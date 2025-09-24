@@ -16,7 +16,6 @@ def main() -> None:
     max_rooms = 30
 
     max_monsters_per_room = 2
-
     map_width = 80
     map_height = 45
 
