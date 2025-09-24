@@ -1,6 +1,7 @@
 import tcod
 import copy
 
+import color
 from engine import Engine
 import entity_factories
 from procgen import generate_dungeon
@@ -17,7 +18,7 @@ def main() -> None:
 
     max_monsters_per_room = 2
     map_width = 80
-    map_height = 45
+    map_height = 43
 
     tileset = tcod.tileset.load_tilesheet(
         "dejavu16x16_gs_tc.png", 32, 8, tcod.tileset.CHARMAP_TCOD
@@ -40,6 +41,10 @@ def main() -> None:
 
     engine.update_fov()
 
+    engine.message_log.add_message(
+        "Welcome.", color.welcome_text
+    )
+
     with tcod.context.new_terminal(
         screen_width,
         screen_height,
@@ -49,9 +54,11 @@ def main() -> None:
     ) as context:
         console = tcod.console.Console(screen_width, screen_height, order="F")
         while True:
-            engine.render(console, context=context)
+            console.clear()
+            engine.event_handler.on_render(console=console)
+            context.present(console)
             
-            engine.event_handler.handle_events()
+            engine.event_handler.handle_events(context)
 main()
 
 
