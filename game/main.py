@@ -23,7 +23,7 @@ def main() -> None:
     map_height = 43
 
     tileset = tcod.tileset.load_tilesheet(
-        "dejavu16x16_gs_tc.png", 32, 8, tcod.tileset.CHARMAP_TCOD
+        "dejavu16x16_gen1.png", 32, 8, tcod.tileset.CHARMAP_TCOD
     )
 
     player = copy.deepcopy(entity_factories.player)
