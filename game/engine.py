@@ -34,7 +34,7 @@ class Engine:
         self.game_map.visible[:] = compute_fov(
             self.game_map.tiles["transparent"],
             (self.player.x, self.player.y),
-            radius=100,
+            radius=10,
         )
         self.game_map.explored |= self.game_map.visible
             
