@@ -1,26 +1,34 @@
 from __future__ import annotations
 
+import lzma
+import pickle
 from typing import TYPE_CHECKING
 
 from tcod.console import Console
 from tcod.map import compute_fov
 
 import exceptions
-from input_handlers import MainGameEventHandler
 from message_log import MessageLog
 from render_functions import render_bar, render_names_at_mouse_location
 
 if TYPE_CHECKING:
     from entity import Actor
     from game_map import GameMap
-    from input_handlers import EventHandler
+
+
+
 
 class Engine:
     def __init__(self, player: Actor):
-        self.event_handler: EventHandler = MainGameEventHandler(self)
         self.message_log = MessageLog()
         self.mouse_location = (0,0)
         self.player = player
+
+    def save_as(self, filename: str) -> None:
+        # save this engine instance as a compressed file
+        save_data = lzma.compress(pickle.dumps(self))
+        with open(filename, "wb") as f:
+            f.write(save_data)
     
     def handle_enemy_turns(self) -> None:
         for entity in set(self.game_map.actors) - {self.player}:
