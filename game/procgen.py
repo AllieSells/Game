@@ -63,6 +63,10 @@ def place_entities(
 
             if item_chance < 0.7:
                 entity_factories.health_potion.spawn(dungeon, x, y)
+            elif item_chance < 0.8:
+                entity_factories.fireball_scroll.spawn(dungeon, x, y)
+            elif item_chance < 0.9:
+                entity_factories.confusion_scroll.spawn(dungeon, x, y)
             else:
                 entity_factories.lightning_scroll.spawn(dungeon, x, y)
 def tunnel_between(
