@@ -8,7 +8,7 @@ tileset = tcod.tileset.load_tilesheet(
     "dejavu16x16_gs_tc.png", 16, 16, tcod.tileset.CHARMAP_TCOD
 )
 
-class Animation:
+# class Animation:
     def __init__(self, frames, delay=0.1):
         """
         frames: list of (x, y, char, (r,g,b))
@@ -35,7 +35,7 @@ class Animation:
             x, y, char, color = self.frames[self.index]
             console.print(x, y, char, fg=color)
 
-with tcod.context.new_terminal(WIDTH, HEIGHT, tileset=tileset, title="Non-blocking Animations") as context:
+# with tcod.context.new_terminal(WIDTH, HEIGHT, tileset=tileset, title="Non-blocking Animations") as context:
     console = tcod.Console(WIDTH, HEIGHT, order="F")
 
     x, y = 10, 10
