@@ -31,8 +31,6 @@ def new_game() -> Engine:
     room_min_size = 6
     max_rooms = 30
 
-    max_monsters_per_room = 2
-    max_items_per_room = 2
 
     player = copy.deepcopy(entity_factories.player)
 
@@ -46,8 +44,6 @@ def new_game() -> Engine:
         room_max_size=room_max_size,
         map_width=map_width,
         map_height=map_height,
-        max_monsters_per_room=max_monsters_per_room,
-        max_items_per_room=max_items_per_room,
     )
 
     engine.game_world.generate_floor()
@@ -77,12 +73,14 @@ class MainMenu(input_handlers.BaseEventHandler):
             console.height // 2 - 4,
             "WORK IN PROGRESS TITLE?",
             fg=color.menu_title,
+            bg=color.black,
             alignment=tcod.CENTER,
+            bg_blend=tcod.BKGND_ALPHA(64),
         )
         console.print(
             console.width // 2,
             console.height - 3,
-            "oxenfree\n2025\nVersion Beta 0.1",
+            "oxenfree\n2025\nVersion 0.11 Pre-Alpha",
             fg=color.menu_title,
             alignment=tcod.CENTER,
         )
