@@ -40,8 +40,14 @@ def main() -> None:
                 handler.on_render(console=console)
                 context.present(console)
 
+                if isinstance(handler, input_handlers.EventHandler):
+                    handler.engine.tick(console=console)
+
+
+                context.present(console)
+
                 try:
-                    for event in tcod.event.wait():
+                    for event in tcod.event.get():
                         context.convert_event(event)
                         handler = handler.handle_events(event)
                 except Exception: # handles game exceptions

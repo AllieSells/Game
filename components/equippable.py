@@ -42,3 +42,7 @@ class LeatherArmor(Equippable):
 class ChainMail(Equippable):
     def __init__(self) -> None:
         super().__init__(equipment_type=EquipmentType.ARMOR, defense_bonus=3)
+
+class devtool(Equippable):
+    def __init__(self) -> None:
+        super().__init__(equipment_type=EquipmentType.WEAPON, power_bonus=1000)

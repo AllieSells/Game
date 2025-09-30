@@ -4,6 +4,9 @@ from typing import Optional, TYPE_CHECKING
 
 import actions
 import color
+from animations import LightningAnimation
+
+import tcod
 import components.inventory
 from components.base_component import BaseComponent
 from exceptions import Impossible
@@ -105,6 +108,11 @@ class LightningDamageConsumable(Consumable):
                     closest_distance = distance
 
         if target:
+
+            path = list(tcod.los.bresenham((consumer.x, consumer.y), (target.x, target.y)).tolist())
+
+            self.engine.animation_queue.append(LightningAnimation(path))
+
             self.engine.message_log.add_message(
                 f"A lightning bolt strikes the {target.name} for {self.damage} damage!"
             )

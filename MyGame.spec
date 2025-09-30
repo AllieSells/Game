@@ -1,5 +1,6 @@
 # build_game.spec
 # -*- mode: python -*-
+# python -m PyInstaller MyGame.spec
 
 import glob
 import os

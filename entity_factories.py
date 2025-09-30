@@ -89,3 +89,10 @@ chain_mail = Item(
     name="Chain Mail",
     equippable=equippable.ChainMail(),
 )
+
+dev_tool = Item(
+    char="&", 
+    color=(173, 0, 255),
+    name="DevSword",
+    equippable=equippable.devtool(),
+)

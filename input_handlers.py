@@ -20,6 +20,7 @@ from actions import (
 import color
 import exceptions
 
+
 if TYPE_CHECKING:
     from engine import Engine
     from entity import Item
@@ -80,27 +81,6 @@ class BaseEventHandler(tcod.event.EventDispatch[ActionOrHandler]):
     def ev_quit(self, event: tcod.event.Quit) -> Optional[Action]:
         raise SystemExit()
 
-class PopupMessage(BaseEventHandler):
-    # Displays popup text window
-
-    def __init__(self, parent_handler: BaseEventHandler, text: str):
-        self.parent = parent_handler
-        self.text = text
-
-    def on_render(self, console: tcod.Console) -> None:
-        # renders parent and dims the result, then prints the message
-        self.parent.on_render(console)
-        console.tiles_rgb["fg"] //= 8
-        console.tiles_rgb["bg"] //= 8
-
-        console.print(
-            console.width // 2,
-            console.height // 2,
-            self.text,
-            fg=color.white,
-            bg=color.black,
-            alignment=tcod.CENTER,
-        )
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[BaseEventHandler]:
         """Any key returns to the parent handler."""
@@ -174,6 +154,7 @@ class AskUserEventHandler(EventHandler):
     def on_exit(self) -> Optional[ActionOrHandler]:
         # user is cancelling action
         return MainGameEventHandler(self.engine)
+
 
 class CharacterScreenEventHandler(AskUserEventHandler):
     TITLE = "Character Information"
@@ -518,8 +499,11 @@ class MainGameEventHandler(EventHandler):
         if key == tcod.event.K_PERIOD and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT
         ):
             return actions.TakeStairsAction(player)
-
-        if key in MOVE_KEYS:
+        elif key == tcod.event.K_SLASH and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT
+        ):
+            # TODO HELP MENU
+            return HelpMenuHandler(self.engine)
+        elif key in MOVE_KEYS:
             dx, dy = MOVE_KEYS[key]
             action = BumpAction(player, dx, dy)
         elif key in WAIT_KEYS:
@@ -615,3 +599,42 @@ class HistoryViewer(EventHandler):
         else:  # Any other key moves back to the main game state.
             return MainGameEventHandler(self.engine)
         return None
+    
+
+class HelpMenuHandler(AskUserEventHandler):
+    # CONTROL MENU
+    TITLE = "Controls"
+
+    def on_render(self, console: tcod.Console) -> None:
+        super().on_render(console)
+
+        if self.engine.player.x <= 30:
+            x = 40
+        else:
+            x = 0
+
+        y = 0
+
+        text = f"\nESC: Escape / Save and Quit \n?: Control Menu \nV: Message Log \nG: Pick Up Object \nI: Use/Equip Items \nD: Drop Items \nC: Character Menu \n/: Look Around"
+        width = max(
+            max(len(line) for line in self.TITLE.splitlines()),
+            max(len(line) for line in text.splitlines())
+        ) + 2
+
+        height = text.count("\n") + 3
+
+        console.draw_frame(
+            x=x,
+            y=y,
+            width = width,
+            height = height,
+            title=self.TITLE,
+            clear=True,
+            fg=(255,255,255),
+            bg=(0,0,0)
+        )
+
+        console.print(
+            x=x + 1, y=y + 1, string=text
+        )
+

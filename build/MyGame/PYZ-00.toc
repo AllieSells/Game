@@ -282,11 +282,20 @@
   ('components.consumable',
    'C:\\Users\\lalex\\Game\\components\\consumable.py',
    'PYMODULE'),
+  ('components.equipment',
+   'C:\\Users\\lalex\\Game\\components\\equipment.py',
+   'PYMODULE'),
+  ('components.equippable',
+   'C:\\Users\\lalex\\Game\\components\\equippable.py',
+   'PYMODULE'),
   ('components.fighter',
    'C:\\Users\\lalex\\Game\\components\\fighter.py',
    'PYMODULE'),
   ('components.inventory',
    'C:\\Users\\lalex\\Game\\components\\inventory.py',
+   'PYMODULE'),
+  ('components.level',
+   'C:\\Users\\lalex\\Game\\components\\level.py',
    'PYMODULE'),
   ('concurrent',
    'C:\\Program '
@@ -568,6 +577,14 @@
    'C:\\Program '
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\\Lib\\email\\message.py',
    'PYMODULE'),
+  ('email.mime',
+   'C:\\Program '
+   'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\\Lib\\email\\mime\\__init__.py',
+   'PYMODULE'),
+  ('email.mime.base',
+   'C:\\Program '
+   'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\\Lib\\email\\mime\\base.py',
+   'PYMODULE'),
   ('email.parser',
    'C:\\Program '
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\\Lib\\email\\parser.py',
@@ -589,6 +606,7 @@
   ('entity_factories',
    'C:\\Users\\lalex\\Game\\entity_factories.py',
    'PYMODULE'),
+  ('equipment_types', 'C:\\Users\\lalex\\Game\\equipment_types.py', 'PYMODULE'),
   ('exceptions', 'C:\\Users\\lalex\\Game\\exceptions.py', 'PYMODULE'),
   ('fileinput',
    'C:\\Program '

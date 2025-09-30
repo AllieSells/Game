@@ -25,7 +25,7 @@ background_image = tcod.image.load("image.png")[:, :, :3]
 def new_game() -> Engine:
     """Return a brand new game session as an Engine instance."""
     map_width = 80
-    map_height = 43
+    map_height = 40
 
     room_max_size = 10
     room_min_size = 6
@@ -55,6 +55,7 @@ def new_game() -> Engine:
 
     dagger = copy.deepcopy(entity_factories.dagger)
     leather_armor = copy.deepcopy(entity_factories.leather_armor)
+
 
     dagger.parent = player.inventory
     leather_armor.parent = player.inventory
