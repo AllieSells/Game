@@ -46,3 +46,12 @@ class ChainMail(Equippable):
 class devtool(Equippable):
     def __init__(self) -> None:
         super().__init__(equipment_type=EquipmentType.WEAPON, power_bonus=1000)
+
+class Torch(Equippable):
+    def __init__(self) -> None:
+        super().__init__(equipment_type=EquipmentType.OFFHAND, power_bonus=1)
+
+class Backpack(Equippable):
+    def __init__(self) -> None:
+        super().__init__(equipment_type=EquipmentType.BACKPACK, power_bonus=0)
+        

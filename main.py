@@ -1,3 +1,5 @@
+import random
+import copy
 from numpy import isin
 import tcod
 import traceback
@@ -18,7 +20,7 @@ def save_game(handler: input_handlers.BaseEventHandler, filename: str) -> None:
 
 def main() -> None:
     screen_width = 80
-    screen_height = 50
+    screen_height = 50  
 
     tileset = tcod.tileset.load_tilesheet(
         "dejavu16x16_gen1.png", 32, 8, tcod.tileset.CHARMAP_TCOD
@@ -67,5 +69,3 @@ def main() -> None:
             raise
 
 main()
-
-

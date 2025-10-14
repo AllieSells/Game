@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING
 from tcod.console import Console
 from tcod.map import compute_fov
 from collections import deque
+import random
 
+from components import equipment
 import exceptions
 import game_map
 from message_log import MessageLog
@@ -33,16 +35,72 @@ class Engine:
         self.animation_queue = deque()
         self.animations_enabled = True
 
+    def get_adjacent_tiles(self, x: int, y: int) -> list[tuple[int, int]]:
+        # Returns adjacent (including diagonals) tiles
+        adjacent = []
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                if dx == 0 and dy == 0:
+                    continue
+                adjacent.append((x + dx, y + dy))
+
+        return adjacent
 
     def tick(self, console: Console):
-        expired = []
-        for anim in list(self.animation_queue):
-            anim.tick(console, self.game_map)  # pass the console here
-            if anim.frames <= 0:
-                expired.append(anim)
-
+        # Don't call animation rendering here; rendering happens in GameMap.render().
+        # Here we only clean up animations that were expired during the last render pass.
+        expired = [anim for anim in list(self.animation_queue) if getattr(anim, "frames", 1) <= 0]
         for anim in expired:
-            self.animation_queue.remove(anim)
+            try:
+                self.animation_queue.remove(anim)
+            except ValueError:
+                pass
+        # Periodically spawn campfire animations for campfire items on the map.
+        try:
+            for entity in list(self.game_map.items):
+                if entity.name == "Campfire":
+                    # Spawn flicker more frequently and independently from smoke.
+                    if self.animations_enabled:
+                        try:
+                            from animations import FireFlicker, FireSmoke
+
+                            # Flicker: frequent, short blips
+                            if random.random() < 0.20:
+                                self.animation_queue.append(FireFlicker((entity.x, entity.y)))
+
+                            # Smoke: rarer, longer lasting
+                            if random.random() < 0.03:
+                                self.animation_queue.append(FireSmoke((entity.x, entity.y)))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        # Tick status effects on all actors (so effects update and expire)
+        try:
+            # game_map may not be set yet during early init
+            for actor in list(getattr(self, "game_map", []).actors if hasattr(self, "game_map") else []):
+                if not hasattr(actor, "effects") or not actor.effects:
+                    continue
+                for effect in list(actor.effects):
+                    try:
+                        expired = effect.tick(actor)
+                        if expired:
+                            try:
+                                actor.effects.remove(effect)
+                            except ValueError:
+                                pass
+                    except Exception:
+                        # Don't let a broken effect crash the engine tick
+                        pass
+        except Exception:
+            pass
+
+        # Try spawning enemies when the player is in Darkness (non-blocking)
+        try:
+            self._maybe_spawn_enemy_in_dark()
+        except Exception:
+            pass
 
     def process_animations(self):
         if not self.animation_queue:
@@ -68,13 +126,235 @@ class Engine:
                     pass # Ignore
 
 
+    def _find_dark_spawn_pos(self, max_radius: int = 8, min_radius: int = 2):
+        """Return a random (x,y) near the player that is walkable, empty and not visible.
+        Returns None if none found.
+        """
+        import random
+
+        player = getattr(self, "player", None)
+        gm = getattr(self, "game_map", None)
+        if player is None or gm is None:
+            return None
+
+        candidates = []
+        for radius in range(min_radius, max_radius + 1):
+            ring = []
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    # Prefer perimeter for variety
+                    if abs(dx) != radius and abs(dy) != radius:
+                        continue
+                    x = player.x + dx
+                    y = player.y + dy
+
+                    # bounds check
+                    try:
+                        if not gm.in_bounds(x, y):
+                            continue
+                    except Exception:
+                        if not (0 <= x < getattr(gm, "width", 0) and 0 <= y < getattr(gm, "height", 0)):
+                            continue
+
+                    # must be walkable
+                    try:
+                        if not gm.tiles["walkable"][x, y]:
+                            continue
+                    except Exception:
+                        continue
+
+                    # don't spawn on player or existing actor
+                    try:
+                        if getattr(gm, "get_actor_at_location", lambda a,b: None)(x, y):
+                            continue
+                    except Exception:
+                        continue
+
+                    # don't spawn on currently visible tiles
+                    try:
+                        if getattr(gm, "visible", None) is not None and gm.visible[x, y]:
+                            continue
+                    except Exception:
+                        pass
+
+                    ring.append((x, y))
+
+            if ring:
+                candidates.extend(ring)
+
+            if candidates:
+                break
+
+        if not candidates:
+            return None
+
+        return random.choice(candidates)
+
+
+    def _maybe_spawn_enemy_in_dark(self) -> None:
+        """Try to spawn an enemy when the player is in darkness.
+        This is defensive and will no-op if factories or map API are unavailable.
+        """
+        import random
+        import copy
+
+        player = getattr(self, "player", None)
+        gm = getattr(self, "game_map", None)
+        if player is None or gm is None:
+            return
+
+        # Is the player in darkness? (case-insensitive name check)
+        in_dark = any(getattr(e, "name", "").lower() == "darkness" for e in getattr(player, "effects", []))
+        if not in_dark:
+            # ensure cooldown exists but do nothing
+            self._dark_spawn_cooldown = getattr(self, "_dark_spawn_cooldown", 0)
+            return
+
+        # init cooldown
+        if not hasattr(self, "_dark_spawn_cooldown"):
+            self._dark_spawn_cooldown = 0
+
+        if self._dark_spawn_cooldown > 0:
+            self._dark_spawn_cooldown -= 1
+            return
+
+        # spawn chance when ready
+        if random.random() > 0.10:  # 20% chance per ready tick
+            self._dark_spawn_cooldown = 8
+            return
+
+        spawn_pos = self._find_dark_spawn_pos(max_radius=8, min_radius=2)
+        if spawn_pos is None:
+            self._dark_spawn_cooldown = 8
+            return
+
+        sx, sy = spawn_pos
+
+        # Try to find a suitable enemy template in entity_factories
+        try:
+            import entity_factories as factories
+        except Exception:
+            self._dark_spawn_cooldown = 8
+            return
+
+        enemy_template = factories.shade
+        
+        try:
+            enemy = copy.deepcopy(enemy_template)
+            enemy.x = sx
+            enemy.y = sy
+            enemy.parent = gm
+
+            # Add to map using common APIs
+            if hasattr(gm, "spawn"):
+                try:
+                    gm.spawn(enemy)
+                except Exception:
+                    # fallback to entities set/list
+                    if hasattr(gm, "entities") and isinstance(gm.entities, set):
+                        gm.entities.add(enemy)
+                    elif hasattr(gm, "entities") and isinstance(gm.entities, list):
+                        gm.entities.append(enemy)
+                    else:
+                        self._dark_spawn_cooldown = 8
+                        return
+            elif hasattr(gm, "entities") and isinstance(gm.entities, set):
+                gm.entities.add(enemy)
+            elif hasattr(gm, "entities") and isinstance(gm.entities, list):
+                gm.entities.append(enemy)
+            else:
+                try:
+                    gm.entities.add(enemy)
+                except Exception:
+                    self._dark_spawn_cooldown = 8
+                    return
+
+            # optional message/log
+            try:
+                if hasattr(self, "message_log"):
+                    self.message_log.add_message("You hear something moving in the dark...")
+            except Exception:
+                pass
+        except Exception:
+            self._dark_spawn_cooldown = 8
+            return
+
+        self._dark_spawn_cooldown = 40
+
+
     def update_fov(self) -> None:
+        # check if player has a torch in either hand; be robust if slots are None
+        try:
+            weapon_name = (
+                self.player.equipment.weapon.name if self.player.equipment and self.player.equipment.weapon else None
+            )
+        except Exception:
+            weapon_name = None
+
+        try:
+            offhand_name = (
+                self.player.equipment.offhand.name if self.player.equipment and self.player.equipment.offhand else None
+            )
+        except Exception:
+            offhand_name = None
+
+        # Determine if player is holding a torch
+        has_torch = (weapon_name == "Torch" or offhand_name == "Torch")
+
+        # Determine if there is a campfire within radius 3 (lighting only)
+        near_campfire = False
+        try:
+            for item in getattr(self.game_map, "items", []):
+                try:
+                    if item.name == "Campfire":
+                        dx = item.x - self.player.x
+                        dy = item.y - self.player.y
+                        if dx * dx + dy * dy <= 3 * 3:
+                            near_campfire = True
+                            break
+                except Exception:
+                    continue
+        except Exception:
+            near_campfire = False
+
+        # Torch increases FOV radius; campfires only affect Darkness (lighting), not FOV
+        radius = 7 if has_torch else 2
+
         self.game_map.visible[:] = compute_fov(
             self.game_map.tiles["transparent"],
             (self.player.x, self.player.y),
-            radius=10,
+            radius,
         )
+
         self.game_map.explored |= self.game_map.visible
+
+        # Apply or remove the persistent Darkness effect depending on lighting
+        try:
+            # Deferred import to avoid circular imports at module load time
+            from components.effect import Effect
+
+            has_darkness = any(getattr(e, "name", "") == "Darkness" for e in self.player.effects)
+
+            if not (has_torch or near_campfire):
+                # Player is in darkness: ensure they have the Darkness effect
+                if not has_darkness:
+                    try:
+                        # duration=None => persistent until removed
+                        self.player.add_effect(Effect(name="Darkness", duration=None, description="You are in darkness"))
+                    except Exception:
+                        pass
+            else:
+                # Player is lit: remove any Darkness effects
+                if has_darkness:
+                    for e in list(self.player.effects):
+                        try:
+                            if getattr(e, "name", "") == "Darkness":
+                                self.player.remove_effect(e)
+                        except Exception:
+                            pass
+        except Exception:
+            # If anything goes wrong, don't break FOV update
+            pass
             
     def render(self, console: Console) -> None:
         self.game_map.render(console)
@@ -92,6 +372,11 @@ class Engine:
             console=console,
             dungeon_level=self.game_world.current_floor,
             location=(0, 45),
+        )
+
+        render_functions.render_effects(
+            console=console,
+            effects=self.player.effects
         )
 
         render_functions.render_player_level(

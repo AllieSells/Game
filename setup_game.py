@@ -49,8 +49,9 @@ def new_game() -> Engine:
     engine.game_world.generate_floor()
     engine.update_fov()
 
+    engine.message_log.add_message("Press ? For Controls")
     engine.message_log.add_message(
-        "Hello and welcome, adventurer, to yet another dungeon!", color.welcome_text
+        "You enter the dungeon. Haunted figures move in the dark...", color.welcome_text
     )
 
     dagger = copy.deepcopy(entity_factories.dagger)

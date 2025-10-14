@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from components.fighter import Fighter
     from components.inventory import Inventory
     from components.level import Level
+    from components.effect import Effect
     from game_map import GameMap
 
 T = TypeVar("T", bound="Entity")
@@ -89,11 +90,12 @@ class Actor(Entity):
         char: str = "?",
         color: Tuple[int, int, int] = (255, 255, 255),
         name: str = "<Unnamed>",
-        ai_cls: Type[BaseAI],
-        equipment: Equipment,
-        fighter: Fighter,
-        inventory: Inventory,
-        level: Level,
+        ai_cls: Optional[Type[BaseAI]] = None,
+        equipment: Optional[Equipment] = None,
+        fighter: Optional[Fighter] = None,
+        inventory: Optional[Inventory] = None,
+        level: Optional[Level] = None,
+        effects: Optional[list] = None,
     ):
         super().__init__(
             x=x,
@@ -105,19 +107,46 @@ class Actor(Entity):
             render_order=RenderOrder.ACTOR
         )
 
-        self.ai: Optional[BaseAI] = ai_cls(self)
+        # Initialize AI if provided
+        self.ai: Optional[BaseAI] = ai_cls(self) if ai_cls is not None else None
 
-        self.equipment: Equipment = equipment
-        self.equipment.parent = self
+        # Attach optional components and set their parent links when present
+        self.equipment: Optional[Equipment] = None
+        if equipment is not None:
+            self.equipment = equipment
+            self.equipment.parent = self
 
-        self.fighter = fighter
-        self.fighter.parent = self
+        self.fighter: Optional[Fighter] = None
+        if fighter is not None:
+            self.fighter = fighter
+            self.fighter.parent = self
 
-        self.inventory = inventory
-        self.inventory.parent = self
+        self.inventory: Optional[Inventory] = None
+        if inventory is not None:
+            self.inventory = inventory
+            self.inventory.parent = self
 
-        self.level = level
-        self.level.parent = self
+        self.level: Optional[Level] = None
+        if level is not None:
+            self.level = level
+            self.level.parent = self
+
+        # Effects: a list of Effect instances applied to this actor
+        # Initialize inside __init__ to avoid circular import issues at module top-level
+        self.effects = effects if effects is not None else []
+
+    def add_effect(self, effect: 'Effect') -> None:
+        """Attach an Effect to this actor."""
+        if not hasattr(self, "effects"):
+            self.effects = []
+        self.effects.append(effect)
+
+    def remove_effect(self, effect: 'Effect') -> None:
+        """Remove an Effect from this actor if present."""
+        try:
+            self.effects.remove(effect)
+        except ValueError:
+            pass
 
     @property
     def is_alive(self) -> bool:
@@ -133,7 +162,8 @@ class Item(Entity):
             color: Tuple[int, int, int] = (255,255,255),
             name: str = "<Unnamed>",
             consumable: Optional[Consumable] = None,
-            equippable: Optional[Equippable] = None,
+        equippable: Optional[Equippable] = None,
+        burn_duration: Optional[int] = None,
 
     ):
         super().__init__(
@@ -155,5 +185,9 @@ class Item(Entity):
 
         if self.equippable:
             self.equippable.parent = self
+
+        # Optional burn duration (in player turns) for items like torches.
+        # When the value reaches 0 the item should be consumed/removed.
+        self.burn_duration = burn_duration
 
         

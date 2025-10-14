@@ -4,10 +4,12 @@ from typing import Optional, Tuple, TYPE_CHECKING
 
 import color
 import exceptions
+import copy 
 
 if TYPE_CHECKING:
     from engine import Engine
     from entity import Actor, Entity, Item
+    from components.container import Container
 
 
 class Action:
@@ -49,6 +51,20 @@ class PickupAction(Action):
                 self.engine.game_map.entities.remove(item)
                 item.parent = self.entity.inventory
                 inventory.items.append(item)
+                # Special-case picking up a campfire: convert to a Torch with a flavor message
+                try:
+                    from entity_factories import torch 
+                except Exception:
+                    _torch_template = None
+
+                if item.name == "Campfire" and torch is not None:
+                    inventory.items.pop()
+                    new_torch = copy.deepcopy(torch)
+                    new_torch.parent = self.entity.inventory
+                    inventory.items.append(new_torch)
+
+                    self.engine.message_log.add_message("You pull a burning log from the fire")
+                    return
 
                 self.engine.message_log.add_message(f"You picked up the {item.name}!")
                 return
@@ -81,6 +97,11 @@ class DropItem(ItemAction):
             self.entity.equipment.toggle_equip(self.item)
         
         self.entity.inventory.drop(self.item) 
+class OpenAction(Action):
+    def perform(self) -> None:
+        # Open a container (chest) on the map and present its contents to the player.
+        actor_location_x = self.entity.x
+        actor_location_y = self.entity.y
 
 class EquipAction(Action):
     def __init__(self, entity: Actor, item: Item):

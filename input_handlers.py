@@ -15,15 +15,18 @@ from actions import (
     BumpAction,
     PickupAction,
     WaitAction,
+    OpenAction,
 )
 
 import color
+import engine
 import exceptions
 
 
 if TYPE_CHECKING:
     from engine import Engine
     from entity import Item
+    from components.container import Container
 
 
 MOVE_KEYS = {
@@ -56,6 +59,8 @@ WAIT_KEYS = {
 CONFIRM_KEYS = {
     tcod.event.K_RETURN,
     tcod.event.K_KP_ENTER,
+    tcod.event.K_SPACE,
+    tcod.event.K_RIGHT,
 }
 
 
@@ -104,6 +109,29 @@ class EventHandler(BaseEventHandler):
             elif self.engine.player.level.requires_level_up:
                 return LevelUpEventHandler(self.engine)
             
+            # After a player turn, decrement burn durations on equipped items (e.g., torches)
+            try:
+                player = self.engine.player
+                for slot in ("weapon", "offhand"):
+                    item = getattr(player.equipment, slot)
+                    if item is not None and getattr(item, "burn_duration", None) is not None:
+                        try:
+                            item.burn_duration -= 1
+                            if item.burn_duration <= 0:
+                                # Remove the burned-out item: unequip and drop/consume
+                                player.equipment.unequip_from_slot(slot, add_message=False)
+                                try:
+                                    # Remove from inventory if present
+                                    if item in player.inventory.items:
+                                        player.inventory.items.remove(item)
+                                except Exception:
+                                    pass
+                                self.engine.message_log.add_message(f"Your {item.name} burns out.", color.error)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
             return MainGameEventHandler(self.engine) # Return to main handler
         
         return self
@@ -276,13 +304,24 @@ class InventoryEventHandler(AskUserEventHandler):
 
     TITLE = "<missing title>"
 
+    def __init__(self, engine: Engine, item_filter: Optional[Callable] = None):
+        super().__init__(engine)
+        # item_filter should accept an Item and return True if it should be shown
+        self.item_filter: Callable = item_filter if item_filter is not None else (lambda i: True)
+        # selected index for arrow navigation
+        self.selected_index: int = 0
+
     def on_render(self, console: tcod.Console) -> None:
         """Render an inventory menu, which displays the items in the inventory, and the letter to select them.
         Will move to a different position based on where the player is located, so the player can always see where
         they are.
         """
         super().on_render(console)
-        number_of_items_in_inventory = len(self.engine.player.inventory.items)
+        # Build filtered list according to filter function (modular)
+        all_items = list(self.engine.player.inventory.items)
+        filtered_items = [it for it in all_items if self.item_filter(it)]
+
+        number_of_items_in_inventory = len(filtered_items)
 
         height = number_of_items_in_inventory + 2
 
@@ -309,10 +348,18 @@ class InventoryEventHandler(AskUserEventHandler):
             bg=(0, 0, 0),
         )
 
+        # Ensure we have a selected index for arrow-key navigation
+        if not hasattr(self, "selected_index"):
+            self.selected_index = 0
+
         if number_of_items_in_inventory > 0:
-            for i, item in enumerate(self.engine.player.inventory.items):
+            # Clamp selected index to the filtered list
+            if self.selected_index >= number_of_items_in_inventory:
+                self.selected_index = max(0, number_of_items_in_inventory - 1)
+
+            for i, item in enumerate(filtered_items):
                 item_key = chr(ord("a") + i)
-                
+
                 is_equipped = self.engine.player.equipment.item_is_equipped(item)
 
                 item_string = f"({item_key}) {item.name}"
@@ -320,7 +367,10 @@ class InventoryEventHandler(AskUserEventHandler):
                 if is_equipped:
                     item_string = f"{item_string} (E)"
 
-                console.print(x+1, y+i+1, item_string)
+                # Draw selection marker for keyboard navigation
+                marker = ">" if i == getattr(self, "selected_index", 0) else " "
+                console.print(x, y + i + 1, marker)
+                console.print(x + 1, y + i + 1, item_string)
         else:
             console.print(x + 1, y + 1, "(Empty)")
 
@@ -329,15 +379,39 @@ class InventoryEventHandler(AskUserEventHandler):
         key = event.sym
         modifier = event.mod
 
+        # Build filtered list for selection mapping
+        all_items = list(player.inventory.items)
+        filtered_items = [it for it in all_items if self.item_filter(it)]
+
+        # Arrow-key navigation: up/down to move selection, Enter to confirm
+        if key == tcod.event.K_UP:
+            self.selected_index = max(0, self.selected_index - 1)
+            return None
+        if key == tcod.event.K_DOWN:
+            self.selected_index = min(len(filtered_items) - 1 if filtered_items else 0, self.selected_index + 1)
+            return None
+        if key in CONFIRM_KEYS:
+            # If inventory empty, do nothing
+            if len(filtered_items) == 0:
+                return None
+            try:
+                selected_item = filtered_items[getattr(self, "selected_index", 0)]
+            except Exception:
+                self.engine.message_log.add_message("Invalid selection.", color.invalid)
+                return None
+            return self.on_item_selected(selected_item)
+
+        # Letter selection still supported but operates on the filtered list
         index = key - tcod.event.KeySym.A
 
         if 0 <= index <= 26:
             try:
-                selected_item = player.inventory.items[index]
+                selected_item = filtered_items[index]
             except IndexError:
                 self.engine.message_log.add_message("Invalid entry.", color.invalid)
                 return None
             return self.on_item_selected(selected_item)
+
         return super().ev_keydown(event)
 
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
@@ -349,7 +423,168 @@ class InventoryEventHandler(AskUserEventHandler):
         
         else:
             return None
-        
+
+class ScrollActivateHandler(InventoryEventHandler):
+    # Handles using magic/scroll item
+    TITLE = "Select a scroll to read"
+
+    def __init__(self, engine, item_filter = None):
+        super().__init__(engine, item_filter=lambda it: getattr(it, "consumable", None) is not None and "Scroll" in getattr(it, "name", ""))
+
+    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
+        # Returns the action for the selected item
+        if "Scroll" in item.name and item.consumable:
+            return item.consumable.get_action(self.engine.player)
+        else:
+            self.engine.message_log.add_message(f"You cannot read the {item.name}.", color.invalid)
+
+
+class ExchangeInventoryHandler(AskUserEventHandler):
+
+    TITLE = "<missing title>"
+
+    def __init__(self, engine: Engine, item_filter: Optional[Callable] = None, container: Container = None):
+        super().__init__(engine)
+        # item_filter should accept an Item and return True if it should be shown
+        self.item_filter: Callable = item_filter if item_filter is not None else (lambda i: True)
+        # selected index for arrow navigation
+        self.selected_index: int = 0
+
+    def on_render(self, console: tcod.Console) -> None:
+        print("Rendering exchange handler")
+        # Renders two inventories side by side: player and container
+        super().on_render(console)
+        # Build filtered list according to filter function (modular)
+        all_items = list(self.engine.player.inventory.items)
+        filtered_items = [it for it in all_items if self.item_filter(it)]
+
+        number_of_items_in_inventory = len(filtered_items)
+
+        height = number_of_items_in_inventory + 2
+
+        if height <= 3:
+            height = 3
+
+        if self.engine.player.x <= 30:
+            x = 40
+        else:
+            x = 0
+
+        y = 0
+
+        width = len(self.TITLE) + 4
+
+        # Player inventory render
+        console.draw_frame(
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=self.TITLE,
+            clear=True,
+            fg=(255, 255, 255),
+            bg=(0, 0, 0),
+        )
+
+        # Ensure we have a selected index for arrow-key navigation
+        if not hasattr(self, "selected_index"):
+            self.selected_index = 0
+
+        if number_of_items_in_inventory > 0:
+            # Clamp selected index to the filtered list
+            if self.selected_index >= number_of_items_in_inventory:
+                self.selected_index = max(0, number_of_items_in_inventory - 1)
+
+            for i, item in enumerate(filtered_items):
+                item_key = chr(ord("a") + i)
+
+                is_equipped = self.engine.player.equipment.item_is_equipped(item)
+
+                item_string = f"({item_key}) {item.name}"
+
+                if is_equipped:
+                    item_string = f"{item_string} (E)"
+
+                # Draw selection marker for keyboard navigation
+                marker = ">" if i == getattr(self, "selected_index", 0) else " "
+                console.print(x, y + i + 1, marker)
+                console.print(x + 1, y + i + 1, item_string)
+        else:
+            console.print(x + 1, y + 1, "(Empty)")
+        # Container inventory render
+        console.draw_frame(
+            x=x+width+1,
+            y=y,
+            width=width,
+            height=height,
+            title=self.TITLE,
+            clear=True,
+            fg=(255, 255, 255),
+            bg=(0, 0, 0),
+        )
+        for i, item in enumerate(self.container.items):
+            item_key = chr(ord("a") + i)
+
+            item_string = f"({item_key}) {item.name}"
+
+            # Draw selection marker for keyboard navigation
+            marker = ">" if i == getattr(self, "selected_index", 0) else " "
+            console.print(x+width+1, y + i + 1, marker)
+            console.print(x + width + 2, y + i + 1, item_string)
+            
+
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        player = self.engine.player
+        key = event.sym
+        modifier = event.mod
+
+        # Build filtered list for selection mapping
+        all_items = list(player.inventory.items)
+        filtered_items = [it for it in all_items if self.item_filter(it)]
+
+        # Arrow-key navigation: up/down to move selection, Enter to confirm
+        if key == tcod.event.K_UP:
+            self.selected_index = max(0, self.selected_index - 1)
+            return None
+        if key == tcod.event.K_DOWN:
+            self.selected_index = min(len(filtered_items) - 1 if filtered_items else 0, self.selected_index + 1)
+            return None
+        if key in CONFIRM_KEYS:
+            # If inventory empty, do nothing
+            if len(filtered_items) == 0:
+                return None
+            try:
+                selected_item = filtered_items[getattr(self, "selected_index", 0)]
+            except Exception:
+                self.engine.message_log.add_message("Invalid selection.", color.invalid)
+                return None
+            return self.on_item_selected(selected_item)
+
+        # Letter selection still supported but operates on the filtered list
+        index = key - tcod.event.KeySym.A
+
+        if 0 <= index <= 26:
+            try:
+                selected_item = filtered_items[index]
+            except IndexError:
+                self.engine.message_log.add_message("Invalid entry.", color.invalid)
+                return None
+            return self.on_item_selected(selected_item)
+
+        return super().ev_keydown(event)
+
+    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
+        # Transfer selected item to player inventory
+        if item in self.container.items:
+            return actions.PickupAction(self.engine.player, item)
+            # Remove item from container
+            self.container.items.remove(item)
+
+        # Return back to transfer screen (allows multiple transfers)
+        return InventoryExchangeHandler(self.engine, item_filter=self.item_filter, container=self.container)
+            
+            
+
 
 class InventoryActivateHandler(InventoryEventHandler):
     # Handles using inventory item
@@ -357,12 +592,21 @@ class InventoryActivateHandler(InventoryEventHandler):
 
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
         # Returns the action for the selected item
-        if item.consumable:
+        return None
+        
+class QuaffActivateHandler(InventoryEventHandler):
+    # Handles using inventory item
+    TITLE = "Select potion to quaff"
+
+    def __init__(self, engine: Engine):
+        super().__init__(engine, item_filter=lambda it: getattr(it, "consumable", None) is not None and "Potion" in getattr(it, "name", ""))
+
+    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
+        # Returns the action for the selected item
+        if "Potion" in item.name and item.consumable:
             return item.consumable.get_action(self.engine.player)
-        elif item.equippable:
-            return actions.EquipAction(self.engine.player, item)
         else:
-            return None
+            self.engine.message_log.add_message(f"You cannot drink the {item.name}.", color.invalid)
     
 class InventoryDropHandler(InventoryEventHandler):
     #Handles dropping inventory item
@@ -372,6 +616,22 @@ class InventoryDropHandler(InventoryEventHandler):
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
         # Drop this item
         return actions.DropItem(self.engine.player, item)
+
+
+class InventoryEquipHandler(InventoryEventHandler):
+    """Shows only equippable items and equips the selected one."""
+    TITLE = "Select an item to equip"
+
+    def __init__(self, engine: Engine):
+        # Filter for items that have an equippable component
+        super().__init__(engine, item_filter=lambda it: getattr(it, "equippable", None) is not None)
+
+    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
+        if getattr(item, "equippable", None):
+            return actions.EquipAction(self.engine.player, item)
+        else:
+            self.engine.message_log.add_message(f"{item.name} cannot be equipped.", color.invalid)
+            return None
 
 class SelectIndexHandler(AskUserEventHandler):
     # Handles asking the user for a location on the map
@@ -390,6 +650,28 @@ class SelectIndexHandler(AskUserEventHandler):
         x, y = int(x), int(y)
         console.rgb["bg"][x, y] = color.white
         console.rgb["fg"][x, y] = color.black
+        # Draw a small framed box next to the cursor showing the name(s)
+        try:
+            from render_functions import get_names_at_location
+
+            names = get_names_at_location(x, y, self.engine.game_map)
+            if names:
+                # Decide where to place the box: prefer to the right of cursor
+                width = max(10, len(names) + 2)
+                box_x = x + 1
+                box_y = y
+                # If box would overflow to the right, place it to the left
+                if box_x + width > console.width:
+                    box_x = x - width - 1
+                if box_x < 0:
+                    box_x = 0
+
+                # Draw frame and text
+                console.draw_frame(x=box_x, y=box_y, width=width, height=3, title=None, clear=True, fg=(255,255,255), bg=(0,0,0))
+                console.print(x=box_x + 1, y=box_y + 1, string=names)
+        except Exception:
+            # If anything goes wrong, skip drawing the look box
+            pass
     
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         # check for key motion or confimration keys
@@ -510,12 +792,20 @@ class MainGameEventHandler(EventHandler):
             action = WaitAction(player)
         elif key ==tcod.event.K_ESCAPE:
             raise SystemExit()
+        elif key == tcod.event.KeySym.O:
+            action = OpenAction(player)
         elif key == tcod.event.KeySym.V:
             return HistoryViewer(self.engine)
         elif key == tcod.event.KeySym.G:
             action = PickupAction(player)
+        elif key == tcod.event.KeySym.R:
+            return ScrollActivateHandler(self.engine)
         elif key == tcod.event.KeySym.I:
             return InventoryActivateHandler(self.engine)
+        elif key == tcod.event.KeySym.E:
+            return InventoryEquipHandler(self.engine)
+        elif key == tcod.event.KeySym.Q:
+            return QuaffActivateHandler(self.engine)
         elif key == tcod.event.KeySym.D:
             return InventoryDropHandler(self.engine)
         elif key == tcod.event.KeySym.C:

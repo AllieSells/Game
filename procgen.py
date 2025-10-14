@@ -129,6 +129,12 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) 
 
         if not any(entity.x == x and entity.y == y for entity in dungeon.entities):
             entity.spawn(dungeon, x, y)
+    # Occasionally spawn a campfire in rooms (low chance)
+    if random.random() < 0.15:
+        x = random.randint(room.x1+1, room.x2-1)
+        y = random.randint(room.y1+1, room.y2-1)
+        if not any(e.x == x and e.y == y for e in dungeon.entities):
+            entity_factories.campfire.spawn(dungeon, x, y)
 def tunnel_between(
         start: Tuple[int, int], end: Tuple[int, int]
 ) -> Iterator[Tuple[int, int]]:
@@ -182,6 +188,24 @@ def generate_dungeon(
         if len(rooms) == 0:
             # First room, where player starts
             player.place(*new_room.center, dungeon)
+            # Guaranteed campfire placed one tile above the player on the first floor
+            cx, cy = new_room.center
+            camp_x, camp_y = cx, max(0, cy - 1)
+            if not any(e.x == camp_x and e.y == camp_y for e in dungeon.entities):
+                entity_factories.campfire.spawn(dungeon, camp_x, camp_y)
+            # Spawn a test chest for debugging in the first room, one tile to the right
+            try:
+                # Build a small loot list: health potion + torch (deepcopy to avoid shared parents)
+                import copy as _copy
+                loot = [_copy.deepcopy(entity_factories.health_potion), _copy.deepcopy(entity_factories.torch)]
+                test_chest = entity_factories.make_chest_with_loot(loot, capacity=6)
+                chest_x, chest_y = min(dungeon.width - 1, cx + 1), cy
+                # Only place if empty
+                if not any(e.x == chest_x and e.y == chest_y for e in dungeon.entities):
+                    test_chest.place(chest_x, chest_y, dungeon)
+            except Exception:
+                # If anything goes wrong, skip the test chest spawn
+                pass
         else:
             for x, y in tunnel_between(rooms[-1].center, new_room.center):
                 dungeon.tiles[x,y] = tile_types.floor

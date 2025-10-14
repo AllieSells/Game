@@ -1,9 +1,11 @@
-from components.ai import HostileEnemy
+from components.ai import DarkHostileEnemy, HostileEnemy
 from components import consumable, equippable
+from components.effect import Effect
 from components.equipment import Equipment
 from components.fighter import Fighter
 from components.inventory import Inventory
 from components.level import Level
+from components.container import Container
 from entity import Actor, Item
 
 
@@ -16,11 +18,24 @@ player = Actor(
     fighter=Fighter(hp=30, base_defense=2, base_power=5),
     inventory=Inventory(capacity=26),
     level=Level(level_up_base=200),
+    # Temporary demo effect so the status-effects panel shows during testing
+    effects = [Effect(name="Burning", duration=20, description="Demo burning effect")],
+)
+
+shade = Actor(
+    char="S",
+    color=(100, 100, 100),
+    name = "Shade",
+    ai_cls=DarkHostileEnemy,
+    equipment=Equipment(),
+    fighter=Fighter(hp=10, base_defense=2, base_power=5, leave_corpse=False),
+    inventory=Inventory(capacity=5),
+    level=Level(xp_given=0),
 )
 
 orc = Actor(
     char="o",
-    color=(63, 127, 63),
+    color=(63, 127, 90),
     name = "Orc",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
@@ -31,7 +46,7 @@ orc = Actor(
 
 troll = Actor(
     char="T",
-    color=(63, 127, 63),
+    color=(63, 127, 90),
     name = "Troll",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
@@ -67,6 +82,20 @@ fireball_scroll = Item(
     consumable=consumable.FireballDamageConsumable(damage=12, radius=3)
 )
 
+campfire = Item(
+    char="x",
+    color=(255, 140, 0),
+    name="Campfire",
+)
+
+torch = Item(
+    char="!",
+    color=(255, 200, 50),
+    name="Torch",
+    equippable=equippable.Torch(),
+    burn_duration=300,
+)
+
 dagger = Item(
     char="/", color=(0, 191, 255), name="Dagger",
     equippable=equippable.Dagger()
@@ -96,3 +125,50 @@ dev_tool = Item(
     name="DevSword",
     equippable=equippable.devtool(),
 )
+
+backpack = Item(
+    char="D",
+    color=(139,69,19),
+    name="Backpack",
+    equippable=equippable.Backpack(),
+)
+
+chest = Actor(
+    char="C",
+    color=(139,69,19),
+    name="Chest",
+    # No AI for static container
+    ai_cls=None,
+    equipment=Equipment(),
+    fighter=None,
+    inventory=Inventory(capacity=0),
+    level=Level(xp_given=0),
+)
+
+# Attach a Container component to a chest template (not an Actor constructor arg
+# since the Actor expects certain component types). We'll create a light-weight
+# chest_entity factory that will 'spawn' and then attach a Container to it when
+# placed on the map via code elsewhere.
+def make_chest_with_loot(items: list, capacity: int = 10) -> Actor:
+    c = chest.spawn  # This is the Actor.spawn method; we want a template clone
+    # Instead we'll build a fresh Actor instance based on the chest template
+    new_chest = Actor(
+        char=chest.char,
+        color=chest.color,
+        name=chest.name,
+        ai_cls=None,
+        equipment=Equipment(),
+        fighter=None,
+        inventory=Inventory(capacity=0),
+        level=Level(xp_given=0),
+    )
+    # Attach a Container component and populate it
+    cont = Container(capacity=capacity)
+    cont.parent = new_chest
+    for it in items:
+        cont.add(it)
+    # Make chest block movement so it occupies a tile
+    new_chest.blocks_movement = True
+    # Expose the container on the actor for easy checks
+    new_chest.container = cont
+    return new_chest

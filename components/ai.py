@@ -8,6 +8,7 @@ import tcod
 
 from actions import Action, MeleeAction, BumpAction, MovementAction, WaitAction
 
+import color
 
 
 
@@ -38,6 +39,23 @@ class BaseAI(Action):
         path: List[List[int]] = pathfinder.path_to((dest_x, dest_y))[1:].tolist()
 
         return [(index[0], index[1]) for index in path]
+
+    def can_see_actor(self, actor: "Actor", radius: Optional[int] = None) -> bool:
+        """Compute an FOV from this entity and return True if it can see `actor`.
+
+        Uses tcod.map.compute_fov on the game map's transparency mask. If the
+        actor or map is unavailable, returns False. The radius defaults to the
+        entity's `sight_radius` attribute if present, otherwise 6.
+        """
+        try:
+            gm = self.entity.gamemap
+            if radius is None:
+                radius = getattr(self.entity, "sight_radius", 6)
+
+            fov = tcod.map.compute_fov(gm.tiles["transparent"], (self.entity.x, self.entity.y), radius)
+            return bool(fov[actor.x, actor.y])
+        except Exception:
+            return False
 
 class ConfusedEnemy(BaseAI):
     # Will stumble around for a number of turns, it will attack if it bumps into you
@@ -87,12 +105,169 @@ class HostileEnemy(BaseAI):
         dx = target.x - self.entity.x
         dy = target.y - self.entity.y
         distance = max(abs(dx), abs(dy))
-
-        if self.engine.game_map.visible[self.entity.x, self.entity.y]:
+        # Use per-enemy FOV so enemies can spot the player even when the player
+        # doesn't see them.
+        if self.can_see_actor(target):
             if distance <= 1:
                 return MeleeAction(self.entity, dx, dy).perform()
             
             self.path = self.get_path_to(target.x, target.y)
+        
+        if self.path:
+            dest_x, dest_y = self.path.pop(0)
+            return MovementAction(
+                self.entity, dest_x - self.entity.x, dest_y - self.entity.y,
+            ).perform()
+        
+        return WaitAction(self.entity).perform()
+    
+class DarkHostileEnemy(BaseAI):
+    # Enemy that avoids light, only moves in darkness
+    def __init__(self, entity: Actor):
+        super().__init__(entity)
+        self.path: List[Tuple[int, int]] = []
+    
+    def perform(self) -> None:
+        target = self.engine.player
+        dx = target.x - self.entity.x
+        dy = target.y - self.entity.y
+        distance = max(abs(dx), abs(dy))
+        gm = self.engine.game_map
+        if self.can_see_actor(target):
+            # Build a walkable cost map similar to get_path_to but mark lit tiles as impassable
+            try:
+                import numpy as _np
+
+                cost = _np.array(gm.tiles["walkable"], dtype=_np.int8)
+
+                # mark lit tiles as non-walkable so pathfinder avoids them
+                # Determine lit mask using same rules as GameMap.render
+                lit_mask = _np.zeros((gm.width, gm.height), dtype=bool, order="F")
+
+                # Check player-held torch
+                try:
+                    weapon_name = (
+                        self.engine.player.equipment.weapon.name
+                        if self.engine.player.equipment and self.engine.player.equipment.weapon
+                        else None
+                    )
+                except Exception:
+                    weapon_name = None
+                try:
+                    offhand_name = (
+                        self.engine.player.equipment.offhand.name
+                        if self.engine.player.equipment and self.engine.player.equipment.offhand
+                        else None
+                    )
+                except Exception:
+                    offhand_name = None
+
+                has_torch = (weapon_name == "Torch" or offhand_name == "Torch")
+                if has_torch:
+                    rr = 7
+                    px, py = self.engine.player.x, self.engine.player.y
+                    xs = _np.arange(0, gm.width)
+                    ys = _np.arange(0, gm.height)
+                    dxs = xs[:, None] - px
+                    dys = ys[None, :] - py
+                    dist2 = dxs * dxs + dys * dys
+                    lit_mask |= dist2 <= (rr * rr)
+
+                # campfires
+                for item in getattr(gm, "items", []):
+                    try:
+                        if item.name == "Campfire":
+                            cx, cy = item.x, item.y
+                            xs = _np.arange(0, gm.width)
+                            ys = _np.arange(0, gm.height)
+                            dxs = xs[:, None] - cx
+                            dys = ys[None, :] - cy
+                            dist2 = dxs * dxs + dys * dys
+                            lit_mask |= dist2 <= (3 * 3)
+                    except Exception:
+                        continue
+
+                # treat lit tiles as non-walkable by setting cost to 0 where lit
+                try:
+                    cost[lit_mask] = 0
+                except Exception:
+                    # fallback: iterate
+                    for lx, ly in zip(*_np.where(lit_mask)):
+                        cost[lx, ly] = 0
+
+                # increase cost for occupied tiles so pathfinder avoids them
+                for entity in gm.entities:
+                    try:
+                        if entity.blocks_movement and cost[entity.x, entity.y]:
+                            cost[entity.x, entity.y] += 10
+                    except Exception:
+                        continue
+
+                graph = tcod.path.SimpleGraph(cost=cost, cardinal=2, diagonal=3)
+                pathfinder = tcod.path.Pathfinder(graph)
+                pathfinder.add_root((self.entity.x, self.entity.y))
+
+                raw_path = pathfinder.path_to((target.x, target.y))[1:]
+                # raw_path may be empty or contain coordinates in chained lists; coerce
+                path = raw_path.tolist() if hasattr(raw_path, "tolist") else list(raw_path)
+                self.path = [(p[0], p[1]) for p in path]
+            except Exception:
+                # If anything goes wrong, don't move into light; clear path so we wait
+                self.path = []
+            
+            # attack if adjacent and not lit
+            # ensure current tile is not lit
+            try:
+                current_lit = False
+                if has_torch:
+                    ddx = self.entity.x - self.engine.player.x
+                    ddy = self.entity.y - self.engine.player.y
+                    if ddx * ddx + ddy * ddy <= 7 * 7:
+                        current_lit = True
+                if not current_lit:
+                    for item in getattr(gm, "items", []):
+                        try:
+                            if item.name == "Campfire":
+                                cx = item.x - self.entity.x
+                                cy = item.y - self.entity.y
+                                if cx * cx + cy * cy <= 3 * 3:
+                                    current_lit = True
+                                    break
+                        except Exception:
+                            continue
+                # If the enemy is currently lit, it vanishes
+                if current_lit:
+                    try:
+                        # optional message
+                        if hasattr(self.engine, "message_log"):
+                            self.engine.message_log.add_message(f"The {self.entity.name} dissolves in the light.", color.purple)
+                    except Exception:
+                        pass
+
+                    try:
+                        # Remove entity safely from map
+                        if hasattr(gm, "entities") and self.entity in gm.entities:
+                            try:
+                                gm.entities.remove(self.entity)
+                            except Exception:
+                                try:
+                                    gm.entities.discard(self.entity)
+                                except Exception:
+                                    pass
+                        # clear ai to mark dead
+                        try:
+                            self.entity.ai = None
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+                    return
+
+                if not current_lit and distance <= 1:
+                    return MeleeAction(self.entity, dx, dy).perform()
+            except Exception:
+                pass
         
         if self.path:
             dest_x, dest_y = self.path.pop(0)

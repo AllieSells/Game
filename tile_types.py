@@ -30,19 +30,22 @@ def new_tile(
 ) -> np.ndarray:
     return np.array((walkable, transparent, dark, light), dtype=tile_dt)
 
-SHROUD = np.array((ord(" "), (255, 255, 255), (0, 0, 0)), dtype=graphic_dt)
+SHROUD = np.array((ord(" "), (255, 255, 255), (10, 10, 10)), dtype=graphic_dt)
 
 floor = new_tile(
     walkable=True,
     transparent=True,
-    dark=(ord(" "), (255, 255, 255), (50, 50, 150)),
-    light=(ord(" "), (255, 255, 255), (37, 38, 35)),
+    # Dark = much darker grey, Light = darker grey for lit floors
+    dark=(ord(" "), (255, 255, 255), (25, 25, 25)),
+    light=(ord(" "), (255, 255, 255), (80, 80, 80)),
 )
 wall = new_tile(
     walkable=False,
     transparent=False,
-    dark=(ord("░"), (255, 255, 255), (0, 0, 100)),
-    light=(ord("░"), (255, 255, 255), (54, 51, 51)),
+    # Use darker greys for wall glyph foreground so the wall glyph appears less bright
+    dark=(ord("░"), (60, 60, 60), (15, 15, 15)),
+    # Make wall foreground/background a bit whiter when lit to increase contrast
+    light=(ord("░"), (200, 200, 200), (60, 60, 60)),
 )
 down_stairs = new_tile(
     walkable=True,

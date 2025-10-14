@@ -16,11 +16,14 @@ class Fighter(BaseComponent):
 
     parent: Actor
 
-    def __init__(self, hp: int, base_defense: int, base_power: int):
+    def __init__(self, hp: int, base_defense: int, base_power: int, leave_corpse: bool = True):
         self.max_hp = hp
         self._hp = hp
         self.base_defense = base_defense
         self.base_power = base_power
+        # Whether this entity should leave a corpse when it dies.
+        # Set to False for ephemeral creatures like Shades.
+        self.leave_corpse = leave_corpse
 
     @property
     def hp(self) -> int:
@@ -62,7 +65,45 @@ class Fighter(BaseComponent):
         else:
             death_message = f"{self.parent.name} is dead! Not big surpise."
             death_message_color = color.enemy_die
-        
+        # If configured not to leave a corpse (ephemeral creatures), remove
+        # the entity from the map and award XP without creating a corpse.
+        if not getattr(self, "leave_corpse", True):
+            try:
+                self.engine.message_log.add_message(death_message, death_message_color)
+            except Exception:
+                pass
+
+            try:
+                gm = self.parent.gamemap
+                if hasattr(gm, "entities") and self.parent in gm.entities:
+                    try:
+                        gm.entities.remove(self.parent)
+                    except Exception:
+                        try:
+                            gm.entities.discard(self.parent)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            try:
+                self.parent.ai = None
+            except Exception:
+                pass
+
+            try:
+                self.parent.blocks_movement = False
+            except Exception:
+                pass
+
+            try:
+                self.engine.player.level.add_xp(self.parent.level.xp_given)
+            except Exception:
+                pass
+
+            return
+
+        # Default death behavior: leave a corpse
         self.parent.char = "%"
         self.parent.color = (191, 0, 0)
         self.parent.blocks_movement = False
@@ -70,10 +111,15 @@ class Fighter(BaseComponent):
         self.parent.name = f"remains of {self.parent.name}"
         self.parent.render_order = RenderOrder.CORPSE
 
-        self.engine.message_log.add_message(
-            death_message, death_message_color
-        )
-        self.engine.player.level.add_xp(self.parent.level.xp_given)
+        try:
+            self.engine.message_log.add_message(death_message, death_message_color)
+        except Exception:
+            pass
+
+        try:
+            self.engine.player.level.add_xp(self.parent.level.xp_given)
+        except Exception:
+            pass
 
     def heal(self, amount: int) -> int:
         if self.hp == self.max_hp:
