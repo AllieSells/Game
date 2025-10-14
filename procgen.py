@@ -18,6 +18,11 @@ max_items_by_floor = [
     (4, 2),
 ]
 
+max_chests_by_floor = [
+    (1, 1),
+    (3, 2),
+]
+
 max_monsters_by_floor =[
     (1, 2),
     (4, 3),
@@ -119,11 +124,26 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) 
     monsters: List[Entity] = get_entities_at_random(
         enemy_chances, number_of_monsters, floor_number
     )
+
     items: List[Entity] = get_entities_at_random(
         item_chances, number_of_items, floor_number
     )
 
-    for entity in monsters + items:
+    # Place chests based on floor
+    for entity in range(random.randint(0, get_max_value_for_floor(max_chests_by_floor, floor_number))):
+        chest = entity_factories.chest
+
+        # Spawn chests in room, avoiding corridors
+        x = random.randint(room.x1+1, room.x2-1)
+        y = random.randint(room.y1+1, room.y2-1)
+        if not any(e.x == x and e.y == y for e in dungeon.entities):
+            # Choose chest loot based on item weights from item dictionary
+            loot = get_entities_at_random(item_chances, random.randint(1,3), floor_number)
+            chest = entity_factories.make_chest_with_loot(loot, capacity=6)
+            chest.spawn(dungeon, x, y)
+
+
+    for entity in monsters:
         x = random.randint(room.x1+1, room.x2-1)
         y= random.randint(room.y1+1, room.y2-1)
 

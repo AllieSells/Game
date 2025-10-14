@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, TYPE_CHECKING
 
 import color
+import engine
 import exceptions
 import copy 
 
@@ -102,7 +103,20 @@ class OpenAction(Action):
         # Open a container (chest) on the map and present its contents to the player.
         actor_location_x = self.entity.x
         actor_location_y = self.entity.y
-
+        # Check for chest entity adjacent to player
+        for ent in self.engine.game_map.entities:
+            if hasattr(ent, "container") and ent.container and (
+                abs(ent.x - actor_location_x) <= 1 and abs(ent.y - actor_location_y) <= 1
+            ):
+                # Container found
+                container = ent.container
+                if len(container.items) == 0:
+                    raise exceptions.Impossible("The chest is empty.")
+                else:
+                    # Send to input handler to display contents
+                    from input_handlers import ContainerEventHandler
+                    return ContainerEventHandler(self.engine, container)
+        raise exceptions.Impossible("Nothing nearby to open.")
 class EquipAction(Action):
     def __init__(self, entity: Actor, item: Item):
         super().__init__(entity)

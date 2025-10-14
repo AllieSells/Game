@@ -7,6 +7,7 @@ from components.inventory import Inventory
 from components.level import Level
 from components.container import Container
 from entity import Actor, Item
+from render_order import RenderOrder
 
 
 player = Actor(
@@ -135,7 +136,7 @@ backpack = Item(
 
 chest = Actor(
     char="C",
-    color=(139,69,19),
+    color=(222, 153, 52),
     name="Chest",
     # No AI for static container
     ai_cls=None,
@@ -168,7 +169,8 @@ def make_chest_with_loot(items: list, capacity: int = 10) -> Actor:
     for it in items:
         cont.add(it)
     # Make chest block movement so it occupies a tile
-    new_chest.blocks_movement = True
+    new_chest.blocks_movement = False
+    new_chest.render_order = RenderOrder.CHEST  # Below actors, above items
     # Expose the container on the actor for easy checks
     new_chest.container = cont
     return new_chest

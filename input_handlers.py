@@ -9,6 +9,8 @@ from unittest.mock import Base
 
 import tcod.event
 
+import traceback
+
 import actions
 from actions import (
     Action,
@@ -101,7 +103,11 @@ class EventHandler(BaseEventHandler):
         action_or_state = self.dispatch(event)
         if isinstance(action_or_state, BaseEventHandler):
             return action_or_state
-        if self.handle_action(action_or_state):
+        handled = self.handle_action(action_or_state)
+        # If an action returned a handler, switch to it directly.
+        if isinstance(handled, BaseEventHandler):
+            return handled
+        if handled:
             # Valid action
             if not self.engine.player.is_alive:
                 # Player was killed
@@ -136,17 +142,20 @@ class EventHandler(BaseEventHandler):
         
         return self
 
-    def handle_action(self, action: Optional[Action]) -> bool:
+    def handle_action(self, action: Optional[Action]) -> Union[bool, BaseEventHandler]:
         # Handles actions returned from event methods
         #Returns true is action will advance a turn
         if action is None:
             return False
         
         try:
-            action.perform()
+            result = action.perform()
         except exceptions.Impossible as exc:
             self.engine.message_log.add_message(exc.args[0], color.impossible)
             return False #skip enemy turn
+        # If an action returns a handler, switch without advancing the turn.
+        if isinstance(result, BaseEventHandler):
+            return result
         
         self.engine.handle_enemy_turns()
         self.engine.update_fov()
@@ -295,7 +304,185 @@ class LevelUpEventHandler(AskUserEventHandler):
     ) -> Optional[ActionOrHandler]:
         # Don't allow player to click to exit
         return None
+class ContainerEventHandler(AskUserEventHandler):
+    # Handler displays both inventories and allows transferring items
+    def __init__(self, engine: Engine, container: Container):
+        super().__init__(engine)
+        # Innit container being interacted with
+        self.container = container
+        # Skip filter, not needed
+
+        # Selected index for arrow navigation
+        self.selected_index: int = 0
+        # Which inventory is active: "Player" or "Container"
+        self.menu: str = "Player"
+
+    def on_render(self, console: tcod.Console) -> None:
+        # Renders inventory menu displaying items in both inventories
+        super().on_render(console)
+        player_items = list(self.engine.player.inventory.items)
+        container_items = list(self.container.items)
+        number_of_player_items = len(player_items)
+        number_of_container_items = len(container_items)
+
+        height = max(number_of_player_items, number_of_container_items) + 4
+        # Fall back to 3 if both inventories empty
+        if height <= 3:
+            height = 3
+        width = 47
+        x = (console.width - width) // 2
+        y = 1
+
+        # Draw player inventory frame
+        console.draw_frame(
+            x=x,
+            y=y,
+            width=width // 2,
+            height=height,
+            title="Your Inventory",
+            clear=True,
+            fg=(255, 255, 255),
+            bg=(0, 0, 0),
+        )
+
+        # Draw container inventory frame
+        console.draw_frame(
+            x=x + width // 2,
+            y=y,
+            width=width // 2,
+            height=height,
+            title=f"{(self.container.parent.name)} Inventory",
+            clear=True,
+            fg=(255, 255, 255),
+            bg=(0, 0, 0),
+        )
+
+        # Ensure index is selected
+        if not hasattr(self, "selected_index"):
+            self.selected_index = 0
+        # Clamp selected index based on active menu
+        if number_of_player_items > 0 and self.menu == "Player":
+            if self.selected_index >= number_of_player_items:
+                self.selected_index = max(0, number_of_player_items - 1)
+
+        if number_of_container_items > 0 and self.menu == "Container":
+            if self.selected_index >= number_of_container_items:
+                self.selected_index = max(0, number_of_container_items - 1)
+
+        # Draw player inventory items
+        if number_of_player_items > 0:
+            for i, item in enumerate(player_items):
+                item_key = chr(ord("a") + i)
+                is_equipped = self.engine.player.equipment.item_is_equipped(item)
+
+                item_string = f"({item_key}) {item.name}"
+
+                if is_equipped:
+                    item_string = f"{item_string} (E)"
+
+                # Draw selection marker for keyboard navigation
+                marker = ">" if i == getattr(self, "selected_index", 0) and self.menu == "Player" else " "
+                console.print(x, y + i + 1, marker)
+                console.print(x + 1, y + i + 1, item_string)
+        else:
+            console.print(x + 1, y + 1, "(Empty)")
+
+        # Draw container inventory items
+        if number_of_container_items > 0:
+            for i, item in enumerate(container_items):
+                item_key = chr(ord("a") + i)
+                item_string = f"({item_key}) {item.name}"
+
+                # Draw selection marker for keyboard navigation
+                marker = ">" if i == getattr(self, "selected_index", 0) and self.menu == "Container" else " "
+                console.print(x + width // 2, y + i + 1, marker)
+                console.print(x + width // 2 + 1, y + i + 1, item_string)
+        else:
+            console.print(x + width // 2 + 1, y + 1, "(Empty)")
+
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        player = self.engine.player
+        key = event.sym
+        modifier = event.mod
+
+        # Skip filter
+
+        # Tab shifts active menu
+        if key == tcod.event.K_TAB:
+            self.menu = "Container" if self.menu == "Player" else "Player"
+            return None
+
+        # Arrow-key navigation: up/down to move selection, Enter to confirm
+        if key == tcod.event.K_UP:
+            self.selected_index = max(0, self.selected_index - 1)
+            return None
+        elif key == tcod.event.K_DOWN:
+            if self.menu == "Player":
+                max_index = max(0, len(self.engine.player.inventory.items) - 1)
+            else:
+                max_index = max(0, len(self.container.items) - 1)
+            self.selected_index = min(max_index, self.selected_index + 1)
+            return None
+        elif key in CONFIRM_KEYS:
+            # Confirm selection from the active menu
+            if self.menu == "Player":
+                if not self.engine.player.inventory.items:
+                    return None
+                return self.on_item_selected(self.engine.player.inventory.items[self.selected_index])
+            else:
+                if not self.container.items:
+                    return None
+                return self.on_item_selected(self.container.items[self.selected_index])
     
+        # Letter selection still supported but operates on the filtered list
+        index = key - tcod.event.KeySym.A
+
+        if 0 <= index <= 26:
+            try:
+                if self.menu == "Player":
+                    selected_item = player.inventory.items[index]
+                else:
+                    selected_item = self.container.items[index]
+            except IndexError:
+                self.engine.message_log.add_message("Invalid entry.", color.invalid)
+                return None
+            return self.on_item_selected(selected_item)
+        return super().ev_keydown(event)
+    
+    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
+        # Transfer this item between inventories
+        if self.menu == "Player":
+            # Transfer from player to container
+            try:
+                # Check if equipped
+                if self.engine.player.equipment.item_is_equipped(item):
+                    # Get slot item is in
+                    slot = self.engine.player.equipment.get_slot(item)
+                    self.engine.player.equipment.unequip_from_slot(slot, add_message=True)
+
+                self.engine.player.inventory.items.remove(item)
+                self.container.items.append(item)
+                self.engine.message_log.add_message(f"You transfer the {item.name}.")
+            except Exception:
+                print(traceback.format_exc(), color.error)
+                self.engine.message_log.add_message(f"Could not transfer {item.name}.", color.error)
+        else:
+            # Transfer from container to player
+            try:
+                self.container.items.remove(item)
+                if len(self.engine.player.inventory.items) > self.engine.player.inventory.capacity:
+                    self.engine.message_log.add_message("Your inventory is full.", color.error)
+                    # Return item to container
+                    self.container.items.append(item)
+                else:
+                    self.engine.player.inventory.items.append(item)
+                    self.engine.message_log.add_message(f"You take the {item.name}.")
+            except Exception:
+                
+                self.engine.message_log.add_message(f"Could not transfer {item.name}.", color.error)
+        # Return back to container handler
+        return self
+
 class InventoryEventHandler(AskUserEventHandler):
     """This handler lets the user select an item.
 
@@ -439,150 +626,7 @@ class ScrollActivateHandler(InventoryEventHandler):
             self.engine.message_log.add_message(f"You cannot read the {item.name}.", color.invalid)
 
 
-class ExchangeInventoryHandler(AskUserEventHandler):
 
-    TITLE = "<missing title>"
-
-    def __init__(self, engine: Engine, item_filter: Optional[Callable] = None, container: Container = None):
-        super().__init__(engine)
-        # item_filter should accept an Item and return True if it should be shown
-        self.item_filter: Callable = item_filter if item_filter is not None else (lambda i: True)
-        # selected index for arrow navigation
-        self.selected_index: int = 0
-
-    def on_render(self, console: tcod.Console) -> None:
-        print("Rendering exchange handler")
-        # Renders two inventories side by side: player and container
-        super().on_render(console)
-        # Build filtered list according to filter function (modular)
-        all_items = list(self.engine.player.inventory.items)
-        filtered_items = [it for it in all_items if self.item_filter(it)]
-
-        number_of_items_in_inventory = len(filtered_items)
-
-        height = number_of_items_in_inventory + 2
-
-        if height <= 3:
-            height = 3
-
-        if self.engine.player.x <= 30:
-            x = 40
-        else:
-            x = 0
-
-        y = 0
-
-        width = len(self.TITLE) + 4
-
-        # Player inventory render
-        console.draw_frame(
-            x=x,
-            y=y,
-            width=width,
-            height=height,
-            title=self.TITLE,
-            clear=True,
-            fg=(255, 255, 255),
-            bg=(0, 0, 0),
-        )
-
-        # Ensure we have a selected index for arrow-key navigation
-        if not hasattr(self, "selected_index"):
-            self.selected_index = 0
-
-        if number_of_items_in_inventory > 0:
-            # Clamp selected index to the filtered list
-            if self.selected_index >= number_of_items_in_inventory:
-                self.selected_index = max(0, number_of_items_in_inventory - 1)
-
-            for i, item in enumerate(filtered_items):
-                item_key = chr(ord("a") + i)
-
-                is_equipped = self.engine.player.equipment.item_is_equipped(item)
-
-                item_string = f"({item_key}) {item.name}"
-
-                if is_equipped:
-                    item_string = f"{item_string} (E)"
-
-                # Draw selection marker for keyboard navigation
-                marker = ">" if i == getattr(self, "selected_index", 0) else " "
-                console.print(x, y + i + 1, marker)
-                console.print(x + 1, y + i + 1, item_string)
-        else:
-            console.print(x + 1, y + 1, "(Empty)")
-        # Container inventory render
-        console.draw_frame(
-            x=x+width+1,
-            y=y,
-            width=width,
-            height=height,
-            title=self.TITLE,
-            clear=True,
-            fg=(255, 255, 255),
-            bg=(0, 0, 0),
-        )
-        for i, item in enumerate(self.container.items):
-            item_key = chr(ord("a") + i)
-
-            item_string = f"({item_key}) {item.name}"
-
-            # Draw selection marker for keyboard navigation
-            marker = ">" if i == getattr(self, "selected_index", 0) else " "
-            console.print(x+width+1, y + i + 1, marker)
-            console.print(x + width + 2, y + i + 1, item_string)
-            
-
-    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
-        player = self.engine.player
-        key = event.sym
-        modifier = event.mod
-
-        # Build filtered list for selection mapping
-        all_items = list(player.inventory.items)
-        filtered_items = [it for it in all_items if self.item_filter(it)]
-
-        # Arrow-key navigation: up/down to move selection, Enter to confirm
-        if key == tcod.event.K_UP:
-            self.selected_index = max(0, self.selected_index - 1)
-            return None
-        if key == tcod.event.K_DOWN:
-            self.selected_index = min(len(filtered_items) - 1 if filtered_items else 0, self.selected_index + 1)
-            return None
-        if key in CONFIRM_KEYS:
-            # If inventory empty, do nothing
-            if len(filtered_items) == 0:
-                return None
-            try:
-                selected_item = filtered_items[getattr(self, "selected_index", 0)]
-            except Exception:
-                self.engine.message_log.add_message("Invalid selection.", color.invalid)
-                return None
-            return self.on_item_selected(selected_item)
-
-        # Letter selection still supported but operates on the filtered list
-        index = key - tcod.event.KeySym.A
-
-        if 0 <= index <= 26:
-            try:
-                selected_item = filtered_items[index]
-            except IndexError:
-                self.engine.message_log.add_message("Invalid entry.", color.invalid)
-                return None
-            return self.on_item_selected(selected_item)
-
-        return super().ev_keydown(event)
-
-    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        # Transfer selected item to player inventory
-        if item in self.container.items:
-            return actions.PickupAction(self.engine.player, item)
-            # Remove item from container
-            self.container.items.remove(item)
-
-        # Return back to transfer screen (allows multiple transfers)
-        return InventoryExchangeHandler(self.engine, item_filter=self.item_filter, container=self.container)
-            
             
 
 
@@ -653,6 +697,7 @@ class SelectIndexHandler(AskUserEventHandler):
         # Draw a small framed box next to the cursor showing the name(s)
         try:
             from render_functions import get_names_at_location
+
 
             names = get_names_at_location(x, y, self.engine.game_map)
             if names:

@@ -47,6 +47,17 @@ class Equipment(BaseComponent):
             bonus += self.offhand.equippable.power_bonus
 
         return bonus
+    # Return slot item is in
+    def get_slot(self, item: Item) -> Optional[str]:
+        if self.weapon == item:
+            return "weapon"
+        elif self.armor == item:
+            return "armor"
+        elif self.offhand == item:
+            return "offhand"
+        elif self.backpack == item:
+            return "backpack"
+        return None
 
     def item_is_equipped(self, item: Item) -> bool:
         return self.weapon == item or self.armor == item or self.offhand == item

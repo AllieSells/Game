@@ -109,6 +109,8 @@ class LightningDamageConsumable(Consumable):
 
         if target:
 
+            # Animation queuer
+
             path = list(tcod.los.bresenham((consumer.x, consumer.y), (target.x, target.y)).tolist())
 
             self.engine.animation_queue.append(LightningAnimation(path))
