@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 class GameMap:
     def __init__(
-            self, engine: Engine, width: int, height: int, entities: Iterable[Entity] = ()
+            self, engine: Engine, width: int, height: int, entities: Iterable[Entity] = (), type: str = "dungeon",
     ):
         self.engine = engine
         self.width, self.height = width, height
@@ -28,6 +28,7 @@ class GameMap:
             (width, height), fill_value=False, order="F") # Tiles player has seen before
         
         self.downstairs_location = (0, 0)
+        self.type = type  # What type of map this is, e.g. "dungeon" or "village"
         
     @property
     def gamemap(self) -> GameMap:
@@ -90,7 +91,7 @@ class GameMap:
                 dist2 = dx * dx + dy * dy
                 lit_mask |= dist2 <= (rr * rr)
 
-            # Campfire lighting (radius 3) - doesn't affect FOV, only visual lighting
+            # Campfire and Bonfire lighting - doesn't affect FOV, only visual lighting
             try:
                 for item in getattr(self, "items", []):
                     try:
@@ -101,7 +102,15 @@ class GameMap:
                             dx = xs[:, None] - cx
                             dy = ys[None, :] - cy
                             dist2 = dx * dx + dy * dy
-                            lit_mask |= dist2 <= (3 * 3)
+                            lit_mask |= dist2 <= (3 * 3)  # radius 3 for campfires
+                        elif item.name == "Bonfire":
+                            bx, by = item.x, item.y
+                            xs = np.arange(0, self.width)
+                            ys = np.arange(0, self.height)
+                            dx = xs[:, None] - bx
+                            dy = ys[None, :] - by
+                            dist2 = dx * dx + dy * dy
+                            lit_mask |= dist2 <= (15 * 15)  # radius 15 for bonfires (larger)
                     except Exception:
                         continue
             except Exception:
@@ -247,14 +256,14 @@ class GameWorld:
             self.current_floor = current_floor
 
     def generate_floor(self) -> None:
-        from procgen import generate_dungeon
+        from procgen import generate_dungeon, generate_village
 
         self.current_floor += 1
 
-        self.engine.game_map = generate_dungeon(
-            max_rooms=self.max_rooms,
-            room_min_size=self.room_min_size,
-            room_max_size=self.room_max_size,
+        self.engine.game_map = generate_village(
+            #max_rooms=self.max_rooms,
+            #room_min_size=self.room_min_size,
+            #room_max_size=self.room_max_size,
             map_width=self.map_width,
             map_height=self.map_height,
             engine=self.engine,

@@ -26,6 +26,9 @@ bar_text = white
 bar_filled = (0x0, 0x60, 0x0)
 bar_empty = (0x40, 0x10, 0x10)
 
+lucidity_bar_filled = (0x60, 0x60, 0x0)
+lucidity_bar_empty = (0x40, 0x10, 0x10)
+
 xp_bar_empty = (0, 0, 0)
 xp_bar_filled = (6, 100, 255)
 

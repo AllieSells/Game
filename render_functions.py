@@ -46,29 +46,7 @@ def render_debug_overlay(console: Console, fps: float, player_pos: Tuple[int, in
     console.print(0, 40, f"Entities: {entity_count}", fg=(255, 255, 255))
     console.print(0, 41, f"FPS: {fps:.1f}", fg=(255, 255, 255))
 
-def render_bar(
-        console: Console, current_value: int, maximum_value: int, total_width: int
-) -> None:
-    bar_width = int(float(current_value) / maximum_value * total_width)
 
-    console.draw_rect(x=0, y=43, width=total_width, height=1, ch=1, bg=color.bar_empty)
-
-    if bar_width > 0:
-        console.draw_rect(
-            x=0, y=43, width=bar_width, height=1, ch=1, bg=color.bar_filled
-        )
-
-    console.print(
-        x=1, y=43, string=f"HP: {current_value}/{maximum_value}", fg=color.bar_text
-    )
-
-def render_dungeon_level(
-        console: Console, dungeon_level: int, location: Tuple[int, int]
-) -> None:
-    # Render the level the player is on, at the given location
-    x, y = location
-
-    console.print(x=x+1, y=y, string=f"Dungeon: {dungeon_level}")
 
 
         
@@ -117,7 +95,7 @@ def render_debug_overlay(console: 'Console', fps, player_pos: Tuple[int, int], h
     console.print(0, 40, f"Entities: {entity_count}", fg=(255, 255, 255))
     console.print(0, 41, f"FPS: {fps:.1f}", fg=(255, 255, 255))
 
-
+# HP bar render
 def render_bar(
         console: 'Console', current_value: int, maximum_value: int, total_width: int
 ) -> None:
@@ -134,15 +112,49 @@ def render_bar(
         x=1, y=43, string=f"HP: {current_value}/{maximum_value}", fg=color.bar_text
     )
 
+# Lucidity bar render
+def render_lucidity_bar(
+        console: 'Console', current_value: int, maximum_value: int, total_width: int
+) -> None:
+    bar_width = int(float(current_value) / maximum_value * total_width)
+
+    console.draw_rect(x=0, y=44, width=total_width, height=1, ch=1, bg=color.lucidity_bar_empty)
+
+    if bar_width > 0:
+        console.draw_rect(
+            x=0, y=44, width=bar_width, height=1, ch=1, bg=color.lucidity_bar_filled
+        )
+
+    console.print(
+        x=1, y=44, string=f"Lucidity: {current_value}/{maximum_value}", fg=color.bar_text
+    )
+
+def render_player_level(
+        console: 'Console', current_value: int, maximum_value: int, total_value: int, total_width: int
+) -> None:
+    bar_width = int(float(current_value) / maximum_value * total_width)
+
+    console.draw_rect(x=0, y=45, width=total_width, height=1, ch=1, bg=color.xp_bar_empty)
+
+    if bar_width > 0:
+        console.draw_rect(
+            x=0, y=45, width=bar_width, height=1, ch=1, bg=color.xp_bar_filled
+        )
+
+    console.print(
+        x=1, y=45, string=f"Level: {current_value}/{maximum_value} ({total_value})", fg=color.bar_text
+    )
+
+
 
 def render_dungeon_level(
-        console: 'Console', dungeon_level: int, location: Tuple[int, int]
+        console: 'Console', dungeon_level: int,
 ) -> None:
     # Render the level the player is on, at the given location
-    x, y = location
+    x = 0
+    y = 46
 
     console.print(x=x+1, y=y, string=f"Dungeon: {dungeon_level}")
-
 
 # Status effect render
 def render_effects(console: 'Console', effects: list) -> None:
@@ -152,25 +164,9 @@ def render_effects(console: 'Console', effects: list) -> None:
     except Exception:
         has_darkness = False
 
-    status = "darkness" if has_darkness else "light"
+    status = "Darkness" if has_darkness else "Light"
     console.print(x=61, y=41, string=status, fg=(255, 255, 255))
 
-
-def render_player_level(
-        console: 'Console', current_value: int, maximum_value: int, total_value: int, total_width: int
-) -> None:
-    bar_width = int(float(current_value) / maximum_value * total_width)
-
-    console.draw_rect(x=0, y=44, width=total_width, height=1, ch=1, bg=color.xp_bar_empty)
-
-    if bar_width > 0:
-        console.draw_rect(
-            x=0, y=44, width=bar_width, height=1, ch=1, bg=color.xp_bar_filled
-        )
-
-    console.print(
-        x=1, y=44, string=f"Level: {current_value}/{maximum_value} ({total_value})", fg=color.bar_text
-    )
 
 
 def render_separator(console: tcod.Console, y: int = 42, vline_xs: list[int] = [20, 60], vline_height: int = 7):

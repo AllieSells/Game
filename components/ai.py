@@ -120,7 +120,51 @@ class HostileEnemy(BaseAI):
             ).perform()
         
         return WaitAction(self.entity).perform()
-    
+
+class Friendly(BaseAI):
+    # Friendly entity that paths around occasionally
+    def __init__(self, entity: Actor):
+        super().__init__(entity)
+        self.path: List[Tuple[int, int]] = []
+        self.wait_turns = random.randint(0, 20)  # Initial wait before first move
+
+    def perform(self) -> None:
+        if self.wait_turns > 0:
+            self.wait_turns -= 1
+            return WaitAction(self.entity).perform()
+        
+        if not self.path:
+            # Pick a random location within 5 tiles to walk to
+            dest_x = self.entity.x + random.randint(-5, 5)
+            dest_y = self.entity.y + random.randint(-5, 5)
+            # Ensure destination is in bounds and walkable
+            if (0 <= dest_x < self.engine.game_map.width and
+                0 <= dest_y < self.engine.game_map.height and
+                self.engine.game_map.tiles["walkable"][dest_x, dest_y] and
+                # Prefer to stay in radius of campfires
+                (not hasattr(self.engine.game_map, "items") or any(
+                    item.name == ("Campfire" or "Bonfire") and
+                    (item.x - dest_x) ** 2 + (item.y - dest_y) ** 2 <= 7 * 7
+                    for item in self.engine.game_map.items)
+                )
+                ):
+                self.path = self.get_path_to(dest_x, dest_y)
+            else:
+                # Invalid destination; wait instead
+                self.wait_turns = random.randint(5,20)
+                return WaitAction(self.entity).perform()
+        
+        if self.path:
+            dest_x, dest_y = self.path.pop(0)
+            return MovementAction(
+                self.entity, dest_x - self.entity.x, dest_y - self.entity.y,
+            ).perform()
+        
+        # If no path found or path exhausted, wait a few turns before next move
+        self.wait_turns = random.randint(5, 20)
+        return WaitAction(self.entity).perform()
+
+
 class DarkHostileEnemy(BaseAI):
     # Enemy that avoids light, only moves in darkness
     def __init__(self, entity: Actor):

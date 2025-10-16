@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import lzma
 import pickle
+import trace
+import traceback
 from typing import TYPE_CHECKING
 
 from tcod.console import Console
@@ -55,21 +57,25 @@ class Engine:
                 self.animation_queue.remove(anim)
             except ValueError:
                 pass
-        # Periodically spawn campfire animations for campfire items on the map.
+        # Periodically spawn fire animations for campfire and bonfire items on the map.
         try:
             for entity in list(self.game_map.items):
-                if entity.name == "Campfire":
+                if entity.name in ("Campfire", "Bonfire"):
                     # Spawn flicker more frequently and independently from smoke.
                     if self.animations_enabled:
                         try:
                             from animations import FireFlicker, FireSmoke
 
+                            # Bonfire has more frequent and intense animations
+                            flicker_chance = 0.35 if entity.name == "Bonfire" else 0.20
+                            smoke_chance = 0.08 if entity.name == "Bonfire" else 0.03
+
                             # Flicker: frequent, short blips
-                            if random.random() < 0.20:
+                            if random.random() < flicker_chance:
                                 self.animation_queue.append(FireFlicker((entity.x, entity.y)))
 
                             # Smoke: rarer, longer lasting
-                            if random.random() < 0.03:
+                            if random.random() < smoke_chance:
                                 self.animation_queue.append(FireSmoke((entity.x, entity.y)))
                         except Exception:
                             pass
@@ -96,11 +102,6 @@ class Engine:
         except Exception:
             pass
 
-        # Try spawning enemies when the player is in Darkness (non-blocking)
-        try:
-            self._maybe_spawn_enemy_in_dark()
-        except Exception:
-            pass
 
     def process_animations(self):
         if not self.animation_queue:
@@ -301,24 +302,36 @@ class Engine:
         # Determine if player is holding a torch
         has_torch = (weapon_name == "Torch" or offhand_name == "Torch")
 
-        # Determine if there is a campfire within radius 3 (lighting only)
-        near_campfire = False
+        # Determine if there is a campfire/bonfire within lighting radius
+        near_light_source = False
         try:
             for item in getattr(self.game_map, "items", []):
                 try:
                     if item.name == "Campfire":
                         dx = item.x - self.player.x
                         dy = item.y - self.player.y
-                        if dx * dx + dy * dy <= 3 * 3:
-                            near_campfire = True
+                        if dx * dx + dy * dy <= 3 * 3:  # radius 3 for campfires
+                            near_light_source = True
+                            break
+                    elif item.name == "Bonfire":
+                        dx = item.x - self.player.x
+                        dy = item.y - self.player.y
+                        if dx * dx + dy * dy <= 15 * 15:  # radius 15 for bonfires (larger)
+                            near_light_source = True
                             break
                 except Exception:
                     continue
         except Exception:
-            near_campfire = False
+            near_light_source = False
+
+
 
         # Torch increases FOV radius; campfires only affect Darkness (lighting), not FOV
         radius = 7 if has_torch else 2
+
+        # If player in village, greatly increase FOV radius
+        if self.game_map.type == "village":
+            radius = 10
 
         self.game_map.visible[:] = compute_fov(
             self.game_map.tiles["transparent"],
@@ -335,7 +348,7 @@ class Engine:
 
             has_darkness = any(getattr(e, "name", "") == "Darkness" for e in self.player.effects)
 
-            if not (has_torch or near_campfire):
+            if not (has_torch or near_light_source):
                 # Player is in darkness: ensure they have the Darkness effect
                 if not has_darkness:
                     try:
@@ -367,11 +380,15 @@ class Engine:
             maximum_value=self.player.fighter.max_hp,
             total_width=20
         )
-
+        render_functions.render_lucidity_bar(
+            console=console,
+            current_value=self.player.lucidity,
+            maximum_value=self.player.max_lucidity,
+            total_width=20
+        )
         render_functions.render_dungeon_level(
             console=console,
             dungeon_level=self.game_world.current_floor,
-            location=(0, 45),
         )
 
         render_functions.render_effects(

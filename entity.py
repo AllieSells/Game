@@ -96,6 +96,8 @@ class Actor(Entity):
         inventory: Optional[Inventory] = None,
         level: Optional[Level] = None,
         effects: Optional[list] = None,
+        lucidity: int = None,
+        max_lucidity: int = None,
     ):
         super().__init__(
             x=x,
@@ -134,6 +136,8 @@ class Actor(Entity):
         # Effects: a list of Effect instances applied to this actor
         # Initialize inside __init__ to avoid circular import issues at module top-level
         self.effects = effects if effects is not None else []
+        self.lucidity = lucidity if lucidity is not None else 100
+        self.max_lucidity = max_lucidity if max_lucidity is not None else 100
 
     def add_effect(self, effect: 'Effect') -> None:
         """Attach an Effect to this actor."""

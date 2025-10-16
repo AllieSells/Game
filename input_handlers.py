@@ -8,6 +8,7 @@ from typing import Callable, Tuple, Optional, TYPE_CHECKING, Union
 from unittest.mock import Base
 
 import tcod.event
+import random
 
 import traceback
 
@@ -147,7 +148,6 @@ class EventHandler(BaseEventHandler):
         #Returns true is action will advance a turn
         if action is None:
             return False
-        
         try:
             result = action.perform()
         except exceptions.Impossible as exc:
@@ -159,6 +159,32 @@ class EventHandler(BaseEventHandler):
         
         self.engine.handle_enemy_turns()
         self.engine.update_fov()
+
+                # Check for darkness effect
+        if "Darkness" in [getattr(e, "name", "") for e in getattr(self.engine.player, "effects", [])]:
+            # Player is in darkness; try spawning enemies occasionally
+            if random.random() < 0.33:  # 10% chance per tick
+                self.engine.player.lucidity = max(0, self.engine.player.lucidity - 1)  # Lose 1 lucidity per tick in darkness
+        elif "Darkness" not in [getattr(e, "name", "") for e in getattr(self.engine.player, "effects", [])]:
+            self.engine.player.lucidity = min(self.engine.player.max_lucidity, self.engine.player.lucidity + 1)  # Regain 1 lucidity per tick in light
+        if self.engine.player.lucidity == 66:
+            self.engine.message_log.add_message("You feel your mind slipping...", color.purple)
+        elif self.engine.player.lucidity == 33:
+            self.engine.message_log.add_message("Your mind is deteriorating!", color.purple)
+        elif self.engine.player.lucidity == 10:
+            self.engine.message_log.add_message("Your mind is on the brink of collapse!", color.red)
+        elif self.engine.player.lucidity == 0:
+            self.engine.message_log.add_message("Your mind has collapsed into madness!", color.red)
+            # Trigger a sanity event here, e.g., spawn a powerful enemy
+        if self.engine.player.lucidity <= 66:
+            self.engine._maybe_spawn_enemy_in_dark()
+        
+        # Try spawning enemies when the player is in Darkness (non-blocking)
+        try:
+            self._maybe_spawn_enemy_in_dark()
+        except Exception:
+            pass
+
         return True
 
     def ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:

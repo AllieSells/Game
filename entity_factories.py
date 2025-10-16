@@ -1,4 +1,4 @@
-from components.ai import DarkHostileEnemy, HostileEnemy
+from components.ai import DarkHostileEnemy, Friendly, HostileEnemy
 from components import consumable, equippable
 from components.effect import Effect
 from components.equipment import Equipment
@@ -8,7 +8,7 @@ from components.level import Level
 from components.container import Container
 from entity import Actor, Item
 from render_order import RenderOrder
-
+import components.names as names
 
 player = Actor(
     char="@",
@@ -20,7 +20,10 @@ player = Actor(
     inventory=Inventory(capacity=26),
     level=Level(level_up_base=200),
     # Temporary demo effect so the status-effects panel shows during testing
-    effects = [Effect(name="Burning", duration=20, description="Demo burning effect")],
+    effects = [],
+    lucidity = 100,
+    max_lucidity = 100,
+
 )
 
 shade = Actor(
@@ -89,6 +92,12 @@ campfire = Item(
     name="Campfire",
 )
 
+bonfire = Item(
+    char="X",
+    color=(255, 140, 0),
+    name="Bonfire",
+)
+
 torch = Item(
     char="!",
     color=(255, 200, 50),
@@ -145,6 +154,19 @@ chest = Actor(
     inventory=Inventory(capacity=0),
     level=Level(xp_given=0),
 )
+
+villager = Actor(
+    char="@",
+    color=(255, 255, 0),
+    name=names.get_names("Human"),
+    ai_cls=Friendly,
+    equipment=Equipment(),
+    fighter=Fighter(hp=10, base_defense=0, base_power=0),
+    inventory=Inventory(capacity=26),
+    level=Level(xp_given=10),
+)
+
+
 
 # Attach a Container component to a chest template (not an Actor constructor arg
 # since the Actor expects certain component types). We'll create a light-weight

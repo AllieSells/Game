@@ -49,6 +49,10 @@ class PickupAction(Action):
                 if len(inventory.items) >= inventory.capacity:
                     raise exceptions.Impossible("Your inventory is full IDIOT")
             
+                # Bonfires cannot be picked up
+                if item.name == "Bonfire":
+                    raise exceptions.Impossible("The bonfire is too hot to handle!")
+                
                 self.engine.game_map.entities.remove(item)
                 item.parent = self.entity.inventory
                 inventory.items.append(item)
