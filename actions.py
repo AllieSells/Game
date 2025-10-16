@@ -33,6 +33,43 @@ class Action:
         """
         raise NotImplementedError()
 
+class InteractAction(Action):
+    # Handles 
+    def __init__(self, entity: Actor, dx: int = 0, dy: int = 0):
+        super().__init__(entity)
+        self.dx = dx
+        self.dy = dy
+
+    def perform(self):
+        actor_location_x = self.entity.x
+        actor_location_y = self.entity.y
+
+        target_x = actor_location_x + self.dx
+        target_y = actor_location_y + self.dy
+
+        # Read tile tuple for 'true' interactable property
+        tile = self.engine.game_map.tiles["interactable"][target_x, target_y]    
+        if tile:
+            # Get name for that tile
+            name = self.engine.game_map.tiles["name"][target_x, target_y]
+
+
+            # If it's a door, toggle open/closed state
+            if name == "Closed Door":
+                # Convert "Closed Door" tile to "Open Door" tile
+                import tile_types
+                self.engine.game_map.tiles[target_x, target_y] = tile_types.open_door
+                self.engine.message_log.add_message("You open the door.")
+
+            if name == "Open Door":
+                # Convert "Open Door" tile to "Closed Door" tile
+                import tile_types
+                self.engine.game_map.tiles[target_x, target_y] = tile_types.closed_door
+                self.engine.message_log.add_message("You close the door.")
+        else:
+            self.engine.message_log.add_message("There is nothing to interact with.")
+
+
 class PickupAction(Action):
     #pick up item and put in inventory IF ROOM
 

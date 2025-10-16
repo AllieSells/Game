@@ -19,6 +19,7 @@ from actions import (
     PickupAction,
     WaitAction,
     OpenAction,
+    InteractAction,
 )
 
 import color
@@ -144,6 +145,7 @@ class EventHandler(BaseEventHandler):
         return self
 
     def handle_action(self, action: Optional[Action]) -> Union[bool, BaseEventHandler]:
+        
         # Handles actions returned from event methods
         #Returns true is action will advance a turn
         if action is None:
@@ -853,9 +855,46 @@ class MainGameEventHandler(EventHandler):
         ):
             return actions.TakeStairsAction(player)
         elif key == tcod.event.K_SLASH and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT
-        ):
+        ):            
             # TODO HELP MENU
             return HelpMenuHandler(self.engine)
+        
+        # Interact action (ALT + arrow key direction OR numpad direction)
+        elif key == tcod.event.K_LEFT and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            action = InteractAction(player, -1, 0)
+        elif key == tcod.event.K_RIGHT and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            action = InteractAction(player, 1, 0)
+        elif key == tcod.event.K_UP and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            action = InteractAction(player, 0, -1)
+        elif key == tcod.event.K_DOWN and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            action = InteractAction(player, 0, 1)
+        elif key == tcod.event.K_KP_1 and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            action = InteractAction(player, -1, 1)
+        elif key == tcod.event.K_KP_2 and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            action = InteractAction(player, 0, 1)
+        elif key == tcod.event.K_KP_3 and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            action = InteractAction(player, 1, 1)
+        elif key == tcod.event.K_KP_4 and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            action = InteractAction(player, -1, 0)
+        elif key == tcod.event.K_KP_6 and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            action = InteractAction(player, 1, 0)
+        elif key == tcod.event.K_KP_7 and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            action = InteractAction(player, -1, -1)
+        elif key == tcod.event.K_KP_8 and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            action = InteractAction(player, 0, -1)
+        elif key == tcod.event.K_KP_9 and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            action = InteractAction(player, 1, -1)
+
+#       Dev key, press K to kill all enemies on the map
+#        elif key == tcod.event.KeySym.K:
+#            for entity in self.engine.game_map.entities:
+#                try:
+#                    if entity.fighter and entity is not self.engine.player:
+#                        entity.fighter.hp = 0
+#                except Exception:
+#                    pass
+#                self.engine.message_log.add_message("You feel a sudden surge of power!", color.red)
+            
         elif key in MOVE_KEYS:
             dx, dy = MOVE_KEYS[key]
             action = BumpAction(player, dx, dy)
@@ -883,6 +922,8 @@ class MainGameEventHandler(EventHandler):
             return CharacterScreenEventHandler(self.engine)
         elif key == tcod.event.K_SLASH:
             return LookHandler(self.engine)
+
+
         
         # No valid key was pressed
         # print(action)
@@ -960,7 +1001,6 @@ class HistoryViewer(EventHandler):
         else:  # Any other key moves back to the main game state.
             return MainGameEventHandler(self.engine)
         return None
-    
 
 class HelpMenuHandler(AskUserEventHandler):
     # CONTROL MENU

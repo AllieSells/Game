@@ -98,6 +98,7 @@ class Actor(Entity):
         effects: Optional[list] = None,
         lucidity: int = None,
         max_lucidity: int = None,
+        type: str = "None",
     ):
         super().__init__(
             x=x,
@@ -138,6 +139,7 @@ class Actor(Entity):
         self.effects = effects if effects is not None else []
         self.lucidity = lucidity if lucidity is not None else 100
         self.max_lucidity = max_lucidity if max_lucidity is not None else 100
+        self.type = type
 
     def add_effect(self, effect: 'Effect') -> None:
         """Attach an Effect to this actor."""

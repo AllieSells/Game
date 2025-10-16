@@ -63,10 +63,10 @@ class GameMap:
         return 0 <= x < self.width and 0 <= y < self.height
     
     def render(self, console: Console) -> None:
-        # Build per-tile lighting mask: tiles considered "lit" if within player's torch radius
-        # or within campfire radius (3). We'll compute lit_mask first and then choose
-        # per-tile 'light' vs 'dark' so mixed FOV renders correctly.
-        lit_mask = np.zeros((self.width, self.height), dtype=bool, order="F")
+        # Update tile lighting status based on proximity to light sources
+        # Reset all tiles to unlit first
+        self.tiles["lit"][:] = False
+        
         try:
             player = self.engine.player
             # Torch lighting: if player holds a Torch, light radius is 7
@@ -82,14 +82,30 @@ class GameMap:
             has_torch = (weapon_name == "Torch" or offhand_name == "Torch")
 
             if has_torch:
-                rr = 7
                 px, py = player.x, player.y
-                xs = np.arange(0, self.width)
-                ys = np.arange(0, self.height)
-                dx = xs[:, None] - px
-                dy = ys[None, :] - py
-                dist2 = dx * dx + dy * dy
-                lit_mask |= dist2 <= (rr * rr)
+                # Use FOV to prevent torch light from going through walls
+                try:
+                    from tcod.map import compute_fov
+                    import tcod
+                    torch_fov = compute_fov(
+                        self.tiles["transparent"], (px, py), 
+                        radius=7, algorithm=tcod.FOV_SHADOW
+                    )
+                    self.tiles["lit"] |= torch_fov
+                except Exception:
+                    # Explain why FOV failed
+                    print(f"Failed to compute FOV for torch at ({px}, {py}): {e}")
+                    import traceback
+                    traceback.print_exc()
+
+                    # Fallback to simple distance if FOV fails
+                    rr = 7
+                    xs = np.arange(0, self.width)
+                    ys = np.arange(0, self.height)
+                    dx = xs[:, None] - px
+                    dy = ys[None, :] - py
+                    dist2 = dx * dx + dy * dy
+                    self.tiles["lit"] |= dist2 <= (rr * rr)
 
             # Campfire and Bonfire lighting - doesn't affect FOV, only visual lighting
             try:
@@ -97,45 +113,79 @@ class GameMap:
                     try:
                         if item.name == "Campfire":
                             cx, cy = item.x, item.y
-                            xs = np.arange(0, self.width)
-                            ys = np.arange(0, self.height)
-                            dx = xs[:, None] - cx
-                            dy = ys[None, :] - cy
-                            dist2 = dx * dx + dy * dy
-                            lit_mask |= dist2 <= (3 * 3)  # radius 3 for campfires
+                            # Use FOV to prevent light from going through walls
+                            try:
+                                from tcod.map import compute_fov
+                                import tcod
+                                campfire_fov = compute_fov(
+                                    self.tiles["transparent"], (cx, cy), 
+                                    radius=3, algorithm=tcod.FOV_SHADOW
+                                )
+                                self.tiles["lit"] |= campfire_fov
+                            except Exception:
+                                # Fallback to simple distance if FOV fails
+                                xs = np.arange(0, self.width)
+                                ys = np.arange(0, self.height)
+                                dx = xs[:, None] - cx
+                                dy = ys[None, :] - cy
+                                dist2 = dx * dx + dy * dy
+                                self.tiles["lit"] |= dist2 <= (3 * 3)  # radius 3 for campfires
                         elif item.name == "Bonfire":
                             bx, by = item.x, item.y
-                            xs = np.arange(0, self.width)
-                            ys = np.arange(0, self.height)
-                            dx = xs[:, None] - bx
-                            dy = ys[None, :] - by
-                            dist2 = dx * dx + dy * dy
-                            lit_mask |= dist2 <= (15 * 15)  # radius 15 for bonfires (larger)
+                            # Use FOV to prevent light from going through walls
+                            try:
+                                from tcod.map import compute_fov
+                                import tcod
+                                bonfire_fov = compute_fov(
+                                    self.tiles["transparent"], (bx, by), 
+                                    radius=15, algorithm=tcod.FOV_SHADOW
+                                )
+                                self.tiles["lit"] |= bonfire_fov
+                            except Exception:
+                                # Fallback to simple distance if FOV fails
+                                xs = np.arange(0, self.width)
+                                ys = np.arange(0, self.height)
+                                dx = xs[:, None] - bx
+                                dy = ys[None, :] - by
+                                dist2 = dx * dx + dy * dy
+                                self.tiles["lit"] |= dist2 <= (15 * 15)  # radius 15 for bonfires (larger)
                     except Exception:
                         continue
             except Exception:
                 pass
         except Exception:
-            lit_mask[:] = False
+            self.tiles["lit"][:] = False
 
-        # Now select per-tile graphic: visible+lit -> light, visible+unlit -> dark, explored -> dark, else SHROUD
+        # Now select per-tile graphic: use the tile's lit attribute combined with player FOV
+        # Light sources set tile lit status, but player only sees the effect if in their FOV
         console.tiles_rgb[0 : self.width, 0 : self.height] = np.select(
-            condlist=[self.visible & lit_mask, self.visible & (~lit_mask), self.explored],
+            condlist=[self.visible & self.tiles["lit"], self.visible & (~self.tiles["lit"]), self.explored],
             choicelist=[self.tiles["light"], self.tiles["dark"], self.tiles["dark"]],
             default=tile_types.SHROUD,
         )
 
-        # If entire visible area has no lit tiles (complete darkness), make the
-        # visible-but-unlit tiles a hair lighter so the player's FOV reads more
-        # usefully. This is a single, conditional pass to avoid stacking.
+        # Make the 3x3 area around player always a bit lighter (renders under light source light)
         try:
-            visible_mask = self.visible
-            visible_count = int(np.count_nonzero(visible_mask))
-            visible_lit_count = int(np.count_nonzero(visible_mask & lit_mask))
-            # Only apply when there are visible tiles and none are lit
-            if visible_count > 0 and visible_lit_count == 0:
+            # Create 3x3 area mask around player that respects walls/transparency
+            px, py = self.engine.player.x, self.engine.player.y
+            player_area_mask = np.zeros((self.width, self.height), dtype=bool, order="F")
+            
+            if 0 <= px < self.width and 0 <= py < self.height:
+                # Check each tile in 3x3 area around player
+                for dx in [-1, 0, 1]:
+                    for dy in [-1, 0, 1]:
+                        tx, ty = px + dx, py + dy
+                        # Check if target position is in bounds
+                        if 0 <= tx < self.width and 0 <= ty < self.height:
+                            # Only include if tile is transparent (not a wall)
+                            if self.tiles[tx, ty]["transparent"]:
+                                player_area_mask[tx, ty] = True
+            
+            # Always apply enhancement (first line is always true)
+            if True:
                 alpha = 0.15
-                dark_mask = visible_mask & (~lit_mask)
+                # Apply only to player area (independent of FOV)
+                dark_mask = player_area_mask
                 if np.any(dark_mask):
                     tiles = console.tiles_rgb[0 : self.width, 0 : self.height]
                     if hasattr(tiles.dtype, 'names') and tiles.dtype.names and 'fg' in tiles.dtype.names:
@@ -163,10 +213,7 @@ class GameMap:
                         console.tiles_rgb[0 : self.width, 0 : self.height] = layer.astype(np.uint8)
         except Exception:
             pass
-        # Render animations in priority order. Each animation may set a
-        # numeric `render_priority` (0=under items, 1=between items and actors,
-        # 2=above actors). Older animations may set `draw_above` (boolean);
-        # treat draw_above=True as priority 2 for compatibility.
+        # ANIM RENDER AREA
         if hasattr(self.engine, "animation_queue"):
             # First render priority 0 (under everything).
             for anim in list(self.engine.animation_queue):

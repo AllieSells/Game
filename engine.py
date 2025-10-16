@@ -57,22 +57,43 @@ class Engine:
                 self.animation_queue.remove(anim)
             except ValueError:
                 pass
-        # Periodically spawn fire animations for campfire and bonfire items on the map.
+        
         try:
-            for entity in list(self.game_map.items):
+            for entity in list(self.game_map.entities):
+                # Get Quest Givers on map
+                if hasattr(entity, "type"):
+                    print(entity.type)
+                    if entity.type == "Quest Giver":
+                        #print("Quest Giver found on map:", entity.name, "at", (entity.x, entity.y))
+                        # Spawn a flicker or glow animation to highlight quest giver
+                        if self.animations_enabled and random.random() < .03: 
+                            try:
+                                from animations import GivingQuestAnimation
+                                # Pass the entity reference instead of static coordinates
+                                self.animation_queue.append(GivingQuestAnimation(entity))
+                            except Exception:
+                                import traceback
+                                traceback.print_exc()
+                                pass
+                
+
+                # Periodically spawn fire animations for campfire and bonfire items on the map.
+                # Get campfire and bonfire on map
                 if entity.name in ("Campfire", "Bonfire"):
                     # Spawn flicker more frequently and independently from smoke.
                     if self.animations_enabled:
                         try:
-                            from animations import FireFlicker, FireSmoke
+                            from animations import FireFlicker, BonefireFlicker, FireSmoke
 
                             # Bonfire has more frequent and intense animations
                             flicker_chance = 0.35 if entity.name == "Bonfire" else 0.20
                             smoke_chance = 0.08 if entity.name == "Bonfire" else 0.03
 
                             # Flicker: frequent, short blips
-                            if random.random() < flicker_chance:
+                            if random.random() < flicker_chance and entity.name is "Campfire":
                                 self.animation_queue.append(FireFlicker((entity.x, entity.y)))
+                            elif random.random() < flicker_chance and entity.name is "Bonfire":
+                                self.animation_queue.append(BonefireFlicker((entity.x, entity.y)))
 
                             # Smoke: rarer, longer lasting
                             if random.random() < smoke_chance:
@@ -80,6 +101,8 @@ class Engine:
                         except Exception:
                             pass
         except Exception:
+            import traceback
+            traceback.print_exc()
             pass
 
         # Tick status effects on all actors (so effects update and expire)
@@ -174,6 +197,13 @@ class Engine:
                     # don't spawn on currently visible tiles
                     try:
                         if getattr(gm, "visible", None) is not None and gm.visible[x, y]:
+                            continue
+                    except Exception:
+                        pass
+
+                    # don't spawn on lit tiles (enemies prefer darkness)
+                    try:
+                        if gm.tiles["lit"][x, y]:
                             continue
                     except Exception:
                         pass
@@ -302,25 +332,12 @@ class Engine:
         # Determine if player is holding a torch
         has_torch = (weapon_name == "Torch" or offhand_name == "Torch")
 
-        # Determine if there is a campfire/bonfire within lighting radius
+        # Check if player's current tile is lit by any light source
         near_light_source = False
         try:
-            for item in getattr(self.game_map, "items", []):
-                try:
-                    if item.name == "Campfire":
-                        dx = item.x - self.player.x
-                        dy = item.y - self.player.y
-                        if dx * dx + dy * dy <= 3 * 3:  # radius 3 for campfires
-                            near_light_source = True
-                            break
-                    elif item.name == "Bonfire":
-                        dx = item.x - self.player.x
-                        dy = item.y - self.player.y
-                        if dx * dx + dy * dy <= 15 * 15:  # radius 15 for bonfires (larger)
-                            near_light_source = True
-                            break
-                except Exception:
-                    continue
+            px, py = self.player.x, self.player.y
+            if self.game_map.in_bounds(px, py):
+                near_light_source = self.game_map.tiles["lit"][px, py]
         except Exception:
             near_light_source = False
 
@@ -331,7 +348,7 @@ class Engine:
 
         # If player in village, greatly increase FOV radius
         if self.game_map.type == "village":
-            radius = 10
+            radius = 1000
 
         self.game_map.visible[:] = compute_fov(
             self.game_map.tiles["transparent"],

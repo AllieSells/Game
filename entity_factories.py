@@ -166,6 +166,18 @@ villager = Actor(
     level=Level(xp_given=10),
 )
 
+quest_giver = Actor(
+    char="@",
+    color=(255, 0, 243),
+    name="Quest Giver",
+    ai_cls=Friendly,
+    equipment=Equipment(),
+    fighter=Fighter(hp=10, base_defense=0, base_power=0),
+    inventory=Inventory(capacity=26),
+    level=Level(xp_given=50),
+    type = "Quest Giver",
+)
+
 
 
 # Attach a Container component to a chest template (not an Actor constructor arg

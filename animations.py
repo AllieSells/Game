@@ -135,7 +135,24 @@ class FireFlicker:
 
         self.frames -= 1
 
+class BonefireFlicker:
+    def __init__(self, position):
+        self.position = position
+        self.frames = 10  # duration in frames
+        # Render priority: 0 = under entities/items, 1 = between items and actors, 2 = above actors
+        # Set to 1 so campfire flicker renders above items but below actors.
+        self.render_priority = 1
 
+    def tick(self, console, game_map):
+        x, y = self.position
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        if game_map.visible[x, y]:
+            r = random.randint(200, 255)
+            g = random.randint(0, 150)
+            console.print(x, y, "X", fg=(r, g, 0))  # yellow-orange flicker
 class FireSmoke:
     def __init__(self, position):
         self.position = position
@@ -170,5 +187,33 @@ class FireSmoke:
         ):
             gray_value = random.randint(100, 200)
             console.print(xi, yi, "+", fg=(gray_value, gray_value, gray_value))  # gray smoke
+
+        self.frames -= 1
+
+class GivingQuestAnimation():
+    def __init__(self, entity):
+        self.entity = entity
+        self.frames = 10  # duration in frames
+        # Render priority: 0 = under entities/items, 1 = between items and actors, 2 = above actors
+        self.render_priority = 2  # Above actors to be clearly visible
+
+    def tick(self, console, game_map):
+        x, y = self.entity.x, self.entity.y
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        if game_map.visible[x, y]:
+            # Play animation in order
+            if self.frames == 10:
+                console.print(x, y, ".", fg=(255, 215, 0))  # Gold
+            elif self.frames == 9:
+                console.print(x, y, "o", fg=(255, 255, 0))  # Yellow
+            elif self.frames == 8:
+                console.print(x, y, "O", fg=(173, 255, 47))  # GreenYellow
+            elif self.frames == 7:
+                console.print(x, y, "0", fg=(0, 255, 127))  # SpringGreen
+            elif self.frames <= 6:
+                console.print(x, y, "!", fg=(0, 191, 255))  # DeepSkyBlue
 
         self.frames -= 1

@@ -59,8 +59,16 @@ def get_names_at_location(x: int, y: int, game_map: GameMap) -> str:
     names = ", ".join(
         entity.name for entity in game_map.entities if entity.x == x and entity.y == y
     )
-
-    return names.capitalize()
+    # Get data from tiles array for debugging
+    #names = f"{names} (Lit: {game_map.tiles['lit'][x, y]})\n Walk: ({game_map.tiles['walkable'][x, y]})\n Trans: ({game_map.tiles['transparent'][x, y]})\n Interac: ({game_map.tiles['interactable'][x, y]})"
+    names.capitalize()
+    tile = (game_map.tiles['name'][x, y]).capitalize()
+    # If no entities, show tile name instead
+    if not names:
+        names = tile
+    else:
+        names = f"{names} ({tile})"
+    return names
 
 
 def render_names_at_mouse(console: 'Console', mouse_x: int, mouse_y: int, game_map: GameMap) -> None:

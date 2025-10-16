@@ -255,7 +255,7 @@ def place_village_entities(building: Building, village: GameMap, floor_number: i
     items: List[Entity] = get_entities_at_random(
         item_chances, number_of_items, floor_number
     )
-    
+
     # Place NPCs in each building
     number_of_npcs = random.randint(0, 2)  # 0-2 NPCs
     for _ in range(number_of_npcs):
@@ -265,11 +265,19 @@ def place_village_entities(building: Building, village: GameMap, floor_number: i
         if not any(e.x == x and e.y == y for e in village.entities):
             # Create a unique copy of the villager with a new name
             import copy
-            unique_villager = copy.deepcopy(entity_factories.villager)
-            # Generate a new name for this villager
             from components import names
-            unique_villager.name = names.get_names("Human")
+            if random.random() < 1:
+            
+                
+                unique_villager = copy.deepcopy(entity_factories.quest_giver)
+                unique_villager.name = (names.get_names("Human"))
+            else:
+                unique_villager = copy.deepcopy(entity_factories.villager)
+                unique_villager.name = names.get_names("Human")
+            # Generate a new name for this villager
+            
             unique_villager.spawn(village, x, y)
+
     
     # Place items
     for entity in items:
@@ -389,7 +397,7 @@ def generate_village(
             village.tiles[new_building.x2, y] = tile_types.wall
         
         # Interior floor (already floor from initial fill, but ensure it)
-        village.tiles[new_building.inner] = tile_types.floor
+        village.tiles[new_building.inner] = tile_types.wooden_floor
         
         # Add an entrance (opening) to each building facing the town center
         # Determine which wall is closest to town center
@@ -412,7 +420,7 @@ def generate_village(
                 entrance_y = new_building.y1
         
         # Create the entrance (opening in the wall)
-        village.tiles[entrance_x, entrance_y] = tile_types.floor
+        village.tiles[entrance_x, entrance_y] = tile_types.closed_door
 
 
         buildings.append(new_building)
@@ -486,20 +494,9 @@ def generate_village(
     # Place player in the town center
     player.place(center_x, center_y, village)
     
-    # Place central bonfire just above player if possible
-    center_pos = (center_x, center_y - 1)
-    if center_pos:
-        center_x, center_y = center_pos
-        camp_x, camp_y = center_x, center_y - 1
-        if not any(e.x == camp_x and e.y == camp_y for e in village.entities):
-            entity_factories.bonfire.spawn(village, camp_x, camp_y)
+
     
-    # Place entities in buildings
-    for building in buildings:
-        #place_village_entities(building, village, engine.game_world.current_floor)
-        # Possibly place campfires in buildings
-        place_campfires(village, "village_building", building=building)
-        place_village_entities(building, village, engine.game_world.current_floor)
+
     
 
 
@@ -513,6 +510,20 @@ def generate_village(
         # Fallback: place stairs at edge of town center
         village.tiles[center_x + town_center_radius, center_y] = tile_types.down_stairs
         village.downstairs_location = (center_x + town_center_radius, center_y)
+
+    # Place entities in buildings
+    for building in buildings:
+        #place_village_entities(building, village, engine.game_world.current_floor)
+        # Possibly place campfires in buildings
+        place_campfires(village, "village_building", building=building)
+        place_village_entities(building, village, engine.game_world.current_floor)
+    # Place central bonfire just above player if possible
+    center_pos = (center_x, center_y - 1)
+    if center_pos:
+        center_x, center_y = center_pos
+        camp_x, camp_y = center_x, center_y - 1
+        if not any(e.x == camp_x and e.y == camp_y for e in village.entities):
+            entity_factories.bonfire.spawn(village, camp_x, camp_y)
     
     return village
     
