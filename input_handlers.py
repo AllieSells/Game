@@ -858,7 +858,10 @@ class MainGameEventHandler(EventHandler):
         ):            
             # TODO HELP MENU
             return HelpMenuHandler(self.engine)
-        
+        # F2 toggles debug mode
+        elif key == tcod.event.K_F2:
+            self.engine.message_log.add_message("Debug mode toggled.", color.green)
+            self.engine.debug = not self.engine.debug
         # Interact action (ALT + arrow key direction OR numpad direction)
         elif key == tcod.event.K_LEFT and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
             action = InteractAction(player, -1, 0)

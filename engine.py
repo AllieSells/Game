@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from entity import Actor
     from game_map import GameMap, GameWorld
 
-
+import time
 
 
 class Engine:
@@ -36,6 +36,7 @@ class Engine:
         
         self.animation_queue = deque()
         self.animations_enabled = True
+        self.debug = False
 
     def get_adjacent_tiles(self, x: int, y: int) -> list[tuple[int, int]]:
         # Returns adjacent (including diagonals) tiles
@@ -49,11 +50,34 @@ class Engine:
         return adjacent
 
     def tick(self, console: Console):
+        # Calculate tick rate per second
+        now = time.monotonic()
+        _last = getattr(self, "_last_tick_time", None)
+
+        if _last is None:
+            # first tick: initialize storage
+            self._last_tick_time = now
+            self._tick_intervals = deque(maxlen=60)  # smooth over last N frames
+            self.tick_rate = 0.0
+        else:
+            dt = now - _last
+            self._last_tick_time = now
+            if dt > 0:
+                self._tick_intervals.append(dt)
+                total = sum(self._tick_intervals)
+                # ticks per second = number of recorded ticks / total time covered
+                self.tick_rate = (len(self._tick_intervals) / total) if total > 0 else 0.0
+            else:
+                # very unlikely, but avoid division by zero
+                self.tick_rate = getattr(self, "tick_rate", 0.0)
+
+
         # Don't call animation rendering here; rendering happens in GameMap.render().
         # Here we only clean up animations that were expired during the last render pass.
         expired = [anim for anim in list(self.animation_queue) if getattr(anim, "frames", 1) <= 0]
         for anim in expired:
             try:
+                # Delete expired animations from queue
                 self.animation_queue.remove(anim)
             except ValueError:
                 pass
@@ -62,11 +86,10 @@ class Engine:
             for entity in list(self.game_map.entities):
                 # Get Quest Givers on map
                 if hasattr(entity, "type"):
-                    print(entity.type)
                     if entity.type == "Quest Giver":
                         #print("Quest Giver found on map:", entity.name, "at", (entity.x, entity.y))
                         # Spawn a flicker or glow animation to highlight quest giver
-                        if self.animations_enabled and random.random() < .03: 
+                        if self.animations_enabled and random.random() < .01: 
                             try:
                                 from animations import GivingQuestAnimation
                                 # Pass the entity reference instead of static coordinates
@@ -87,7 +110,7 @@ class Engine:
 
                             # Bonfire has more frequent and intense animations
                             flicker_chance = 0.35 if entity.name == "Bonfire" else 0.20
-                            smoke_chance = 0.08 if entity.name == "Bonfire" else 0.03
+                            smoke_chance = 0.08 if entity.name == "Bonfire" else 0.01
 
                             # Flicker: frequent, short blips
                             if random.random() < flicker_chance and entity.name is "Campfire":
@@ -433,3 +456,5 @@ class Engine:
         render_functions.render_equipment(
             console=console, x=61, y=43, engine=self
         )
+        if self.debug:
+            render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.current_handler.__class__.__name__, len(self.game_map.entities))

@@ -266,7 +266,7 @@ def place_village_entities(building: Building, village: GameMap, floor_number: i
             # Create a unique copy of the villager with a new name
             import copy
             from components import names
-            if random.random() < 1:
+            if random.random() < .20:
             
                 
                 unique_villager = copy.deepcopy(entity_factories.quest_giver)

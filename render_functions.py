@@ -96,12 +96,6 @@ def status_effect_overlay(console: 'Console', effects: list) -> None:
             y -= 1
 
 
-def render_debug_overlay(console: 'Console', fps, player_pos: Tuple[int, int], handler_name: str, entity_count: int) -> None:
-    x, y = player_pos
-    console.print(0, 38, f"Player: ({x}, {y})", fg=(255, 255, 255))
-    console.print(0, 39, f"Handler: {handler_name}", fg=(255, 255, 255))
-    console.print(0, 40, f"Entities: {entity_count}", fg=(255, 255, 255))
-    console.print(0, 41, f"FPS: {fps:.1f}", fg=(255, 255, 255))
 
 # HP bar render
 def render_bar(
