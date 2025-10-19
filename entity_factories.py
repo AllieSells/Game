@@ -1,3 +1,4 @@
+from re import T
 from components.ai import DarkHostileEnemy, Friendly, HostileEnemy
 from components import consumable, equippable
 from components.effect import Effect
@@ -28,13 +29,16 @@ player = Actor(
 
 shade = Actor(
     char="S",
+    sight_radius=1000,
     color=(100, 100, 100),
     name = "Shade",
+    description="A dark figure, barely visible in the dim light. Stories say they wait for you in the shadows, but cannot cross into the light.",
     ai_cls=DarkHostileEnemy,
     equipment=Equipment(),
     fighter=Fighter(hp=10, base_defense=2, base_power=5, leave_corpse=False),
     inventory=Inventory(capacity=5),
     level=Level(xp_given=0),
+    opinion=0,
 )
 
 orc = Actor(
@@ -63,13 +67,15 @@ health_potion = Item(
     char="!",
     color=(127,0,255),
     name="Health Potion",
-    consumable=consumable.HealingConsumables(amount=4)
+    consumable=consumable.HealingConsumables(amount=4),
+    description="A small vial filled with a red liquid.",
 )
 lightning_scroll = Item(
     char="~",
     color=(255,255,0),
     name="Lightning Scroll",
-    consumable=consumable.LightningDamageConsumable(damage=20, maximum_range=5)
+    consumable=consumable.LightningDamageConsumable(damage=20, maximum_range=5),
+    description="A tattered scroll crackling with electricity.",
 )
 
 confusion_scroll = Item(
@@ -77,25 +83,29 @@ confusion_scroll = Item(
     color=(207, 63, 255),
     name="Confusion Scroll",
     consumable=consumable.ConfusionConsumable(number_of_turns=10),
+    description="A worn scroll that seems to distort the mind.",
 )
 
 fireball_scroll = Item(
     char="~",
     color=(255,0,0),
     name="Fireball Scroll",
-    consumable=consumable.FireballDamageConsumable(damage=12, radius=3)
+    consumable=consumable.FireballDamageConsumable(damage=12, radius=3),
+    description="A singed scroll radiating intense heat.",
 )
 
 campfire = Item(
     char="x",
     color=(255, 140, 0),
     name="Campfire",
+    description="A small campfire providing warmth and light.",
 )
 
 bonfire = Item(
     char="X",
     color=(255, 140, 0),
     name="Bonfire",
+    description="A large bonfire crackling with intense flames.",
 )
 
 torch = Item(
@@ -104,11 +114,13 @@ torch = Item(
     name="Torch",
     equippable=equippable.Torch(),
     burn_duration=300,
+    description="A wooden torch that can be carried to provide light.",
 )
 
 dagger = Item(
     char="/", color=(0, 191, 255), name="Dagger",
     equippable=equippable.Dagger()
+
 )
 
 sword = Item(
@@ -149,7 +161,7 @@ chest = Actor(
     name="Chest",
     # No AI for static container
     ai_cls=None,
-    equipment=Equipment(),
+    equipment=None,
     fighter=None,
     inventory=Inventory(capacity=0),
     level=Level(xp_given=0),
@@ -158,12 +170,15 @@ chest = Actor(
 villager = Actor(
     char="@",
     color=(255, 255, 0),
-    name=names.get_names("Human"),
+    name="Villager",
     ai_cls=Friendly,
     equipment=Equipment(),
     fighter=Fighter(hp=10, base_defense=0, base_power=0),
     inventory=Inventory(capacity=26),
     level=Level(xp_given=10),
+    sentient=True,
+    is_known=False,
+    type = "NPC",
 )
 
 quest_giver = Actor(
@@ -175,7 +190,9 @@ quest_giver = Actor(
     fighter=Fighter(hp=10, base_defense=0, base_power=0),
     inventory=Inventory(capacity=26),
     level=Level(xp_given=50),
-    type = "Quest Giver",
+    is_known=False,
+    sentient=True,
+    type = "NPC",
 )
 
 
@@ -196,6 +213,8 @@ def make_chest_with_loot(items: list, capacity: int = 10) -> Actor:
         fighter=None,
         inventory=Inventory(capacity=0),
         level=Level(xp_given=0),
+        description="A sturdy chest.",
+        sentient=False,
     )
     # Attach a Container component and populate it
     cont = Container(capacity=capacity)

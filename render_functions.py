@@ -21,15 +21,37 @@ if TYPE_CHECKING:
 
 
 def get_names_at_location(x: int, y: int, game_map: GameMap) -> str:
-    x,y = int(x), int(y)
+    x, y = int(x), int(y)
     if not game_map.in_bounds(x, y) or not game_map.visible[x, y]:
         return ""
 
-    names = ", ".join(
-        entity.name for entity in game_map.entities if entity.x == x and entity.y == y
-    )
-
-    return names.capitalize()
+    entity_names = []
+    for entity in game_map.entities:
+        if entity.x == x and entity.y == y:
+            # Use unknown_name for actors if not known, but real name for items
+            display_name = entity.name
+            if hasattr(entity, 'unknown_name') and hasattr(entity, 'ai'):
+                # This is an actor (has AI), check if known
+                if hasattr(entity, 'is_known') and entity.is_known:
+                    display_name = entity.name
+                else:
+                    display_name = entity.unknown_name
+            else:
+                display_name = entity.name
+            entity_names.append(display_name)
+    names = ", ".join(entity_names)
+    names = names.capitalize()
+    
+    # Get tile name
+    tile = (game_map.tiles['name'][x, y]).capitalize()
+    
+    # If no entities, show tile name instead
+    if not names:
+        names = tile
+    else:
+        names = f"{names} ({tile})"
+    
+    return names
 
 def status_effect_overlay(console: Console, effects: list) -> None:
     y = 41
@@ -49,26 +71,7 @@ def render_debug_overlay(console: Console, fps: float, player_pos: Tuple[int, in
 
 
 
-        
 
-def get_names_at_location(x: int, y: int, game_map: GameMap) -> str:
-    x, y = int(x), int(y)
-    if not game_map.in_bounds(x, y) or not game_map.visible[x, y]:
-        return ""
-
-    names = ", ".join(
-        entity.name for entity in game_map.entities if entity.x == x and entity.y == y
-    )
-    # Get data from tiles array for debugging
-    #names = f"{names} (Lit: {game_map.tiles['lit'][x, y]})\n Walk: ({game_map.tiles['walkable'][x, y]})\n Trans: ({game_map.tiles['transparent'][x, y]})\n Interac: ({game_map.tiles['interactable'][x, y]})"
-    names.capitalize()
-    tile = (game_map.tiles['name'][x, y]).capitalize()
-    # If no entities, show tile name instead
-    if not names:
-        names = tile
-    else:
-        names = f"{names} ({tile})"
-    return names
 
 
 def render_names_at_mouse(console: 'Console', mouse_x: int, mouse_y: int, game_map: GameMap) -> None:
@@ -150,7 +153,7 @@ def render_player_level(
 
 
 def render_dungeon_level(
-        console: 'Console', dungeon_level: int,
+        console: 'Console', dungeon_level: int, map: GameMap = None,
 ) -> None:
     # Render the level the player is on, at the given location
     x = 0

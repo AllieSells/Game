@@ -59,7 +59,7 @@ class MessageLog:
         messages: Reversible[Message],
     ) -> None:
         # Renders messages. MessAges start at last message and go back
-        y_offset = height - 1   
+        y_offset = height + 2
 
         for message in reversed(messages):
             for line in reversed(list(cls.wrap(message.full_text, width))):

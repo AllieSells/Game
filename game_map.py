@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 class GameMap:
     def __init__(
-            self, engine: Engine, width: int, height: int, entities: Iterable[Entity] = (), type: str = "dungeon",
+            self, engine: Engine, width: int, height: int, entities: Iterable[Entity] = (), type: str = "dungeon", name: str = "Dungeon"
     ):
         self.engine = engine
         self.width, self.height = width, height
@@ -29,6 +29,7 @@ class GameMap:
         
         self.downstairs_location = (0, 0)
         self.type = type  # What type of map this is, e.g. "dungeon" or "village"
+        self.name = name  # Name of this map, e.g. "Dungeon Level 1", "Oakwood"
         
     @property
     def gamemap(self) -> GameMap:
@@ -301,17 +302,38 @@ class GameWorld:
             self.room_max_size = room_max_size
 
             self.current_floor = current_floor
+            self.floors_since_village = 0  # Track floors since last village
 
     def generate_floor(self) -> None:
         from procgen import generate_dungeon, generate_village
+        import random
 
         self.current_floor += 1
+        self.floors_since_village += 1
 
-        self.engine.game_map = generate_village(
-            #max_rooms=self.max_rooms,
-            #room_min_size=self.room_min_size,
-            #room_max_size=self.room_max_size,
-            map_width=self.map_width,
-            map_height=self.map_height,
-            engine=self.engine,
-        )
+        # Calculate village probability based on floors since last village
+        # Adjusted for testing: villages appear on average every 3 floors
+        # Floor 1 since village: ~25%, Floor 2: ~44%, Floor 3: ~58%, etc.
+        village_chance = 1 - (0.75 ** self.floors_since_village)
+        
+        # Cap at 90% to always have some dungeon chance
+        village_chance = min(village_chance, 0.90)
+        
+        if random.random() < village_chance:
+            # Generate village and reset counter
+            self.floors_since_village = 0  # Reset counter when village appears
+            self.engine.game_map = generate_village(
+                map_width=self.map_width,
+                map_height=self.map_height,
+                engine=self.engine,
+            )
+        else:
+            # Generate dungeon (counter continues to accumulate)
+            self.engine.game_map = generate_dungeon(
+                max_rooms=self.max_rooms,
+                room_min_size=self.room_min_size,
+                room_max_size=self.room_max_size,
+                map_width=self.map_width,
+                map_height=self.map_height,
+                engine=self.engine,
+            )

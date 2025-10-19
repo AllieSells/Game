@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import e
 from optparse import Option
 
 import os
@@ -9,6 +10,7 @@ from unittest.mock import Base
 
 import tcod.event
 import random
+
 
 import traceback
 
@@ -23,13 +25,16 @@ from actions import (
 )
 
 import color
+from dialogue_generator import ConversationNode
 import engine
 import exceptions
+
+from text_utils import *
 
 
 if TYPE_CHECKING:
     from engine import Engine
-    from entity import Item
+    from entity import Item, Actor
     from components.container import Container
 
 
@@ -264,6 +269,210 @@ class CharacterScreenEventHandler(AskUserEventHandler):
         console.print(
             x=x + 1, y=y + 5, string=f"Defense: {self.engine.player.fighter.defense}"
         )
+
+
+class DialogueEventHandler(AskUserEventHandler):
+    """Handles dialogue interactions with NPCs with hierarchical menu system."""
+    
+    def __init__(self, engine: Engine, npc: Actor):
+        super().__init__(engine)
+        self.npc = npc
+        # Initialize dialogue system
+        from dialogue_generator import ConversationNode
+        self.dialogue = ConversationNode()
+        
+        # Menu system
+        self.current_menu = "main"
+        if npc.is_known:
+            knows_name = npc.name
+        else:
+            knows_name = npc.unknown_name
+        self.selected_index = 0
+        self.menu_structure = {
+            "main": {
+                "title": f"Talking to {knows_name}",
+                "options": [
+                    {"text": "Hello", "action": "dialogue", "context": ["Greeting"]},
+                    {"text": "Questions", "action": "submenu", "target": "questions"},
+                    {"text": "Farewell", "action": "dialogue", "context": ["Goodbye"]},
+                    {"text": "[Exit]", "action": "exit"}
+                ]
+            },
+            "questions": {
+                "title": "Questions",
+                "options": [
+                    {"text": "Where are we?", "action": "dialogue", "context": ["Location"]},
+                    {"text": "What are you called?", "action": "dialogue", "context": ["Identity"]},
+                    {"text": "What do you know?", "action": "dialogue", "context": ["Knowledge"]},
+                    {"text": "[Back]", "action": "submenu", "target": "main"}
+                ]
+            }
+        }
+
+        
+        # Generate initial dialogue text
+        self.current_dialogue = self.dialogue.generate_dialogue(character=self.npc, context=self.npc.dialogue_context)
+        print(self.npc.dialogue_context)
+        if "Identity" in self.npc.dialogue_context:
+            print("KNOWN")
+            self.npc.is_known = True
+
+        # Safety check
+        if self.current_dialogue is None:
+            self.current_dialogue = ("Hello there.", ["Greeting"])
+        if len(self.current_dialogue) < 2:
+            self.current_dialogue = ("Hello there.", ["Greeting"])
+            
+        display_name = self.npc.name if self.npc.is_known else self.npc.unknown_name
+        self.engine.message_log.add_message(f"{display_name}: {self.current_dialogue[0]}", color.blue)
+        if isinstance(self.current_dialogue[1], str):
+            self.npc.dialogue_context = [self.current_dialogue[1]]
+        else:
+            self.npc.dialogue_context = self.current_dialogue[1]
+
+    def update_menu_title(self):
+        """Update the main menu title when NPC becomes known."""
+        knows_name = self.npc.name if self.npc.is_known else self.npc.unknown_name
+        self.menu_structure["main"]["title"] = f"Talking to {knows_name}"
+    
+    def on_render(self, console: tcod.Console) -> None:
+        super().on_render(console)
+        
+        # Draw the dialogue box
+        width = 65
+        height = 20
+        x = (self.engine.game_map.width - width) // 2
+        y = (self.engine.game_map.height - height) // 2
+
+        current_menu_data = self.menu_structure[self.current_menu]
+        
+        console.draw_frame(x, y, width, height, current_menu_data["title"], fg=color.white, bg=color.black)
+        
+        # Display current dialogue if available
+        if hasattr(self, 'current_dialogue') and self.current_dialogue:
+            console.print(x + 2, y + 2, self.current_dialogue[0], fg=color.teal)
+        
+        # Display menu options in inventory-style format
+        start_y = y + 5
+        options = current_menu_data["options"]
+        
+        for i, option in enumerate(options):
+            option_y = start_y + i
+            if option_y >= y + height - 3:  # Leave room for instructions
+                break
+            
+            # Generate letter key for this option
+            item_key = chr(ord("a") + i)
+            option_text = f"({item_key}) {option['text']}"
+            
+            # Draw selection marker for arrow navigation (like inventory)
+            marker = ">" if i == self.selected_index else " "
+            
+            # Highlight selected option with white background and black text
+            if i == self.selected_index:
+                # Draw white background for the entire line
+                line_width = len(marker + option_text) + 2  # Extra space for padding
+                for j in range(line_width):
+                    console.print(x + 1 + j, option_y, " ", fg=color.black, bg=color.white)
+                # Draw the text on top with black text
+                console.print(x + 1, option_y, marker, fg=color.black, bg=color.white)
+                console.print(x + 2, option_y, option_text, fg=color.black, bg=color.white)
+            else:
+                console.print(x + 1, option_y, marker)
+                console.print(x + 2, option_y, option_text, fg=color.white)
+        
+        # Instructions
+        instructions_y = y + height - 3
+        console.print(x + 2, instructions_y, "↑↓: Navigate  Enter: Select  Esc: Exit", fg=color.grey)
+
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        current_menu_data = self.menu_structure[self.current_menu]
+        options = current_menu_data["options"]
+        key = event.sym
+        
+        # Arrow key navigation (like inventory)
+        if key == tcod.event.KeySym.UP:
+            self.selected_index = max(0, self.selected_index - 1)
+            return None
+        elif key == tcod.event.KeySym.DOWN:
+            self.selected_index = min(len(options) - 1 if options else 0, self.selected_index + 1)
+            return None
+            
+        # Enter key to select option (Return, enter, space, or right key)
+        elif key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.KP_ENTER or key == tcod.event.KeySym.SPACE or key == tcod.event.KeySym.RIGHT:
+            if len(options) == 0:
+                return None
+            return self.handle_menu_selection()
+            
+        # Letter selection (like inventory system)
+        index = key - tcod.event.KeySym.A
+        if 0 <= index < len(options):
+            self.selected_index = index
+            return self.handle_menu_selection()
+    
+                
+        # Escape to exits current menu, or back to main event
+        elif key == tcod.event.KeySym.ESCAPE:
+            return MainGameEventHandler(self.engine)
+        
+        return None
+        
+        return None
+    
+    def handle_menu_selection(self) -> Optional[ActionOrHandler]:
+        """Handle the selected menu option."""
+        current_menu_data = self.menu_structure[self.current_menu]
+        options = current_menu_data["options"]
+        
+        if self.selected_index >= len(options):
+            return None
+            
+        selected_option = options[self.selected_index]
+        action = selected_option["action"]
+        
+        if action == "exit":
+            self.npc.dialogue_context = ["Goodbye"]
+            return MainGameEventHandler(self.engine)
+            
+        elif action == "submenu":
+            # Navigate to submenu
+            target_menu = selected_option["target"]
+            if target_menu in self.menu_structure:
+                self.current_menu = target_menu
+                self.selected_index = 0  # Reset selection in new menu
+            return None
+            
+        elif action == "dialogue":
+            # Execute dialogue with given context
+            context = selected_option.get("context", [])
+            self.npc.dialogue_context = context
+            self.current_dialogue = self.dialogue.generate_dialogue(
+                character=self.npc, context=context
+            )
+            
+            # Safety check
+            if self.current_dialogue is None:
+                self.current_dialogue = ("I have nothing to say about that.", ["Default"])
+            if len(self.current_dialogue) < 2:
+                self.current_dialogue = ("I have nothing to say about that.", ["Default"])
+                
+            display_name = self.npc.name if self.npc.is_known else self.npc.unknown_name
+            self.engine.message_log.add_message(f"{display_name}: {self.current_dialogue[0]}", color.blue)
+            
+            # Update dialogue context
+            if isinstance(self.current_dialogue[1], str):
+                self.npc.dialogue_context = [self.current_dialogue[1]]
+            else:
+                self.npc.dialogue_context = self.current_dialogue[1]
+            
+            # Check if this was an identity dialogue and update menu title if NPC becomes known
+            if "Identity" in context:
+                self.npc.is_known = True
+                self.update_menu_title()
+            
+            return None
+        
+        return None
 
 
 class LevelUpEventHandler(AskUserEventHandler):
@@ -786,11 +995,487 @@ class SelectIndexHandler(AskUserEventHandler):
         raise NotImplementedError()
     
 class LookHandler(SelectIndexHandler):
-    # lets player look using keyboard
+    """Enhanced look handler with detailed inspection sidebar."""
 
-    def on_index_selected(self, X: int, y: int) -> MainGameEventHandler:
-        # Return to main handler
+    def __init__(self, engine: Engine):
+        super().__init__(engine)
+        self.show_details = True  # Always show details now
+        self.detail_index = 0  # Index for cycling through items at location
+        self.scroll_offset = 0  # For scrolling through text
+
+    def on_index_selected(self, x: int, y: int) -> Optional[ActionOrHandler]:
+        """Return to main handler when location is selected."""
         return MainGameEventHandler(self.engine)
+
+    def on_render(self, console: tcod.Console) -> None:
+        # Call parent render for cursor highlighting but skip the basic name box
+        # Highlights tile underneath cursor
+        super(SelectIndexHandler, self).on_render(console)
+
+        x, y = self.engine.mouse_location
+        x, y = int(x), int(y)
+        console.rgb["bg"][x, y] = color.white
+        console.rgb["fg"][x, y] = color.black
+        
+        # Always show detailed sidebar
+        self.render_detailed_sidebar(console)
+
+    def render_detailed_sidebar(self, console: tcod.Console) -> None:
+        """Render detailed information sidebar."""
+        x, y = self.engine.mouse_location
+        x, y = int(x), int(y)
+        
+        # Get all items and entities at location
+        items_and_entities = self.get_items_and_entities_at(x, y)
+        
+        if not items_and_entities:
+            return
+            
+        # Clamp detail_index to valid range
+        self.detail_index = max(0, min(self.detail_index, len(items_and_entities) - 1))
+        current_item = items_and_entities[self.detail_index]
+        
+        # Determine sidebar position based on cursor location to avoid blocking it
+        cursor_x, cursor_y = self.engine.mouse_location
+        sidebar_width = 35  # Increased width to accommodate both text and preview
+        sidebar_height = 30
+        
+        # Position sidebar to avoid cursor - prefer right side, but use left if cursor is on right
+        if cursor_x < console.width // 2:
+            # Cursor on left side, put sidebar on right
+            sidebar_x = console.width - sidebar_width
+        else:
+            # Cursor on right side, put sidebar on left
+            sidebar_x = 0
+            
+        # Position vertically to avoid cursor as well
+        if cursor_y < console.height // 2:
+            # Cursor in top half, prefer bottom positioning
+            sidebar_y = max(2, console.height - sidebar_height - 2)
+        else:
+            # Cursor in bottom half, prefer top positioning
+            sidebar_y = 2
+        
+        # Draw sidebar frame
+        console.draw_frame(
+            x=sidebar_x, y=sidebar_y, 
+            width=sidebar_width, height=sidebar_height,
+            title="Inspect", clear=True,
+            fg=color.white, bg=color.black
+        )
+        
+        # Show current item info at the top
+        info_y = sidebar_y + 2
+        
+        if len(items_and_entities) > 1:
+            # Center the item counter
+            counter_text = f"{self.detail_index + 1} of {len(items_and_entities)}"
+            counter_x = sidebar_x + (sidebar_width - len(counter_text)) // 2
+            console.print(counter_x, info_y, counter_text, fg=color.grey)
+            info_y += 1
+            
+        # Center the visual preview horizontally in the sidebar
+        preview_size = 5  # Size of the preview area (3x3 + 2 for frame = 5x5)
+        preview_x = sidebar_x + (sidebar_width - preview_size) // 2
+        preview_y = info_y + 1
+        self.render_visual_preview(console, current_item, x, y, preview_x, preview_y)
+        
+        # Build scrollable text content below the preview
+        text_details_y = preview_y + preview_size + 2  # Leave some space after preview
+        text_area_width = sidebar_width - 4  # Use full width minus margins
+        text_area_height = sidebar_height - (text_details_y - sidebar_y) - 3  # Leave space for instructions
+        
+        # Build complete text content
+        full_text = self.build_item_description(current_item, text_area_width)
+        
+        # Render scrollable text
+        self.render_scrollable_text(console, full_text, sidebar_x, text_details_y, text_area_width, text_area_height)
+            
+        # Show navigation instructions
+        instructions_y = sidebar_y + sidebar_height - 4
+        console.print(sidebar_x + 2, instructions_y, "Alt+←→: Cycle items", fg=color.grey)
+        console.print(sidebar_x + 2, instructions_y + 1, "Shift+↑↓: Scroll text", fg=color.grey)
+        console.print(sidebar_x + 2, instructions_y + 2, "Enter: Exit details", fg=color.grey)
+
+    def render_visual_preview(self, console: tcod.Console, current_item: dict, look_x: int, look_y: int, preview_x: int, preview_y: int) -> None:
+        """Render a visual preview of the object being inspected."""
+        # Create a small framed preview area (3x3 for now, can adjust)
+        preview_size = 3
+        # Position the frame at the specified location
+        frame_x = preview_x
+        frame_y = preview_y
+        
+        # Draw frame around preview
+        console.draw_frame(
+            x=frame_x, y=frame_y,
+            width=preview_size + 2, height=preview_size + 2,
+            title="", clear=True,
+            fg=color.white, bg=color.black
+        )
+        
+        # Center position in the preview frame (inside the frame borders)
+        center_x = frame_x + 1 + preview_size // 2
+        center_y = frame_y + 1 + preview_size // 2
+        
+        # Draw the surrounding area first (for context)
+        for dy in range(-preview_size//2, preview_size//2 + 1):
+            for dx in range(-preview_size//2, preview_size//2 + 1):
+                world_x = look_x + dx
+                world_y = look_y + dy
+                preview_x = center_x + dx
+                preview_y = center_y + dy
+                
+                # Only draw within the frame boundaries
+                if (preview_x > frame_x and preview_x < frame_x + preview_size + 1 and
+                    preview_y > frame_y and preview_y < frame_y + preview_size + 1):
+                    
+                    # Draw tile background
+                    if self.engine.game_map.in_bounds(world_x, world_y):
+                        tile = self.engine.game_map.tiles[world_x, world_y]
+                        
+                        # Get tile character and color
+                        if self.engine.game_map.visible[world_x, world_y]:
+                            # Use light colors for visible tiles
+                            char = int(tile['light'][0]) if 'light' in tile.dtype.names else ord('.')
+                            fg = tuple(tile['light'][1]) if 'light' in tile.dtype.names else (255, 255, 255)
+                            bg = tuple(tile['light'][2]) if 'light' in tile.dtype.names else (0, 0, 0)
+                        else:
+                            # Use dark colors for non-visible tiles
+                            char = int(tile['dark'][0]) if 'dark' in tile.dtype.names else ord('.')
+                            fg = tuple(tile['dark'][1]) if 'dark' in tile.dtype.names else (128, 128, 128)
+                            bg = tuple(tile['dark'][2]) if 'dark' in tile.dtype.names else (0, 0, 0)
+                        
+                        # If this is the center tile (the one being looked at), highlight it
+                        # But only if there's no entity at this position (entities get their own highlighting)
+                        if preview_x == center_x and preview_y == center_y and current_item['type'] == 'tile':
+                            # For floor tiles (space or period), highlight the background
+                            if char == ord(' ') or char == ord('.') or char == ord('+') or char == ord('/'):
+                                bg = color.white
+                            else:
+                                # For tiles with visible characters, highlight the foreground
+                                fg = color.white
+                        
+                        console.print(preview_x, preview_y, chr(char), fg=fg, bg=bg)
+        
+        # Draw entities and items at their positions
+        for dy in range(-preview_size//2, preview_size//2 + 1):
+            for dx in range(-preview_size//2, preview_size//2 + 1):
+                world_x = look_x + dx
+                world_y = look_y + dy
+                preview_x = center_x + dx
+                preview_y = center_y + dy
+                
+                # Only draw within the frame boundaries
+                if (preview_x > frame_x and preview_x < frame_x + preview_size + 1 and
+                    preview_y > frame_y and preview_y < frame_y + preview_size + 1):
+                    
+                    # Draw entities
+                    for entity in self.engine.game_map.entities:
+                        if entity.x == world_x and entity.y == world_y:
+                            if hasattr(entity, 'char') and hasattr(entity, 'color'):
+                                console.print(preview_x, preview_y, entity.char, fg=entity.color)
+                    
+                    # Draw items
+                    if hasattr(self.engine.game_map, 'items'):
+                        for item in self.engine.game_map.items:
+                            if item.x == world_x and item.y == world_y:
+                                if hasattr(item, 'char') and hasattr(item, 'color'):
+                                    console.print(preview_x, preview_y, item.char, fg=item.color)
+        
+        # Highlight the current object being inspected with a subtle border instead of background
+        obj = current_item['object']
+        if current_item['type'] == 'entity' and hasattr(obj, 'char') and hasattr(obj, 'color'):
+            # Draw with brighter color to make it stand out
+            console.print(center_x, center_y, obj.char, fg=color.white)
+            # Add subtle corner markers around it
+            console.print(center_x - 1, center_y - 1, "┌", fg=color.cyan)
+            console.print(center_x + 1, center_y - 1, "┐", fg=color.cyan) 
+            console.print(center_x - 1, center_y + 1, "└", fg=color.cyan)
+            console.print(center_x + 1, center_y + 1, "┘", fg=color.cyan)
+        elif current_item['type'] == 'item' and hasattr(obj, 'char') and hasattr(obj, 'color'):
+            # Draw with brighter color
+            console.print(center_x, center_y, obj.char, fg=color.white)
+            # Add subtle corner markers
+            console.print(center_x - 1, center_y - 1, "┌", fg=color.cyan)
+            console.print(center_x + 1, center_y - 1, "┐", fg=color.cyan)
+            console.print(center_x - 1, center_y + 1, "└", fg=color.cyan)
+            console.print(center_x + 1, center_y + 1, "┘", fg=color.cyan)
+        elif current_item['type'] == 'tile':
+            # Just add corner markers for tiles
+            console.print(center_x - 1, center_y - 1, "┌", fg=color.cyan)
+            console.print(center_x + 1, center_y - 1, "┐", fg=color.cyan)
+            console.print(center_x - 1, center_y + 1, "└", fg=color.cyan)
+            console.print(center_x + 1, center_y + 1, "┘", fg=color.cyan)
+
+    def wrap_text(self, text: str, max_width: int) -> list:
+        """Wrap text to fit within max_width, returning list of lines."""
+        if not text:
+            return []
+        
+        words = text.split()
+        lines = []
+        current_line = []
+        current_length = 0
+        
+        for word in words:
+            # Check if adding this word would exceed the width
+            word_length = len(word)
+            space_length = 1 if current_line else 0
+            
+            if current_length + space_length + word_length <= max_width:
+                current_line.append(word)
+                current_length += space_length + word_length
+            else:
+                # Start a new line
+                if current_line:
+                    lines.append(' '.join(current_line))
+                current_line = [word]
+                current_length = word_length
+        
+        # Add the last line if it has content
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        return lines
+
+    def build_item_description(self, current_item: dict, max_width: int) -> list:
+        """Build complete description text as list of lines for scrolling."""
+        lines = []
+        
+        if current_item['type'] == 'entity':
+            entity = current_item['object']
+
+            # Get alive or dead status
+            if hasattr(entity, 'is_alive') and not entity.is_alive:
+                status_text = red("The body lies here, lifeless.")
+                wrapped_status = wrap_colored_text_to_strings(status_text, max_width)
+                lines.extend(wrapped_status)
+                lines.append("")  # Empty line for spacing
+
+            # Get name, if known
+            if hasattr(entity, 'sentient') and entity.sentient:
+                if hasattr(entity, 'name'):
+                    if hasattr(entity, 'is_known') and not entity.is_known:
+                        # Only print knowledge for entities that have it (NPCs, not chests)
+                        if hasattr(entity, 'knowledge'):
+                            print(entity.knowledge)
+                            objective_pronoun = entity.knowledge["pronouns"]["object"].lower()
+                            name_text = f"You do not know {objective_pronoun}."
+                        else:
+                            # For entities without knowledge (like chests), show generic message
+                            name_text = f"You don't know what this is."
+                        lines.extend(self.wrap_text(name_text, max_width))
+                        lines.append("")  # Empty line for spacing
+                    else:
+                        name_text = f"{entity.name}"
+                        lines.extend(self.wrap_text(name_text, max_width))
+                        lines.append("")  # Empty line for spacing
+                    
+            
+            # Add entity description
+            if hasattr(entity, 'description') and entity.description:
+                wrapped_desc = self.wrap_text(entity.description, max_width)
+                lines.extend(wrapped_desc)
+                lines.append("")  # Empty line for spacing
+
+            if hasattr(entity, "container") and entity.container.locked:
+                lock_text = red("It has a lock.")
+                # Use proper colored text wrapping
+                wrapped_lock = wrap_colored_text_to_strings(lock_text, max_width)
+                lines.extend(wrapped_lock)
+                lines.append("")  # Empty line for spacing
+
+            if hasattr(entity, 'sentient') and entity.sentient:
+                if hasattr(entity, "opinion"):
+                    if entity.opinion >= 66:
+                        opinion_text = green(f"{(entity.knowledge['pronouns']['subject']).capitalize()} smiles at you")
+                    elif entity.opinion >= 33:
+                        opinion_text = yellow(f"{(entity.knowledge['pronouns']['subject']).capitalize()} looks at you unfeelingly.")
+                    else:
+                        opinion_text = red(f"{(entity.knowledge['pronouns']['subject']).capitalize()} frowns at you")
+                    # Use proper colored text wrapping
+                    wrapped_opinion = wrap_colored_text_to_strings(opinion_text, max_width)
+                    lines.extend(wrapped_opinion)
+                    lines.append("")  # Empty line for spacing
+            
+                    
+        elif current_item['type'] == 'tile':
+            tile_info = current_item['object']
+            
+            # Add tile information
+            type_text = f"This is a {(tile_info['name']).lower()}."
+            lines.extend(self.wrap_text(type_text, max_width))
+            
+            walkable_text = f" {'You can walk here.' if tile_info['walkable'] else 'You cannot walk here.'}"
+            lines.extend(self.wrap_text(walkable_text, max_width))
+            
+            transparent_text = f"{'You can see through this.' if tile_info['transparent'] else 'You cannot see through this.'}"
+            lines.extend(self.wrap_text(transparent_text, max_width))
+            
+            if tile_info.get('interactable', False):
+                interact_text = cyan(f"You can interact with this {(tile_info['name']).lower()}.")
+                # Use proper colored text wrapping
+                wrapped_interact = wrap_colored_text_to_strings(interact_text, max_width)
+                lines.extend(wrapped_interact)
+        
+        return lines
+
+    def render_scrollable_text(self, console: tcod.Console, text_lines: list, x: int, y: int, width: int, height: int) -> None:
+        """Render text with scrolling support."""
+        if not text_lines:
+            return
+            
+        # Limit scroll offset to valid range
+        max_scroll = max(0, len(text_lines) - height)
+        self.scroll_offset = max(0, min(self.scroll_offset, max_scroll))
+        
+        # Calculate which lines to display based on scroll offset
+        start_line = self.scroll_offset
+        end_line = min(len(text_lines), start_line + height)
+        
+        # Display the visible lines
+        for i, line_idx in enumerate(range(start_line, end_line)):
+            if line_idx < len(text_lines):
+                print_colored_markup(console, x + 2, y + i, text_lines[line_idx], default_color=color.white)
+        
+        # Show scroll indicators if there's more content
+        if start_line > 0:
+            console.print(x + width - 3, y, "↑", fg=color.yellow)
+        if end_line < len(text_lines):
+            console.print(x + width - 3, y + height - 1, "↓", fg=color.yellow)
+
+    def render_entity_details(self, console: tcod.Console, entity, sidebar_x: int, info_y: int, sidebar_width: int) -> None:
+        """Render details for an entity (actor/NPC)."""
+        max_text_width = sidebar_width - 4  # Leave space for indentation and borders
+        if hasattr(entity, 'description') and entity.description:
+            
+            # Wrap description text
+            wrapped_lines = self.wrap_text(entity.description, max_text_width)
+            for line in wrapped_lines:
+                console.print(sidebar_x + 2, info_y, line, fg=color.green)
+                info_y += 1
+
+
+
+    def render_tile_details(self, console: tcod.Console, tile_info, sidebar_x: int, info_y: int, sidebar_width: int) -> None:
+        """Render details for a tile."""
+        max_text_width = sidebar_width - 4  # Leave space for indentation and borders
+        
+        # Wrap each piece of tile information
+        type_text = f"Type: {tile_info['name']}"
+        wrapped_type = self.wrap_text(type_text, max_text_width)
+        for line in wrapped_type:
+            console.print(sidebar_x + 2, info_y, line, fg=color.green)
+            info_y += 1
+            
+        walkable_text = f"Walkable: {'Yes' if tile_info['walkable'] else 'No'}"
+        wrapped_walkable = self.wrap_text(walkable_text, max_text_width)
+        for line in wrapped_walkable:
+            console.print(sidebar_x + 2, info_y, line, fg=color.white)
+            info_y += 1
+            
+        transparent_text = f"Transparent: {'Yes' if tile_info['transparent'] else 'No'}"
+        wrapped_transparent = self.wrap_text(transparent_text, max_text_width)
+        for line in wrapped_transparent:
+            console.print(sidebar_x + 2, info_y, line, fg=color.white)
+            info_y += 1
+            
+        if tile_info.get('interactable', False):
+            interact_text = "Interactable: Yes"
+            wrapped_interact = self.wrap_text(interact_text, max_text_width)
+            for line in wrapped_interact:
+                console.print(sidebar_x + 2, info_y, line, fg=color.yellow)
+                info_y += 1
+
+    def get_items_and_entities_at(self, x: int, y: int) -> list:
+        """Get all items and entities at the specified location (only if visible)."""
+        results = []
+        
+        # Only return information for tiles that are currently visible
+        if not self.engine.game_map.in_bounds(x, y) or not self.engine.game_map.visible[x, y]:
+            return results
+        
+        # Add entities (actors and items) at location
+        for entity in self.engine.game_map.entities:
+            if entity.x == x and entity.y == y:
+                # Use unknown_name for actors if not known, but real name for items
+                display_name = entity.name
+                if hasattr(entity, 'unknown_name') and hasattr(entity, 'ai'):
+                    # This is an actor (has AI), check if known
+                    if hasattr(entity, 'is_known') and entity.is_known:
+                        display_name = entity.name
+                    else:
+                        display_name = entity.unknown_name
+
+                if hasattr(entity, "is_alive") and not entity.is_alive:
+                    display_name = red(f"Corpse of {display_name}")
+
+                
+                results.append({
+                    'name': display_name,
+                    'type': 'entity',
+                    'object': entity
+                })
+                
+
+                    
+        # Add tile information
+        if self.engine.game_map.in_bounds(x, y):
+            tile = self.engine.game_map.tiles[x, y]
+            tile_info = {
+                'name': tile['name'] if 'name' in tile.dtype.names else 'Unknown Tile',
+                'walkable': tile['walkable'] if 'walkable' in tile.dtype.names else False,
+                'transparent': tile['transparent'] if 'transparent' in tile.dtype.names else False,
+                'interactable': tile['interactable'] if 'interactable' in tile.dtype.names else False,
+            }
+            results.append({
+                'name': tile_info['name'],
+                'type': 'tile',
+                'object': tile_info
+            })
+            
+        return results
+
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        """Handle keyboard input for inspection interface."""
+        key = event.sym
+        modifier = event.mod
+        
+        # Handle item cycling with Alt + left/right FIRST (before parent class intercepts)
+        if key == tcod.event.KeySym.LEFT and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            # Cycle to previous item and reset scroll
+            x, y = self.engine.mouse_location
+            items_and_entities = self.get_items_and_entities_at(x, y)
+            if items_and_entities:
+                self.detail_index = (self.detail_index - 1) % len(items_and_entities)
+                self.scroll_offset = 0  # Reset scroll when changing items
+            return None
+        elif key == tcod.event.KeySym.RIGHT and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            # Cycle to next item and reset scroll
+            x, y = self.engine.mouse_location
+            items_and_entities = self.get_items_and_entities_at(x, y)
+            if items_and_entities:
+                self.detail_index = (self.detail_index + 1) % len(items_and_entities)
+                self.scroll_offset = 0  # Reset scroll when changing items
+            return None
+        # Handle scrolling with Shift + up/down
+        elif key == tcod.event.KeySym.UP and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT):
+            # Scroll text up
+            self.scroll_offset = max(0, self.scroll_offset - 1)
+            return None
+        elif key == tcod.event.KeySym.DOWN and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT):
+            # Scroll text down (limit will be handled in render)
+            self.scroll_offset += 1
+            return None
+        elif key == tcod.event.KeySym.ESCAPE:
+            # Exit inspection mode
+            return MainGameEventHandler(self.engine)
+        elif key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.KP_ENTER or key == tcod.event.KeySym.SPACE:
+            # Exit inspection mode on confirm keys
+            return MainGameEventHandler(self.engine)
+        
+        # Use parent handler for normal movement (arrow keys without modifiers)
+        return super().ev_keydown(event)
 
 class SingleRangedAttackHandler(SelectIndexHandler):
     # Handles targeting single enemy

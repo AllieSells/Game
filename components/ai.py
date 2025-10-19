@@ -25,13 +25,33 @@ class BaseAI(Action):
         self.opened_doors: List[Tuple[int, int]] = []
         # Track the entity's last position to detect when they've moved through a door
         self.last_position: Optional[Tuple[int, int]] = None
+        self.type: str = "BaseAI"
+        # Movement speed system: higher values = slower movement
+        # 1 = normal speed (moves every turn), 2 = half speed (moves every 2 turns)
+        self.movement_speed: int = 1
+        self.movement_counter: int = 0
 
     def perform(self) -> None:
         raise NotImplementedError(
         )
+    
+    def should_move_this_turn(self) -> bool:
+        """Check if this AI should move this turn based on movement speed."""
+        self.movement_counter += 1
+        if self.movement_counter >= self.movement_speed:
+            self.movement_counter = 0
+            return True
+        return False
+    
     def get_path_to(self, dest_x: int, dest_y: int) -> List[Tuple[int, int]]:
         
+        # Create cost array where walkable tiles cost 1, non-walkable cost 0 (impassable)
         cost = np.array(self.entity.gamemap.tiles["walkable"], dtype=np.int8)
+        
+        # Make closed doors walkable for pathfinding purposes (AI will handle opening them)
+        # This allows AI to plan paths through doors without making them expensive
+        door_mask = self.entity.gamemap.tiles["name"] == "Door"
+        cost[door_mask] = 1  # Treat doors as walkable for pathfinding
 
         for entity in self.entity.gamemap.entities:
             if entity.blocks_movement and cost[entity.x, entity.y]:
@@ -52,7 +72,7 @@ class BaseAI(Action):
             if not self.entity.gamemap.in_bounds(x, y):
                 return False
             tile_name = self.entity.gamemap.tiles["name"][x, y]
-            return tile_name in ["Closed Door", "Open Door"]
+            return tile_name in ["Door", "Open Door"]
         except Exception:
             return False
 
@@ -89,7 +109,7 @@ class BaseAI(Action):
             
             if result is not None:
                 # If we opened a door, track it for later closing
-                if tile_name == "Closed Door":
+                if tile_name == "Door":
                     self.opened_doors.append((x, y))
                 # If we closed a door, remove it from tracking
                 elif tile_name == "Open Door":
@@ -168,8 +188,8 @@ class BaseAI(Action):
             cost = np.array(self.entity.gamemap.tiles["walkable"], dtype=np.int8)
             
             # Mark closed doors as walkable (but with higher cost)
-            door_mask = self.entity.gamemap.tiles["name"] == "Closed Door"
-            cost[door_mask] = 5  # Higher cost than normal movement but still walkable
+            door_mask = self.entity.gamemap.tiles["name"] == "Door"
+            cost[door_mask] =  5  # Higher cost than normal movement but still walkable
 
             # Mark opened doors as normal walkable
             open_door_mask = self.entity.gamemap.tiles["name"] == "Open Door"
@@ -279,8 +299,15 @@ class Friendly(BaseAI):
         super().__init__(entity)
         self.path: List[Tuple[int, int]] = []
         self.wait_turns = random.randint(0, 20)  # Initial wait before first move
+        self.type = "Friendly"
+        # Set NPCs to move at half speed compared to player
+        self.movement_speed = 2
 
     def perform(self) -> None:
+        # Check if this AI should move this turn
+        if not self.should_move_this_turn():
+            return WaitAction(self.entity).perform()
+        
         # Check and close any doors we've moved away from
         self.check_and_close_doors()
         
@@ -301,14 +328,15 @@ class Friendly(BaseAI):
                 # Prefer to stay in radius of campfires, else will wander
                 (not hasattr(self.engine.game_map, "items") or any(
                     item.name in ("Campfire", "Bonfire") and
-                    (item.x - dest_x) ** 2 + (item.y - dest_y) ** 2 <= 7 * 7
+                    (item.x - dest_x) ** 2 + (item.y - dest_y) ** 2 <= 10 * 10
                     for item in self.engine.game_map.items)
                 )):
                 self.path = self.get_path_with_doors(dest_x, dest_y)
+            # If no campfire, just wander anywhere walkable
             elif (0 <= dest_x < self.engine.game_map.width and
-                0 <= dest_y < self.engine.game_map.height and
-                (self.engine.game_map.tiles["walkable"][dest_x, dest_y] or 
-                 self.is_door_tile(dest_x, dest_y))):
+                  0 <= dest_y < self.engine.game_map.height and
+                  (self.engine.game_map.tiles["walkable"][dest_x, dest_y] or 
+                   self.is_door_tile(dest_x, dest_y))):
                 self.path = self.get_path_with_doors(dest_x, dest_y)
             else:
 
@@ -320,13 +348,13 @@ class Friendly(BaseAI):
             dest_x, dest_y = self.path.pop(0)
             
             # Check if the destination is a closed door that needs to be opened
-            if self.is_door_tile(dest_x, dest_y):
-                # Try to toggle the door first
+            if self.entity.gamemap.tiles["name"][dest_x, dest_y] == "Door":
+                # Try to open the closed door
                 if self.toggle_door_at(dest_x, dest_y):
-                    # Door toggled successfully, wait this turn and move next turn
+                    # Door opened successfully, wait this turn and move next turn
                     return WaitAction(self.entity).perform()
                 else:
-                    # Couldn't toggle door, clear path and wait
+                    # Couldn't open door, clear path and wait
                     self.path = []
                     self.wait_turns = random.randint(5, 20)
                     return WaitAction(self.entity).perform()
@@ -398,17 +426,20 @@ class DarkHostileEnemy(BaseAI):
                     dist2 = dxs * dxs + dys * dys
                     lit_mask |= dist2 <= (rr * rr)
 
-                # campfires
+                # campfires and bonfires
                 for item in getattr(gm, "items", []):
                     try:
-                        if item.name == "Campfire":
+                        if item.name == "Campfire" or item.name == "Bonfire":
                             cx, cy = item.x, item.y
                             xs = _np.arange(0, gm.width)
                             ys = _np.arange(0, gm.height)
                             dxs = xs[:, None] - cx
                             dys = ys[None, :] - cy
                             dist2 = dxs * dxs + dys * dys
-                            lit_mask |= dist2 <= (3 * 3)
+                            if item.name == "Campfire":
+                                lit_mask |= dist2 <= (3 * 3)  # radius 3 for campfires (matches game_map.py)
+                            elif item.name == "Bonfire":
+                                lit_mask |= dist2 <= (15 * 15)  # radius 15 for bonfires (matches game_map.py)
                     except Exception:
                         continue
 
@@ -455,7 +486,13 @@ class DarkHostileEnemy(BaseAI):
                             if item.name == "Campfire":
                                 cx = item.x - self.entity.x
                                 cy = item.y - self.entity.y
-                                if cx * cx + cy * cy <= 3 * 3:
+                                if cx * cx + cy * cy <= 3 * 3:  # radius 3 for campfires
+                                    current_lit = True
+                                    break
+                            elif item.name == "Bonfire":
+                                bx = item.x - self.entity.x
+                                by = item.y - self.entity.y
+                                if bx * bx + by * by <= 15 * 15:  # radius 15 for bonfires
                                     current_lit = True
                                     break
                         except Exception:

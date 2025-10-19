@@ -42,6 +42,35 @@ SHROUD = np.array((ord(" "), (255, 255, 255), (10, 10, 10)), dtype=graphic_dt)
 def random_floor_char() -> int:
     return ord(random.choice([" ", " ", " ", " ", " ", " ", ".", ",", "`"]))
 
+def random_floor_tile():
+    """Generate a random floor tile with varied appearance."""
+    # Use the existing random_floor_char function
+    char = random_floor_char()
+    
+    return new_tile(
+        name="Floor",
+        walkable=True,
+        transparent=True,
+        # Use the random character for both dark and light
+        # Dark grey fg
+        dark=(char, ((40+random.randint(-10,-10)), (40+random.randint(-10,-10)), (40+random.randint(-10,-10))), (25, 25, 25)),
+        light=(char, ((90+random.randint(-10, 10)), (90+random.randint(-10, 10)), (90+random.randint(-10, 10))), (80, 80, 80)),
+    )
+
+
+def random_wall_tile():
+    """Generate a random wall tile with varied appearance."""
+    char = ord("░")
+    
+    return new_tile(
+        name="Stone Wall",
+        walkable=False,
+        transparent=False,
+        # Dark grey fg
+        dark=(char, ((50+random.randint(-10,-10)), (50+random.randint(-10,-10)), (50+random.randint(-10,-10))), ((15+random.randint(-5,5)), (15+random.randint(-5,5)), (15+random.randint(-5,5)))),
+        light=(char, ((200+random.randint(-10,10)), (200+random.randint(-10,10)), (200+random.randint(-10,10))), ((60+random.randint(-5,5)), (60+random.randint(-5,5)), (60+random.randint(-5,5)))),
+    )
+
 floor = new_tile(
     name="Floor",
     walkable=True,
@@ -77,7 +106,7 @@ down_stairs = new_tile(
     light=(ord(">"), (255, 255, 255), (200, 180, 50)),
 )
 closed_door = new_tile(
-    name="Closed Door",
+    name="Door",
     walkable=False,
     transparent=False,
     dark=(ord("+"), (60, 60, 60), (15, 15, 15)),

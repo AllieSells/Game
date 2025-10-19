@@ -1,4 +1,5 @@
 from __future__ import annotations
+from enum import unique
 from typing import Dict, Iterator, Tuple, List, TYPE_CHECKING
 from webbrowser import get
 from numpy import number
@@ -270,13 +271,26 @@ def place_village_entities(building: Building, village: GameMap, floor_number: i
             
                 
                 unique_villager = copy.deepcopy(entity_factories.quest_giver)
-                unique_villager.name = (names.get_names("Human"))
+
+                unique_villager.description = unique_villager.generate_villager()
+                unique_villager.name = names.get_names("Human", gender = unique_villager.knowledge["gender"])
+                unique_villager.knowledge["name"] = unique_villager.name
+                unique_villager.unknown_name = f"{unique_villager.knowledge['age_group']} {unique_villager.knowledge['gendered_noun']}"
+                unique_villager.knowledge["location"] = village.name
+                unique_villager.knowledge["name"] = unique_villager.name
             else:
                 unique_villager = copy.deepcopy(entity_factories.villager)
-                unique_villager.name = names.get_names("Human")
+                
+                unique_villager.description = unique_villager.generate_villager()
+                unique_villager.name = names.get_names("Human", gender = unique_villager.knowledge["gender"])
+                unique_villager.knowledge["name"] = unique_villager.name
+                unique_villager.unknown_name = f"{unique_villager.knowledge['age_group']} {unique_villager.knowledge['gendered_noun']}"
+                unique_villager.knowledge["location"] = village.name
+                unique_villager.knowledge["name"] = unique_villager.name
             # Generate a new name for this villager
             
             unique_villager.spawn(village, x, y)
+
 
     
     # Place items
@@ -316,7 +330,9 @@ def generate_village(
 
     """Generate a village with a large open center and square buildings dotted around."""
     player = engine.player
-    village = GameMap(engine, map_width, map_height, entities=[player], type="village")
+    import components.names as names
+    name = names.get_location_name("Village")
+    village = GameMap(engine, map_width, map_height, entities=[player], type="village", name=name)
     
     # Create town center area (large open space in the middle)
     center_x = map_width // 2
@@ -324,11 +340,15 @@ def generate_village(
     town_center_radius = min(map_width, map_height) // 4
     
     # Start with walls everywhere, then carve out the village
-    village.tiles[:] = tile_types.wall
+    village.tiles[:] = tile_types.random_wall_tile()
     
     # Create the main village area (leave border walls)
     village_border = 2  # 2-tile thick walls around the perimeter
-    village.tiles[village_border:map_width-village_border, village_border:map_height-village_border] = tile_types.floor
+    
+    # Generate random floor tiles for each position
+    for x in range(village_border, map_width - village_border):
+        for y in range(village_border, map_height - village_border):
+            village.tiles[x, y] = tile_types.random_floor_tile()
     
     buildings: List[Building] = []
     
@@ -390,11 +410,11 @@ def generate_village(
         # Create the building walls
         # Outer walls
         for x in range(new_building.x1, new_building.x2 + 1):
-            village.tiles[x, new_building.y1] = tile_types.wall
-            village.tiles[x, new_building.y2] = tile_types.wall
+            village.tiles[x, new_building.y1] = tile_types.random_wall_tile()
+            village.tiles[x, new_building.y2] = tile_types.random_wall_tile()
         for y in range(new_building.y1, new_building.y2 + 1):
-            village.tiles[new_building.x1, y] = tile_types.wall
-            village.tiles[new_building.x2, y] = tile_types.wall
+            village.tiles[new_building.x1, y] = tile_types.random_wall_tile()
+            village.tiles[new_building.x2, y] = tile_types.random_wall_tile()
         
         # Interior floor (already floor from initial fill, but ensure it)
         village.tiles[new_building.inner] = tile_types.wooden_floor
@@ -459,11 +479,11 @@ def generate_village(
                 
                 # Create building walls and door (same as before)
                 for x in range(new_building.x1, new_building.x2 + 1):
-                    village.tiles[x, new_building.y1] = tile_types.wall
-                    village.tiles[x, new_building.y2] = tile_types.wall
+                    village.tiles[x, new_building.y1] = tile_types.random_wall_tile()
+                    village.tiles[x, new_building.y2] = tile_types.random_wall_tile()
                 for y in range(new_building.y1, new_building.y2 + 1):
-                    village.tiles[new_building.x1, y] = tile_types.wall
-                    village.tiles[new_building.x2, y] = tile_types.wall
+                    village.tiles[new_building.x1, y] = tile_types.random_wall_tile()
+                    village.tiles[new_building.x2, y] = tile_types.random_wall_tile()
                 
                 village.tiles[new_building.inner] = tile_types.floor
                 
@@ -544,6 +564,7 @@ def generate_dungeon(
 
     center_of_last_room = (0, 0)
 
+
     for r in range(max_rooms):
         room_width = random.randint(room_min_size, room_max_size)
         room_height = random.randint(room_min_size, room_max_size)
@@ -555,8 +576,6 @@ def generate_dungeon(
 
         if any(new_room.intersects(other_room) for other_room in rooms):
             continue
-
-        dungeon.tiles[new_room.inner] = tile_types.floor
 
         if len(rooms) == 0:
             # First room, where player starts

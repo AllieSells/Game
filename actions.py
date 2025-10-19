@@ -55,17 +55,29 @@ class InteractAction(Action):
 
 
             # If it's a door, toggle open/closed state
-            if name == "Closed Door":
-                # Convert "Closed Door" tile to "Open Door" tile
+            if name == "Door":
+                # Convert "Door" tile to "Open Door" tile
                 import tile_types
                 self.engine.game_map.tiles[target_x, target_y] = tile_types.open_door
                 self.engine.message_log.add_message("You open the door.")
 
-            if name == "Open Door":
-                # Convert "Open Door" tile to "Closed Door" tile
+            elif name == "Open Door":
+                # Convert "Open Door" tile to "Door" tile
                 import tile_types
                 self.engine.game_map.tiles[target_x, target_y] = tile_types.closed_door
                 self.engine.message_log.add_message("You close the door.")
+
+            else:
+                self.engine.message_log.add_message("There is nothing to interact with.")
+        elif self.engine.game_map.get_actor_at_location(target_x, target_y):
+            print(f"Interacting with actor at {target_x}, {target_y}")
+            npc = self.engine.game_map.get_actor_at_location(target_x, target_y)
+            if npc and hasattr(npc, "ai") and getattr(npc.ai, "type", None) == "Friendly":
+                # Import here to avoid circular imports
+                from input_handlers import DialogueEventHandler
+                return DialogueEventHandler(self.engine, npc)
+            else:
+                self.engine.message_log.add_message("They don't seem interested in talking.")
         else:
             self.engine.message_log.add_message("There is nothing to interact with.")
 

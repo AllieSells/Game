@@ -21,17 +21,17 @@ def open_door(engine: "Engine", actor: "Actor", x: int, y: int) -> Optional[str]
         # Check if the tile is actually a closed door
         current_tile = engine.game_map.tiles[x, y]
         if not (hasattr(current_tile, 'dtype') and 
-                current_tile['name'] == "Closed Door"):
+                current_tile['name'] == "Door"):
             return None
         
         # Change the tile to an open door
         engine.game_map.tiles[x, y] = tile_types.open_door
         
         # Add message to log, if visible to the player
-        if engine.game_map.visible[x, y]:
-            message = f"{actor.name} opens the door."
-            if hasattr(engine, 'message_log'):
-                engine.message_log.add_message(message, color.grey)
+        #if engine.game_map.visible[x, y]:
+        #    message = f"{actor.name} opens the door."
+        #    if hasattr(engine, 'message_log'):
+        #        engine.message_log.add_message(message, color.grey)
         
         return message
         
@@ -59,10 +59,10 @@ def close_door(engine: "Engine", actor: "Actor", x: int, y: int) -> Optional[str
         engine.game_map.tiles[x, y] = tile_types.closed_door
         
         # Add message to log, only if visible to the player
-        if engine.game_map.visible[x, y]:
-            message = f"{actor.name} closes the door."
-            if hasattr(engine, 'message_log'):
-                engine.message_log.add_message(message, color.grey)
+        #if engine.game_map.visible[x, y]:
+        #    message = f"{actor.name} closes the door."
+        #    if hasattr(engine, 'message_log'):
+        #        engine.message_log.add_message(message, color.grey)
         
         return message
         
@@ -78,7 +78,7 @@ def toggle_door(engine: "Engine", actor: "Actor", x: int, y: int) -> Optional[st
         current_tile = engine.game_map.tiles[x, y]
         tile_name = current_tile['name'] if hasattr(current_tile, 'dtype') else None
         
-        if tile_name == "Closed Door":
+        if tile_name == "Door":
             return open_door(engine, actor, x, y)
         elif tile_name == "Open Door":
             return close_door(engine, actor, x, y)
@@ -90,7 +90,7 @@ def toggle_door(engine: "Engine", actor: "Actor", x: int, y: int) -> Optional[st
 
 # Dictionary mapping tile names to their interaction functions
 TILE_FUNCTIONS = {
-    "Closed Door": lambda engine, actor, x, y: open_door(engine, actor, x, y),
+    "Door": lambda engine, actor, x, y: open_door(engine, actor, x, y),
     "Open Door": lambda engine, actor, x, y: close_door(engine, actor, x, y),
     # Add more tile functions here as needed
     # "Lever": lambda engine, actor, x, y: toggle_lever(engine, actor, x, y),
