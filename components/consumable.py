@@ -7,6 +7,8 @@ import color
 from animations import LightningAnimation
 
 import tcod
+from tcod import libtcodpy
+
 import components.inventory
 from components.base_component import BaseComponent
 from exceptions import Impossible

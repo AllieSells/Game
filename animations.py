@@ -1,6 +1,7 @@
 import random
 from tcod.map import compute_fov
 import tcod
+from tcod import libtcodpy
 
 class LightningAnimation:
     def __init__(self, path):

@@ -20,7 +20,6 @@ from actions import (
     BumpAction,
     PickupAction,
     WaitAction,
-    OpenAction,
     InteractAction,
 )
 
@@ -316,6 +315,8 @@ class DialogueEventHandler(AskUserEventHandler):
         if "Identity" in self.npc.dialogue_context:
             print("KNOWN")
             self.npc.is_known = True
+            # Increase opinion when identity is known
+            self.npc.opinion += 10
 
         # Safety check
         if self.current_dialogue is None:
@@ -1247,7 +1248,7 @@ class LookHandler(SelectIndexHandler):
 
             # Get alive or dead status
             if hasattr(entity, 'is_alive') and not entity.is_alive:
-                status_text = red("The body lies here, lifeless.")
+                status_text = red(entity.name)
                 wrapped_status = wrap_colored_text_to_strings(status_text, max_width)
                 lines.extend(wrapped_status)
                 lines.append("")  # Empty line for spacing
@@ -1590,8 +1591,6 @@ class MainGameEventHandler(EventHandler):
             action = WaitAction(player)
         elif key ==tcod.event.K_ESCAPE:
             raise SystemExit()
-        elif key == tcod.event.KeySym.O:
-            action = OpenAction(player)
         elif key == tcod.event.KeySym.V:
             return HistoryViewer(self.engine)
         elif key == tcod.event.KeySym.G:

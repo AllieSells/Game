@@ -603,6 +603,9 @@ def generate_dungeon(
 
             center_of_last_room = new_room.center
 
+        # Carve out the room floor
+        dungeon.tiles[new_room.inner] = tile_types.floor
+        
         place_entities(new_room, dungeon, engine.game_world.current_floor)
 
         dungeon.tiles[center_of_last_room] = tile_types.down_stairs

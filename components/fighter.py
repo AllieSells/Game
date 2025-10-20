@@ -108,7 +108,7 @@ class Fighter(BaseComponent):
         self.parent.color = (191, 0, 0)
         self.parent.blocks_movement = False
         self.parent.ai = None
-        self.parent.name = f"remains of {self.parent.name}"
+        self.parent.name = f"This is the lifeless remains of {self.parent.name}"
         self.parent.render_order = RenderOrder.CORPSE
         self.parent.type = "Dead"
 
@@ -139,3 +139,4 @@ class Fighter(BaseComponent):
     
     def take_damage(self, amount: int) -> None:
         self.hp -= amount
+

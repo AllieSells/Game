@@ -5,6 +5,7 @@ from typing import List, Tuple, Optional, TYPE_CHECKING
 
 import numpy as np
 import tcod
+from tcod import libtcodpy
 
 from actions import Action, MeleeAction, BumpAction, MovementAction, WaitAction
 

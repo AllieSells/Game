@@ -47,12 +47,25 @@ class InteractAction(Action):
         target_x = actor_location_x + self.dx
         target_y = actor_location_y + self.dy
 
+        # Check for chest entity at the target location
+        for ent in self.engine.game_map.entities:
+            if hasattr(ent, "container") and ent.container and (
+                ent.x == target_x and ent.y == target_y
+            ):
+                # Container found at target location
+                container = ent.container
+                if len(container.items) == 0:
+                    raise exceptions.Impossible("The chest is empty.")
+                else:
+                    # Send to input handler to display contents
+                    from input_handlers import ContainerEventHandler
+                    return ContainerEventHandler(self.engine, container)
+
         # Read tile tuple for 'true' interactable property
         tile = self.engine.game_map.tiles["interactable"][target_x, target_y]    
         if tile:
             # Get name for that tile
             name = self.engine.game_map.tiles["name"][target_x, target_y]
-
 
             # If it's a door, toggle open/closed state
             if name == "Door":

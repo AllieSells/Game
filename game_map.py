@@ -88,6 +88,7 @@ class GameMap:
                 try:
                     from tcod.map import compute_fov
                     import tcod
+                    from tcod import libtcodpy
                     torch_fov = compute_fov(
                         self.tiles["transparent"], (px, py), 
                         radius=7, algorithm=tcod.FOV_SHADOW
@@ -114,10 +115,14 @@ class GameMap:
                     try:
                         if item.name == "Campfire":
                             cx, cy = item.x, item.y
+                            # Only apply lighting if item is within map bounds
+                            if not (0 <= cx < self.width and 0 <= cy < self.height):
+                                continue
                             # Use FOV to prevent light from going through walls
                             try:
                                 from tcod.map import compute_fov
                                 import tcod
+                                from tcod import libtcodpy
                                 campfire_fov = compute_fov(
                                     self.tiles["transparent"], (cx, cy), 
                                     radius=3, algorithm=tcod.FOV_SHADOW
@@ -133,10 +138,14 @@ class GameMap:
                                 self.tiles["lit"] |= dist2 <= (3 * 3)  # radius 3 for campfires
                         elif item.name == "Bonfire":
                             bx, by = item.x, item.y
+                            # Only apply lighting if item is within map bounds
+                            if not (0 <= bx < self.width and 0 <= by < self.height):
+                                continue
                             # Use FOV to prevent light from going through walls
                             try:
                                 from tcod.map import compute_fov
                                 import tcod
+                                from tcod import libtcodpy
                                 bonfire_fov = compute_fov(
                                     self.tiles["transparent"], (bx, by), 
                                     radius=15, algorithm=tcod.FOV_SHADOW
@@ -311,15 +320,15 @@ class GameWorld:
         self.current_floor += 1
         self.floors_since_village += 1
 
-        # Calculate village probability based on floors since last village
-        # Adjusted for testing: villages appear on average every 3 floors
-        # Floor 1 since village: ~25%, Floor 2: ~44%, Floor 3: ~58%, etc.
-        village_chance = 1 - (0.75 ** self.floors_since_village)
+        # Calculate village probability for average village by floor 3
+        # Using geometric distribution: E[X] = 1/p = 3, so p = 1/3 ≈ 0.333
+        #
+        # Change to guaranteed village for testing
+        village_chance = 1
         
-        # Cap at 90% to always have some dungeon chance
-        village_chance = min(village_chance, 0.90)
-        
-        if random.random() < village_chance:
+        gen_chance = random.random()
+        if gen_chance < village_chance:
+
             # Generate village and reset counter
             self.floors_since_village = 0  # Reset counter when village appears
             self.engine.game_map = generate_village(
