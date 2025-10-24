@@ -713,6 +713,11 @@ class ContainerEventHandler(AskUserEventHandler):
                     # Return item to container
                     self.container.items.append(item)
                 else:
+                    if "coin" in item.name.lower():
+                        # Auto-convert coins to player gold
+                        self.engine.player.gold += item.value
+                        self.engine.message_log.add_message(f"You pick up some coins.")
+                        return self
                     self.engine.player.inventory.items.append(item)
                     self.engine.message_log.add_message(f"You take the {item.name}.")
             except Exception:
@@ -1242,16 +1247,17 @@ class LookHandler(SelectIndexHandler):
     def build_item_description(self, current_item: dict, max_width: int) -> list:
         """Build complete description text as list of lines for scrolling."""
         lines = []
-        
+        # Entity handling
         if current_item['type'] == 'entity':
             entity = current_item['object']
 
             # Get alive or dead status
             if hasattr(entity, 'is_alive') and not entity.is_alive:
-                status_text = red(entity.name)
-                wrapped_status = wrap_colored_text_to_strings(status_text, max_width)
-                lines.extend(wrapped_status)
-                lines.append("")  # Empty line for spacing
+                if hasattr(entity, 'sentient') and entity.sentient:
+                    status_text = red(entity.name)
+                    wrapped_status = wrap_colored_text_to_strings(status_text, max_width)
+                    lines.extend(wrapped_status)
+                    lines.append("")  # Empty line for spacing
 
             # Get name, if known
             if hasattr(entity, 'sentient') and entity.sentient:
@@ -1271,14 +1277,19 @@ class LookHandler(SelectIndexHandler):
                         name_text = f"{entity.name}"
                         lines.extend(self.wrap_text(name_text, max_width))
                         lines.append("")  # Empty line for spacing
+            else:
+                if hasattr(entity, 'name'):
+                    name_text = f"{entity.name}"
+                    lines.extend(wrap_colored_text_to_strings(name_text, max_width))
+                    lines.append("")  # Empty line for spacing
                     
-            
             # Add entity description
             if hasattr(entity, 'description') and entity.description:
                 wrapped_desc = self.wrap_text(entity.description, max_width)
                 lines.extend(wrapped_desc)
                 lines.append("")  # Empty line for spacing
-
+            
+            # Add lock status if applicable
             if hasattr(entity, "container") and entity.container.locked:
                 lock_text = red("It has a lock.")
                 # Use proper colored text wrapping
@@ -1286,6 +1297,7 @@ class LookHandler(SelectIndexHandler):
                 lines.extend(wrapped_lock)
                 lines.append("")  # Empty line for spacing
 
+            # Add opinion if sentient
             if hasattr(entity, 'sentient') and entity.sentient:
                 if hasattr(entity, "opinion"):
                     if entity.opinion >= 66:
@@ -1299,19 +1311,25 @@ class LookHandler(SelectIndexHandler):
                     lines.extend(wrapped_opinion)
                     lines.append("")  # Empty line for spacing
             
-                    
+            # Add value if applicable
+            if hasattr(entity, 'value'):
+                if entity.value > 0:
+                    value_text = f"Estimated value: <yellow>{entity.value} gold.</yellow>"
+                    lines.extend(wrap_colored_text_to_strings(value_text, max_width))      
+        # Tile handling
         elif current_item['type'] == 'tile':
             tile_info = current_item['object']
             
             # Add tile information
-            type_text = f"This is a {(tile_info['name']).lower()}."
-            lines.extend(self.wrap_text(type_text, max_width))
+            # Preserve the name verbatim (don't lower-case markup tags)
+            type_text = f"This is a {tile_info['name']}."
+            lines.extend(wrap_colored_text_to_strings(type_text, max_width))
             
             walkable_text = f" {'You can walk here.' if tile_info['walkable'] else 'You cannot walk here.'}"
-            lines.extend(self.wrap_text(walkable_text, max_width))
+            lines.extend(wrap_colored_text_to_strings(walkable_text, max_width))
             
             transparent_text = f"{'You can see through this.' if tile_info['transparent'] else 'You cannot see through this.'}"
-            lines.extend(self.wrap_text(transparent_text, max_width))
+            lines.extend(wrap_colored_text_to_strings(transparent_text, max_width))
             
             if tile_info.get('interactable', False):
                 interact_text = cyan(f"You can interact with this {(tile_info['name']).lower()}.")

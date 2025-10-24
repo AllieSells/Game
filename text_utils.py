@@ -236,25 +236,28 @@ def wrap_colored_text_to_strings(text: str, max_width: int, default_color=color.
     
     for line_parts in wrapped_lines:
         line_markup = ""
-        current_color = None
-        
+        # Start assuming the current color is the default; we only open/close
+        # explicit tags for non-default colors. This avoids emitting stray
+        # closing tags for the default color (e.g. '</white>').
+        current_color = default_color
+
         for text_part, text_color in line_parts:
-            # If color changed, close previous tag and open new one
+            # If color changed, close previous non-default tag and open new one
             if text_color != current_color:
-                if current_color is not None:
-                    # Close previous color tag
+                # Close previous tag only if it was non-default (it was opened)
+                if current_color != default_color:
                     line_markup += f"</{get_color_name(current_color)}>"
-                
+
+                # Open new tag only if the new color is non-default
                 if text_color != default_color:
-                    # Open new color tag
                     line_markup += f"<{get_color_name(text_color)}>"
-                
+
                 current_color = text_color
-            
+
             line_markup += text_part
-        
-        # Close final color tag if needed
-        if current_color is not None and current_color != default_color:
+
+        # Close final color tag if it is non-default
+        if current_color != default_color:
             line_markup += f"</{get_color_name(current_color)}>"
         
         markup_lines.append(line_markup)

@@ -114,10 +114,16 @@ class PickupAction(Action):
                 # Bonfires cannot be picked up
                 if item.name == "Bonfire":
                     raise exceptions.Impossible("The bonfire is too hot to handle!")
-                
-                self.engine.game_map.entities.remove(item)
-                item.parent = self.entity.inventory
-                inventory.items.append(item)
+
+                if "coin" in item.name.lower():
+                    self.engine.message_log.add_message("You pick up some coins.", color.yellow)
+                    self.engine.player.gold += item.value
+                    self.engine.game_map.entities.remove(item)
+                    return
+                else:
+                    self.engine.game_map.entities.remove(item)
+                    item.parent = self.entity.inventory
+                    inventory.items.append(item)
                 # Special-case picking up a campfire: convert to a Torch with a flavor message
                 try:
                     from entity_factories import torch 
@@ -132,7 +138,7 @@ class PickupAction(Action):
 
                     self.engine.message_log.add_message("You pull a burning log from the fire")
                     return
-
+                
                 self.engine.message_log.add_message(f"You picked up the {item.name}!")
                 return
         raise exceptions.Impossible("There is nothing here to pick up.")
@@ -199,15 +205,37 @@ class WaitAction(Action):
 class TakeStairsAction(Action):
     def perform(self) -> None:
         # Take the stairs, if they exist at its location
+        pos = (self.entity.x, self.entity.y)
 
-        if (self.entity.x, self.entity.y) == self.engine.game_map.downstairs_location:
-            self.engine.game_world.generate_floor()
-            self.engine.message_log.add_message(
-                "You descend the staircase.", color.descend
-            )
+        # Descend if on the downstairs tile
+        if pos == self.engine.game_map.downstairs_location:
+            # Use GameWorld.descend helper if available, otherwise fall back
+            try:
+                self.engine.game_world.descend()
+            except Exception:
+                # Fallback to previous behavior
+                self.engine.game_world.generate_floor()
 
-        else:
-            raise exceptions.Impossible("There are no stairs here.")
+            self.engine.message_log.add_message("You descend the staircase.", color.descend)
+            return
+
+        # Ascend if on an upstairs tile
+        if hasattr(self.engine.game_map, "upstairs_location") and pos == self.engine.game_map.upstairs_location:
+            # Call ascend on the GameWorld if available; if not, try map-level ascend
+            try:
+                self.engine.game_world.ascend()
+                self.engine.message_log.add_message("You ascend the staircase.", color.ascend)
+                return
+            except Exception:
+                try:
+                    # Some older code may expect engine.game_map.ascend
+                    self.engine.game_map.ascend()
+                    self.engine.message_log.add_message("You ascend the staircase.", color.ascend)
+                    return
+                except Exception:
+                    pass
+
+        raise exceptions.Impossible("There are no stairs here.")
 
 class ActionWithDirection(Action):
     def __init__(self, entity: Actor, dx: int, dy: int):

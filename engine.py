@@ -426,6 +426,10 @@ class Engine:
             maximum_value=self.player.max_lucidity,
             total_width=20
         )
+        render_functions.render_gold(
+            console=console,
+            gold_amount=self.player.gold
+        )
         render_functions.render_dungeon_level(
             console=console,
             dungeon_level=self.game_world.current_floor,

@@ -6,6 +6,7 @@ from numpy import number
 import tcod
 import random
 
+import engine
 import entity_factories
 from game_map import GameMap
 import tile_types
@@ -29,6 +30,11 @@ max_monsters_by_floor =[
     (1, 2),
     (4, 3),
     (6, 5),
+]
+
+max_flora_by_floor = [
+    (1, 3),
+    (4, 5),
 ]
 
 item_chances: Dict[int, List[Tuple[Entity, int]]] = {
@@ -148,6 +154,14 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) 
             chest = entity_factories.make_chest_with_loot(loot, capacity=6)
             chest.spawn(dungeon, x, y)
 
+    # Place flora
+    game_world = dungeon.engine.game_world
+    for entity in range(random.randint(0, get_max_value_for_floor(max_flora_by_floor, floor_number))):
+        fungus = game_world.fungi[random.randint(0, len(game_world.fungi)-1)]
+        x = random.randint(room.x1+1, room.x2-1)
+        y = random.randint(room.y1+1, room.y2-1)
+        if not any(e.x == x and e.y == y for e in dungeon.entities):
+            fungus.spawn(dungeon, x, y)
 
     for entity in monsters:
         x = random.randint(room.x1+1, room.x2-1)
@@ -300,6 +314,8 @@ def place_village_entities(building: Building, village: GameMap, floor_number: i
         
         if not any(e.x == x and e.y == y for e in village.entities):
             entity.spawn(village, x, y)
+
+
     
     # Maybe place a chest (lower chance than dungeons)
     if random.random() < 0.3:
@@ -320,6 +336,8 @@ def place_village_entities(building: Building, village: GameMap, floor_number: i
                 chest.spawn(village, x, y)
         except Exception:
             pass
+
+
 
 def generate_village(
         map_width: int,
@@ -586,7 +604,7 @@ def generate_dungeon(
             try:
                 # Build a small loot list: health potion + torch (deepcopy to avoid shared parents)
                 import copy as _copy
-                loot = [_copy.deepcopy(entity_factories.health_potion), _copy.deepcopy(entity_factories.torch)]
+                loot = [_copy.deepcopy(entity_factories.health_potion), _copy.deepcopy(entity_factories.torch), entity_factories.get_random_coins(1, 10)]
                 test_chest = entity_factories.make_chest_with_loot(loot, capacity=6)
                 cx, cy = new_room.center
                 chest_x, chest_y = min(dungeon.width - 1, cx + 1), cy
@@ -598,13 +616,26 @@ def generate_dungeon(
                 pass
         else:
             for x, y in tunnel_between(rooms[-1].center, new_room.center):
-                dungeon.tiles[x,y] = tile_types.floor
-                # First tunnel tile and last are closed doors always
+                dungeon.tiles[x,y] = tile_types.random_floor_tile()
+
+                # Place doors at the entrances of the new room
+                if (x == new_room.x1 or x == new_room.x2) and (y >= new_room.y1 and y <= new_room.y2):
+                    dungeon.tiles[x,y] = tile_types.closed_door
+                # Place doors at the exits of the previous room
+                if (x == rooms[-1].x1 or x == rooms[-1].x2) and (y >= rooms[-1].y1 and y <= rooms[-1].y2):
+                    dungeon.tiles[x,y] = tile_types.closed_door
+                
+
 
             center_of_last_room = new_room.center
 
-        # Carve out the room floor
-        dungeon.tiles[new_room.inner] = tile_types.floor
+        # Carve out the room floor with random tiles for each position
+        for x in range(new_room.x1 + 1, new_room.x2):
+            for y in range(new_room.y1 + 1, new_room.y2):
+                dungeon.tiles[x, y] = tile_types.random_floor_tile()
+
+
+
         
         place_entities(new_room, dungeon, engine.game_world.current_floor)
 
@@ -612,5 +643,6 @@ def generate_dungeon(
         dungeon.downstairs_location = center_of_last_room
 
         rooms.append(new_room)
+
 
     return dungeon

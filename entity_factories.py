@@ -10,6 +10,7 @@ from components.container import Container
 from entity import Actor, Item
 from render_order import RenderOrder
 import components.names as names
+from text_utils import *
 
 player = Actor(
     char="@",
@@ -195,6 +196,88 @@ quest_giver = Actor(
     type = "NPC",
 )
 
+coin = Item(
+    char="$",
+    color=(255, 223, 0),
+    name="Coin",
+    description="A shiny gold coin.",
+    value=1,
+    weight=0.01,
+)
+
+fungus = Item(
+    char="%",
+    color=(0, 255, 0),
+    name="Fungus",
+    description="",
+)
+
+def get_random_fungus() -> Item:
+    import random
+    fungus_types = {
+            "prefix": ["Cap", "Spot", "Gill", "Twist", "Iron", "Glow", "Silent", "Blood", "Red", "Blue", "Yellow",
+                       "Purple", "Green", "Black", "White", "Silver", "Golden", "Shiny", "Smoke", "Dust", "Oak", "Pine", "Birch", "Maple",
+                       "Dark"],
+            "suffix": ["cap", "cap", "cap", "cap", "cup", "stem", "sprout", "spore", "bloom", "shroom", "-agaric", "root", "stalk", "puff"]
+        }
+
+    prefix = random.choice(fungus_types["prefix"])
+    suffix = random.choice(fungus_types["suffix"])
+    name = f"{prefix}{suffix}"
+    description = "Placeholder"
+    color = (random.randint(100, 255), random.randint(100, 255), random.randint(100, 255))
+
+    # Color calibration based on name
+    if "Blue" in prefix:
+        color = (max(color[0]-50, 75), max(color[1]-50, 75), 255)
+    elif "Red" in prefix:
+        color = (255, max(color[1]-50, 75), max(color[2]-50, 75))
+
+    elif "Green" in prefix:
+        color = (max(color[0]-50, 75), 255, max(color[2]-50, 75))
+    elif "Yellow" in prefix:
+        color = (255, 255, max(color[2]-100, 75))
+    elif "Purple" in prefix:
+        color = (255, max(color[1]-100, 75), 255)
+    elif "Black" in prefix:
+        color = (0, 0, 0)
+    elif "White" in prefix:
+        color = (255, 255, 255)
+
+    if "cap" in suffix or "cup" in suffix or "-agaric" in suffix or "puff" in suffix:
+        char = "."
+    elif "stem" in suffix or "stalk" in suffix or "root" in suffix:
+        char = ","
+    else:
+        char = ","
+        
+    
+    return Item(
+        char=char,
+        color=color,
+        name=name,
+        description=description,
+    )
+
+def get_random_coins(min_amount: int, max_amount: int) -> Item:
+    import random
+    amount = random.randint(min_amount, max_amount)
+    if amount == 1:
+        def_name = "Coin"
+        def_description = "A shiny gold coin."
+    else:
+        def_name = "Pile of Coins"
+        def_description = f"A pile of {amount} gold coins."
+    return Item(
+        char="$",
+        color=(255, 223, 0),    
+        name=def_name,
+        description=def_description,
+        value=amount,
+        weight=0.01 * amount,
+    )
+
+
 
 
 # Attach a Container component to a chest template (not an Actor constructor arg
@@ -227,3 +310,4 @@ def make_chest_with_loot(items: list, capacity: int = 10) -> Actor:
     # Expose the container on the actor for easy checks
     new_chest.container = cont
     return new_chest
+

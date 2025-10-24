@@ -7,6 +7,7 @@ from tcod.console import Console
 import tile_types
 from entity import Actor, Item
 from render_order import RenderOrder
+import color
 
 if TYPE_CHECKING:
     from engine import Engine
@@ -19,7 +20,18 @@ class GameMap:
         self.engine = engine
         self.width, self.height = width, height
         self.entities = set(entities)
-        self.tiles = np.full((width, height), fill_value=tile_types.wall, order="F")
+        # Initialize tiles. For dungeon maps, populate per-tile using
+        # tile_types.random_wall_tile() so we get variation (mossy walls etc.).
+        if type == "dungeon":
+            # Create an empty structured array and fill each cell with a
+            # freshly generated wall tile to avoid sharing the same object.
+            self.tiles = np.empty((width, height), dtype=tile_types.tile_dt, order="F")
+            for x in range(width):
+                for y in range(height):
+                    self.tiles[x, y] = tile_types.random_wall_tile()
+        else:
+            # Preserve original behavior for other map types.
+            self.tiles = np.full((width, height), fill_value=tile_types.wall, order="F")
 
         self.visible = np.full(
             (width, height), fill_value=False, order="F")  # Tiles the player can see
@@ -28,6 +40,8 @@ class GameMap:
             (width, height), fill_value=False, order="F") # Tiles player has seen before
         
         self.downstairs_location = (0, 0)
+        # Location of an upstairs tile on this map (if any).
+        self.upstairs_location = (0, 0)
         self.type = type  # What type of map this is, e.g. "dungeon" or "village"
         self.name = name  # Name of this map, e.g. "Dungeon Level 1", "Oakwood"
         
@@ -94,7 +108,7 @@ class GameMap:
                         radius=7, algorithm=tcod.FOV_SHADOW
                     )
                     self.tiles["lit"] |= torch_fov
-                except Exception:
+                except Exception as e:
                     # Explain why FOV failed
                     print(f"Failed to compute FOV for torch at ({px}, {py}): {e}")
                     import traceback
@@ -240,11 +254,27 @@ class GameMap:
         entities_sorted_for_rendering = sorted(self.entities, key=lambda x: x.render_order.value)
 
         # Render non-actor entities first (corpses, items)
+        drawn_positions = set()
         for entity in entities_sorted_for_rendering:
             if entity.render_order == RenderOrder.ACTOR:
                 continue
+            pos = (entity.x, entity.y)
             if self.visible[entity.x, entity.y]:
                 console.print(x=entity.x, y=entity.y, string=entity.char, fg=entity.color)
+                drawn_positions.add(pos)
+            else:
+                # If tile has been explored but is not currently visible, show a generic marker
+                # Only show last-known marker for Items (not corpses or other non-actors)
+                if self.explored[entity.x, entity.y] and pos not in drawn_positions and isinstance(entity, Item):
+                    try:
+                        console.print(x=entity.x, y=entity.y, string="*", fg=color.gray)
+                        drawn_positions.add(pos)
+                    except Exception:
+                        try:
+                            console.print(x=entity.x, y=entity.y, string="*", fg=(192,192,192))
+                            drawn_positions.add(pos)
+                        except Exception:
+                            pass
 
         # Now render priority 1 animations (between items and actors)
         if hasattr(self.engine, "animation_queue"):
@@ -263,8 +293,13 @@ class GameMap:
         for entity in entities_sorted_for_rendering:
             if entity.render_order != RenderOrder.ACTOR:
                 continue
+            pos = (entity.x, entity.y)
             if self.visible[entity.x, entity.y]:
                 console.print(x=entity.x, y=entity.y, string=entity.char, fg=entity.color)
+                drawn_positions.add(pos)
+            else:
+                # Do not show '*' for non-visible actors; items already handled above.
+                pass
         # Finally render priority 2 animations (above actors)
         if hasattr(self.engine, "animation_queue"):
             for anim in list(self.engine.animation_queue):
@@ -312,6 +347,13 @@ class GameWorld:
 
             self.current_floor = current_floor
             self.floors_since_village = 0  # Track floors since last village
+            # Stacks to support navigating between previously visited maps.
+            # up_stack: maps above the current map (you can ascend to these)
+            # down_stack: maps below the current map (you can descend to these if you previously ascended)
+            # Each entry is a tuple: (gamemap, player_xy, floor_number)
+            self.up_stack: list[tuple] = []
+            self.down_stack: list[tuple] = []
+            self.fungi = []  # Global list of fungi in the world
 
     def generate_floor(self) -> None:
         from procgen import generate_dungeon, generate_village
@@ -320,12 +362,27 @@ class GameWorld:
         self.current_floor += 1
         self.floors_since_village += 1
 
+        # Clear any pending animations when moving to a new floor so
+        # animations from the previous level don't carry over.
+        try:
+            if hasattr(self.engine, "animation_queue"):
+                try:
+                    self.engine.animation_queue.clear()
+                except Exception:
+                    # Fallback: remove items one-by-one
+                    try:
+                        while self.engine.animation_queue:
+                            self.engine.animation_queue.popleft()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         # Calculate village probability for average village by floor 3
         # Using geometric distribution: E[X] = 1/p = 3, so p = 1/3 ≈ 0.333
         #
-        # Change to guaranteed village for testing
-        village_chance = 1
-        
+        # Village equation chance
+        village_chance = ((self.floors_since_village)^2) / 25
         gen_chance = random.random()
         if gen_chance < village_chance:
 
@@ -346,3 +403,121 @@ class GameWorld:
                 map_height=self.map_height,
                 engine=self.engine,
             )
+
+    def descend(self) -> None:
+        """Descend one level.
+
+        Behavior:
+        - Push the current map onto the up_stack so it can be returned to by ascending.
+        - If a previously-visited lower map exists on the down_stack, pop and restore it
+          (so descend after an ascend returns you to the same lower map).
+        - Otherwise, generate a fresh floor (via generate_floor()).
+        - In both cases, ensure an up_stairs tile exists on the newly active map at the
+          player's location so the player can ascend back.
+        """
+        current_map = self.engine.game_map
+        player_pos = (self.engine.player.x, self.engine.player.y)
+
+        # Push current map onto up_stack (so we can ascend later)
+        self.up_stack.append((current_map, player_pos, self.current_floor))
+
+        # If we have a previously-cached lower map, reuse it instead of regenerating
+        if len(self.down_stack) > 0:
+            next_map, next_player_pos, next_floor = self.down_stack.pop()
+
+            # Clear animations before map swap
+            try:
+                if hasattr(self.engine, "animation_queue"):
+                    try:
+                        self.engine.animation_queue.clear()
+                    except Exception:
+                        try:
+                            while self.engine.animation_queue:
+                                self.engine.animation_queue.popleft()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # Restore the cached lower map
+            self.engine.game_map = next_map
+            # Update floor number to the stored value
+            try:
+                self.current_floor = next_floor
+            except Exception:
+                pass
+
+            # Place player where they were on that lower map (if provided)
+            try:
+                nx, ny = next_player_pos
+                self.engine.player.place(nx, ny, next_map)
+            except Exception:
+                pass
+
+            return
+
+        # No cached lower map: generate a new floor
+        self.generate_floor()
+
+        # After generation, place an up stairs tile at the player's current location
+        try:
+            px, py = self.engine.player.x, self.engine.player.y
+            self.engine.game_map.tiles[px, py] = tile_types.up_stairs
+            self.engine.game_map.upstairs_location = (px, py)
+        except Exception:
+            pass
+
+    def ascend(self) -> None:
+        """Ascend one level.
+
+        Behavior:
+        - Push the current map onto down_stack so it can be returned to by descending.
+        - Pop the most recent map from up_stack and restore it as the active map.
+        - Restore player position and floor number from the popped entry.
+        """
+        # If nothing to ascend to, do nothing
+        if len(self.up_stack) == 0:
+            return
+
+        current_map = self.engine.game_map
+        current_player_pos = (self.engine.player.x, self.engine.player.y)
+
+        # Push current map onto down_stack so we can go back down to it later
+        self.down_stack.append((current_map, current_player_pos, self.current_floor))
+
+        # Pop the map above us and restore it
+        prev_map, prev_player_pos, prev_floor = self.up_stack.pop()
+
+        # Clear animations before map swap
+        try:
+            if hasattr(self.engine, "animation_queue"):
+                try:
+                    self.engine.animation_queue.clear()
+                except Exception:
+                    try:
+                        while self.engine.animation_queue:
+                            self.engine.animation_queue.popleft()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Restore previous map and player position
+        self.engine.game_map = prev_map
+        try:
+            px, py = prev_player_pos
+            self.engine.player.place(px, py, prev_map)
+        except Exception:
+            try:
+                px = max(0, min(prev_map.width - 1, px))
+                py = max(0, min(prev_map.height - 1, py))
+                self.engine.player.place(px, py, prev_map)
+            except Exception:
+                pass
+
+        # Restore recorded floor number
+        try:
+            self.current_floor = prev_floor
+        except Exception:
+            pass
+

@@ -111,6 +111,7 @@ class Actor(Entity):
         opinion: int = 50,
         sentient: bool = False,
         sight_radius: int = 6,
+        gold: int = 0,
     ):
         super().__init__(
             x=x,
@@ -162,6 +163,7 @@ class Actor(Entity):
         self.opinion = opinion
         self.sentient = sentient
         self.sight_radius = sight_radius
+        self.gold = gold
 
     def add_effect(self, effect: 'Effect') -> None:
         """Attach an Effect to this actor."""
@@ -559,8 +561,10 @@ class Item(Entity):
             name: str = "<Unnamed>",
             consumable: Optional[Consumable] = None,
             description: str = "<No description>",
-        equippable: Optional[Equippable] = None,
-        burn_duration: Optional[int] = None,
+            equippable: Optional[Equippable] = None,
+            burn_duration: Optional[int] = None,
+            value: int = 0,
+            weight: float = 0.0,
 
     ):
         super().__init__(
@@ -587,4 +591,6 @@ class Item(Entity):
         # When the value reaches 0 the item should be consumed/removed.
         self.burn_duration = burn_duration
         self.description = description
+        self.value = value
+        self.weight = weight
         

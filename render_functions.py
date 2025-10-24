@@ -157,9 +157,18 @@ def render_dungeon_level(
 ) -> None:
     # Render the level the player is on, at the given location
     x = 0
-    y = 46
+    y = 47
 
     console.print(x=x+1, y=y, string=f"Dungeon: {dungeon_level}")
+
+def render_gold(
+        console: 'Console', gold_amount: int,
+) -> None:
+    # Render the player's gold amount at the given location
+    x = 0
+    y = 46
+
+    console.print(x=x+1, y=y, string=f"Gold: {gold_amount}")
 
 # Status effect render
 def render_effects(console: 'Console', effects: list) -> None:

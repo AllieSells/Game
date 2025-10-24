@@ -14,7 +14,7 @@ graphic_dt = np.dtype(
 tile_dt = np.dtype(
     [
         ("lit", np.bool_),
-        ("name", "U16"),
+        ("name", "U64"),
         ("walkable", np.bool_),
         ("transparent", np.bool_),
         ("dark", graphic_dt),  
@@ -59,16 +59,51 @@ def random_floor_tile():
 
 
 def random_wall_tile():
-    """Generate a random wall tile with varied appearance."""
-    char = ord("░")
-    
+    """Generate a random wall tile by sampling a base tile (wall or mossy)
+    and constructing a fresh tile with small variations applied. Building a
+    new tile via `new_tile(...)` avoids subtle numpy structured-array
+    assignment issues and ensures the returned tile is distinct.
+    """
+    # Chance to be mossy
+    if random.random() < 0.05:
+        base = mossy_wall
+    else:
+        base = wall
+
+    # Extract base values as plain Python ints/tuples
+    base_name = str(base["name"])
+    base_walkable = bool(base["walkable"])
+    base_transparent = bool(base["transparent"])
+
+    base_dark_ch = int(base["dark"]["ch"])
+    base_dark_fg = tuple(int(x) for x in base["dark"]["fg"])
+    base_dark_bg = tuple(int(x) for x in base["dark"]["bg"])
+
+    base_light_ch = int(base["light"]["ch"])
+    base_light_fg = tuple(int(x) for x in base["light"]["fg"])
+    base_light_bg = tuple(int(x) for x in base["light"]["bg"])
+
+    # Small random variation helper with clamping
+    def vary_channel(base_tuple, delta):
+        return (
+            max(0, min(255, base_tuple[0] + 0)),
+            max(0, min(255, base_tuple[1] + 0)),
+            max(0, min(255, base_tuple[2] + 0))
+        )
+
+    dark_fg = vary_channel(base_dark_fg, 8)
+    dark_bg = vary_channel(base_dark_bg, 6)
+    light_fg = vary_channel(base_light_fg, 8)
+    light_bg = vary_channel(base_light_bg, 6)
+
+    glyph = base_dark_ch
+
     return new_tile(
-        name="Stone Wall",
-        walkable=False,
-        transparent=False,
-        # Dark grey fg
-        dark=(char, ((50+random.randint(-10,-10)), (50+random.randint(-10,-10)), (50+random.randint(-10,-10))), ((15+random.randint(-5,5)), (15+random.randint(-5,5)), (15+random.randint(-5,5)))),
-        light=(char, ((200+random.randint(-10,10)), (200+random.randint(-10,10)), (200+random.randint(-10,10))), ((60+random.randint(-5,5)), (60+random.randint(-5,5)), (60+random.randint(-5,5)))),
+        name=base_name,
+        walkable=base_walkable,
+        transparent=base_transparent,
+        dark=(glyph, dark_fg, dark_bg),
+        light=(glyph, light_fg, light_bg),
     )
 
 floor = new_tile(
@@ -88,6 +123,16 @@ wooden_floor = new_tile(
     dark=(ord(" "), (255, 255, 255), (89, 87, 78)),
     light=(ord(" "), (255, 255, 255), (158, 152, 128)),
 )
+
+
+
+mossy_wall = new_tile(
+    name="<green>Lichenous Wall</green>",
+    walkable=False,
+    transparent=False,
+    dark=(ord("░"), (60, 60, 60), (15, 15, 15)),
+    light=(ord("░"), (100, 200, 100), (60, 60, 60)),
+)
     
 wall = new_tile(
     name="Stone Wall",
@@ -99,11 +144,19 @@ wall = new_tile(
     light=(ord("░"), (200, 200, 200), (60, 60, 60)),
 )
 down_stairs = new_tile(
-    name="Down Stairs",
+    name="<purple>Down Stairs</purple>",
     walkable=True,
     transparent=True,
-    dark=(ord(">"), (0, 0, 100), (50, 50, 150)),
-    light=(ord(">"), (255, 255, 255), (200, 180, 50)),
+    dark=(ord(">"), (100, 100, 100), (25, 25, 25)),
+    light=(ord(">"), (255, 255, 255), (50, 50, 50)),
+)
+
+up_stairs = new_tile(
+    name="<purple>Up Stairs</purple>",
+    walkable=True,
+    transparent=True,
+    dark=(ord("<"), (100, 100, 100), (25, 25, 25)),
+    light=(ord("<"), (255, 255, 255), (50, 50, 50)),
 )
 closed_door = new_tile(
     name="Door",
