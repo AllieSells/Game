@@ -37,6 +37,9 @@ class Engine:
         self.animation_queue = deque()
         self.animations_enabled = True
         self.debug = False
+        
+        # Initialize turn manager for centralized turn processing
+        self.turn_manager = None  # Will be set after import to avoid circular imports
 
     def get_adjacent_tiles(self, x: int, y: int) -> list[tuple[int, int]]:
         # Returns adjacent (including diagonals) tiles
@@ -165,6 +168,7 @@ class Engine:
             f.write(save_data)
     
     def handle_enemy_turns(self) -> None:
+        """Legacy method - use turn_manager.process_player_turn_end() instead."""
         for entity in set(self.game_map.actors) - {self.player}:
             if entity.ai:
                 try:

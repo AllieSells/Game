@@ -106,6 +106,10 @@ def random_wall_tile():
         light=(glyph, light_fg, light_bg),
     )
 
+def place_oriented_wall():
+    
+
+
 floor = new_tile(
     name="Floor",
     walkable=True,
@@ -130,8 +134,8 @@ mossy_wall = new_tile(
     name="<green>Lichenous Wall</green>",
     walkable=False,
     transparent=False,
-    dark=(ord("░"), (60, 60, 60), (15, 15, 15)),
-    light=(ord("░"), (100, 200, 100), (60, 60, 60)),
+    dark=(ord("▓"), (60, 60, 60), (15, 15, 15)),
+    light=(ord("▓"), (100, 200, 100), (60, 60, 60)),
 )
     
 wall = new_tile(
@@ -139,9 +143,9 @@ wall = new_tile(
     walkable=False,
     transparent=False,
     # Use darker greys for wall glyph foreground so the wall glyph appears less bright
-    dark=(ord("░"), (60, 60, 60), (15, 15, 15)),
+    dark=(ord("║"), (60, 60, 60), (15, 15, 15)),
     # Make wall foreground/background a bit whiter when lit to increase contrast
-    light=(ord("░"), (200, 200, 200), (60, 60, 60)),
+    light=(ord("║"), (200, 200, 200), (60, 60, 60)),
 )
 down_stairs = new_tile(
     name="<purple>Down Stairs</purple>",
@@ -162,8 +166,8 @@ closed_door = new_tile(
     name="Door",
     walkable=False,
     transparent=False,
-    dark=(ord("+"), (60, 60, 60), (15, 15, 15)),
-    light=(ord("+"), (255, 212, 0), (89, 52, 28)),
+    dark=(ord("•"), (60, 60, 60), (15, 15, 15)),
+    light=(ord("•"), (255, 212, 0), (89, 52, 28)),
     interactable=True
 )
 open_door = new_tile(

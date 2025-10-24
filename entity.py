@@ -112,6 +112,7 @@ class Actor(Entity):
         sentient: bool = False,
         sight_radius: int = 6,
         gold: int = 0,
+        hunger: float = 100.0,
     ):
         super().__init__(
             x=x,
@@ -164,6 +165,7 @@ class Actor(Entity):
         self.sentient = sentient
         self.sight_radius = sight_radius
         self.gold = gold
+        self.hunger = hunger
 
     def add_effect(self, effect: 'Effect') -> None:
         """Attach an Effect to this actor."""

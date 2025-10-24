@@ -13,7 +13,7 @@ import components.names as names
 from text_utils import *
 
 player = Actor(
-    char="@",
+    char="☺",
     color=(52, 222, 235),
     name = "Player",
     ai_cls=HostileEnemy,
@@ -96,14 +96,14 @@ fireball_scroll = Item(
 )
 
 campfire = Item(
-    char="x",
+    char="☼",
     color=(255, 140, 0),
     name="Campfire",
     description="A small campfire providing warmth and light.",
 )
 
 bonfire = Item(
-    char="X",
+    char="☼",
     color=(255, 140, 0),
     name="Bonfire",
     description="A large bonfire crackling with intense flames.",
@@ -169,7 +169,7 @@ chest = Actor(
 )
 
 villager = Actor(
-    char="@",
+    char="☺",
     color=(255, 255, 0),
     name="Villager",
     ai_cls=Friendly,
@@ -183,7 +183,7 @@ villager = Actor(
 )
 
 quest_giver = Actor(
-    char="@",
+    char="☺",
     color=(255, 0, 243),
     name="Quest Giver",
     ai_cls=Friendly,
@@ -245,11 +245,11 @@ def get_random_fungus() -> Item:
         color = (255, 255, 255)
 
     if "cap" in suffix or "cup" in suffix or "-agaric" in suffix or "puff" in suffix:
-        char = "."
-    elif "stem" in suffix or "stalk" in suffix or "root" in suffix:
         char = ","
     else:
-        char = ","
+        char = "."
+    if name == "Capcap":
+        name = blue("L")+red("e")+green("g")+yellow("e")+purple("n")+white("d")+green("a")+cyan("r")+red("y") + " " + purple("C")+yellow("a")+white("p")+cyan("c")+purple("a")+green("p")
         
     
     return Item(

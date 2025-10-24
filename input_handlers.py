@@ -103,6 +103,10 @@ class BaseEventHandler(tcod.event.EventDispatch[ActionOrHandler]):
 class EventHandler(BaseEventHandler):
     def __init__(self, engine: Engine):
         self.engine = engine
+        # Initialize turn manager if not already set
+        if not hasattr(engine, 'turn_manager') or engine.turn_manager is None:
+            from turn_manager import TurnManager
+            engine.turn_manager = TurnManager(engine)
 
     def handle_events(self, event: tcod.event.Event) -> BaseEventHandler:
         # handles events for input handlers with an engine
@@ -114,35 +118,10 @@ class EventHandler(BaseEventHandler):
         if isinstance(handled, BaseEventHandler):
             return handled
         if handled:
-            # Valid action
-            if not self.engine.player.is_alive:
-                # Player was killed
-                return GameOverEventHandler(self.engine)
-            elif self.engine.player.level.requires_level_up:
-                return LevelUpEventHandler(self.engine)
-            
-            # After a player turn, decrement burn durations on equipped items (e.g., torches)
-            try:
-                player = self.engine.player
-                for slot in ("weapon", "offhand"):
-                    item = getattr(player.equipment, slot)
-                    if item is not None and getattr(item, "burn_duration", None) is not None:
-                        try:
-                            item.burn_duration -= 1
-                            if item.burn_duration <= 0:
-                                # Remove the burned-out item: unequip and drop/consume
-                                player.equipment.unequip_from_slot(slot, add_message=False)
-                                try:
-                                    # Remove from inventory if present
-                                    if item in player.inventory.items:
-                                        player.inventory.items.remove(item)
-                                except Exception:
-                                    pass
-                                self.engine.message_log.add_message(f"Your {item.name} burns out.", color.error)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+            # Valid action - use centralized turn manager for all post-action processing
+            handler_change = self.engine.turn_manager.process_player_turn_end()
+            if handler_change:
+                return handler_change
 
             return MainGameEventHandler(self.engine) # Return to main handler
         
@@ -163,34 +142,7 @@ class EventHandler(BaseEventHandler):
         if isinstance(result, BaseEventHandler):
             return result
         
-        self.engine.handle_enemy_turns()
-        self.engine.update_fov()
-
-                # Check for darkness effect
-        if "Darkness" in [getattr(e, "name", "") for e in getattr(self.engine.player, "effects", [])]:
-            # Player is in darkness; try spawning enemies occasionally
-            if random.random() < 0.33:  # 10% chance per tick
-                self.engine.player.lucidity = max(0, self.engine.player.lucidity - 1)  # Lose 1 lucidity per tick in darkness
-        elif "Darkness" not in [getattr(e, "name", "") for e in getattr(self.engine.player, "effects", [])]:
-            self.engine.player.lucidity = min(self.engine.player.max_lucidity, self.engine.player.lucidity + 1)  # Regain 1 lucidity per tick in light
-        if self.engine.player.lucidity == 66:
-            self.engine.message_log.add_message("You feel your mind slipping...", color.purple)
-        elif self.engine.player.lucidity == 33:
-            self.engine.message_log.add_message("Your mind is deteriorating!", color.purple)
-        elif self.engine.player.lucidity == 10:
-            self.engine.message_log.add_message("Your mind is on the brink of collapse!", color.red)
-        elif self.engine.player.lucidity == 0:
-            self.engine.message_log.add_message("Your mind has collapsed into madness!", color.red)
-            # Trigger a sanity event here, e.g., spawn a powerful enemy
-        if self.engine.player.lucidity <= 66:
-            self.engine._maybe_spawn_enemy_in_dark()
-        
-        # Try spawning enemies when the player is in Darkness (non-blocking)
-        try:
-            self._maybe_spawn_enemy_in_dark()
-        except Exception:
-            pass
-
+        # Turn advancement is now handled by the turn manager
         return True
 
     def ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:

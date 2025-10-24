@@ -133,7 +133,6 @@ class FireFlicker:
             r = random.randint(200, 255)
             g = random.randint(0, 150)
             console.print(x, y, "x", fg=(r, g, 0))  # yellow-orange flicker
-
         self.frames -= 1
 
 class BonefireFlicker:
@@ -154,6 +153,7 @@ class BonefireFlicker:
             r = random.randint(200, 255)
             g = random.randint(0, 150)
             console.print(x, y, "X", fg=(r, g, 0))  # yellow-orange flicker
+
 class FireSmoke:
     def __init__(self, position):
         self.position = position

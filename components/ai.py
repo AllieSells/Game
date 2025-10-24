@@ -29,7 +29,7 @@ class BaseAI(Action):
         self.type: str = "BaseAI"
         # Movement speed system: higher values = slower movement
         # 1 = normal speed (moves every turn), 2 = half speed (moves every 2 turns)
-        self.movement_speed: int = 1
+        self.movement_speed: int = 2
         self.movement_counter: int = 0
 
     def perform(self) -> None:
