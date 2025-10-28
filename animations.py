@@ -3,6 +3,8 @@ from tcod.map import compute_fov
 import tcod
 from tcod import libtcodpy
 
+
+
 class LightningAnimation:
     def __init__(self, path):
         self.path = path
@@ -218,3 +220,40 @@ class GivingQuestAnimation():
                 console.print(x, y, "!", fg=(0, 191, 255))  # DeepSkyBlue
 
         self.frames -= 1
+
+class SlashAnimation:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.frames = 3  # duration in frames
+        self.render_priority = 2  # Above actors
+    def tick(self, console, game_map):
+        """Render a brief slash effect at the stored (x,y).
+
+        This animation expects to be called with (console, game_map) from
+        GameMap.render; it draws a small rotating glyph for a few frames
+        and then expires.
+        """
+        x, y = int(self.x), int(self.y)
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        if game_map.visible[x, y]:
+            # Curved slash effect
+            if self.frames == 3:
+                console.print(x, y, "_", fg=(255, 0, 0))  # Red
+            elif self.frames == 2:
+                console.print(x, y, "~", fg=(255, 255, 0))  # Yellow
+            elif self.frames == 1:
+                console.print(x, y, ")", fg=(255, 255, 244))  # Yellow White
+            
+            # Random spark
+            if random.random() < 0.3:
+                spark_x = x + random.choice([-1, 0, 1])
+                spark_y = y + random.choice([-1, 0, 1])
+                if game_map.in_bounds(spark_x, spark_y) and game_map.visible[spark_x, spark_y]:
+                    console.print(spark_x, spark_y, "`", fg=(255, 50, 0))  # Gold spark
+
+        self.frames -= 1
+        

@@ -25,6 +25,7 @@ player = Actor(
     effects = [],
     lucidity = 100,
     max_lucidity = 100,
+    hunger = 100.0,
 
 )
 

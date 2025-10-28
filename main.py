@@ -1,3 +1,5 @@
+import os
+import warnings
 import tcod
 import traceback
 
@@ -7,12 +9,21 @@ import input_handlers
 import setup_game
 
 
+# By default suppress noisy FutureWarning/DeprecationWarning messages from
+# third-party libraries (numpy, tcod, etc). Set the environment variable
+# GAME_SHOW_WARNINGS=1 to opt into seeing warnings during development.
+if not os.environ.get("GAME_SHOW_WARNINGS"):
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+
+
 
 def save_game(handler: input_handlers.BaseEventHandler, filename: str) -> None:
     # If current event handler has active engine then save it
     if isinstance(handler, input_handlers.EventHandler):
         handler.engine.save_as(filename)
-        print("Game saved.")
+        print("Game saved.")    
 
 
 def main() -> None:

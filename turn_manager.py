@@ -22,6 +22,9 @@ import random
 from typing import TYPE_CHECKING
 
 import color
+from components.effect import Effect
+from text_utils import orange, red
+import sounds
 
 if TYPE_CHECKING:
     from engine import Engine
@@ -33,6 +36,7 @@ class TurnManager:
     
     def __init__(self, engine: Engine):
         self.engine = engine
+        self.total_player_moves = 0  # Track total player moves for hunger system
     
     def process_player_turn_end(self) -> BaseEventHandler | None:
         """
@@ -45,6 +49,33 @@ class TurnManager:
         handler_change = self._handle_equipment_durability()
         if handler_change:
             return handler_change
+        # Hunger / saturation handling:
+        # - Saturation decreases faster each tick (represents recent food buffering).
+        # - While saturation is high, hunger decreases slowly. As saturation depletes
+        #   the hunger decrease ramps up to the full rate when saturation == 0.
+        player = self.engine.player
+        base_hunger_decrease = 0.13
+        saturation_decay = 0.22  # how quickly saturation is consumed per tick
+
+        # Drain saturation first (can't go below 0)
+        player.saturation = max(0.0, player.saturation - saturation_decay)
+
+        # Compute hunger multiplier based on remaining saturation.
+        # If saturation > 50 -> slow drain (25% of base).
+        # If 0 < saturation <= 50 -> linearly interpolate between 25% and 100%.
+        if player.saturation > 50:
+            hunger_mult = 0.25
+        elif player.saturation > 0:
+            # at saturation==50 -> 0.25, at saturation==0 -> 1.0
+            hunger_mult = 0.25 + ((50.0 - player.saturation) / 50.0) * 0.75
+        else:
+            hunger_mult = 1.0
+
+        player.hunger = max(0.0, player.hunger - (base_hunger_decrease * hunger_mult))
+        self.total_player_moves += 1
+
+
+        print(f"Hunger: {player.hunger:.2f}, Saturation: {player.saturation:.2f}, Mult: {hunger_mult:.2f}, TotalMoves: {self.total_player_moves}")
         
         # 2. Process enemy turns
         self._handle_enemy_turns()
@@ -54,14 +85,49 @@ class TurnManager:
         
         # 4. Handle status effects and environmental effects
         self._handle_status_effects()
+
+        # 5. Update player state (e.g., check for starvation)
+        self._update_player_state()
         
-        # 5. Handle special game state checks (level up, death, etc.)
+        # 6. Handle special game state checks (level up, death, etc.)
         handler_change = self._handle_game_state_checks()
         if handler_change:
             return handler_change
         
         return None
     
+    def _update_player_state(self) -> None:
+        """Update player state"""
+        if self.engine.player.hunger <= 25.0:
+            # Check if already has hunger effect
+            has_hunger = any(getattr(e, "type", "") == ("Hungry") or getattr(e, "type", "") == ("Starving") for e in self.engine.player.effects)
+            if not has_hunger:
+                self.engine.message_log.add_message("You feel hungry.", color.yellow)
+                
+                self.engine.player.add_effect(
+                    effect = Effect(
+                                name=orange("Hungry"),
+                                duration=None,
+                                description="Causes periodic damage due to starvation.",
+                                type="Hungry"
+                    )
+                )
+        if self.engine.player.hunger <= 10.0:
+            # Already starving?
+            has_starving = any(getattr(e, "type", "") == ("Starving") for e in self.engine.player.effects)
+            if not has_starving:
+                self.engine.message_log.add_message("You are starving!", color.red)
+                self.engine.player.add_effect(
+                    effect=Effect(
+                        name=red("Starving"),
+                        duration=None,
+                        description="Causes severe damage due to starvation.",
+                        type="Starving"
+                ))
+            # Remove hungry effect if present
+            has_hunger = any(getattr(e, "type", "") == "Hungry" for e in self.engine.player.effects)
+            if has_hunger:
+                self.engine.player.remove_effect("Hungry")
     def _handle_equipment_durability(self) -> BaseEventHandler | None:
         """Handle equipment that degrades over time (like torches)."""
         try:
@@ -80,6 +146,7 @@ class TurnManager:
                                     player.inventory.items.remove(item)
                             except Exception:
                                 pass
+                            sounds.torch_burns_out_sound.play()
                             self.engine.message_log.add_message(f"Your {item.name} burns out.", color.error)
                     except Exception:
                         pass

@@ -113,6 +113,7 @@ class Actor(Entity):
         sight_radius: int = 6,
         gold: int = 0,
         hunger: float = 100.0,
+        saturation: float = 100.0,
     ):
         super().__init__(
             x=x,
@@ -166,6 +167,7 @@ class Actor(Entity):
         self.sight_radius = sight_radius
         self.gold = gold
         self.hunger = hunger
+        self.saturation = saturation
 
     def add_effect(self, effect: 'Effect') -> None:
         """Attach an Effect to this actor."""
@@ -173,13 +175,10 @@ class Actor(Entity):
             self.effects = []
         self.effects.append(effect)
 
-    def remove_effect(self, effect: 'Effect') -> None:
-        """Remove an Effect from this actor if present."""
-        try:
-            self.effects.remove(effect)
-        except ValueError:
-            pass
-
+    def remove_effect(self, effect_type: str) -> None:
+        """Remove an Effect based on type"""
+        self.effects = [e for e in self.effects if e.type != effect_type]
+        
     @property
     def is_alive(self) -> bool:
         return bool(self.ai)

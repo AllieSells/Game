@@ -167,8 +167,38 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) 
         x = random.randint(room.x1+1, room.x2-1)
         y= random.randint(room.y1+1, room.y2-1)
 
+
         if not any(entity.x == x and entity.y == y for entity in dungeon.entities):
             entity.spawn(dungeon, x, y)
+
+        # Roll equipment for monster based on dict values
+        mob_equip_dict = {
+            "Orc": {
+                "weapon":{
+                    entity_factories.dagger: 10,
+                    None: 50
+                },
+                "armor":{
+                    entity_factories.leather_armor: 15,
+                    None: 45
+                }
+            }
+        }
+        # Roll for mob equipment
+        if entity.name in mob_equip_dict:
+            equip_rolls = mob_equip_dict[entity.name]
+            for slot, items in equip_rolls.items():
+                item_names = list(items.keys())
+                item_weights = list(items.values())
+                chosen_item = random.choices(item_names, weights=item_weights, k=1)[0]
+                if chosen_item is not None:
+                    # Deep copy
+                    import copy as _copy
+                    item_copy = _copy.deepcopy(chosen_item)
+                    item_copy.parent = entity.inventory
+                    entity.equipment.equip_to_slot(slot, item_copy, False)
+                    print(f"Equipped {entity.name} with {item_copy.name} in slot {slot}")
+
     # Place campfire using centralized logic
     place_campfires(dungeon, "dungeon_room", room=room)
 def tunnel_between(
@@ -350,17 +380,15 @@ def generate_village(
     player = engine.player
     import components.names as names
     name = names.get_location_name("Village")
-    village = GameMap(engine, map_width, map_height, entities=[player], type="village", name=name)
+    village = GameMap(engine, map_width, map_height, entities=[player], type="dungeon", name=name)  # Use dungeon type for world borders
     
     # Create town center area (large open space in the middle)
     center_x = map_width // 2
     center_y = map_height // 2
     town_center_radius = min(map_width, map_height) // 4
     
-    # Start with walls everywhere, then carve out the village
-    village.tiles[:] = tile_types.random_wall_tile()
-    
     # Create the main village area (leave border walls)
+    # The GameMap constructor already filled everything with walls and world borders
     village_border = 2  # 2-tile thick walls around the perimeter
     
     # Generate random floor tiles for each position
@@ -563,8 +591,193 @@ def generate_village(
         if not any(e.x == camp_x and e.y == camp_y for e in village.entities):
             entity_factories.bonfire.spawn(village, camp_x, camp_y)
     
-    return village
+    # Post-processing: Remove isolated walls that have no floors touching them
+    remove_isolated_walls(village)
     
+    # Apply wall merging system to create connected wall appearances
+    apply_wall_merging(village)
+    
+    return village
+
+def remove_isolated_walls(dungeon: GameMap) -> None:
+    """Remove walls that have no floor tiles touching them in a 3x3 grid."""
+    walls_to_remove = []
+    
+    for x in range(dungeon.width):
+        for y in range(dungeon.height):
+            # Check if this tile is a wall
+            if not dungeon.tiles[x, y]["walkable"] and not dungeon.tiles[x, y]["interactable"]:
+                # Check 3x3 grid around this wall tile
+                has_adjacent_floor = False
+                
+                for dx in range(-1, 2):  # -1, 0, 1
+                    for dy in range(-1, 2):  # -1, 0, 1
+                        if dx == 0 and dy == 0:  # Skip the center tile (the wall itself)
+                            continue
+                            
+                        check_x = x + dx
+                        check_y = y + dy
+                        
+                        # Check if coordinates are in bounds
+                        if 0 <= check_x < dungeon.width and 0 <= check_y < dungeon.height:
+                            # Check if this neighboring tile is a floor (walkable)
+                            if dungeon.tiles[check_x, check_y]["walkable"]:
+                                has_adjacent_floor = True
+                                break
+                        else:
+                            # Out of bounds counts as "floor" for border walls
+                            has_adjacent_floor = True
+                            break
+                    
+                    if has_adjacent_floor:
+                        break
+                
+                # If no floor tiles are adjacent, mark this wall for removal
+                if not has_adjacent_floor:
+                    walls_to_remove.append((x, y))
+    
+    # Replace isolated walls with floor tiles
+    for x, y in walls_to_remove:
+        dungeon.tiles[x, y] = tile_types.random_floor_tile()
+
+def get_wall_connections(dungeon: GameMap, x: int, y: int) -> Dict[str, bool]:
+    """Check which directions have wall connections in a 3x3 grid around the position."""
+    connections = {
+        'north': False,
+        'south': False, 
+        'east': False,
+        'west': False,
+        'northeast': False,
+        'northwest': False,
+        'southeast': False,
+        'southwest': False
+    }
+    
+    # Direction mappings
+    directions = {
+        'north': (0, -1),
+        'south': (0, 1),
+        'east': (1, 0), 
+        'west': (-1, 0),
+        'northeast': (1, -1),
+        'northwest': (-1, -1),
+        'southeast': (1, 1),
+        'southwest': (-1, 1)
+    }
+    
+    for direction, (dx, dy) in directions.items():
+        check_x = x + dx
+        check_y = y + dy
+        
+        # Check if coordinates are in bounds
+        if 0 <= check_x < dungeon.width and 0 <= check_y < dungeon.height:
+            # Check if this neighboring tile is a wall or door, but not a world border
+            tile = dungeon.tiles[check_x, check_y]
+            is_wall = not tile["walkable"] and not tile["interactable"]
+            is_door = not tile["walkable"] and tile["interactable"]
+            is_world_border = tile["name"] == "World Border"
+            
+            # Only connect to walls and doors, not world borders
+            if (is_wall or is_door) and not is_world_border:
+                connections[direction] = True
+        # Note: Out of bounds is NOT considered a wall connection
+        # Only actual walls and doors within the map count as connections
+    
+    return connections
+
+def determine_wall_tile(connections: Dict[str, bool]):
+    """Determine the appropriate wall tile based on connection pattern."""
+    # Extract main directions for easier checking
+    n = connections['north']
+    s = connections['south']
+    e = connections['east']
+    w = connections['west']
+    ne = connections['northeast']
+    nw = connections['northwest']
+    se = connections['southeast']
+    sw = connections['southwest']
+
+    if n and s and e and w and nw and sw and not ne and not se:
+        return tile_types.get_wall_top_left()
+    
+    # Double wall reduction - vertical
+    if n and s and e and w:
+        return tile_types.get_wall_cross()
+    
+    if n and nw and w and s and sw:
+        # Return vertical
+        return tile_types.get_wall_vertical()
+    if n and ne and e and s and se:
+        # Return vertical
+        return tile_types.get_wall_vertical()
+    
+    # Double wall reduction - horizontal
+    if e and se and s and w and sw:
+        # Return horizontal
+        return tile_types.get_wall_horizontal()
+    if w and nw and n and e and ne:
+        # Return horizontal
+        return tile_types.get_wall_horizontal()
+    
+
+    
+    
+    
+    
+    # T-junctions (3 directions)
+    if n and s and w and not e:  # T facing right (╣) - connects up, down, left
+        return tile_types.get_wall_t_right()
+    if n and s and e and not w:  # T facing left (╠) - connects up, down, right
+        return tile_types.get_wall_t_left()
+    if e and w and s and not n:  # T facing up (╦) - connects left, right, down
+        return tile_types.get_wall_t_up()
+    if e and w and n and not s:  # T facing down (╩) - connects left, right, up
+        return tile_types.get_wall_t_down()
+    
+    # Corners (2 perpendicular directions)
+    if n and e and not s and not w:  # Top-left corner
+        return tile_types.get_wall_top_left()
+    if n and w and not s and not e:  # Top-right corner
+        return tile_types.get_wall_top_right()
+    if s and e and not n and not w:  # Bottom-left corner
+        return tile_types.get_wall_bottom_left()
+    if s and w and not n and not e:  # Bottom-right corner
+        return tile_types.get_wall_bottom_right()
+    
+    # Straight lines (2 opposite directions or single direction)
+    if (n and s) or (n and not s and not e and not w) or (s and not n and not e and not w):
+        return tile_types.get_wall_vertical()
+    if (e and w) or (e and not w and not n and not s) or (w and not e and not n and not s):
+        return tile_types.get_wall_horizontal()
+    
+    # Fallback to basic wall for complex or unhandled patterns
+    return tile_types.wall
+
+def apply_wall_merging(dungeon: GameMap) -> None:
+    """Apply wall merging system to all wall tiles in the dungeon."""
+    walls_to_update = []
+    
+    # First pass: identify all wall tiles and their appropriate replacements
+    for x in range(dungeon.width):
+        for y in range(dungeon.height):
+            # Check if this tile is a wall, but not a world border
+            tile = dungeon.tiles[x, y]
+            is_wall = not tile["walkable"] and not tile["interactable"]
+            is_world_border = tile["name"] == "World Border"
+            
+            if is_wall and not is_world_border:
+                # Get wall connections in 3x3 grid
+                connections = get_wall_connections(dungeon, x, y)
+                
+                # Determine appropriate wall tile
+                new_wall_tile = determine_wall_tile(connections)
+                
+                # Store the update for later application
+                walls_to_update.append((x, y, new_wall_tile))
+    
+    # Second pass: apply all updates
+    for x, y, new_tile in walls_to_update:
+        dungeon.tiles[x, y] = new_tile
 
 def generate_dungeon(
         max_rooms: int,
@@ -587,8 +800,19 @@ def generate_dungeon(
         room_width = random.randint(room_min_size, room_max_size)
         room_height = random.randint(room_min_size, room_max_size)
 
-        x = random.randint(0, dungeon.width - room_width - 1)
-        y = random.randint(0, dungeon.height - room_height - 1)
+        # Keep rooms away from world borders - ensure at least 2 tiles buffer
+        # This prevents room walls from being adjacent to world borders
+        min_x = 2
+        max_x = dungeon.width - room_width - 3
+        min_y = 2  
+        max_y = dungeon.height - room_height - 3
+        
+        # Make sure we have valid bounds for room placement
+        if max_x <= min_x or max_y <= min_y:
+            continue
+            
+        x = random.randint(min_x, max_x)
+        y = random.randint(min_y, max_y)
 
         new_room = RectangularRoom(x, y, room_width, room_height)
 
@@ -604,7 +828,7 @@ def generate_dungeon(
             try:
                 # Build a small loot list: health potion + torch (deepcopy to avoid shared parents)
                 import copy as _copy
-                loot = [_copy.deepcopy(entity_factories.health_potion), _copy.deepcopy(entity_factories.torch), entity_factories.get_random_coins(1, 10)]
+                loot = [_copy.deepcopy(entity_factories.health_potion), _copy.deepcopy(entity_factories.torch), entity_factories.get_random_coins(1, 10), _copy.deepcopy(entity_factories.lightning_scroll)]
                 test_chest = entity_factories.make_chest_with_loot(loot, capacity=6)
                 cx, cy = new_room.center
                 chest_x, chest_y = min(dungeon.width - 1, cx + 1), cy
@@ -644,5 +868,10 @@ def generate_dungeon(
 
         rooms.append(new_room)
 
+    # Post-processing: Remove isolated walls that have no floors touching them
+    remove_isolated_walls(dungeon)
+    
+    # Apply wall merging system to create connected wall appearances
+    apply_wall_merging(dungeon)
 
     return dungeon

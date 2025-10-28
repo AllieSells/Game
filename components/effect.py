@@ -9,6 +9,7 @@ class Effect:
     name: str
     duration: Optional[int] = None  # None = permanent
     description: str = ""
+    type: str = "status"  # e.g., "status", "buff", "debuff"
 
     def tick(self, target):
         """Called each turn to update effect state. Returns True if expired."""

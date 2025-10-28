@@ -21,6 +21,8 @@ from input_handlers import (
 if TYPE_CHECKING:
     from entity import Actor, Item
 
+import sounds
+
 
 class Consumable(BaseComponent):
     parent: Item
@@ -37,7 +39,9 @@ class Consumable(BaseComponent):
         #removes consumed item from inventory
         entity = self.parent
         inventory = entity.parent
+        print("Inventory:", inventory, type(inventory), entity)
         if isinstance(inventory, components.inventory.Inventory):
+            print("Consuming item:", entity.name)
             inventory.items.remove(entity)
 
 class ConfusionConsumable(Consumable):
@@ -68,11 +72,12 @@ class ConfusionConsumable(Consumable):
         self.engine.message_log.add_message(
             f"You have confused the {target.name}!", color.status_effect_applied
         )
+        
         target.ai = components.ai.ConfusedEnemy(
             entity=target, previous_ai=target.ai, turns_remaining=self.number_of_turns,
         )
         self.consume()
-
+        sounds.confusion_sound.play()
 class HealingConsumables(Consumable):
     def __init__(self, amount: int):
         self.amount = amount
@@ -120,9 +125,10 @@ class LightningDamageConsumable(Consumable):
             self.engine.message_log.add_message(
                 f"A lightning bolt strikes the {target.name} for {self.damage} damage!"
             )
+            
             target.fighter.take_damage(self.damage)
             self.consume()
-
+            sounds.lightning_sound.play()
         else:
 
             raise Impossible("No enemy is close enough to strike!") 

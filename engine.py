@@ -16,6 +16,7 @@ import exceptions
 import game_map
 from message_log import MessageLog
 import render_functions
+import sounds
 
 if TYPE_CHECKING:
     from entity import Actor
@@ -330,6 +331,7 @@ class Engine:
             # optional message/log
             try:
                 if hasattr(self, "message_log"):
+                    sounds.darkness_spawn_sound.play()
                     self.message_log.add_message("You hear something moving in the dark...")
             except Exception:
                 pass
@@ -397,7 +399,7 @@ class Engine:
                 if not has_darkness:
                     try:
                         # duration=None => persistent until removed
-                        self.player.add_effect(Effect(name="Darkness", duration=None, description="You are in darkness"))
+                        self.player.add_effect(Effect(name="Darkness", duration=None, description="You are in darkness", type="Darkness"))
                     except Exception:
                         pass
             else:
@@ -405,8 +407,8 @@ class Engine:
                 if has_darkness:
                     for e in list(self.player.effects):
                         try:
-                            if getattr(e, "name", "") == "Darkness":
-                                self.player.remove_effect(e)
+                            if getattr(e, "type", "") == "Darkness":
+                                self.player.remove_effect(e.type)
                         except Exception:
                             pass
         except Exception:

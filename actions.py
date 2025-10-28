@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from components.container import Container
 
 
+import sounds
+
 class Action:
     def __init__(self, entity: Actor) -> None:
         super().__init__()
@@ -58,6 +60,7 @@ class InteractAction(Action):
                     raise exceptions.Impossible("The chest is empty.")
                 else:
                     # Send to input handler to display contents
+                    sounds.chest_open_sound.play()
                     from input_handlers import ContainerEventHandler
                     return ContainerEventHandler(self.engine, container)
 
@@ -72,12 +75,14 @@ class InteractAction(Action):
                 # Convert "Door" tile to "Open Door" tile
                 import tile_types
                 self.engine.game_map.tiles[target_x, target_y] = tile_types.open_door
+                sounds.door_open_sound.play()
                 self.engine.message_log.add_message("You open the door.")
 
             elif name == "Open Door":
                 # Convert "Open Door" tile to "Door" tile
                 import tile_types
                 self.engine.game_map.tiles[target_x, target_y] = tile_types.closed_door
+                sounds.door_close_sound.play()
                 self.engine.message_log.add_message("You close the door.")
 
             else:
@@ -116,9 +121,10 @@ class PickupAction(Action):
                     raise exceptions.Impossible("The bonfire is too hot to handle!")
 
                 if "coin" in item.name.lower():
-                    self.engine.message_log.add_message("You pick up some coins.", color.yellow)
                     self.engine.player.gold += item.value
                     self.engine.game_map.entities.remove(item)
+                    sounds.pickup_coin_sound.play()
+                    self.engine.message_log.add_message("You pick up some coins.", color.yellow)
                     return
                 else:
                     self.engine.game_map.entities.remove(item)
@@ -135,10 +141,10 @@ class PickupAction(Action):
                     new_torch = copy.deepcopy(torch)
                     new_torch.parent = self.entity.inventory
                     inventory.items.append(new_torch)
-
+                    sounds.pull_torch_sound.play()
                     self.engine.message_log.add_message("You pull a burning log from the fire")
                     return
-                
+                sounds.play_transfer_item_sound()
                 self.engine.message_log.add_message(f"You picked up the {item.name}!")
                 return
         raise exceptions.Impossible("There is nothing here to pick up.")
@@ -215,7 +221,7 @@ class TakeStairsAction(Action):
             except Exception:
                 # Fallback to previous behavior
                 self.engine.game_world.generate_floor()
-
+            sounds.stairs_sound.play()
             self.engine.message_log.add_message("You descend the staircase.", color.descend)
             return
 
@@ -224,6 +230,7 @@ class TakeStairsAction(Action):
             # Call ascend on the GameWorld if available; if not, try map-level ascend
             try:
                 self.engine.game_world.ascend()
+                sounds.stairs_sound.play()
                 self.engine.message_log.add_message("You ascend the staircase.", color.ascend)
                 return
             except Exception:
@@ -272,6 +279,10 @@ class MeleeAction(ActionWithDirection):
         damage = self.entity.fighter.power - target.fighter.defense
 
         attack_desc = f"{self.entity.name.capitalize()} attacks {target.name}"
+        sounds.play_attack_sound()
+        # Add slash animation
+        from animations import SlashAnimation
+        self.engine.animation_queue.append(SlashAnimation(target.x, target.y))
 
         if self.entity is self.engine.player:
             attack_color = color.player_atk
@@ -302,6 +313,8 @@ class MovementAction(ActionWithDirection):
             raise exceptions.Impossible("That way is blocked.")  # Destination is blocked by an entity.
         
         self.entity.move(self.dx, self.dy)
+        #sounds.play_walk_sound()
+
 
 class BumpAction(ActionWithDirection):
     def perform(self) -> None:

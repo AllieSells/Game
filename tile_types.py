@@ -106,7 +106,7 @@ def random_wall_tile():
         light=(glyph, light_fg, light_bg),
     )
 
-def place_oriented_wall():
+
     
 
 
@@ -143,10 +143,80 @@ wall = new_tile(
     walkable=False,
     transparent=False,
     # Use darker greys for wall glyph foreground so the wall glyph appears less bright
-    dark=(ord("║"), (60, 60, 60), (15, 15, 15)),
+    dark=(ord(" "), (60, 60, 60), (15, 15, 15)),
     # Make wall foreground/background a bit whiter when lit to increase contrast
-    light=(ord("║"), (200, 200, 200), (60, 60, 60)),
+    light=(ord(" "), (200, 200, 200), (60, 60, 60)),
 )
+
+# Box drawing wall tile generator function
+def create_wall_tile(character: str, base_tile=None):
+    """Create a wall tile with the specified character using the stone wall as template."""
+    if base_tile is None:
+        base_tile = wall
+    
+    # Create a copy of the base tile with the new character
+    return new_tile(
+        name=base_tile["name"],
+        walkable=base_tile["walkable"],
+        transparent=base_tile["transparent"],
+        dark=(ord(character), base_tile["dark"]["fg"], base_tile["dark"]["bg"]),
+        light=(ord(character), base_tile["light"]["fg"], base_tile["light"]["bg"]),
+        interactable=base_tile["interactable"],
+    )
+
+# Wall tile variants - generated on demand
+def get_wall_horizontal():
+    return create_wall_tile("═")
+
+def get_wall_vertical():
+    return create_wall_tile("║")
+
+def get_wall_top_left():
+    return create_wall_tile("╚")
+
+def get_wall_top_right():
+    return create_wall_tile("╝")
+
+def get_wall_bottom_left():
+    return create_wall_tile("╔")
+
+def get_wall_bottom_right():
+    return create_wall_tile("╗")
+
+def get_wall_cross():
+    return create_wall_tile("╬")
+
+def get_wall_t_up():
+    return create_wall_tile("╦")
+
+def get_wall_t_down():
+    return create_wall_tile("╩")
+
+def get_wall_t_left():
+    return create_wall_tile("╠")
+
+def get_wall_t_right():
+    return create_wall_tile("╣")
+
+debug_wall = new_tile(
+    name="Stone Wall",
+    walkable=False,
+    transparent=False,
+    # Use darker greys for wall glyph foreground so the wall glyph appears less bright
+    dark=(ord(" "), (60, 60, 60), (15, 15, 15)),
+    # Make wall foreground/background a bit whiter when lit to increase contrast
+    light=(ord(" "), (255, 10, 10), (255, 60, 60)),
+)
+
+world_border = new_tile(
+    name="World Border",
+    walkable=False,
+    transparent=False,
+    # Use a distinctive character and darker colors for world border
+    dark=(ord("▓"), (255, 0, 0), (0, 0, 0)),
+    light=(ord("▓"), (255, 0, 0), (255, 0, 0)),
+)
+
 down_stairs = new_tile(
     name="<purple>Down Stairs</purple>",
     walkable=True,

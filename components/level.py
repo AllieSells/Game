@@ -7,6 +7,7 @@ from components.base_component import BaseComponent
 if TYPE_CHECKING:
     from entity import Actor
 
+import sounds
 
 class Level(BaseComponent):
     parent: Actor
@@ -18,12 +19,14 @@ class Level(BaseComponent):
         level_up_base: int = 0,
         level_up_factor: int = 150,
         xp_given: int = 0,
+        score: int = 0
     ):
         self.current_level = current_level
         self.current_xp = current_xp
         self.level_up_base = level_up_base
         self.level_up_factor = level_up_factor
         self.xp_given = xp_given
+        self.score = score
 
     @property
     def experience_to_next_level(self) -> int:
@@ -38,10 +41,12 @@ class Level(BaseComponent):
             return
 
         self.current_xp += xp
+        self.score += xp
 
         self.engine.message_log.add_message(f"You gain {xp} experience points.")
 
         if self.requires_level_up:
+            sounds.level_up_sound.play()
             self.engine.message_log.add_message(
                 f"You advance to level {self.current_level + 1}!"
             )
@@ -50,6 +55,7 @@ class Level(BaseComponent):
         self.current_xp -= self.experience_to_next_level
 
         self.current_level += 1
+
 
     def increase_max_hp(self, amount: int = 20) -> None:
         self.parent.fighter.max_hp += amount

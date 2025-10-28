@@ -28,7 +28,11 @@ class GameMap:
             self.tiles = np.empty((width, height), dtype=tile_types.tile_dt, order="F")
             for x in range(width):
                 for y in range(height):
-                    self.tiles[x, y] = tile_types.random_wall_tile()
+                    # Place world borders around the edges
+                    if x == 0 or x == width - 1 or y == 0 or y == height - 1:
+                        self.tiles[x, y] = tile_types.world_border
+                    else:
+                        self.tiles[x, y] = tile_types.random_wall_tile()
         else:
             # Preserve original behavior for other map types.
             self.tiles = np.full((width, height), fill_value=tile_types.wall, order="F")

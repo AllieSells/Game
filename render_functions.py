@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import tcod
 
 import color
+import text_utils
 
 # Try to import animation helpers if they exist; fall back gracefully.
 try:
@@ -173,13 +174,13 @@ def render_gold(
 # Status effect render
 def render_effects(console: 'Console', effects: list) -> None:
     # Display a single lighting status word on the right-hand panel.
-    try:
-        has_darkness = any(getattr(e, "name", "") == "Darkness" for e in effects)
-    except Exception:
-        has_darkness = False
-
-    status = "Darkness" if has_darkness else "Light"
-    console.print(x=61, y=41, string=status, fg=(255, 255, 255))
+    effect_display = "Effects: "
+    for effect in effects:
+        try:
+            effect_display += effect.name + " "
+        except Exception:
+            pass
+    text_utils.print_colored_markup(x=2, y=41, console=console, text=effect_display)
 
 
 

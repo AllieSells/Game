@@ -29,6 +29,7 @@ import engine
 import exceptions
 
 from text_utils import *
+import sounds
 
 
 if TYPE_CHECKING:
@@ -178,7 +179,112 @@ class AskUserEventHandler(EventHandler):
 
 
 class CharacterScreenEventHandler(AskUserEventHandler):
-    TITLE = "Character Information"
+    TITLE = "Character Sheet"
+
+    def __init__(self, engine):
+        super().__init__(engine)
+        # Collapsible sections state (kept for future use). Sections removed per request.
+        self.collapsed_sections = set()
+
+        # NOTE: left/right section lists were removed to make the menu narrow and
+        # minimal. If you want to re-add sections later, populate
+        # `self.left_sections` and `self.right_sections` with the same structure
+        # as before (id/title/color/items).
+
+    def ev_keydown(self, event):
+        key = event.sym
+        # Keep behavior minimal: number-key toggles were removed with sections.
+        # Defer to base handler for navigation and closing.
+        if key == tcod.event.K_ESCAPE:
+            return MainGameEventHandler(self.engine)
+        return super().ev_keydown(event)
+
+    def _render_colored_text(self, console, x, y, text):
+        """Helper to render colored text and return the width used."""
+        from text_utils import parse_colored_text
+        segments = parse_colored_text(text)
+        x_offset = 0
+        for text_part, color in segments:
+            console.print(x=x + x_offset, y=y, string=text_part, fg=color)
+            x_offset += len(text_part)
+        return x_offset
+
+    def _render_section(self, console, section, x, y, width, section_num):
+        """Render a collapsible section and return the height used."""
+        is_collapsed = section["id"] in self.collapsed_sections
+        
+        # Section header with collapse indicator
+        collapse_icon = "▼" if not is_collapsed else "▶"
+        header_text = f"<gray>{collapse_icon}</gray> <{section['color']}>[{section_num}] {section['title']}</{section['color']}>"
+        self._render_colored_text(console, x, y, header_text)
+        
+        height_used = 1
+        
+        if not is_collapsed:
+            # Render section items
+            items = section["items"]()
+            for i, item in enumerate(items):
+                if y + height_used + 1 < console.height - 1:  # Bounds check
+                    self._render_colored_text(console, x + 2, y + height_used + 1, item)
+                    height_used += 1
+            height_used += 1  # Extra spacing after section
+        
+        return height_used
+
+    def _get_basic_info_items(self):
+        player = self.engine.player
+        return [
+            f"<white>Name:</white> <yellow>{player.name}</yellow>",
+            f"<white>Race:</white> <white>Human</white>",  # Placeholder
+            f"<white>Class:</white> <white>Adventurer</white>"  # Placeholder
+        ]
+
+    def _get_experience_items(self):
+        player = self.engine.player
+        if player.level.current_level < 30:
+            next_xp = player.level.experience_to_next_level
+            next_text = f"{next_xp}"
+        else:
+            next_text = "MAX LEVEL"
+        
+        return [
+            f"<cyan>Level:</cyan> <white>{player.level.current_level}</white>",
+            f"<cyan>Current XP:</cyan> <white>{player.level.current_xp}</white>",
+            f"<cyan>XP to Next:</cyan> <white>{next_text}</white>"
+        ]
+
+    def _get_attributes_items(self):
+        # Placeholder for future attribute system
+        return [
+            f"<green>Strength:</green> <white>10</white>",
+            f"<green>Dexterity:</green> <white>10</white>",
+            f"<green>Intelligence:</green> <white>10</white>",
+            f"<green>Constitution:</green> <white>10</white>"
+        ]
+
+    def _get_combat_items(self):
+        player = self.engine.player
+        return [
+            f"<red>Health:</red> <white>{player.fighter.hp}/{player.fighter.max_hp}</white>",
+            f"<orange>Attack:</orange> <white>{player.fighter.power}</white>",
+            f"<lightblue>Defense:</lightblue> <white>{player.fighter.defense}</white>"
+        ]
+
+    def _get_equipment_items(self):
+        # Placeholder for equipment system
+        return [
+            f"<orange>Weapon:</orange> <gray>None</gray>",
+            f"<orange>Armor:</orange> <gray>None</gray>",
+            f"<orange>Accessory:</orange> <gray>None</gray>"
+        ]
+
+    def _get_skills_items(self):
+        # Placeholder for skills system  
+        return [
+            f"<lightblue>Swordsmanship:</lightblue> <white>1</white>",
+            f"<lightblue>Archery:</lightblue> <white>1</white>",
+            f"<lightblue>Magic:</lightblue> <white>1</white>"
+        ]
 
     def on_render(self, console: tcod.Console) -> None:
         super().on_render(console)
@@ -187,39 +293,71 @@ class CharacterScreenEventHandler(AskUserEventHandler):
             x = 40
         else:
             x = 0
-
+        # Dimensions (narrower menu, responsive to console width)
         y = 0
-
-        width = len(self.TITLE) + 4
+        # Ensure the menu fits on screen; prefer 44 but shrink if needed
+        max_available = max(24, console.width - x - 2)
+        width = min(44, max_available)
+        height = 18
 
         console.draw_frame(
-            x=x,
-            y=y,
-            width = width,
-            height = 7,
-            title=self.TITLE,
-            clear=True,
-            fg=(255,255,255),
-            bg=(0,0,0)
-        )
-        console.print(
-            x=x + 1, y=y + 1, string=f"Level: {self.engine.player.level.current_level}"
-        )
-        console.print(
-            x=x + 1, y=y + 2, string=f"XP: {self.engine.player.level.current_xp}"
-        )
-        console.print(
-            x=x + 1,
-            y=y + 3,
-            string=f"XP for next Level: {self.engine.player.level.experience_to_next_level}",
+            x=x, y=y, width=width, height=height,
+            title=self.TITLE, clear=True,
+            fg=(255,255,255), bg=(0,0,0)
         )
 
-        console.print(
-            x=x + 1, y=y + 4, string=f"Attack: {self.engine.player.fighter.power}"
-        )
-        console.print(
-            x=x + 1, y=y + 5, string=f"Defense: {self.engine.player.fighter.defense}"
-        )
+        player = self.engine.player
+
+        # Draw small centered 5x5 player box above the divider
+        divider_x = x + (width // 2)
+        box_w = 5
+        box_h = 5
+        box_x = divider_x - (box_w // 2)
+        # move the box one row down so we can print the name above it
+        box_y = y + 2
+        console.draw_frame(x=box_x, y=box_y, width=box_w, height=box_h, title="", clear=True, fg=(200,200,200), bg=(0,0,0))
+        # player centered in the box
+        console.print(x=box_x + (box_w // 2), y=box_y + (box_h // 2), string=player.char, fg=player.color)
+        # name printed above the box (supports text_utils markup)
+        name_text = f"<yellow>{player.name}</yellow>"
+        name_width = len(player.name)
+        name_x = box_x + (box_w // 2) - (name_width // 2)
+        # print the name one row above the box
+        self._render_colored_text(console, name_x, box_y - 1, name_text)
+
+        # Draw divider from one row below the name to the bottom
+        for div_y in range(box_y + box_h, y + height - 1):
+            console.print(x=divider_x, y=div_y, string="│", fg=(128, 128, 128))
+
+        # LEFT PANEL (static) - quick stats
+        left_x = x + 1
+        left_width = divider_x - x - 2
+        left_start_y = box_y + box_h
+        quick_stats = [
+            f"<white>Level:</white> <cyan>{player.level.current_level}</cyan>",
+            f"<white>HP:</white> <red>{player.fighter.hp}/{player.fighter.max_hp}</red>",
+            f"<white>XP:</white> <cyan>{player.level.current_xp}</cyan>",
+            "",
+            f"<white>Attack:</white> <orange>{player.fighter.power}</orange>",
+            f"<white>Defense:</white> <lightblue>{player.fighter.defense}</lightblue>",
+        ]
+        for i, stat in enumerate(quick_stats):
+            if stat:
+                self._render_colored_text(console, left_x, left_start_y + i, stat)
+
+        # RIGHT PANEL (static) - placeholder for future detailed info
+        right_x = divider_x + 1
+        right_width = x + width - divider_x - 2
+        right_start_y = box_y + box_h
+        character_stats = [
+            "<white>Character Stats</white>",
+        ]
+        for i, stat in enumerate(character_stats):
+            self._render_colored_text(console, right_x, right_start_y + i, stat)
+
+        # Instructions at bottom
+        instruction_text = "<gray>ESC: Close</gray>"
+        self._render_colored_text(console, x + 1, y + height - 2, instruction_text)
 
 
 class DialogueEventHandler(AskUserEventHandler):
@@ -651,7 +789,14 @@ class ContainerEventHandler(AskUserEventHandler):
                     self.engine.player.equipment.unequip_from_slot(slot, add_message=True)
 
                 self.engine.player.inventory.items.remove(item)
+                # Move item into the container and update its parent so
+                # later logic (consumption, transfers) sees the correct owner.
                 self.container.items.append(item)
+                try:
+                    item.parent = self.container
+                except Exception:
+                    pass
+                
                 self.engine.message_log.add_message(f"You transfer the {item.name}.")
             except Exception:
                 print(traceback.format_exc(), color.error)
@@ -670,7 +815,13 @@ class ContainerEventHandler(AskUserEventHandler):
                         self.engine.player.gold += item.value
                         self.engine.message_log.add_message(f"You pick up some coins.")
                         return self
+                    # Add to player inventory and update parent link.
                     self.engine.player.inventory.items.append(item)
+                    try:
+                        item.parent = self.engine.player.inventory
+                    except Exception:
+                        pass
+                    sounds.play_transfer_item_sound()
                     self.engine.message_log.add_message(f"You take the {item.name}.")
             except Exception:
                 
@@ -843,6 +994,7 @@ class QuaffActivateHandler(InventoryEventHandler):
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
         # Returns the action for the selected item
         if "Potion" in item.name and item.consumable:
+            sounds.quaff_sound.play()
             return item.consumable.get_action(self.engine.player)
         else:
             self.engine.message_log.add_message(f"You cannot drink the {item.name}.", color.invalid)

@@ -10,6 +10,7 @@ from render_order import RenderOrder
 if TYPE_CHECKING:
     from entity import Actor
 
+import sounds
 
 
 class Fighter(BaseComponent):
@@ -59,6 +60,7 @@ class Fighter(BaseComponent):
             return 0
     
     def die(self) -> None:
+        sounds.death_sound.play()
         if self.engine.player is self.parent:
             death_message = "YOU DIED IDIOT"
             death_message_color = color.player_die
@@ -108,7 +110,8 @@ class Fighter(BaseComponent):
         self.parent.color = (191, 0, 0)
         self.parent.blocks_movement = False
         self.parent.ai = None
-        self.parent.name = f"This is the lifeless remains of {self.parent.name}"
+        import text_utils
+        self.parent.name = text_utils.red(f"This is the lifeless remains of {self.parent.name}")
         self.parent.render_order = RenderOrder.CORPSE
         self.parent.type = "Dead"
 
