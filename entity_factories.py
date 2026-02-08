@@ -10,6 +10,7 @@ from components.container import Container
 from entity import Actor, Item
 from render_order import RenderOrder
 import components.names as names
+import sounds
 from text_utils import *
 
 player = Actor(
@@ -71,6 +72,10 @@ health_potion = Item(
     name="Health Potion",
     consumable=consumable.HealingConsumables(amount=4),
     description="A small vial filled with a red liquid.",
+    equip_sound=sounds.play_equip_glass_sound,
+    unequip_sound=sounds.play_unequip_glass_sound,
+    pickup_sound=sounds.pick_up_glass_sound,
+    drop_sound=sounds.drop_glass_sound,
 )
 lightning_scroll = Item(
     char="~",
@@ -78,6 +83,10 @@ lightning_scroll = Item(
     name="Lightning Scroll",
     consumable=consumable.LightningDamageConsumable(damage=20, maximum_range=5),
     description="A tattered scroll crackling with electricity.",
+    equip_sound=sounds.play_equip_paper_sound,
+    unequip_sound=sounds.play_unequip_paper_sound,
+    pickup_sound=sounds.pick_up_paper_sound,
+    drop_sound=sounds.drop_paper_sound,
 )
 
 confusion_scroll = Item(
@@ -86,6 +95,10 @@ confusion_scroll = Item(
     name="Confusion Scroll",
     consumable=consumable.ConfusionConsumable(number_of_turns=10),
     description="A worn scroll that seems to distort the mind.",
+    equip_sound=sounds.play_equip_paper_sound,
+    unequip_sound=sounds.play_unequip_paper_sound,
+    pickup_sound=sounds.pick_up_paper_sound,
+    drop_sound=sounds.drop_paper_sound,
 )
 
 fireball_scroll = Item(
@@ -94,6 +107,10 @@ fireball_scroll = Item(
     name="Fireball Scroll",
     consumable=consumable.FireballDamageConsumable(damage=12, radius=3),
     description="A singed scroll radiating intense heat.",
+    equip_sound=sounds.play_equip_paper_sound,
+    unequip_sound=sounds.play_unequip_paper_sound,
+    pickup_sound=sounds.pick_up_paper_sound,
+    drop_sound=sounds.drop_paper_sound,
 )
 
 campfire = Item(
@@ -117,6 +134,10 @@ torch = Item(
     equippable=equippable.Torch(),
     burn_duration=300,
     description="A wooden torch that can be carried to provide light.",
+    pickup_sound=sounds.pick_up_wood_sound,
+    drop_sound=sounds.drop_wood_sound,
+    equip_sound=sounds.play_torch_pull_sound,
+    unequip_sound=sounds.play_torch_extinguish_sound,
 )
 
 dagger = Item(
@@ -135,6 +156,10 @@ leather_armor = Item(
     color=(139, 69, 19),
     name="Leather Armor",
     equippable=equippable.LeatherArmor(),
+    equip_sound=sounds.play_equip_leather_sound,
+    unequip_sound=sounds.play_unequip_leather_sound,
+    pickup_sound=sounds.pick_up_leather_sound,
+    drop_sound=sounds.drop_leather_sound,
 )
 
 chain_mail = Item(
@@ -269,6 +294,17 @@ def get_random_coins(min_amount: int, max_amount: int) -> Item:
     else:
         def_name = "Pile of Coins"
         def_description = f"A pile of {amount} gold coins."
+
+    if amount == 1:
+        def_equip_sound = sounds.play_equip_coin_sound
+        def_unequip_sound = sounds.play_unequip_coin_sound
+        def_pickup_sound = sounds.pick_up_coin_sound
+        def_drop_sound = sounds.drop_coin_sound
+    else:
+        def_equip_sound = sounds.pick_up_manycoins_sound
+        def_unequip_sound = sounds.pick_up_manycoins_sound
+        def_pickup_sound = sounds.pick_up_manycoins_sound
+        def_drop_sound = sounds.drop_manycoins_sound
     return Item(
         char="$",
         color=(255, 223, 0),    
@@ -276,6 +312,10 @@ def get_random_coins(min_amount: int, max_amount: int) -> Item:
         description=def_description,
         value=amount,
         weight=0.01 * amount,
+        equip_sound=def_equip_sound,
+        unequip_sound=def_unequip_sound,
+        pickup_sound=def_pickup_sound,
+        drop_sound=def_drop_sound,
     )
 
 

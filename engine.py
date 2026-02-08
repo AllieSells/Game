@@ -41,6 +41,10 @@ class Engine:
         
         # Initialize turn manager for centralized turn processing
         self.turn_manager = None  # Will be set after import to avoid circular imports
+        
+        # Damage indicator system
+        self.damage_indicator_timer = 0
+        self.damage_indicator_duration = 20  # frames to show damage indicator
 
     def get_adjacent_tiles(self, x: int, y: int) -> list[tuple[int, int]]:
         # Returns adjacent (including diagonals) tiles
@@ -331,7 +335,7 @@ class Engine:
             # optional message/log
             try:
                 if hasattr(self, "message_log"):
-                    sounds.darkness_spawn_sound.play()
+                    sounds.play_darkness_spawn_sound()
                     self.message_log.add_message("You hear something moving in the dark...")
             except Exception:
                 pass
@@ -418,6 +422,11 @@ class Engine:
     def render(self, console: Console) -> None:
         self.game_map.render(console)
 
+        # Render damage indicator if active - render above all HUD elements
+        if self.damage_indicator_timer > 0:
+            self.render_damage_indicator(console)
+            self.damage_indicator_timer -= 1
+
         self.message_log.render(console=console, x=21, y=43, width=39, height=4)
 
         render_functions.render_bar(
@@ -469,3 +478,49 @@ class Engine:
         )
         if self.debug:
             render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.current_handler.__class__.__name__, len(self.game_map.entities))
+
+    def trigger_damage_indicator(self):
+        """Trigger the damage indicator visual effect"""
+        self.damage_indicator_timer = self.damage_indicator_duration
+        # Debug: Add a message to see if this is being called
+        if hasattr(self, 'message_log'):
+            self.message_log.add_message("Damage indicator triggered!", (255, 255, 0))  # Yellow debug message
+    
+    def render_damage_indicator(self, console):
+        """Render red corners on screen edges when player takes damage"""
+        # Calculate fade effect based on remaining timer
+        fade_ratio = self.damage_indicator_timer / self.damage_indicator_duration
+        red_intensity = int(255 * fade_ratio)
+        red_color = (red_intensity, 0, 0)
+        
+        # Get console dimensions
+        width = console.width
+        height = console.height
+        
+        # Corner size
+        corner_size = 8  # Made bigger to see better
+        
+        # Test: Just draw simple rectangles in all four corners to make sure it's working
+        # Top-left corner (L facing inward)
+        for x in range(corner_size):
+            for y in range(corner_size):
+                if x < 2 or y < 2:  # Thinner L shape
+                    console.print(x, y, " ", bg=red_color)
+        
+        # Top-right corner (backwards L facing inward)
+        for x in range(corner_size):
+            for y in range(corner_size):
+                if x >= corner_size - 2 or y < 2:  # Thinner backwards L shape
+                    console.print(width - corner_size + x, y, " ", bg=red_color)
+        
+        # Bottom-left corner (upside-down L facing inward)
+        for x in range(corner_size):
+            for y in range(corner_size):
+                if x < 2 or y >= corner_size - 2:  # Thinner upside-down L shape
+                    console.print(x, height - corner_size + y, " ", bg=red_color)
+        
+        # Bottom-right corner (upside-down backwards L facing inward)
+        for x in range(corner_size):
+            for y in range(corner_size):
+                if x >= corner_size - 2 or y >= corner_size - 2:  # Thinner upside-down backwards L shape
+                    console.print(width - corner_size + x, height - corner_size + y, " ", bg=red_color)

@@ -289,75 +289,187 @@ class CharacterScreenEventHandler(AskUserEventHandler):
     def on_render(self, console: tcod.Console) -> None:
         super().on_render(console)
 
+        # Enhanced window sizing for beautiful layout
+        total_width = 60
+        height = 20
+        
+        # Position based on player location
         if self.engine.player.x <= 30:
-            x = 40
+            x = 3
         else:
-            x = 0
-        # Dimensions (narrower menu, responsive to console width)
-        y = 0
-        # Ensure the menu fits on screen; prefer 44 but shrink if needed
-        max_available = max(24, console.width - x - 2)
-        width = min(44, max_available)
-        height = 18
+            x = max(0, console.width - total_width - 3)
+        y = 1
 
-        console.draw_frame(
-            x=x, y=y, width=width, height=height,
-            title=self.TITLE, clear=True,
-            fg=(255,255,255), bg=(0,0,0)
-        )
+        # Draw main fantasy parchment background
+        self._draw_parchment_background(console, x, y, total_width, height)
+        
+        # Draw ornate main border
+        self._draw_ornate_border(console, x, y, total_width, height, self.TITLE)
 
         player = self.engine.player
 
-        # Draw small centered 5x5 player box above the divider
-        divider_x = x + (width // 2)
-        box_w = 5
-        box_h = 5
-        box_x = divider_x - (box_w // 2)
-        # move the box one row down so we can print the name above it
-        box_y = y + 2
-        console.draw_frame(x=box_x, y=box_y, width=box_w, height=box_h, title="", clear=True, fg=(200,200,200), bg=(0,0,0))
-        # player centered in the box
-        console.print(x=box_x + (box_w // 2), y=box_y + (box_h // 2), string=player.char, fg=player.color)
-        # name printed above the box (supports text_utils markup)
-        name_text = f"<yellow>{player.name}</yellow>"
-        name_width = len(player.name)
-        name_x = box_x + (box_w // 2) - (name_width // 2)
-        # print the name one row above the box
-        self._render_colored_text(console, name_x, box_y - 1, name_text)
+        # Character portrait section
+        portrait_x = x + 5
+        portrait_y = y + 3
+        portrait_width = 12
+        portrait_height = 8
+        
+        # Draw portrait frame
+        self._draw_fantasy_frame(console, portrait_x, portrait_y, portrait_width, portrait_height, "Portrait")
+        
+        # Player character centered in portrait
+        char_x = portrait_x + portrait_width // 2
+        char_y = portrait_y + portrait_height // 2
+        console.print(char_x, char_y, player.char, fg=player.color, bg=(60, 40, 25))
+        
+        # Player name above portrait
+        name_text = player.name
+        name_x = portrait_x + (portrait_width - len(name_text)) // 2
+        console.print(name_x, portrait_y - 1, name_text, fg=(255, 223, 127))
 
-        # Draw divider from one row below the name to the bottom
-        for div_y in range(box_y + box_h, y + height - 1):
-            console.print(x=divider_x, y=div_y, string="│", fg=(128, 128, 128))
+        # Main stats section (right side)
+        stats_x = x + 20
+        stats_y = y + 3
+        stats_width = 35
+        stats_height = height - 6
+        
+        # Stats background
+        for sy in range(stats_height):
+            for sx in range(stats_width):
+                console.print(stats_x + sx, stats_y + sy, " ", bg=(40, 30, 22))
 
-        # LEFT PANEL (static) - quick stats
-        left_x = x + 1
-        left_width = divider_x - x - 2
-        left_start_y = box_y + box_h
-        quick_stats = [
-            f"<white>Level:</white> <cyan>{player.level.current_level}</cyan>",
-            f"<white>HP:</white> <red>{player.fighter.hp}/{player.fighter.max_hp}</red>",
-            f"<white>XP:</white> <cyan>{player.level.current_xp}</cyan>",
-            "",
-            f"<white>Attack:</white> <orange>{player.fighter.power}</orange>",
-            f"<white>Defense:</white> <lightblue>{player.fighter.defense}</lightblue>",
+        # Draw decorative divider
+        self._draw_decorative_divider(console, stats_x - 1, stats_y, stats_height)
+        
+        current_y = stats_y + 1
+        
+        # Basic Info Section
+        console.print(stats_x + 2, current_y, "✦ Basic Information ✦", fg=(255, 215, 0), bg=(40, 30, 22))
+        current_y += 2
+        basic_info = [
+            f"Level: {player.level.current_level}",
+            f"XP: {player.level.current_xp}",
+            f"Race: Human",
+            f"Class: Adventurer"
         ]
-        for i, stat in enumerate(quick_stats):
-            if stat:
-                self._render_colored_text(console, left_x, left_start_y + i, stat)
-
-        # RIGHT PANEL (static) - placeholder for future detailed info
-        right_x = divider_x + 1
-        right_width = x + width - divider_x - 2
-        right_start_y = box_y + box_h
-        character_stats = [
-            "<white>Character Stats</white>",
+        for info in basic_info:
+            console.print(stats_x + 4, current_y, info, fg=(200, 170, 120), bg=(40, 30, 22))
+            current_y += 1
+        
+        current_y += 1
+        
+        # Combat Stats Section
+        console.print(stats_x + 2, current_y, "✦ Combat Stats ✦", fg=(255, 215, 0), bg=(40, 30, 22))
+        current_y += 2
+        combat_stats = [
+            f"Health: {player.fighter.hp}/{player.fighter.max_hp}",
+            f"Attack: {player.fighter.power}",
+            f"Defense: {player.fighter.defense}"
         ]
-        for i, stat in enumerate(character_stats):
-            self._render_colored_text(console, right_x, right_start_y + i, stat)
+        for stat in combat_stats:
+            console.print(stats_x + 4, current_y, stat, fg=(200, 170, 120), bg=(40, 30, 22))
+            current_y += 1
+        
+        # Instructions footer
+        footer_text = "✦ [Esc] Close ✦"
+        footer_x = x + (total_width - len(footer_text)) // 2
+        console.print(footer_x, y + height - 2, footer_text, fg=(180, 140, 100))
 
-        # Instructions at bottom
-        instruction_text = "<gray>ESC: Close</gray>"
-        self._render_colored_text(console, x + 1, y + height - 2, instruction_text)
+    def _draw_parchment_background(self, console, x: int, y: int, width: int, height: int):
+        """Draw a beautiful parchment-like background."""
+        # Rich parchment color gradient
+        base_bg = (45, 35, 25)      # Base parchment
+        light_bg = (50, 38, 28)     # Slightly lighter
+        
+        for py in range(height):
+            for px in range(width):
+                # Create subtle texture variation
+                bg_color = light_bg if (px + py) % 3 == 0 else base_bg
+                console.print(x + px, y + py, " ", bg=bg_color)
+
+    def _draw_ornate_border(self, console, x: int, y: int, width: int, height: int, title: str):
+        """Draw a smooth fantasy border with decorative elements."""
+        # Elegant color scheme
+        border_fg = (139, 105, 60)     # Rich bronze
+        accent_fg = (205, 164, 87)     # Bright gold
+        title_fg = (255, 215, 0)       # Pure gold
+        bg = (35, 25, 18)              # Dark background for border
+        
+        # Simple, smooth corners and borders
+        # Top border
+        console.print(x, y, "╔", fg=accent_fg, bg=bg)
+        for i in range(1, width - 1):
+            console.print(x + i, y, "═", fg=border_fg, bg=bg)
+        console.print(x + width - 1, y, "╗", fg=accent_fg, bg=bg)
+        
+        # Bottom border
+        console.print(x, y + height - 1, "╚", fg=accent_fg, bg=bg)
+        for i in range(1, width - 1):
+            console.print(x + i, y + height - 1, "═", fg=border_fg, bg=bg)
+        console.print(x + width - 1, y + height - 1, "╝", fg=accent_fg, bg=bg)
+        
+        # Side borders - smooth
+        for i in range(1, height - 1):
+            console.print(x, y + i, "║", fg=border_fg, bg=bg)
+            console.print(x + width - 1, y + i, "║", fg=border_fg, bg=bg)
+        
+        # Clean title
+        title_decorated = f"✦ {title} ✦"
+        title_start = x + (width - len(title_decorated)) // 2
+        # Clear title area
+        for tx in range(len(title_decorated)):
+            console.print(title_start + tx, y, " ", bg=bg)
+        console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
+
+    def _draw_decorative_divider(self, console, x: int, y: int, height: int):
+        """Draw a smooth decorative vertical divider."""
+        divider_fg = (139, 105, 60)  # Bronze
+        accent_fg = (205, 164, 87)   # Gold accent
+        bg = (40, 30, 22)            # Slightly lighter than parchment
+        
+        for dy in range(height):
+            console.print(x, y + dy, " ", bg=bg)
+            
+            if dy == 0:
+                console.print(x, y + dy, "╤", fg=accent_fg, bg=bg)
+            elif dy == height - 1:
+                console.print(x, y + dy, "╧", fg=accent_fg, bg=bg)
+            else:
+                console.print(x, y + dy, "│", fg=divider_fg, bg=bg)
+
+    def _draw_fantasy_frame(self, console, x: int, y: int, width: int, height: int, title: str):
+        """Draw a fantasy-themed frame with decorative corners."""
+        frame_bg = (60, 40, 25)
+        border_fg = (205, 164, 87)  # Gold
+        title_fg = (255, 215, 0)    # Bright gold
+        
+        # Fill frame background
+        for fy in range(height):
+            for fx in range(width):
+                console.print(x + fx, y + fy, " ", bg=frame_bg)
+        
+        # Draw simple border
+        # Top and bottom
+        for i in range(width):
+            console.print(x + i, y, "─", fg=border_fg, bg=frame_bg)
+            console.print(x + i, y + height - 1, "─", fg=border_fg, bg=frame_bg)
+        
+        # Left and right
+        for i in range(height):
+            console.print(x, y + i, "│", fg=border_fg, bg=frame_bg)
+            console.print(x + width - 1, y + i, "│", fg=border_fg, bg=frame_bg)
+        
+        # Corners
+        console.print(x, y, "┌", fg=border_fg, bg=frame_bg)
+        console.print(x + width - 1, y, "┐", fg=border_fg, bg=frame_bg)
+        console.print(x, y + height - 1, "└", fg=border_fg, bg=frame_bg)
+        console.print(x + width - 1, y + height - 1, "┘", fg=border_fg, bg=frame_bg)
+        
+        # Title
+        if title:
+            title_text = f" {title} "
+            title_x = x + (width - len(title_text)) // 2
+            console.print(title_x, y, title_text, fg=title_fg, bg=frame_bg)
 
 
 class DialogueEventHandler(AskUserEventHandler):
@@ -646,44 +758,70 @@ class ContainerEventHandler(AskUserEventHandler):
         self.menu: str = "Player"
 
     def on_render(self, console: tcod.Console) -> None:
-        # Renders inventory menu displaying items in both inventories
+        # Renders inventory menu displaying items in both inventories with fantasy styling
         super().on_render(console)
         player_items = list(self.engine.player.inventory.items)
         container_items = list(self.container.items)
         number_of_player_items = len(player_items)
         number_of_container_items = len(container_items)
 
-        height = max(number_of_player_items, number_of_container_items) + 4
-        # Fall back to 3 if both inventories empty
-        if height <= 3:
-            height = 3
-        width = 47
-        x = (console.width - width) // 2
+        # Enhanced window sizing for beautiful layout
+        total_width = 70
+        height = max(number_of_player_items, number_of_container_items) + 12
+        if height < 18:
+            height = 18
+        
+        # Position window
+        x = (console.width - total_width) // 2
         y = 1
 
-        # Draw player inventory frame
-        console.draw_frame(
-            x=x,
-            y=y,
-            width=width // 2,
-            height=height,
-            title="Your Inventory",
-            clear=True,
-            fg=(255, 255, 255),
-            bg=(0, 0, 0),
-        )
+        # Draw main fantasy parchment background
+        self._draw_parchment_background(console, x, y, total_width, height)
+        
+        # Draw ornate main border
+        container_name = getattr(self.container.parent, 'name', 'Container')
+        title = f"Container: {container_name}"
+        self._draw_ornate_border(console, x, y, total_width, height, title)
 
-        # Draw container inventory frame
-        console.draw_frame(
-            x=x + width // 2,
-            y=y,
-            width=width // 2,
-            height=height,
-            title=f"{(self.container.parent.name)} Inventory",
-            clear=True,
-            fg=(255, 255, 255),
-            bg=(0, 0, 0),
-        )
+        # Calculate panel dimensions
+        panel_width = (total_width - 6) // 2  # Leave space for divider and margins
+        panel_height = height - 6
+        
+        # Left panel (Player inventory)
+        left_x = x + 3
+        left_y = y + 3
+        
+        # Right panel (Container inventory) 
+        right_x = x + 3 + panel_width + 2
+        right_y = y + 3
+        
+        # Draw panel backgrounds
+        panel_bg = (40, 30, 22)
+        for px in range(panel_width):
+            for py in range(panel_height):
+                console.print(left_x + px, left_y + py, " ", bg=panel_bg)
+                console.print(right_x + px, right_y + py, " ", bg=panel_bg)
+        
+        # Draw decorative divider between panels
+        divider_x = left_x + panel_width + 1
+        self._draw_decorative_divider(console, divider_x, left_y, panel_height)
+        
+        # Panel headers
+        player_header = "✦ Your Inventory ✦"
+        container_header = f"✦ {container_name} ✦"
+        
+        # Center headers in panels
+        player_header_x = left_x + (panel_width - len(player_header)) // 2
+        container_header_x = right_x + (panel_width - len(container_header)) // 2
+        
+        console.print(player_header_x, left_y + 1, player_header, fg=(255, 215, 0), bg=panel_bg)
+        console.print(container_header_x, right_y + 1, container_header, fg=(255, 215, 0), bg=panel_bg)
+        
+        # Active panel indicator
+        if self.menu == "Player":
+            console.print(left_x + 1, left_y + 1, "◆", fg=(255, 215, 0), bg=panel_bg)
+        else:
+            console.print(right_x + 1, right_y + 1, "◆", fg=(255, 215, 0), bg=panel_bg)
 
         # Ensure index is selected
         if not hasattr(self, "selected_index"):
@@ -698,35 +836,59 @@ class ContainerEventHandler(AskUserEventHandler):
                 self.selected_index = max(0, number_of_container_items - 1)
 
         # Draw player inventory items
+        item_start_y = left_y + 3
         if number_of_player_items > 0:
             for i, item in enumerate(player_items):
+                if item_start_y + i >= left_y + panel_height - 1:
+                    break  # Don't draw outside panel
+                    
                 item_key = chr(ord("a") + i)
                 is_equipped = self.engine.player.equipment.item_is_equipped(item)
+                is_selected = i == self.selected_index and self.menu == "Player"
 
-                item_string = f"({item_key}) {item.name}"
-
+                item_string = f"{item_key}) {item.name}"
                 if is_equipped:
-                    item_string = f"{item_string} (E)"
+                    item_string = f"{item_string} (e)"
 
-                # Draw selection marker for keyboard navigation
-                marker = ">" if i == getattr(self, "selected_index", 0) and self.menu == "Player" else " "
-                console.print(x, y + i + 1, marker)
-                console.print(x + 1, y + i + 1, item_string)
+                # Draw with selection highlighting
+                if is_selected:
+                    # Selection background
+                    for hx in range(panel_width - 4):
+                        console.print(left_x + 2 + hx, item_start_y + i, " ", bg=(45, 25, 15))
+                    console.print(left_x + 2, item_start_y + i, "✦", fg=(255, 223, 127), bg=(45, 25, 15))
+                    console.print(left_x + 4, item_start_y + i, item_string, fg=(255, 248, 220), bg=(45, 25, 15))
+                else:
+                    item_color = (220, 200, 160) if is_equipped else (200, 180, 140)
+                    console.print(left_x + 4, item_start_y + i, item_string, fg=item_color, bg=panel_bg)
         else:
-            console.print(x + 1, y + 1, "(Empty)")
+            console.print(left_x + 4, item_start_y, "~ Empty ~", fg=(120, 100, 80), bg=panel_bg)
 
-        # Draw container inventory items
+        # Draw container inventory items  
         if number_of_container_items > 0:
             for i, item in enumerate(container_items):
+                if item_start_y + i >= right_y + panel_height - 1:
+                    break  # Don't draw outside panel
+                    
                 item_key = chr(ord("a") + i)
-                item_string = f"({item_key}) {item.name}"
+                is_selected = i == self.selected_index and self.menu == "Container"
+                item_string = f"{item_key}) {item.name}"
 
-                # Draw selection marker for keyboard navigation
-                marker = ">" if i == getattr(self, "selected_index", 0) and self.menu == "Container" else " "
-                console.print(x + width // 2, y + i + 1, marker)
-                console.print(x + width // 2 + 1, y + i + 1, item_string)
+                # Draw with selection highlighting
+                if is_selected:
+                    # Selection background
+                    for hx in range(panel_width - 4):
+                        console.print(right_x + 2 + hx, item_start_y + i, " ", bg=(45, 25, 15))
+                    console.print(right_x + 2, item_start_y + i, "✦", fg=(255, 223, 127), bg=(45, 25, 15))
+                    console.print(right_x + 4, item_start_y + i, item_string, fg=(255, 248, 220), bg=(45, 25, 15))
+                else:
+                    console.print(right_x + 4, item_start_y + i, item_string, fg=(200, 180, 140), bg=panel_bg)
         else:
-            console.print(x + width // 2 + 1, y + 1, "(Empty)")
+            console.print(right_x + 4, item_start_y, "~ Empty ~", fg=(120, 100, 80), bg=panel_bg)
+        
+        # Instructions footer
+        instructions = "✦ [Tab] Switch Panel · [↑↓] Navigate · [Enter] Transfer · [Esc] Close ✦"
+        inst_x = x + (total_width - len(instructions)) // 2
+        console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         player = self.engine.player
@@ -796,11 +958,21 @@ class ContainerEventHandler(AskUserEventHandler):
                     item.parent = self.container
                 except Exception:
                     pass
+
+                if hasattr(item, "drop_sound") and item.drop_sound is not None:
+                    #print(f"DEBUG: About to call drop sound for {item.name}")
+                    try:
+                        item.drop_sound()
+                        #print(f"DEBUG: Successfully called drop sound for {item.name}")
+                    except Exception as e:
+                        print(f"DEBUG: Error calling drop sound: {e}")
+                else:
+                    print(f"DEBUG: No drop sound for {item}")
                 
                 self.engine.message_log.add_message(f"You transfer the {item.name}.")
             except Exception:
                 print(traceback.format_exc(), color.error)
-                self.engine.message_log.add_message(f"Could not transfer {item.name}.", color.error)
+                self.engine.message_log.add_message(f"Could not transfer {item.name} to {self.container.name}.", color.error)
         else:
             # Transfer from container to player
             try:
@@ -814,6 +986,13 @@ class ContainerEventHandler(AskUserEventHandler):
                         # Auto-convert coins to player gold
                         self.engine.player.gold += item.value
                         self.engine.message_log.add_message(f"You pick up some coins.")
+
+                        # Play coin pickup sound if it exists
+                        if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
+                            try:
+                                item.pickup_sound()
+                            except Exception as e:
+                                print(f"DEBUG: Error calling pickup sound: {e}")
                         return self
                     # Add to player inventory and update parent link.
                     self.engine.player.inventory.items.append(item)
@@ -821,13 +1000,86 @@ class ContainerEventHandler(AskUserEventHandler):
                         item.parent = self.engine.player.inventory
                     except Exception:
                         pass
-                    sounds.play_transfer_item_sound()
+                    
+                    # Play item pickup sound if it exists
+                    if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
+                        #print(f"DEBUG: About to call pickup sound for {item.name}")
+                        try:
+                            item.pickup_sound()
+                            #print(f"DEBUG: Successfully called pickup sound for {item.name}")
+                        except Exception as e:
+                            print(f"DEBUG: Error calling pickup sound: {e}")
+                    else:
+                        print(f"DEBUG: No pickup sound for {item}")
+
                     self.engine.message_log.add_message(f"You take the {item.name}.")
             except Exception:
-                
-                self.engine.message_log.add_message(f"Could not transfer {item.name}.", color.error)
+                print(traceback.format_exc(), color.error)
+                self.engine.message_log.add_message(f"Could not transfer {item.name} to {self.container.name}.", color.error)
         # Return back to container handler
         return self
+
+    def _draw_parchment_background(self, console, x: int, y: int, width: int, height: int):
+        """Draw a beautiful parchment-like background."""
+        # Rich parchment color gradient
+        base_bg = (45, 35, 25)      # Base parchment
+        light_bg = (50, 38, 28)     # Slightly lighter
+        
+        for py in range(height):
+            for px in range(width):
+                # Create subtle texture variation
+                bg_color = light_bg if (px + py) % 3 == 0 else base_bg
+                console.print(x + px, y + py, " ", bg=bg_color)
+
+    def _draw_ornate_border(self, console, x: int, y: int, width: int, height: int, title: str):
+        """Draw a smooth fantasy border with decorative elements."""
+        # Elegant color scheme
+        border_fg = (139, 105, 60)     # Rich bronze
+        accent_fg = (205, 164, 87)     # Bright gold
+        title_fg = (255, 215, 0)       # Pure gold
+        bg = (35, 25, 18)              # Dark background for border
+        
+        # Simple, smooth corners and borders
+        # Top border
+        console.print(x, y, "╔", fg=accent_fg, bg=bg)
+        for i in range(1, width - 1):
+            console.print(x + i, y, "═", fg=border_fg, bg=bg)
+        console.print(x + width - 1, y, "╗", fg=accent_fg, bg=bg)
+        
+        # Bottom border
+        console.print(x, y + height - 1, "╚", fg=accent_fg, bg=bg)
+        for i in range(1, width - 1):
+            console.print(x + i, y + height - 1, "═", fg=border_fg, bg=bg)
+        console.print(x + width - 1, y + height - 1, "╝", fg=accent_fg, bg=bg)
+        
+        # Side borders - smooth
+        for i in range(1, height - 1):
+            console.print(x, y + i, "║", fg=border_fg, bg=bg)
+            console.print(x + width - 1, y + i, "║", fg=border_fg, bg=bg)
+        
+        # Clean title
+        title_decorated = f"✦ {title} ✦"
+        title_start = x + (width - len(title_decorated)) // 2
+        # Clear title area
+        for tx in range(len(title_decorated)):
+            console.print(title_start + tx, y, " ", bg=bg)
+        console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
+
+    def _draw_decorative_divider(self, console, x: int, y: int, height: int):
+        """Draw a smooth decorative vertical divider."""
+        divider_fg = (139, 105, 60)  # Bronze
+        accent_fg = (205, 164, 87)   # Gold accent
+        bg = (40, 30, 22)            # Slightly lighter than parchment
+        
+        for dy in range(height):
+            console.print(x, y + dy, " ", bg=bg)
+            
+            if dy == 0:
+                console.print(x, y + dy, "╦", fg=accent_fg, bg=bg)
+            elif dy == height - 1:
+                console.print(x, y + dy, "╩", fg=accent_fg, bg=bg)
+            else:
+                console.print(x, y + dy, "│", fg=divider_fg, bg=bg)
 
 class InventoryEventHandler(AskUserEventHandler):
     """This handler lets the user select an item.
@@ -843,69 +1095,617 @@ class InventoryEventHandler(AskUserEventHandler):
         self.item_filter: Callable = item_filter if item_filter is not None else (lambda i: True)
         # selected index for arrow navigation
         self.selected_index: int = 0
+        # category tabs
+        self.current_category: int = 0
+        self.categories = [
+            ("All", self._filter_all),
+            ("Equipment", self._filter_equipment), 
+            ("Consumables", self._filter_consumables),
+            ("Misc", self._filter_misc)
+        ]
 
     def on_render(self, console: tcod.Console) -> None:
-        """Render an inventory menu, which displays the items in the inventory, and the letter to select them.
-        Will move to a different position based on where the player is located, so the player can always see where
-        they are.
-        """
+        """Render a beautiful fantasy-themed inventory with atmospheric styling."""
         super().on_render(console)
-        # Build filtered list according to filter function (modular)
+        
+        # Build filtered list according to filter function and current category
         all_items = list(self.engine.player.inventory.items)
-        filtered_items = [it for it in all_items if self.item_filter(it)]
-
+        category_filter = self.categories[self.current_category][1]
+        filtered_items = [it for it in all_items if self.item_filter(it) and category_filter(it)]
         number_of_items_in_inventory = len(filtered_items)
 
-        height = number_of_items_in_inventory + 2
+        # Enhanced window sizing for beautiful layout
+        sidebar_width = 14  # Category sidebar
+        items_width = 32    # Item list area  
+        preview_width = 22  # Preview area
+        total_width = sidebar_width + items_width + preview_width + 4  # +4 for decorative spacing
+        height = max(18, number_of_items_in_inventory + 8)  # More generous spacing
 
-        if height <= 3:
-            height = 3
-
+        # Position based on player location
         if self.engine.player.x <= 30:
-            x = 40
+            x = 3
         else:
-            x = 0
+            x = max(0, console.width - total_width - 3)
+        y = 1
 
-        y = 0
-
-        width = len(self.TITLE) + 4
-
-        console.draw_frame(
-            x=x,
-            y=y,
-            width=width,
-            height=height,
-            title=self.TITLE,
-            clear=True,
-            fg=(255, 255, 255),
-            bg=(0, 0, 0),
-        )
+        # Draw main fantasy parchment background
+        self._draw_parchment_background(console, x, y, total_width, height)
+        
+        # Draw ornate main border
+        self._draw_ornate_border(console, x, y, total_width, height, self.TITLE)
+        
+        # Draw illuminated category sidebar
+        self._draw_illuminated_sidebar(console, x+1, y + 3, sidebar_width - 2, height - 6)
+        
+        # Draw decorative dividers
+        items_x = x + sidebar_width + 1
+        preview_x = x + sidebar_width + items_width + 2
+        self._draw_decorative_divider(console, items_x - 1, y + 2, height - 4)
+        self._draw_decorative_divider(console, preview_x - 1, y + 2, height - 4)
 
         # Ensure we have a selected index for arrow-key navigation
         if not hasattr(self, "selected_index"):
             self.selected_index = 0
 
+        current_y = y + 4  # Start with more spacing
+        
+        # Render inventory items with elegant styling
         if number_of_items_in_inventory > 0:
             # Clamp selected index to the filtered list
             if self.selected_index >= number_of_items_in_inventory:
                 self.selected_index = max(0, number_of_items_in_inventory - 1)
 
             for i, item in enumerate(filtered_items):
+                if current_y >= y + height - 3:
+                    break  # Don't draw outside the frame
+                    
                 item_key = chr(ord("a") + i)
-
                 is_equipped = self.engine.player.equipment.item_is_equipped(item)
+                is_selected = i == self.selected_index
 
-                item_string = f"({item_key}) {item.name}"
-
+                # Create elegant item string 
+                item_type_char = self._get_item_type_char(item)
+                item_string = f"{item_key}] {item_type_char} {item.name}"
+                
                 if is_equipped:
-                    item_string = f"{item_string} (E)"
+                    item_string = f"{item_string} (e)"  # (e) for equipped
 
-                # Draw selection marker for keyboard navigation
-                marker = ">" if i == getattr(self, "selected_index", 0) else " "
-                console.print(x, y + i + 1, marker)
-                console.print(x + 1, y + i + 1, item_string)
+                # Draw with beautiful highlighting
+                if is_selected:
+                    # Elegant selection background with gradient effect
+                    self._draw_selection_highlight(console, items_x, current_y, items_width - 2)
+                    console.print(items_x + 1, current_y, "✦", fg=(255, 223, 127), bg=(45, 25, 15))  # Beautiful star
+                    console.print(items_x + 3, current_y, item_string, fg=(255, 248, 220), bg=(45, 25, 15))
+                else:
+                    console.print(items_x + 1, current_y, " ")
+                    item_color = (200, 180, 140) if not is_equipped else (220, 200, 160)
+                    console.print(items_x + 3, current_y, item_string, fg=item_color)
+                
+                current_y += 1
+
+            # Draw selected item preview with ornate styling
+            selected_item = filtered_items[self.selected_index]
+            self._draw_ornate_preview(console, preview_x, y + 3, preview_width - 1, height - 6, selected_item)
+            
         else:
-            console.print(x + 1, y + 1, "(Empty)")
+            console.print(items_x + 2, current_y, "~ Your pack is empty ~", fg=(120, 100, 80))
+            # Draw empty preview panel with mystical styling
+            console.print(preview_x + 4, y + 8, "~ No item selected ~", fg=(120, 100, 80))
+        
+        # Draw elegant instruction footer
+        instructions = "✦ [↑↓] Navigate · [←→] Category · [Enter] Select · [Esc] Return ✦"
+        inst_x = x + (total_width - len(instructions)) // 2
+        console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
+    
+    def _draw_parchment_background(self, console, x: int, y: int, width: int, height: int):
+        """Draw a beautiful parchment-like background."""
+        # Rich parchment color gradient
+        parch_colors = [
+            (52, 42, 30),   # Dark parchment
+            (58, 47, 34),   # Medium parchment  
+            (62, 50, 36),   # Light parchment
+        ]
+        
+        # Fill with organic parchment pattern
+        for fy in range(height):
+            for fx in range(width):
+                # Create subtle texture variation
+                color_idx = (fx + fy) % len(parch_colors)
+                if (fx + fy * 3) % 7 == 0:
+                    color_idx = (color_idx + 1) % len(parch_colors)
+                console.print(x + fx, y + fy, " ", bg=parch_colors[color_idx])
+    
+    def _draw_ornate_border(self, console, x: int, y: int, width: int, height: int, title: str):
+        """Draw a smooth fantasy border with decorative elements."""
+        # Elegant color scheme
+        border_fg = (139, 105, 60)     # Rich bronze
+        accent_fg = (205, 164, 87)     # Bright gold
+        title_fg = (255, 215, 0)       # Pure gold
+        bg = (35, 25, 18)              # Dark background for border
+        
+        # Simple, smooth corners and borders
+        # Top border
+        console.print(x, y, "╔", fg=accent_fg, bg=bg)
+        for i in range(1, width - 1):
+            console.print(x + i, y, "═", fg=border_fg, bg=bg)
+        console.print(x + width - 1, y, "╗", fg=accent_fg, bg=bg)
+        
+        # Bottom border
+        console.print(x, y + height - 1, "╚", fg=accent_fg, bg=bg)
+        for i in range(1, width - 1):
+            console.print(x + i, y + height - 1, "═", fg=border_fg, bg=bg)
+        console.print(x + width - 1, y + height - 1, "╝", fg=accent_fg, bg=bg)
+        
+        # Side borders - smooth
+        for i in range(1, height - 1):
+            console.print(x, y + i, "║", fg=border_fg, bg=bg)
+            console.print(x + width - 1, y + i, "║", fg=border_fg, bg=bg)
+        
+        # Clean title
+        title_decorated = f"✦ {title} ✦"
+        title_start = x + (width - len(title_decorated)) // 2
+        # Clear title area
+        for tx in range(len(title_decorated)):
+            console.print(title_start + tx, y, " ", bg=bg)
+        console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
+        
+        # Ornate title with decorative flourishes
+        title_decorated = f"✦ {title} ✦"
+        title_start = x + (width - len(title_decorated)) // 2
+        # Clear title area
+        for tx in range(len(title_decorated)):
+            console.print(title_start + tx, y, " ", bg=bg)
+        console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
+    
+    def _draw_illuminated_sidebar(self, console, x: int, y: int, width: int, height: int):
+        """Draw an illuminated manuscript-style category sidebar."""
+        category_icons = {
+            'All': '',      # 8-pointed star
+            'Equipment': '', # Crossed swords  
+            'Consumables': '', # Hot beverage (potion-like)
+            'Misc': ''      # Diamond with dot
+        }
+        
+        active_colors = {
+            'bg': (65, 35, 20),
+            'fg': (255, 223, 127),
+            'icon': (255, 215, 0)
+        }
+        
+        inactive_colors = {
+            'bg': (45, 30, 20),
+            'fg': (160, 130, 90),
+            'icon': (140, 110, 70)
+        }
+        
+        cat_y = y
+        for i, (name, _) in enumerate(self.categories):
+            if cat_y >= y + height - 1:
+                break
+                
+            is_active = i == self.current_category
+            colors = active_colors if is_active else inactive_colors
+            icon = category_icons.get(name, '•')
+            
+            # Draw illuminated background
+            for bx in range(width):
+                console.print(x + bx, cat_y, " ", bg=colors['bg'])
+            
+            if is_active:
+                # Elegant active indicator at far left
+                console.print(x, cat_y, ">", fg=colors['icon'], bg=colors['bg'])
+                console.print(x , cat_y, f"{name}", fg=colors['fg'], bg=colors['bg'])
+            else:
+                # Left-aligned inactive categories
+                console.print(x, cat_y, f"{icon} {name}", fg=colors['fg'], bg=colors['bg'])
+            
+            cat_y += 1  # Tighter spacing
+    
+    def _draw_decorative_divider(self, console, x: int, y: int, height: int):
+        """Draw a smooth decorative vertical divider."""
+        divider_fg = (139, 105, 60)  # Bronze
+        accent_fg = (205, 164, 87)   # Gold accent
+        bg = (40, 30, 22)            # Slightly lighter than parchment
+        
+        for dy in range(height):
+            console.print(x, y + dy, " ", bg=bg)
+            
+            if dy == 0:
+                console.print(x, y + dy, "╤", fg=accent_fg, bg=bg)
+            elif dy == height - 1:
+                console.print(x, y + dy, "╧", fg=accent_fg, bg=bg)
+            else:
+                console.print(x, y + dy, "│", fg=divider_fg, bg=bg)
+    
+    def _draw_selection_highlight(self, console, x: int, y: int, width: int):
+        """Draw beautiful selection highlighting with gradient effect."""
+        # Warm golden selection gradient
+        for hx in range(width):
+            # Create subtle gradient from center outward
+            center = width // 2
+            distance = abs(hx - center)
+            intensity = max(0.3, 1.0 - (distance / center * 0.4))
+            
+            bg_color = (
+                int(45 * intensity),
+                int(25 * intensity), 
+                int(15 * intensity)
+            )
+            console.print(x + hx, y, " ", bg=bg_color)
+    
+    def _draw_ornate_preview(self, console, x: int, y: int, width: int, height: int, item):
+        """Draw an ornate item preview panel with illuminated manuscript styling."""
+        # Elegant preview background
+        preview_bg = (40, 30, 22)
+        border_fg = (139, 105, 60)
+        
+        # Fill preview area
+        for py in range(height):
+            for px in range(width):
+                console.print(x + px, y + py, " ", bg=preview_bg)
+        
+        # Decorative border
+        for py in range(height):
+            if py == 0 or py == height - 1:
+                for px in range(width):
+                    char = '═' if px % 3 != 1 else '╬'
+                    console.print(x + px, y + py, char, fg=border_fg, bg=preview_bg)
+            else:
+                console.print(x, y + py, '║', fg=border_fg, bg=preview_bg)
+                console.print(x + width - 1, y + py, '║', fg=border_fg, bg=preview_bg)
+        
+        # Draw the existing item preview content with enhanced styling
+        self._draw_enhanced_item_preview(console, x, y, width, height, item)
+    
+    def _draw_enhanced_item_preview(self, console, x: int, y: int, width: int, height: int, item):
+        """Draw a compact fantasy-themed item preview with more space for stats."""
+        preview_bg = (40, 30, 22)
+        
+        # Fill entire preview area with background
+        for py in range(height):
+            for px in range(width):
+                console.print(x + px, y + py, " ", bg=preview_bg)
+        
+        # Compact title
+        title_y = y + 1
+        title_text = "✦ Item ✦"
+        title_x = x + (width - len(title_text)) // 2
+        console.print(title_x, title_y, title_text, fg=(255, 215, 0), bg=preview_bg)
+        
+        # Compact 3x3 item display
+        grid_x = x + (width - 3) // 2
+        grid_y = title_y + 2
+        
+        # Simple 3x3 smooth border
+        border_fg = (205, 164, 87)   # Gold
+        item_bg = (60, 40, 25)       # Rich item background
+        
+        # Draw completely smooth 3x3 border
+        console.print(grid_x, grid_y, "┌", fg=border_fg, bg=preview_bg)
+        console.print(grid_x + 1, grid_y, "─", fg=border_fg, bg=preview_bg)
+        console.print(grid_x + 2, grid_y, "┐", fg=border_fg, bg=preview_bg)
+        
+        console.print(grid_x, grid_y + 1, "│", fg=border_fg, bg=preview_bg)
+        console.print(grid_x + 1, grid_y + 1, " ", bg=item_bg)
+        console.print(grid_x + 2, grid_y + 1, "│", fg=border_fg, bg=preview_bg)
+        
+        console.print(grid_x, grid_y + 2, "└", fg=border_fg, bg=preview_bg)
+        console.print(grid_x + 1, grid_y + 2, "─", fg=border_fg, bg=preview_bg)
+        console.print(grid_x + 2, grid_y + 2, "┘", fg=border_fg, bg=preview_bg)
+        
+        # Item character in center
+        item_char = self._get_item_display_char(item)
+        item_color = self._get_item_color(item)
+        console.print(grid_x + 1, grid_y + 1, item_char, fg=item_color, bg=item_bg)
+        
+        # Compact item name
+        name_y = grid_y + 4
+        item_name = item.name
+        if len(item_name) > width - 6:
+            item_name = item_name[:width - 9] + "..."
+        console.print(x + 3, name_y, item_name, fg=(255, 223, 127), bg=preview_bg)
+        
+        # Stats section with better spacing
+        stats_y = name_y + 1
+        stat_lines = self._get_stat_comparison(item)
+        
+        # Always show at least basic info if no stats
+        if not stat_lines:
+            stat_lines = [
+                f"Item: {item.name[:width-9]}" if len(item.name) > width-6 else f"Item: {item.name}",
+                "Select to interact"
+            ]
+        
+        # Display stat lines with proper spacing and ensure they fit
+        for i, stat_line in enumerate(stat_lines[:6]):  # Show 6 lines max
+            if stats_y + i >= y + height - 2:
+                break
+            # Ensure text fits within borders with proper margin
+            if len(stat_line) > width - 6:
+                stat_line = stat_line[:width - 9] + "..."
+            
+            # Use green color for equipped status
+            if stat_line.strip() == "Equipped":
+                console.print(x + 3, stats_y + i, stat_line, fg=(0, 255, 0), bg=preview_bg)  # Bright green
+            else:
+                console.print(x + 3, stats_y + i, stat_line, fg=(200, 170, 120), bg=preview_bg)
+    
+    def _filter_all(self, item) -> bool:
+        """Show all items."""
+        return True
+        
+    def _filter_equipment(self, item) -> bool:
+        """Show only equippable items."""
+        return getattr(item, "equippable", None) is not None
+        
+    def _filter_consumables(self, item) -> bool:
+        """Show only consumable items."""
+        return getattr(item, "consumable", None) is not None
+        
+    def _filter_misc(self, item) -> bool:
+        """Show items that are neither equipment nor consumables."""
+        return not self._filter_equipment(item) and not self._filter_consumables(item)
+    
+    def _draw_fantasy_frame(self, console, x: int, y: int, width: int, height: int, title: str):
+        """Draw a fantasy-themed frame with decorative corners."""
+        # Color scheme: stone/metal fantasy theme
+        frame_fg = (180, 140, 100)  # Bronze/brass color
+        frame_bg = (25, 20, 15)     # Dark brown/black
+        title_fg = (255, 215, 0)    # Gold
+        
+        # Clear the area first
+        for fy in range(height):
+            for fx in range(width):
+                console.print(x + fx, y + fy, " ", bg=frame_bg)
+        
+        # Draw border with fantasy characters
+        # Top border
+        console.print(x, y, "╔", fg=frame_fg, bg=frame_bg)
+        for i in range(1, width - 1):
+            console.print(x + i, y, "═", fg=frame_fg, bg=frame_bg)
+        console.print(x + width - 1, y, "╗", fg=frame_fg, bg=frame_bg)
+        
+        # Bottom border  
+        console.print(x, y + height - 1, "╚", fg=frame_fg, bg=frame_bg)
+        for i in range(1, width - 1):
+            console.print(x + i, y + height - 1, "═", fg=frame_fg, bg=frame_bg)
+        console.print(x + width - 1, y + height - 1, "╝", fg=frame_fg, bg=frame_bg)
+        
+        # Side borders
+        for i in range(1, height - 1):
+            console.print(x, y + i, "║", fg=frame_fg, bg=frame_bg)
+            console.print(x + width - 1, y + i, "║", fg=frame_fg, bg=frame_bg)
+        
+        # Title with decorative elements
+        title_text = f"═══ {title} ═══"
+        title_start = x + (width - len(title_text)) // 2
+        console.print(title_start, y, title_text, fg=title_fg, bg=frame_bg)
+    
+    def _get_item_type_char(self, item) -> str:
+        """Get a beautiful fantasy character representing the item type."""
+        if getattr(item, "equippable", None):
+            eq_type = getattr(item.equippable, "equipment_type", None)
+            if eq_type:
+                eq_name = eq_type.name.lower()
+                if "weapon" in eq_name or "sword" in eq_name or "dagger" in eq_name:
+                    return "⚔"  # Crossed swords
+                elif "armor" in eq_name or "mail" in eq_name or "leather" in eq_name:
+                    return "🛡"  # Shield
+                elif "shield" in eq_name:
+                    return "⛨"  # Shield variant
+                else:
+                    return "✦"  # Equipment star
+            return "✦"  # Equipment star
+        elif getattr(item, "consumable", None):
+            if "potion" in item.name.lower():
+                return "⚗"  # Alchemical symbol (potion)
+            elif "scroll" in item.name.lower():
+                return "📜"  # Scroll
+            else:
+                return "✿"  # Star-like symbol for consumables
+        return "◉"  # Circle for misc items
+    
+    def _draw_item_preview(self, console, x: int, y: int, width: int, height: int, item):
+        """Draw the 3x3 item preview and stat comparison."""
+        preview_start_y = y + 3
+        
+        # Draw 3x3 item display in center
+        item_char = self._get_item_display_char(item)
+        
+        # 3x3 grid centered
+        grid_x = x + (width - 3) // 2
+        grid_y = preview_start_y + 2
+        
+        # Draw fancy border around the item with same style as main borders
+        border_fg = (180, 140, 100)  # Bronze/brass color
+        border_bg = (25, 20, 15)     # Dark brown/black
+        center_bg = (60, 40, 20)     # Item background
+        
+        # Draw 3x3 border frame (actual 3x3 as requested)
+        # Top border
+        console.print(grid_x, grid_y, "╔", fg=border_fg, bg=border_bg)
+        console.print(grid_x + 1, grid_y, "═", fg=border_fg, bg=border_bg)
+        console.print(grid_x + 2, grid_y, "╗", fg=border_fg, bg=border_bg)
+        
+        # Middle row with item - use direct color assignment  
+        console.print(grid_x, grid_y + 1, "║", fg=border_fg, bg=border_bg)
+        
+        # Get item color directly
+        item_color = self._get_item_color(item)
+        
+        # Print item with proper color
+        console.print(grid_x + 1, grid_y + 1, item_char, fg=item_color, bg=center_bg)
+        
+        console.print(grid_x + 2, grid_y + 1, "║", fg=border_fg, bg=border_bg)
+        
+        # Bottom border
+        console.print(grid_x, grid_y + 2, "╚", fg=border_fg, bg=border_bg)
+        console.print(grid_x + 1, grid_y + 2, "═", fg=border_fg, bg=border_bg)
+        console.print(grid_x + 2, grid_y + 2, "╝", fg=border_fg, bg=border_bg)
+        
+        # Item name (position adjusted for new border)
+        name_y = grid_y + 4
+        item_name = item.name
+        if len(item_name) > width - 2:
+            item_name = item_name[:width - 5] + "..."
+        console.print(x + 1, name_y, item_name, fg=(255, 215, 0))
+        
+        # Stat comparison
+        stats_y = name_y + 2
+        stat_lines = self._get_stat_comparison(item)
+        
+        from text_utils import print_colored_markup
+        for i, stat_line in enumerate(stat_lines):
+            if stats_y + i >= y + height - 2:
+                break
+            print_colored_markup(console, x + 1, stats_y + i, stat_line, default_color=(192, 192, 192))
+    
+    def _get_item_display_char(self, item) -> str:
+        """Get the character to display in the 3x3 preview."""
+        return item.char
+    
+    def _get_item_color(self, item):
+        """Get the actual color object for item display based on type and status."""
+        import color
+        
+        # More robust equipment check - avoid false positives
+        is_equipped = False
+        try:
+            if hasattr(self.engine.player, 'equipment') and hasattr(item, 'equippable'):
+                is_equipped = self.engine.player.equipment.item_is_equipped(item)
+        except Exception as e:
+            # If there's any error, assume not equipped
+            is_equipped = False
+            
+        if is_equipped:
+            return color.green  # Bright green for equipped items only
+        elif getattr(item, "equippable", None):
+            return color.light_gray  # Light gray for unequipped equipment
+        elif getattr(item, "consumable", None):
+            if "potion" in item.name.lower():
+                return color.magenta  # Magenta for potions
+            elif "scroll" in item.name.lower():
+                return color.yellow  # Yellow for scrolls
+            return color.cyan  # Cyan for other consumables
+        return color.white  # White for unknown items
+
+    def _get_item_color_name(self, item) -> str:
+        """Get the color name for text markup based on item type and status."""
+        # More robust equipment check - avoid false positives
+        is_equipped = False
+        try:
+            if hasattr(self.engine.player, 'equipment') and hasattr(item, 'equippable'):
+                is_equipped = self.engine.player.equipment.item_is_equipped(item)
+        except Exception as e:
+            # If there's any error, assume not equipped
+            is_equipped = False
+            
+        if is_equipped:
+            return "green"  # Bright green for equipped items only
+        elif getattr(item, "equippable", None):
+            return "light_gray"  # Light gray for unequipped equipment
+        elif getattr(item, "consumable", None):
+            if "potion" in item.name.lower():
+                return "magenta"  # Magenta for potions
+            elif "scroll" in item.name.lower():
+                return "yellow"  # Yellow for scrolls
+            return "cyan"  # Cyan for other consumables
+        return "white"  # White for unknown items
+    
+    def _get_stat_comparison(self, item) -> list:
+        """Generate stat comparison text for the item."""
+        lines = []
+        player = self.engine.player
+        
+        # Type information
+        if getattr(item, "equippable", None):
+            is_equipped = player.equipment.item_is_equipped(item)
+            
+            # Get equipment type
+            eq_type = getattr(item.equippable, "equipment_type", None)
+            if eq_type:
+                type_name = eq_type.name.replace("_", " ").title()
+                lines.append(f"Type: {type_name}")
+                
+                # Show appropriate stat based on equipment type
+                eq_name = eq_type.name.lower()
+                
+                if "weapon" in eq_name or "sword" in eq_name or "dagger" in eq_name:
+                    # Weapons show power
+                    if hasattr(item.equippable, "power_bonus"):
+                        power = item.equippable.power_bonus
+                        if is_equipped:
+                            current_power = player.fighter.power
+                            lines.append(f"Power: {current_power}({-power:+d})")
+                        else:
+                            current_power = player.fighter.power
+                            lines.append(f"Power: {current_power} (+{power})")
+                            
+                elif "armor" in eq_name or "mail" in eq_name or "leather" in eq_name or "shield" in eq_name:
+                    # Armor shows defense
+                    if hasattr(item.equippable, "defense_bonus"):
+                        defense = item.equippable.defense_bonus
+                        if is_equipped:
+                            current_defense = player.fighter.defense
+                            lines.append(f"Defense: {current_defense}({-defense:+d})")
+                        else:
+                            current_defense = player.fighter.defense
+                            lines.append(f"Defense: {current_defense} (+{defense})")
+                            
+                else:
+                    # Generic equipment - show both if available
+                    if hasattr(item.equippable, "power_bonus"):
+                        power = item.equippable.power_bonus
+                        if power != 0:
+                            if is_equipped:
+                                current_power = player.fighter.power
+                                lines.append(f"Power: {current_power}({-power:+d})")
+                            else:
+                                current_power = player.fighter.power
+                                lines.append(f"Power: {current_power} (+{power})")
+                                
+                    if hasattr(item.equippable, "defense_bonus"):
+                        defense = item.equippable.defense_bonus
+                        if defense != 0:
+                            if is_equipped:
+                                current_defense = player.fighter.defense
+                                lines.append(f"Defense: {current_defense}({-defense:+d})")
+                            else:
+                                current_defense = player.fighter.defense
+                                lines.append(f"Defense: {current_defense} (+{defense})")
+            
+            # Equipment status
+            if is_equipped:
+                lines.append("Equipped")  # Will be colored green in display
+            else:
+                lines.append("Status: Not equipped")
+                
+        elif getattr(item, "consumable", None):
+            lines.append("Type: Consumable")
+            
+            # Healing items
+            if hasattr(item.consumable, "amount") and "heal" in item.name.lower():
+                heal_amount = item.consumable.amount
+                current_hp = player.fighter.hp
+                max_hp = player.fighter.max_hp
+                potential_hp = min(max_hp, current_hp + heal_amount)
+                lines.append(f"Healing: {heal_amount}")
+                lines.append(f"HP: {current_hp}→{potential_hp}")
+            
+            # Usage info
+            if "potion" in item.name.lower():
+                lines.append("Use: Q to quaff")
+            elif "scroll" in item.name.lower():
+                lines.append("Use: R to read")
+            else:
+                lines.append("Use: I to activate")
+        
+        else:
+            lines.append("Type: Miscellaneous")
+            lines.append("Use: D to drop")
+        
+        # Limit to available space
+        return lines[:6]
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         player = self.engine.player
@@ -916,13 +1716,29 @@ class InventoryEventHandler(AskUserEventHandler):
         all_items = list(player.inventory.items)
         filtered_items = [it for it in all_items if self.item_filter(it)]
 
-        # Arrow-key navigation: up/down to move selection, Enter to confirm
+        # Arrow-key navigation: up/down to move selection, left/right for tabs, Enter to confirm
         if key == tcod.event.K_UP:
             self.selected_index = max(0, self.selected_index - 1)
             return None
         if key == tcod.event.K_DOWN:
             self.selected_index = min(len(filtered_items) - 1 if filtered_items else 0, self.selected_index + 1)
             return None
+        if key == tcod.event.K_LEFT:
+            self.current_category = max(0, self.current_category - 1)
+            self.selected_index = 0  # Reset selection when changing tabs
+            return None
+        if key == tcod.event.K_RIGHT:
+            self.current_category = min(len(self.categories) - 1, self.current_category + 1)
+            self.selected_index = 0  # Reset selection when changing tabs
+            return None
+        # Number keys 1-4 for quick tab switching
+        if tcod.event.KeySym.N1 <= key <= tcod.event.KeySym.N4:
+            tab_index = key - tcod.event.KeySym.N1
+            if tab_index < len(self.categories):
+                self.current_category = tab_index
+                self.selected_index = 0  # Reset selection when changing tabs
+                return None
+        
         if key in CONFIRM_KEYS:
             # If inventory empty, do nothing
             if len(filtered_items) == 0:
@@ -949,11 +1765,16 @@ class InventoryEventHandler(AskUserEventHandler):
 
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
         if item.consumable:
-            # Return action for the item
-            return item.consumable.get_action(self.engine.player)
+            # Execute consumable action and stay in inventory
+            action = item.consumable.get_action(self.engine.player)
+            if action:
+                action.perform()
+            return None  # Stay in inventory
         elif item.equippable:
-            return actions.EquipAction(self.engine.player, item)
-        
+            # Execute equip action and stay in inventory
+            action = actions.EquipAction(self.engine.player, item)
+            action.perform()
+            return None  # Stay in inventory
         else:
             return None
 
@@ -965,11 +1786,15 @@ class ScrollActivateHandler(InventoryEventHandler):
         super().__init__(engine, item_filter=lambda it: getattr(it, "consumable", None) is not None and "Scroll" in getattr(it, "name", ""))
 
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        # Returns the action for the selected item
+        # Execute scroll action and stay in inventory
         if "Scroll" in item.name and item.consumable:
-            return item.consumable.get_action(self.engine.player)
+            action = item.consumable.get_action(self.engine.player)
+            if action:
+                action.perform()
+            return None  # Stay in inventory
         else:
             self.engine.message_log.add_message(f"You cannot read the {item.name}.", color.invalid)
+            return None  # Stay in inventory
 
 
 
@@ -992,12 +1817,16 @@ class QuaffActivateHandler(InventoryEventHandler):
         super().__init__(engine, item_filter=lambda it: getattr(it, "consumable", None) is not None and "Potion" in getattr(it, "name", ""))
 
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        # Returns the action for the selected item
+        # Execute potion action and stay in inventory
         if "Potion" in item.name and item.consumable:
             sounds.quaff_sound.play()
-            return item.consumable.get_action(self.engine.player)
+            action = item.consumable.get_action(self.engine.player)
+            if action:
+                action.perform()
+            return None  # Stay in inventory
         else:
             self.engine.message_log.add_message(f"You cannot drink the {item.name}.", color.invalid)
+            return None  # Stay in inventory
     
 class InventoryDropHandler(InventoryEventHandler):
     #Handles dropping inventory item
@@ -1005,8 +1834,33 @@ class InventoryDropHandler(InventoryEventHandler):
     TITLE = "Select an item to drop"
 
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        # Drop this item
-        return actions.DropItem(self.engine.player, item)
+        # Remember the current filtered list to adjust selection index
+        all_items = list(self.engine.player.inventory.items)
+        filtered_items = [it for it in all_items if self.item_filter(it)]
+        
+        # Get current item index in filtered list
+        try:
+            current_filtered_index = filtered_items.index(item)
+        except ValueError:
+            current_filtered_index = 0
+        
+        # Execute drop action
+        action = actions.DropItem(self.engine.player, item)
+        action.perform()
+        
+        # Adjust selected index after dropping item
+        # Get the new filtered list after dropping
+        all_items = list(self.engine.player.inventory.items)
+        new_filtered_items = [it for it in all_items if self.item_filter(it)]
+        
+        # Adjust selection to stay reasonable
+        if len(new_filtered_items) == 0:
+            self.selected_index = 0
+        else:
+            # Keep same index if possible, otherwise move to previous item
+            self.selected_index = min(current_filtered_index, len(new_filtered_items) - 1)
+        
+        return None  # Stay in inventory
 
 
 class InventoryEquipHandler(InventoryEventHandler):
@@ -1019,7 +1873,10 @@ class InventoryEquipHandler(InventoryEventHandler):
 
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
         if getattr(item, "equippable", None):
-            return actions.EquipAction(self.engine.player, item)
+            # Execute equip action and stay in inventory
+            action = actions.EquipAction(self.engine.player, item)
+            action.perform()
+            return None  # Stay in inventory
         else:
             self.engine.message_log.add_message(f"{item.name} cannot be equipped.", color.invalid)
             return None

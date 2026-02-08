@@ -60,7 +60,7 @@ class Fighter(BaseComponent):
             return 0
     
     def die(self) -> None:
-        sounds.death_sound.play()
+        sounds.play_death_sound()
         if self.engine.player is self.parent:
             death_message = "YOU DIED IDIOT"
             death_message_color = color.player_die
@@ -142,4 +142,10 @@ class Fighter(BaseComponent):
     
     def take_damage(self, amount: int) -> None:
         self.hp -= amount
+        
+        # Trigger damage indicator if this is the player
+        if (hasattr(self.parent, 'gamemap') and 
+            hasattr(self.parent.gamemap, 'engine') and
+            self.parent is self.parent.gamemap.engine.player):
+            self.parent.gamemap.engine.trigger_damage_indicator()
 

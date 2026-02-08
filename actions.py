@@ -60,7 +60,7 @@ class InteractAction(Action):
                     raise exceptions.Impossible("The chest is empty.")
                 else:
                     # Send to input handler to display contents
-                    sounds.chest_open_sound.play()
+                    sounds.play_chest_open_sound()
                     from input_handlers import ContainerEventHandler
                     return ContainerEventHandler(self.engine, container)
 
@@ -75,14 +75,14 @@ class InteractAction(Action):
                 # Convert "Door" tile to "Open Door" tile
                 import tile_types
                 self.engine.game_map.tiles[target_x, target_y] = tile_types.open_door
-                sounds.door_open_sound.play()
+                sounds.play_door_open_sound()
                 self.engine.message_log.add_message("You open the door.")
 
             elif name == "Open Door":
                 # Convert "Open Door" tile to "Door" tile
                 import tile_types
                 self.engine.game_map.tiles[target_x, target_y] = tile_types.closed_door
-                sounds.door_close_sound.play()
+                sounds.play_door_close_sound()
                 self.engine.message_log.add_message("You close the door.")
 
             else:
@@ -123,8 +123,14 @@ class PickupAction(Action):
                 if "coin" in item.name.lower():
                     self.engine.player.gold += item.value
                     self.engine.game_map.entities.remove(item)
-                    sounds.pickup_coin_sound.play()
                     self.engine.message_log.add_message("You pick up some coins.", color.yellow)
+                    
+                    # Coin pick up sound 
+                    if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
+                        try:
+                            item.pickup_sound()
+                        except Exception as e:
+                            print(f"DEBUG: Error calling pickup sound: {e}")
                     return
                 else:
                     self.engine.game_map.entities.remove(item)
@@ -141,10 +147,16 @@ class PickupAction(Action):
                     new_torch = copy.deepcopy(torch)
                     new_torch.parent = self.entity.inventory
                     inventory.items.append(new_torch)
-                    sounds.pull_torch_sound.play()
+                    sounds.play_torch_pull_sound()
                     self.engine.message_log.add_message("You pull a burning log from the fire")
                     return
-                sounds.play_transfer_item_sound()
+                # Play pickup sound if it exists
+                if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
+                    try:
+                        item.pickup_sound()
+                    except Exception as e:
+                        print(f"DEBUG: Error calling pickup sound: {e}")
+
                 self.engine.message_log.add_message(f"You picked up the {item.name}!")
                 return
         raise exceptions.Impossible("There is nothing here to pick up.")
@@ -279,7 +291,17 @@ class MeleeAction(ActionWithDirection):
         damage = self.entity.fighter.power - target.fighter.defense
 
         attack_desc = f"{self.entity.name.capitalize()} attacks {target.name}"
-        sounds.play_attack_sound()
+        
+        ## Sounds
+        # Check if player has weapon
+        if self.entity.equipment:
+            # If enemy has armor, play different sound
+            if target.equipment and target.equipment.armor:
+                sounds.play_attack_sound_weapon_to_armor()
+            else:
+                sounds.play_attack_sound_weapon_to_no_armor()
+        
+        
         # Add slash animation
         from animations import SlashAnimation
         self.engine.animation_queue.append(SlashAnimation(target.x, target.y))
@@ -294,6 +316,10 @@ class MeleeAction(ActionWithDirection):
                 f"{attack_desc} for {damage} hit points.", attack_color
                 )
             target.fighter.hp -= damage
+            
+            # Trigger damage indicator if player takes damage
+            if target is self.engine.player:
+                self.engine.trigger_damage_indicator()
         else:
             self.engine.message_log.add_message(
                 f"{attack_desc}, but does no damage.", attack_color

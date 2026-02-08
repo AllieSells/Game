@@ -40,7 +40,7 @@ def main() -> None:
         screen_width,
         screen_height,
         tileset=tileset,
-        title="Hello World",
+        title="THE Game... idk",
         vsync=True,
     ) as context:
         console = tcod.console.Console(screen_width, screen_height, order="F")

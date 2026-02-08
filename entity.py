@@ -566,6 +566,10 @@ class Item(Entity):
             burn_duration: Optional[int] = None,
             value: int = 0,
             weight: float = 0.0,
+            pickup_sound = None,
+            drop_sound = None,
+            equip_sound = None,
+            unequip_sound = None,
 
     ):
         super().__init__(
@@ -594,4 +598,8 @@ class Item(Entity):
         self.description = description
         self.value = value
         self.weight = weight
+        self.pickup_sound = pickup_sound
+        self.equip_sound = equip_sound
+        self.unequip_sound = unequip_sound
+        self.drop_sound = drop_sound
         

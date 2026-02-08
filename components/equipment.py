@@ -73,8 +73,6 @@ class Equipment(BaseComponent):
         self.parent.gamemap.engine.message_log.add_message(
             f"You equip the {item_name}."
         )
-        if item_name.lower() == "torch":
-            sounds.pull_torch_sound.play()
 
     def equip_to_slot(self, slot: str, item: Item, add_message: bool) -> None:
         current_item = getattr(self, slot)
@@ -86,12 +84,37 @@ class Equipment(BaseComponent):
 
         if add_message:
             self.equip_message(item.name)
+                # Play equip sound 
+        #print(f"DEBUG: Checking equip sound for {item.name}")
+        #print(f"DEBUG: Has equip_sound attr: {hasattr(item, 'equip_sound')}")
+        #if hasattr(item, 'equip_sound'):
+        #    print(f"DEBUG: equip_sound value: {item.equip_sound}")
+        if hasattr(item, "equip_sound") and item.equip_sound is not None:
+            #print(f"DEBUG: About to call equip sound for {item.name}")
+            try:
+                item.equip_sound()
+                #print(f"DEBUG: Successfully called equip sound for {item.name}")
+            except Exception as e:
+                print(f"DEBUG: Error calling equip sound: {e}")
+        else:
+            print(f"DEBUG: No equip sound for {item}")
+        #if item_name.lower() == "torch":
+        #    sounds.play_torch_pull_sound()
 
     def unequip_from_slot(self, slot: str, add_message: bool) -> None:
         current_item = getattr(self, slot)
 
         if add_message:
             self.unequip_message(current_item.name)
+        
+        # Play unequip sound
+        if hasattr(current_item, "unequip_sound") and current_item.unequip_sound is not None:
+            try:
+                current_item.unequip_sound()
+            except Exception as e:
+                print(f"DEBUG: Error calling unequip sound: {e}")
+        else:
+            print(f"DEBUG: No unequip sound for {current_item}")
 
         setattr(self, slot, None)
 
