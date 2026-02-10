@@ -13,7 +13,7 @@ graphic_dt = np.dtype(
 
 tile_dt = np.dtype(
     [
-        ("lit", np.bool_),
+        ("light_level", np.float32),  # 0.0 = fully dark, 1.0 = fully lit
         ("name", "U64"),
         ("walkable", np.bool_),
         ("transparent", np.bool_),
@@ -25,7 +25,7 @@ tile_dt = np.dtype(
 
 def new_tile(
         *,
-        lit: bool = False,
+        light_level: float = 0.0,
         name: str = "<error>",
         walkable: int,
         transparent: int,
@@ -35,7 +35,7 @@ def new_tile(
 
 
 ) -> np.ndarray:
-    return np.array((lit, name, walkable, transparent, dark, light, interactable), dtype=tile_dt)
+    return np.array((light_level, name, walkable, transparent, dark, light, interactable), dtype=tile_dt)
 
 SHROUD = np.array((ord(" "), (255, 255, 255), (10, 10, 10)), dtype=graphic_dt)
 

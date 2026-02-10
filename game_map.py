@@ -8,6 +8,7 @@ import tile_types
 from entity import Actor, Item
 from render_order import RenderOrder
 import color
+from liquid_system import LiquidSystem
 
 if TYPE_CHECKING:
     from engine import Engine
@@ -20,6 +21,8 @@ class GameMap:
         self.engine = engine
         self.width, self.height = width, height
         self.entities = set(entities)
+        self.type = type
+        
         # Initialize tiles. For dungeon maps, populate per-tile using
         # tile_types.random_wall_tile() so we get variation (mossy walls etc.).
         if type == "dungeon":
@@ -48,6 +51,9 @@ class GameMap:
         self.upstairs_location = (0, 0)
         self.type = type  # What type of map this is, e.g. "dungeon" or "village"
         self.name = name  # Name of this map, e.g. "Dungeon Level 1", "Oakwood"
+        
+        # Initialize liquid system
+        self.liquid_system = LiquidSystem(self)
         
     @property
     def gamemap(self) -> GameMap:
@@ -81,10 +87,143 @@ class GameMap:
         """Return True if x and y are inside of the map."""
         return 0 <= x < self.width and 0 <= y < self.height
     
+    def _add_light_source(self, source_x: int, source_y: int, radius: int, max_intensity: float = 1.0) -> None:
+        """Add light from a source with distance-based falloff and FOV blocking."""
+        try:
+            from tcod.map import compute_fov
+            import tcod
+            
+            # Compute FOV to respect walls
+            try:
+                fov = compute_fov(
+                    self.tiles["transparent"], (source_x, source_y),
+                    radius=radius, algorithm=tcod.FOV_SHADOW
+                )
+            except Exception:
+                # Fallback: simple distance without FOV if compute_fov fails
+                xs = np.arange(0, self.width)
+                ys = np.arange(0, self.height)
+                dx = xs[:, None] - source_x
+                dy = ys[None, :] - source_y
+                dist = np.sqrt(dx * dx + dy * dy)
+                fov = dist <= radius
+            
+            # Calculate distance-based light intensity for all tiles in FOV
+            xs = np.arange(0, self.width)
+            ys = np.arange(0, self.height)
+            dx = xs[:, None] - source_x
+            dy = ys[None, :] - source_y
+            distance = np.sqrt(dx * dx + dy * dy)
+            
+            # Light falloff: intensity = max_intensity * (1 - distance / radius)^2
+            # Only apply where FOV is true and distance <= radius
+            mask = fov & (distance <= radius)
+            light_intensity = np.where(
+                mask,
+                max_intensity * np.maximum(0, (1 - distance / radius) ** 2),
+                0.0
+            )
+            
+            # Add to existing light levels (lights accumulate)
+            self.tiles["light_level"] = np.minimum(
+                1.0,  # Cap at maximum brightness
+                self.tiles["light_level"] + light_intensity
+            )
+            
+        except Exception as e:
+            # Fallback for any errors: simple distance-based lighting
+            xs = np.arange(0, self.width)
+            ys = np.arange(0, self.height)
+            dx = xs[:, None] - source_x
+            dy = ys[None, :] - source_y
+            distance = np.sqrt(dx * dx + dy * dy)
+            
+            mask = distance <= radius
+            light_intensity = np.where(
+                mask,
+                max_intensity * np.maximum(0, (1 - distance / radius) ** 2),
+                0.0
+            )
+            
+            self.tiles["light_level"] = np.minimum(
+                1.0,
+                self.tiles["light_level"] + light_intensity
+            )
+    
+    def _render_tiles_with_gradient(self, console: Console) -> None:
+        """Render tiles with gradient interpolation between dark and light based on light levels."""
+        import tile_types
+        
+        # Get base tiles for different visibility states
+        visible_mask = self.visible
+        explored_mask = self.explored
+        
+        # Initialize all tiles with SHROUD
+        result_tiles = np.full(
+            (self.width, self.height), 
+            tile_types.SHROUD, 
+            dtype=console.tiles_rgb.dtype
+        )
+        
+        # For explored areas, start with dark tiles
+        dark_tiles = self.tiles["dark"]
+        light_tiles = self.tiles["light"]
+        
+        # Get light levels only where player can see or has explored
+        light_levels = self.tiles["light_level"]
+        
+        # Visible areas get gradient lighting
+        if np.any(visible_mask):
+            # Add small ambient light around player (3x3 area)
+            try:
+                px, py = self.engine.player.x, self.engine.player.y
+                for dx in [-1, 0, 1]:
+                    for dy in [-1, 0, 1]:
+                        tx, ty = px + dx, py + dy
+                        if (0 <= tx < self.width and 0 <= ty < self.height 
+                            and self.tiles[tx, ty]["transparent"]):
+                            light_levels[tx, ty] = max(light_levels[tx, ty], 0.1)
+            except Exception:
+                pass
+            
+            # Interpolate between dark and light tiles based on light level
+            vis_light_levels = light_levels[visible_mask].clip(0, 1)
+            
+            # Extract dark and light graphics for visible tiles
+            vis_dark = dark_tiles[visible_mask]
+            vis_light = light_tiles[visible_mask] 
+            
+            # Interpolate character (use light char if light level > 0.5, dark otherwise)
+            result_chars = np.where(vis_light_levels > 0.5, vis_light['ch'], vis_dark['ch'])
+            
+            # Interpolate foreground and background colors
+            dark_fg = vis_dark['fg'].astype(float)
+            light_fg = vis_light['fg'].astype(float)
+            dark_bg = vis_dark['bg'].astype(float)  
+            light_bg = vis_light['bg'].astype(float)
+            
+            # Linear interpolation: dark + light_level * (light - dark)
+            interp_fg = (dark_fg + vis_light_levels[:, np.newaxis] * (light_fg - dark_fg)).clip(0, 255).astype(np.uint8)
+            interp_bg = (dark_bg + vis_light_levels[:, np.newaxis] * (light_bg - dark_bg)).clip(0, 255).astype(np.uint8)
+            
+            # Create interpolated tiles
+            result_tiles[visible_mask] = np.array(
+                list(zip(result_chars, interp_fg, interp_bg)), 
+                dtype=console.tiles_rgb.dtype
+            )
+        
+        # For explored but not visible areas, use dark tiles
+        explored_not_visible = explored_mask & (~visible_mask)
+        if np.any(explored_not_visible):
+            result_tiles[explored_not_visible] = dark_tiles[explored_not_visible]
+        
+        # Apply to console
+        console.tiles_rgb[0:self.width, 0:self.height] = result_tiles
+    
     def render(self, console: Console) -> None:
-        # Update tile lighting status based on proximity to light sources
-        # Reset all tiles to unlit first
-        self.tiles["lit"][:] = False
+        # Update tile lighting with gradient falloff based on distance to light sources  
+        # Reset all tiles to zero light level first
+        self.tiles["light_level"][:] = 0.0
         
         try:
             player = self.engine.player
@@ -102,30 +241,7 @@ class GameMap:
 
             if has_torch:
                 px, py = player.x, player.y
-                # Use FOV to prevent torch light from going through walls
-                try:
-                    from tcod.map import compute_fov
-                    import tcod
-                    from tcod import libtcodpy
-                    torch_fov = compute_fov(
-                        self.tiles["transparent"], (px, py), 
-                        radius=7, algorithm=tcod.FOV_SHADOW
-                    )
-                    self.tiles["lit"] |= torch_fov
-                except Exception as e:
-                    # Explain why FOV failed
-                    print(f"Failed to compute FOV for torch at ({px}, {py}): {e}")
-                    import traceback
-                    traceback.print_exc()
-
-                    # Fallback to simple distance if FOV fails
-                    rr = 7
-                    xs = np.arange(0, self.width)
-                    ys = np.arange(0, self.height)
-                    dx = xs[:, None] - px
-                    dy = ys[None, :] - py
-                    dist2 = dx * dx + dy * dy
-                    self.tiles["lit"] |= dist2 <= (rr * rr)
+                self._add_light_source(px, py, radius=7, max_intensity=1.0)
 
             # Campfire and Bonfire lighting - doesn't affect FOV, only visual lighting
             try:
@@ -136,111 +252,23 @@ class GameMap:
                             # Only apply lighting if item is within map bounds
                             if not (0 <= cx < self.width and 0 <= cy < self.height):
                                 continue
-                            # Use FOV to prevent light from going through walls
-                            try:
-                                from tcod.map import compute_fov
-                                import tcod
-                                from tcod import libtcodpy
-                                campfire_fov = compute_fov(
-                                    self.tiles["transparent"], (cx, cy), 
-                                    radius=3, algorithm=tcod.FOV_SHADOW
-                                )
-                                self.tiles["lit"] |= campfire_fov
-                            except Exception:
-                                # Fallback to simple distance if FOV fails
-                                xs = np.arange(0, self.width)
-                                ys = np.arange(0, self.height)
-                                dx = xs[:, None] - cx
-                                dy = ys[None, :] - cy
-                                dist2 = dx * dx + dy * dy
-                                self.tiles["lit"] |= dist2 <= (3 * 3)  # radius 3 for campfires
+                            self._add_light_source(cx, cy, radius=5, max_intensity=0.8)
                         elif item.name == "Bonfire":
                             bx, by = item.x, item.y
                             # Only apply lighting if item is within map bounds
                             if not (0 <= bx < self.width and 0 <= by < self.height):
                                 continue
-                            # Use FOV to prevent light from going through walls
-                            try:
-                                from tcod.map import compute_fov
-                                import tcod
-                                from tcod import libtcodpy
-                                bonfire_fov = compute_fov(
-                                    self.tiles["transparent"], (bx, by), 
-                                    radius=15, algorithm=tcod.FOV_SHADOW
-                                )
-                                self.tiles["lit"] |= bonfire_fov
-                            except Exception:
-                                # Fallback to simple distance if FOV fails
-                                xs = np.arange(0, self.width)
-                                ys = np.arange(0, self.height)
-                                dx = xs[:, None] - bx
-                                dy = ys[None, :] - by
-                                dist2 = dx * dx + dy * dy
-                                self.tiles["lit"] |= dist2 <= (15 * 15)  # radius 15 for bonfires (larger)
+                            self._add_light_source(bx, by, radius=15, max_intensity=1.0)
                     except Exception:
                         continue
             except Exception:
                 pass
         except Exception:
-            self.tiles["lit"][:] = False
+            self.tiles["light_level"][:] = 0.0
 
-        # Now select per-tile graphic: use the tile's lit attribute combined with player FOV
-        # Light sources set tile lit status, but player only sees the effect if in their FOV
-        console.tiles_rgb[0 : self.width, 0 : self.height] = np.select(
-            condlist=[self.visible & self.tiles["lit"], self.visible & (~self.tiles["lit"]), self.explored],
-            choicelist=[self.tiles["light"], self.tiles["dark"], self.tiles["dark"]],
-            default=tile_types.SHROUD,
-        )
-
-        # Make the 3x3 area around player always a bit lighter (renders under light source light)
-        try:
-            # Create 3x3 area mask around player that respects walls/transparency
-            px, py = self.engine.player.x, self.engine.player.y
-            player_area_mask = np.zeros((self.width, self.height), dtype=bool, order="F")
-            
-            if 0 <= px < self.width and 0 <= py < self.height:
-                # Check each tile in 3x3 area around player
-                for dx in [-1, 0, 1]:
-                    for dy in [-1, 0, 1]:
-                        tx, ty = px + dx, py + dy
-                        # Check if target position is in bounds
-                        if 0 <= tx < self.width and 0 <= ty < self.height:
-                            # Only include if tile is transparent (not a wall)
-                            if self.tiles[tx, ty]["transparent"]:
-                                player_area_mask[tx, ty] = True
-            
-            # Always apply enhancement (first line is always true)
-            if True:
-                alpha = 0.15
-                # Apply only to player area (independent of FOV)
-                dark_mask = player_area_mask
-                if np.any(dark_mask):
-                    tiles = console.tiles_rgb[0 : self.width, 0 : self.height]
-                    if hasattr(tiles.dtype, 'names') and tiles.dtype.names and 'fg' in tiles.dtype.names:
-                        try:
-                            fg = tiles['fg'].astype(float)
-                            bg = tiles['bg'].astype(float)
-                            # blend toward the light variant
-                            light_fg = self.tiles['light']['fg'].astype(float)
-                            light_bg = self.tiles['light']['bg'].astype(float)
-                            fg[dark_mask] = ((1.0 - alpha) * fg[dark_mask] + alpha * light_fg[dark_mask]).clip(0,255)
-                            bg[dark_mask] = ((1.0 - alpha) * bg[dark_mask] + alpha * light_bg[dark_mask]).clip(0,255)
-                            tiles['fg'] = fg.astype('u1')
-                            tiles['bg'] = bg.astype('u1')
-                            console.tiles_rgb[0 : self.width, 0 : self.height] = tiles
-                        except Exception:
-                            # Fallback to plain RGB blending
-                            layer = tiles.astype(float)
-                            light_layer = self.tiles['light'].astype(float)
-                            layer[dark_mask] = ((1.0 - alpha) * layer[dark_mask] + alpha * light_layer[dark_mask])
-                            console.tiles_rgb[0 : self.width, 0 : self.height] = layer.astype(np.uint8)
-                    else:
-                        layer = tiles.astype(float)
-                        light_layer = self.tiles['light'].astype(float)
-                        layer[dark_mask] = ((1.0 - alpha) * layer[dark_mask] + alpha * light_layer[dark_mask]).clip(0,255)
-                        console.tiles_rgb[0 : self.width, 0 : self.height] = layer.astype(np.uint8)
-        except Exception:
-            pass
+        # Render tiles with gradient lighting based on light levels
+        self._render_tiles_with_gradient(console)
+        
         # ANIM RENDER AREA
         if hasattr(self.engine, "animation_queue"):
             # First render priority 0 (under everything).

@@ -40,36 +40,36 @@ if TYPE_CHECKING:
 
 MOVE_KEYS = {
     # Arrow keys.
-    tcod.event.K_UP: (0, -1),
-    tcod.event.K_DOWN: (0, 1),
-    tcod.event.K_LEFT: (-1, 0),
-    tcod.event.K_RIGHT: (1, 0),
-    tcod.event.K_HOME: (-1, -1),
-    tcod.event.K_END: (-1, 1),
-    tcod.event.K_PAGEUP: (1, -1),
-    tcod.event.K_PAGEDOWN: (1, 1),
+    tcod.event.KeySym.UP: (0, -1),
+    tcod.event.KeySym.DOWN: (0, 1),
+    tcod.event.KeySym.LEFT: (-1, 0),
+    tcod.event.KeySym.RIGHT: (1, 0),
+    tcod.event.KeySym.HOME: (-1, -1),
+    tcod.event.KeySym.END: (-1, 1),
+    tcod.event.KeySym.PAGEUP: (1, -1),
+    tcod.event.KeySym.PAGEDOWN: (1, 1),
     # Numpad keys.
-    tcod.event.K_KP_1: (-1, 1),
-    tcod.event.K_KP_2: (0, 1),
-    tcod.event.K_KP_3: (1, 1),
-    tcod.event.K_KP_4: (-1, 0),
-    tcod.event.K_KP_6: (1, 0),
-    tcod.event.K_KP_7: (-1, -1),
-    tcod.event.K_KP_8: (0, -1),
-    tcod.event.K_KP_9: (1, -1),
+    tcod.event.KeySym.KP_1: (-1, 1),
+    tcod.event.KeySym.KP_2: (0, 1),
+    tcod.event.KeySym.KP_3: (1, 1),
+    tcod.event.KeySym.KP_4: (-1, 0),
+    tcod.event.KeySym.KP_6: (1, 0),
+    tcod.event.KeySym.KP_7: (-1, -1),
+    tcod.event.KeySym.KP_8: (0, -1),
+    tcod.event.KeySym.KP_9: (1, -1),
 }
 
 WAIT_KEYS = {
-    tcod.event.K_PERIOD,
-    tcod.event.K_KP_5,
-    tcod.event.K_CLEAR,
+    tcod.event.KeySym.PERIOD,
+    tcod.event.KeySym.KP_5,
+    tcod.event.KeySym.CLEAR,
 }
 
 CONFIRM_KEYS = {
-    tcod.event.K_RETURN,
-    tcod.event.K_KP_ENTER,
-    tcod.event.K_SPACE,
-    tcod.event.K_RIGHT,
+    tcod.event.KeySym.RETURN,
+    tcod.event.KeySym.KP_ENTER,
+    tcod.event.KeySym.SPACE,
+    tcod.event.KeySym.RIGHT,
 }
 
 
@@ -114,6 +114,13 @@ class EventHandler(BaseEventHandler):
         action_or_state = self.dispatch(event)
         if isinstance(action_or_state, BaseEventHandler):
             return action_or_state
+        
+        # Handle fast enemy turns before processing valid player actions
+        if action_or_state is not None:
+            handler_change = self.engine.turn_manager.process_pre_player_turn()
+            if handler_change:
+                return handler_change
+        
         handled = self.handle_action(action_or_state)
         # If an action returned a handler, switch to it directly.
         if isinstance(handled, BaseEventHandler):
@@ -1766,9 +1773,15 @@ class InventoryEventHandler(AskUserEventHandler):
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
         if item.consumable:
             # Execute consumable action and stay in inventory
-            action = item.consumable.get_action(self.engine.player)
-            if action:
-                action.perform()
+            action_or_handler = item.consumable.get_action(self.engine.player)
+            if action_or_handler:
+                # Check if it's a handler (needs input) or action (can perform immediately)
+                if hasattr(action_or_handler, 'perform'):
+                    action_or_handler.perform()
+                    return None  # Stay in inventory
+                else:
+                    # It's a handler that needs input, return it
+                    return action_or_handler
             return None  # Stay in inventory
         elif item.equippable:
             # Execute equip action and stay in inventory
@@ -1788,9 +1801,15 @@ class ScrollActivateHandler(InventoryEventHandler):
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
         # Execute scroll action and stay in inventory
         if "Scroll" in item.name and item.consumable:
-            action = item.consumable.get_action(self.engine.player)
-            if action:
-                action.perform()
+            action_or_handler = item.consumable.get_action(self.engine.player)
+            if action_or_handler:
+                # Check if it's a handler (needs input) or action (can perform immediately)
+                if hasattr(action_or_handler, 'perform'):
+                    action_or_handler.perform()
+                    return None  # Stay in inventory
+                else:
+                    # It's a handler that needs input, return it
+                    return action_or_handler
             return None  # Stay in inventory
         else:
             self.engine.message_log.add_message(f"You cannot read the {item.name}.", color.invalid)
@@ -1819,10 +1838,16 @@ class QuaffActivateHandler(InventoryEventHandler):
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
         # Execute potion action and stay in inventory
         if "Potion" in item.name and item.consumable:
-            sounds.quaff_sound.play()
-            action = item.consumable.get_action(self.engine.player)
-            if action:
-                action.perform()
+            sounds.play_quaff_sound()
+            action_or_handler = item.consumable.get_action(self.engine.player)
+            if action_or_handler:
+                # Check if it's a handler (needs input) or action (can perform immediately)
+                if hasattr(action_or_handler, 'perform'):
+                    action_or_handler.perform()
+                    return None  # Stay in inventory
+                else:
+                    # It's a handler that needs input, return it
+                    return action_or_handler
             return None  # Stay in inventory
         else:
             self.engine.message_log.add_message(f"You cannot drink the {item.name}.", color.invalid)
@@ -1863,23 +1888,23 @@ class InventoryDropHandler(InventoryEventHandler):
         return None  # Stay in inventory
 
 
-class InventoryEquipHandler(InventoryEventHandler):
-    """Shows only equippable items and equips the selected one."""
-    TITLE = "Select an item to equip"
-
-    def __init__(self, engine: Engine):
-        # Filter for items that have an equippable component
-        super().__init__(engine, item_filter=lambda it: getattr(it, "equippable", None) is not None)
-
-    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        if getattr(item, "equippable", None):
-            # Execute equip action and stay in inventory
-            action = actions.EquipAction(self.engine.player, item)
-            action.perform()
-            return None  # Stay in inventory
-        else:
-            self.engine.message_log.add_message(f"{item.name} cannot be equipped.", color.invalid)
-            return None
+# class InventoryEquipHandler(InventoryEventHandler):
+#     """Shows only equippable items and equips the selected one."""
+#     TITLE = "Select an item to equip"
+# 
+#     def __init__(self, engine: Engine):
+#         # Filter for items that have an equippable component
+#         super().__init__(engine, item_filter=lambda it: getattr(it, "equippable", None) is not None)
+# 
+#     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
+#         if getattr(item, "equippable", None):
+#             # Execute equip action and stay in inventory
+#             action = actions.EquipAction(self.engine.player, item)
+#             action.perform()
+#             return None  # Stay in inventory
+#         else:
+#             self.engine.message_log.add_message(f"{item.name} cannot be equipped.", color.invalid)
+#             return None
 
 class SelectIndexHandler(AskUserEventHandler):
     # Handles asking the user for a location on the map
@@ -1961,6 +1986,529 @@ class SelectIndexHandler(AskUserEventHandler):
         # called when index selected
         raise NotImplementedError()
     
+class TargetingHandler(SelectIndexHandler):
+    """Base targeting handler for area/ranged attacks."""
+    
+    def __init__(self, engine: Engine, callback: Callable[[int, int], Optional[ActionOrHandler]]):
+        super().__init__(engine)
+        self.callback = callback
+    
+    def on_index_selected(self, x: int, y: int) -> Optional[ActionOrHandler]:
+        return self.callback(x, y)
+
+
+class AttackModeHandler(AskUserEventHandler):
+    """Handler for setting the player's preferred attack targeting mode."""
+    
+    def __init__(self, engine: Engine):
+        super().__init__(engine)
+        self.selected_index = 0
+        
+        # Available targeting modes
+        self.attack_modes = [
+            (None, "Random Target", "Hit any available body part (default)"),
+            ('HEAD', "Target Head", "Always aim for head - Very Hard, 2x Damage"),
+            ('TORSO', "Target Torso", "Always aim for torso - Easy Target, Normal Damage"),
+            ('LEFT_ARM', "Target Left Arm", "Always aim for left arm - Hard, Reduced Damage"),
+            ('RIGHT_ARM', "Target Right Arm", "Always aim for right arm - Hard, Reduced Damage"),
+            ('LEFT_LEG', "Target Left Leg", "Always aim for left leg - Medium, Reduced Damage"),
+            ('RIGHT_LEG', "Target Right Leg", "Always aim for right leg - Medium, Reduced Damage"),
+        ]
+        
+        # Quick selection keys
+        self.quick_keys = {
+            tcod.event.KeySym.N0: None,  # Random
+            tcod.event.KeySym.N1: 'HEAD',
+            tcod.event.KeySym.N2: 'TORSO', 
+            tcod.event.KeySym.N3: 'LEFT_ARM',
+            tcod.event.KeySym.N4: 'RIGHT_ARM',
+            tcod.event.KeySym.N5: 'LEFT_LEG',
+            tcod.event.KeySym.N6: 'RIGHT_LEG',
+        }
+    
+    def _get_current_mode_index(self) -> int:
+        """Get the index of the currently selected attack mode."""
+        current_mode = getattr(self.engine.player, 'attack_type', None)
+        for i, (mode, _, _) in enumerate(self.attack_modes):
+            if mode == current_mode:
+                return i
+        return 0  # Default to random
+    
+    def _draw_parchment_background(self, console, x: int, y: int, width: int, height: int):
+        """Draw parchment-style background."""
+        # Rich brown parchment colors with fantasy feel
+        for py in range(height):
+            for px in range(width):
+                # Create subtle variation in the parchment color
+                base_color = (45, 35, 25)  # Rich brown
+                console.print(x + px, y + py, " ", bg=base_color)
+    
+    def _draw_ornate_border(self, console, x: int, y: int, width: int, height: int, title: str):
+        """Draw ornate border with fantasy styling."""
+        border_fg = (139, 105, 60)  # Bronze
+        title_fg = (255, 215, 0)    # Gold
+        bg = (45, 35, 25)           # Parchment background
+        
+        # Draw border corners and edges
+        console.print(x, y, "╔", fg=border_fg, bg=bg)
+        console.print(x + width - 1, y, "╗", fg=border_fg, bg=bg)
+        console.print(x, y + height - 1, "╚", fg=border_fg, bg=bg)
+        console.print(x + width - 1, y + height - 1, "╝", fg=border_fg, bg=bg)
+        
+        # Top and bottom borders
+        for i in range(1, width - 1):
+            console.print(x + i, y, "═", fg=border_fg, bg=bg)
+            console.print(x + i, y + height - 1, "═", fg=border_fg, bg=bg)
+        
+        # Left and right borders
+        for i in range(1, height - 1):
+            console.print(x, y + i, "║", fg=border_fg, bg=bg)
+            console.print(x + width - 1, y + i, "║", fg=border_fg, bg=bg)
+        
+        # Ornate title with decorative flourishes
+        title_decorated = f"✦ {title} ✦"
+        title_start = x + (width - len(title_decorated)) // 2
+        # Clear title area
+        for tx in range(len(title_decorated)):
+            console.print(title_start + tx, y, " ", bg=bg)
+        console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
+    
+    def _draw_parchment_background(self, console, x: int, y: int, width: int, height: int):
+        """Draw parchment-style background."""
+        # Rich brown parchment colors with fantasy feel
+        for py in range(height):
+            for px in range(width):
+                # Create subtle variation in the parchment color
+                base_color = (45, 35, 25)  # Rich brown
+                console.print(x + px, y + py, " ", bg=base_color)
+    
+    def _draw_ornate_border(self, console, x: int, y: int, width: int, height: int, title: str):
+        """Draw ornate border with fantasy styling."""
+        border_fg = (139, 105, 60)  # Bronze
+        title_fg = (255, 215, 0)    # Gold
+        bg = (45, 35, 25)           # Parchment background
+        
+        # Draw border corners and edges
+        console.print(x, y, "╔", fg=border_fg, bg=bg)
+        console.print(x + width - 1, y, "╗", fg=border_fg, bg=bg)
+        console.print(x, y + height - 1, "╚", fg=border_fg, bg=bg)
+        console.print(x + width - 1, y + height - 1, "╝", fg=border_fg, bg=bg)
+        
+        # Top and bottom borders
+        for i in range(1, width - 1):
+            console.print(x + i, y, "═", fg=border_fg, bg=bg)
+            console.print(x + i, y + height - 1, "═", fg=border_fg, bg=bg)
+        
+        # Left and right borders
+        for i in range(1, height - 1):
+            console.print(x, y + i, "║", fg=border_fg, bg=bg)
+            console.print(x + width - 1, y + i, "║", fg=border_fg, bg=bg)
+        
+        # Ornate title with decorative flourishes
+        title_decorated = f"✦ {title} ✦"
+        title_start = x + (width - len(title_decorated)) // 2
+        # Clear title area
+        for tx in range(len(title_decorated)):
+            console.print(title_start + tx, y, " ", bg=bg)
+        console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
+    
+    def on_render(self, console: tcod.Console) -> None:
+        super().on_render(console)
+        
+        # Calculate window size
+        window_width = 65
+        window_height = min(25, len(self.attack_modes) + 12)
+        
+        # Center the window
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height) // 2
+        
+        # Draw ornate fantasy-themed window
+        self._draw_parchment_background(console, x, y, window_width, window_height)
+        self._draw_ornate_border(console, x, y, window_width, window_height, "Set Attack Mode")
+        
+        # Instructions header
+        console.print(
+            x=x + 2, y=y + 2,
+            string="Choose your preferred attack targeting:",
+            fg=(255, 215, 0), bg=(45, 35, 25)
+        )
+        
+        # Current mode indicator
+        current_mode_index = self._get_current_mode_index()
+        current_mode_name = self.attack_modes[current_mode_index][1]
+        console.print(
+            x=x + 2, y=y + 3,
+            string=f"Current: {current_mode_name}",
+            fg=(0, 255, 0), bg=(45, 35, 25)
+        )
+        
+        # Attack modes list
+        start_y = y + 5
+        for i, (mode_key, mode_name, description) in enumerate(self.attack_modes):
+            item_y = start_y + i
+            if item_y >= y + window_height - 4:
+                break
+                
+            # Highlight selected item with ornate selection
+            if i == self.selected_index:
+                # Draw rich selection background with golden glow
+                for sx in range(window_width - 4):
+                    console.print(x + 2 + sx, item_y, " ", bg=(80, 60, 30))
+            
+            # Number key indicator
+            number_key = ""
+            for key, target in self.quick_keys.items():
+                if target == mode_key:
+                    if mode_key is None:
+                        key_num = "0"
+                    else:
+                        key_num = str(key - tcod.event.KeySym.N1 + 1)
+                    number_key = f"[{key_num}] "
+                    break
+            
+            # Current mode indicator
+            current_indicator = "★ " if i == current_mode_index else "  "
+            
+            # Color coding
+            if i == current_mode_index:
+                mode_color = color.green
+            elif i == self.selected_index:
+                mode_color = color.yellow
+            else:
+                mode_color = color.white
+            
+            # Main mode line
+            main_line = f"{current_indicator}{number_key}{mode_name}"
+            console.print(x + 3, item_y, main_line, fg=mode_color, bg=(45, 35, 25) if i != self.selected_index else (80, 60, 30))
+            
+            # Description
+            description_x = x + 3
+            description_y = item_y
+            if len(main_line) < 25:  # If there's space on the same line
+                description_x += len(main_line) + 2
+            else:  # Move to next line if too long
+                description_y += 1
+                item_y += 1  # Adjust for the extra line
+            
+            # Truncate description to fit
+            max_desc_width = window_width - (description_x - x) - 3
+            if len(description) > max_desc_width:
+                description = description[:max_desc_width-3] + "..."
+                
+            console.print(description_x, description_y, description, fg=color.light_gray, bg=(45, 35, 25) if i != self.selected_index else (80, 60, 30))
+        
+        # Instructions footer
+        instructions = [
+            "[↑↓] Navigate  [0-6] Quick Select  [Enter] Set Mode  [Esc] Cancel",
+            "This affects all future attacks until changed."
+        ]
+        
+        for i, instruction in enumerate(instructions):
+            console.print(
+                x + (window_width - len(instruction)) // 2,
+                y + window_height - 3 + i,
+                instruction,
+                fg=color.light_gray, bg=(45, 35, 25)
+            )
+    
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        key = event.sym
+        
+        # Navigation
+        if key == tcod.event.KeySym.UP:
+            self.selected_index = max(0, self.selected_index - 1)
+            return None
+        elif key == tcod.event.KeySym.DOWN:
+            self.selected_index = min(len(self.attack_modes) - 1, self.selected_index + 1)
+            return None
+        
+        # Quick selection with number keys
+        elif key in self.quick_keys:
+            target_mode = self.quick_keys[key]
+            for i, (mode_key, _, _) in enumerate(self.attack_modes):
+                if mode_key == target_mode:
+                    self.selected_index = i
+                    # Auto-set mode when using number keys
+                    return self._set_attack_mode()
+        
+        # Confirm selection
+        elif key in CONFIRM_KEYS:
+            return self._set_attack_mode()
+        
+        # Cancel
+        elif key == tcod.event.KeySym.ESCAPE:
+            return MainGameEventHandler(self.engine)
+        
+        return super().ev_keydown(event)
+    
+    def _set_attack_mode(self) -> Optional[ActionOrHandler]:
+        """Set the attack mode and return to main game."""
+        selected_mode, mode_name, _ = self.attack_modes[self.selected_index]
+        
+        # Store the preferred attack type on the player
+        self.engine.player.attack_type = selected_mode
+        #print(self.engine.player.attack_type)
+        
+        # Show confirmation message
+        if selected_mode is None:
+            message = "Attack mode: Random targeting"
+        else:
+            part_name = selected_mode.replace('_', ' ').title()
+            message = f"Attack mode: Always target {part_name}"
+            
+        #self.engine.message_log.add_message(message, color.green)
+        
+        return MainGameEventHandler(self.engine)
+
+
+class LimbTargetingHandler(AskUserEventHandler):
+    """Handler for selecting which body part to target in combat."""
+    
+    def __init__(self, engine: Engine, attacker: Actor, target: Actor):
+        super().__init__(engine)
+        self.attacker = attacker
+        self.target = target
+        self.selected_index = 0
+        
+        # Get available body parts (not destroyed)
+        self.available_parts = []
+        if hasattr(target, 'body_parts') and target.body_parts:
+            for part_type, part in target.body_parts.body_parts.items():
+                if not part.is_destroyed:
+                    self.available_parts.append((part_type, part))
+        
+        # Sort parts in logical order for display
+        self._sort_body_parts()
+        
+        # Quick selection keys for common parts
+        self.quick_keys = {
+            tcod.event.KeySym.N1: 'HEAD',
+            tcod.event.KeySym.N2: 'TORSO', 
+            tcod.event.KeySym.N3: 'LEFT_ARM',
+            tcod.event.KeySym.N4: 'RIGHT_ARM',
+            tcod.event.KeySym.N5: 'LEFT_LEG',
+            tcod.event.KeySym.N6: 'RIGHT_LEG',
+        }
+    
+    def _sort_body_parts(self):
+        """Sort body parts in logical display order."""
+        order_priority = {
+            'HEAD': 0,
+            'NECK': 1, 
+            'TORSO': 2,
+            'LEFT_ARM': 3,
+            'RIGHT_ARM': 4,
+            'LEFT_HAND': 5,
+            'RIGHT_HAND': 6,
+            'LEFT_LEG': 7,
+            'RIGHT_LEG': 8,
+            'LEFT_FOOT': 9,
+            'RIGHT_FOOT': 10,
+        }
+        
+        self.available_parts.sort(key=lambda x: order_priority.get(x[0].name, 99))
+    
+    def _get_difficulty_description(self, part_type) -> str:
+        """Get difficulty and damage description for a body part."""
+        if part_type.name == "HEAD":
+            return "Very Hard, 2x Damage"
+        elif part_type.name == "TORSO":
+            return "Easy Target, Normal Damage"
+        elif "LEG" in part_type.name:
+            return "Medium, Reduced Damage"
+        elif "ARM" in part_type.name:
+            return "Hard, Reduced Damage"
+        elif "HAND" in part_type.name or "FOOT" in part_type.name:
+            return "Very Hard, Low Damage"
+        else:
+            return "Medium, Normal Damage"
+    
+    def _draw_parchment_background(self, console, x: int, y: int, width: int, height: int):
+        """Draw parchment-style background."""
+        # Rich brown parchment colors with fantasy feel
+        for py in range(height):
+            for px in range(width):
+                # Create subtle variation in the parchment color
+                base_color = (45, 35, 25)  # Rich brown
+                console.print(x + px, y + py, " ", bg=base_color)
+    
+    def _draw_ornate_border(self, console, x: int, y: int, width: int, height: int, title: str):
+        """Draw ornate border with fantasy styling."""
+        border_fg = (139, 105, 60)  # Bronze
+        title_fg = (255, 215, 0)    # Gold
+        bg = (45, 35, 25)           # Parchment background
+        
+        # Draw border corners and edges
+        console.print(x, y, "╔", fg=border_fg, bg=bg)
+        console.print(x + width - 1, y, "╗", fg=border_fg, bg=bg)
+        console.print(x, y + height - 1, "╚", fg=border_fg, bg=bg)
+        console.print(x + width - 1, y + height - 1, "╝", fg=border_fg, bg=bg)
+        
+        # Top and bottom borders
+        for i in range(1, width - 1):
+            console.print(x + i, y, "═", fg=border_fg, bg=bg)
+            console.print(x + i, y + height - 1, "═", fg=border_fg, bg=bg)
+        
+        # Left and right borders
+        for i in range(1, height - 1):
+            console.print(x, y + i, "║", fg=border_fg, bg=bg)
+            console.print(x + width - 1, y + i, "║", fg=border_fg, bg=bg)
+        
+        # Ornate title with decorative flourishes
+        title_decorated = f"✦ {title} ✦"
+        title_start = x + (width - len(title_decorated)) // 2
+        # Clear title area
+        for tx in range(len(title_decorated)):
+            console.print(title_start + tx, y, " ", bg=bg)
+        console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
+    
+    def _get_health_bar(self, part, width=8) -> str:
+        """Create a text health bar for the body part."""
+        if part.max_hp <= 0:
+            return "░" * width
+        
+        ratio = part.current_hp / part.max_hp
+        filled = int(ratio * width)
+        return "█" * filled + "░" * (width - filled)
+    
+    def on_render(self, console: tcod.Console) -> None:
+        super().on_render(console)
+        
+        # Calculate window size
+        window_width = 60
+        window_height = min(25, len(self.available_parts) + 10)
+        
+        # Center the window
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height) // 2
+        
+        # Draw ornate fantasy-themed window
+        self._draw_parchment_background(console, x, y, window_width, window_height)
+        self._draw_ornate_border(console, x, y, window_width, window_height, f"Target {self.target.name}'s Body Parts")
+        
+        # Instructions header
+        console.print(
+            x=x + 2, y=y + 2,
+            string="Select a body part to attack:",
+            fg=(255, 215, 0), bg=(45, 35, 25)
+        )
+        
+        # Body parts list
+        start_y = y + 4
+        for i, (part_type, part) in enumerate(self.available_parts):
+            item_y = start_y + i
+            if item_y >= y + window_height - 4:
+                break
+                
+            # Highlight selected item with ornate selection
+            if i == self.selected_index:
+                # Draw rich selection background with golden glow
+                for sx in range(window_width - 4):
+                    console.print(x + 2 + sx, item_y, " ", bg=(80, 60, 30))
+            
+            # Number key indicator (if available)
+            number_key = ""
+            for key, part_name in self.quick_keys.items():
+                if part_name == part_type.name:
+                    key_num = str(key - tcod.event.KeySym.N1 + 1)
+                    number_key = f"[{key_num}] "
+                    break
+            
+            # Part name
+            part_display_name = part.name.replace("_", " ").title()
+            
+            # Health bar
+            health_bar = self._get_health_bar(part)
+            health_text = f"({part.current_hp}/{part.max_hp})"
+            
+            # Difficulty/damage info
+            difficulty = self._get_difficulty_description(part_type)
+            
+            # Color coding based on health
+            if part.current_hp <= 0:
+                part_color = color.dark_red
+            elif part.current_hp < part.max_hp * 0.3:
+                part_color = color.red
+            elif part.current_hp < part.max_hp * 0.7:
+                part_color = color.yellow
+            else:
+                part_color = color.green
+            
+            # Main part line
+            main_line = f"{number_key}{part_display_name:<12} {health_bar} {health_text}"
+            console.print(x + 3, item_y, main_line, fg=part_color, bg=(45, 35, 25) if i != self.selected_index else (80, 60, 30))
+            
+            # Difficulty info on the right
+            console.print(x + window_width - len(difficulty) - 3, item_y, difficulty, fg=color.light_gray, bg=(45, 35, 25) if i != self.selected_index else (80, 60, 30))
+        
+        # Instructions footer
+        instructions = [
+            "[↑↓] Navigate  [1-6] Quick Select  [Enter] Attack  [Esc] Cancel",
+            "Targeting: Head=2x dmg, Torso=easy hit, Limbs=harder but disable"
+        ]
+        
+        for i, instruction in enumerate(instructions):
+            console.print(
+                x + (window_width - len(instruction)) // 2,
+                y + window_height - 3 + i,
+                instruction,
+                fg=color.light_gray, bg=(45, 35, 25)
+            )
+    
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        key = event.sym
+        
+        # Navigation
+        if key == tcod.event.KeySym.UP:
+            self.selected_index = max(0, self.selected_index - 1)
+            return None
+        elif key == tcod.event.KeySym.DOWN:
+            self.selected_index = min(len(self.available_parts) - 1, self.selected_index + 1)
+            return None
+        
+        # Quick selection with number keys
+        elif key in self.quick_keys:
+            target_part_name = self.quick_keys[key]
+            for i, (part_type, part) in enumerate(self.available_parts):
+                if part_type.name == target_part_name:
+                    self.selected_index = i
+                    # Auto-attack when using number keys
+                    return self._execute_targeted_attack()
+        
+        # Confirm selection
+        elif key in CONFIRM_KEYS:
+            return self._execute_targeted_attack()
+        
+        # Cancel
+        elif key == tcod.event.KeySym.ESCAPE:
+            from input_handlers import MainGameEventHandler
+            return MainGameEventHandler(self.engine)
+        
+        return super().ev_keydown(event)
+    
+    def _execute_targeted_attack(self) -> Optional[ActionOrHandler]:
+        """Execute the targeted attack and return to main game."""
+        if not self.available_parts:
+            return MainGameEventHandler(self.engine)
+            
+        selected_part_type, selected_part = self.available_parts[self.selected_index]
+        
+        # Calculate direction to target
+        dx = self.target.x - self.attacker.x
+        dy = self.target.y - self.attacker.y
+        
+        # Create and perform the targeted attack
+        from actions import MeleeAction
+        action = MeleeAction(self.attacker, dx, dy, selected_part_type)
+        
+        try:
+            action.perform()
+        except Exception as e:
+            self.engine.message_log.add_message(str(e), color.impossible)
+        
+        return MainGameEventHandler(self.engine)
+
 class LookHandler(SelectIndexHandler):
     """Enhanced look handler with detailed inspection sidebar."""
 
@@ -2250,6 +2798,41 @@ class LookHandler(SelectIndexHandler):
                 lines.extend(wrapped_desc)
                 lines.append("")  # Empty line for spacing
             
+            # Add body part information for entities with body parts
+            if hasattr(entity, 'body_parts') and entity.body_parts:
+                body_parts = entity.body_parts                
+                damaged_parts = body_parts.get_damaged_parts()
+
+                for part in damaged_parts:
+                    injury_text = ""  # Reset for each part
+                    if part.damage_level == "damaged":
+                        injury_text = f"<white>It's {part.name} is damaged.</white>"
+                    elif part.damage_level == "wounded":
+                        injury_text = f"<yellow>It's {part.name} is wounded.</yellow>"
+                    elif part.damage_level == "badly wounded":
+                        injury_text = f"<orange>It's {part.name} is badly wounded.</orange>"
+                    elif part.damage_level == "severely wounded":
+                        injury_text = f"<orange>It's {part.name} is severely wounded.</orange>"
+                    elif part.damage_level == "destroyed":
+                        injury_text = f"<red>It's {part.name} is missing.</red>"
+
+                    wrapped_injury = wrap_colored_text_to_strings(injury_text, max_width)
+                    print(wrapped_injury)
+                    lines.extend(wrapped_injury)
+                
+                # Movement impairment
+                movement_penalty = body_parts.get_movement_penalty()
+                if movement_penalty > 0.7:
+                    movement_text = red("It can barely move due to its injuries.")
+                    wrapped_movement = wrap_colored_text_to_strings(movement_text, max_width)
+                    lines.extend(wrapped_movement)
+                    lines.append("")
+                elif movement_penalty > 0.3:
+                    movement_text = yellow("Its movement appears impaired.")
+                    wrapped_movement = wrap_colored_text_to_strings(movement_text, max_width)  
+                    lines.extend(wrapped_movement)
+                    lines.append("\n")
+            
             # Add lock status if applicable
             if hasattr(entity, "container") and entity.container.locked:
                 lock_text = red("It has a lock.")
@@ -2286,7 +2869,7 @@ class LookHandler(SelectIndexHandler):
             type_text = f"This is a {tile_info['name']}."
             lines.extend(wrap_colored_text_to_strings(type_text, max_width))
             
-            walkable_text = f" {'You can walk here.' if tile_info['walkable'] else 'You cannot walk here.'}"
+            walkable_text = f"{'You can walk here.' if tile_info['walkable'] else 'You cannot walk here.'}"
             lines.extend(wrap_colored_text_to_strings(walkable_text, max_width))
             
             transparent_text = f"{'You can see through this.' if tile_info['transparent'] else 'You cannot see through this.'}"
@@ -2297,6 +2880,35 @@ class LookHandler(SelectIndexHandler):
                 # Use proper colored text wrapping
                 wrapped_interact = wrap_colored_text_to_strings(interact_text, max_width)
                 lines.extend(wrapped_interact)
+            
+            # Add liquid coating information if present
+            if hasattr(self.engine.game_map, 'liquid_system'):
+                # Get the tile coordinates from the mouse location
+                x, y = self.engine.mouse_location
+                coating = self.engine.game_map.liquid_system.get_coating(int(x), int(y))
+                if coating:
+                    from liquid_system import LiquidType
+                    
+                    liquid_names = {
+                        LiquidType.WATER: "water",
+                        LiquidType.BLOOD: "blood", 
+                        LiquidType.OIL: "oil",
+                        LiquidType.SLIME: "slime"
+                    }
+                    
+                    liquid_colors = {
+                        LiquidType.WATER: blue,
+                        LiquidType.BLOOD: red,
+                        LiquidType.OIL: yellow,
+                        LiquidType.SLIME: green
+                    }
+                    
+                    liquid_name = liquid_names.get(coating.liquid_type, "unknown liquid")
+                    color_func = liquid_colors.get(coating.liquid_type, lambda x: x)
+                    
+                    coating_text = color_func(f"It is coated in {liquid_name}.")
+                    wrapped_coating = wrap_colored_text_to_strings(coating_text, max_width)
+                    lines.extend(wrapped_coating)
         
         return lines
 
@@ -2526,7 +3138,35 @@ class MainGameEventHandler(EventHandler):
         # F2 toggles debug mode
         elif key == tcod.event.K_F2:
             self.engine.message_log.add_message("Debug mode toggled.", color.green)
+
+
+        # KEYBINDS
+
             self.engine.debug = not self.engine.debug
+        
+        # F3 shows limb stats debug
+        elif key == tcod.event.K_F3:
+            return LimbStatsDebugHandler(self.engine)
+        
+        # Targeted attack (Shift + movement key)
+        elif key in MOVE_KEYS and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT):
+            dx, dy = MOVE_KEYS[key]
+            target_x = player.x + dx
+            target_y = player.y + dy
+            
+            # Check if there's an enemy to target at that location
+            target_actor = self.engine.game_map.get_actor_at_location(target_x, target_y)
+            
+            if target_actor and target_actor != player:
+                # Open limb targeting UI if target has body parts
+                if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
+                    return LimbTargetingHandler(self.engine, player, target_actor)
+                else:
+                    # Otherwise do normal attack
+                    action = actions.BumpAction(player, dx, dy)
+            else:
+                self.engine.message_log.add_message("No target in that direction.", color.impossible)
+        
         # Interact action (ALT + arrow key direction OR numpad direction)
         elif key == tcod.event.K_LEFT and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
             action = InteractAction(player, -1, 0)
@@ -2553,6 +3193,7 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.K_KP_9 and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
             action = InteractAction(player, 1, -1)
 
+
 #       Dev key, press K to kill all enemies on the map
 #        elif key == tcod.event.KeySym.K:
 #            for entity in self.engine.game_map.entities:
@@ -2565,7 +3206,36 @@ class MainGameEventHandler(EventHandler):
             
         elif key in MOVE_KEYS:
             dx, dy = MOVE_KEYS[key]
-            action = BumpAction(player, dx, dy)
+            
+            # Check if player has a preferred attack target and if there's an enemy to attack
+            preferred_target = getattr(player, 'attack_type', None)
+            target_x = player.x + dx
+            target_y = player.y + dy
+            target_actor = self.engine.game_map.get_actor_at_location(target_x, target_y)
+            
+            if preferred_target and target_actor and target_actor != player:
+                # Use targeted attack if we have a preference and there's an enemy
+                if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
+                    # Convert preference string to BodyPartType enum
+                    from components.body_parts import BodyPartType
+                    target_part = None
+                    for part_type in BodyPartType:
+                        if part_type.name == preferred_target:
+                            target_part = part_type
+                            break
+                    
+                    if target_part:
+                        from actions import MeleeAction
+                        action = MeleeAction(player, dx, dy, target_part)
+                    else:
+                        # Fallback to normal attack if body part not found
+                        action = BumpAction(player, dx, dy)
+                else:
+                    # Enemy has no body parts, use normal attack
+                    action = BumpAction(player, dx, dy)
+            else:
+                # No preference set or no enemy, use normal movement/attack
+                action = BumpAction(player, dx, dy)
         elif key in WAIT_KEYS:
             action = WaitAction(player)
         elif key ==tcod.event.K_ESCAPE:
@@ -2579,13 +3249,24 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.KeySym.I:
             return InventoryActivateHandler(self.engine)
         elif key == tcod.event.KeySym.E:
-            return InventoryEquipHandler(self.engine)
+            # Visual equipment interface
+            from equipment_ui import EquipmentUI
+            return EquipmentUI(self.engine)
+        # elif key == tcod.event.KeySym.U:
+        #     return InventoryEquipHandler(self.engine)
         elif key == tcod.event.KeySym.Q:
             return QuaffActivateHandler(self.engine)
         elif key == tcod.event.KeySym.D:
             return InventoryDropHandler(self.engine)
         elif key == tcod.event.KeySym.C:
             return CharacterScreenEventHandler(self.engine)
+        elif key == tcod.event.KeySym.B:
+            # Inspect body parts
+            from body_part_actions import InspectBodyAction
+            action = InspectBodyAction(player)
+        # t key for targeting mode
+        elif key == tcod.event.KeySym.T:
+            return AttackModeHandler(self.engine)
         elif key == tcod.event.K_SLASH:
             return LookHandler(self.engine)
 
@@ -2610,10 +3291,10 @@ class GameOverEventHandler(EventHandler):
             self.on_quit()
     
 CURSOR_Y_KEYS = {
-    tcod.event.K_UP: -1,
-    tcod.event.K_DOWN: 1,
-    tcod.event.K_PAGEUP: -10,
-    tcod.event.K_PAGEDOWN: 10,
+    tcod.event.KeySym.UP: -1,
+    tcod.event.KeySym.DOWN: 1,
+    tcod.event.KeySym.PAGEUP: -10,
+    tcod.event.KeySym.PAGEDOWN: 10,
 }
 
 
@@ -2668,6 +3349,89 @@ class HistoryViewer(EventHandler):
             return MainGameEventHandler(self.engine)
         return None
 
+class LimbStatsDebugHandler(AskUserEventHandler):
+    """Debug handler showing detailed body part statistics."""
+    
+    def __init__(self, engine: Engine):
+        super().__init__(engine)
+    
+    def on_render(self, console: tcod.Console) -> None:
+        super().on_render(console)
+        
+        # Calculate window size and position
+        window_width = 50
+        window_height = 25
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height) // 2
+        
+        # Draw window frame
+        console.draw_frame(
+            x=x, y=y, width=window_width, height=window_height,
+            title="DEBUG: Limb Stats", clear=True,
+            fg=color.white, bg=color.black
+        )
+        
+        # Show player body parts info
+        info_y = y + 2
+        console.print(x + 2, info_y, "PLAYER BODY PARTS:", fg=color.yellow)
+        info_y += 2
+        
+        if hasattr(self.engine.player, 'body_parts') and self.engine.player.body_parts:
+            body_parts = self.engine.player.body_parts
+            
+            for part_type, part in body_parts.body_parts.items():
+                # Part name and HP
+                hp_text = f"{part.current_hp}/{part.max_hp}"
+                hp_ratio = part.current_hp / part.max_hp if part.max_hp > 0 else 0
+                
+                # Color based on health
+                if hp_ratio <= 0:
+                    hp_color = color.red
+                elif hp_ratio <= 0.25:
+                    hp_color = color.orange
+                elif hp_ratio <= 0.5:
+                    hp_color = color.yellow
+                elif hp_ratio <= 0.75:
+                    hp_color = color.light_gray
+                else:
+                    hp_color = color.green
+                
+                # Part info line
+                part_line = f"{part.name:<12} {hp_text:>6} ({hp_ratio*100:.0f}%)"
+                console.print(x + 2, info_y, part_line, fg=hp_color)
+                
+                # Additional status info
+                status_info = []
+                if part.is_vital:
+                    status_info.append("VITAL")
+                if part.can_grasp:
+                    status_info.append("GRASP")
+                if part.is_destroyed:
+                    status_info.append("DESTROYED")
+                elif hp_ratio <= 0.25:
+                    status_info.append("DISABLED")
+                
+                if status_info:
+                    console.print(x + 30, info_y, " ".join(status_info), fg=color.cyan)
+                
+                info_y += 1
+                
+                # Don't overflow window
+                if info_y >= y + window_height - 4:
+                    console.print(x + 2, info_y, "...(more parts)", fg=color.gray)
+                    break
+        else:
+            console.print(x + 2, info_y, "No body parts system", fg=color.red)
+        
+        # Instructions
+        console.print(x + 2, y + window_height - 2, "[Esc] Close Debug", fg=color.light_gray)
+    
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        if event.sym == tcod.event.KeySym.ESCAPE:
+            return MainGameEventHandler(self.engine)
+        return super().ev_keydown(event)
+
+
 class HelpMenuHandler(AskUserEventHandler):
     # CONTROL MENU
     TITLE = "Controls"
@@ -2682,7 +3446,7 @@ class HelpMenuHandler(AskUserEventHandler):
 
         y = 0
 
-        text = f"\nESC: Escape / Save and Quit \n?: Control Menu \nV: Message Log \nG: Pick Up Object \nI: Use/Equip Items \nD: Drop Items \nC: Character Menu \n/: Look Around"
+        text = f"\nESC: Escape / Save and Quit \n?: Control Menu \nV: Message Log \nG: Pick Up Object \nI: Use/Equip Items \nE: Equipment UI \nD: Drop Items \nC: Character Menu \n/: Look Around \nB: Inspect Body Parts \nT: Set Attack Mode \nShift+Move: Target Limbs"
         width = max(
             max(len(line) for line in self.TITLE.splitlines()),
             max(len(line) for line in text.splitlines())

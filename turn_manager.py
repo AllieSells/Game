@@ -38,6 +38,20 @@ class TurnManager:
         self.engine = engine
         self.total_player_moves = 0  # Track total player moves for hunger system
     
+    def process_pre_player_turn(self) -> BaseEventHandler | None:
+        """
+        Called before the player acts to handle fast enemy actions.
+        Fast enemies can act before the player if their speed allows it.
+        
+        Returns:
+            BaseEventHandler if we need to switch handlers (like GameOver), None otherwise.
+        """
+        # Process fast enemy turns that can act before the player
+        handler_change = self._handle_fast_enemy_turns()
+        if handler_change:
+            return handler_change
+        return None
+    
     def process_player_turn_end(self) -> BaseEventHandler | None:
         """
         Called after a valid player action to process all turn-end effects.
@@ -45,6 +59,9 @@ class TurnManager:
         Returns:
             BaseEventHandler if we need to switch handlers (like GameOver), None otherwise.
         """
+        # Increment player's initiative counter
+        self.engine.player.initiative_counter += self.engine.player.get_effective_speed()
+        
         # 1. Handle equipment durability (torches burning out, etc.)
         handler_change = self._handle_equipment_durability()
         if handler_change:
@@ -94,6 +111,10 @@ class TurnManager:
         if handler_change:
             return handler_change
         
+        # 7. Process liquid system aging and evaporation
+        if hasattr(self.engine.game_map, 'liquid_system'):
+            self.engine.game_map.liquid_system.process_aging()
+        
         return None
     
     def _update_player_state(self) -> None:
@@ -132,14 +153,38 @@ class TurnManager:
         """Handle equipment that degrades over time (like torches)."""
         try:
             player = self.engine.player
+            # Check all grasped items for burn duration (new modular system)
+            items_to_remove = []
+            for item in player.equipment.grasped_items.copy():
+                if getattr(item, "burn_duration", None) is not None:
+                    try:
+                        item.burn_duration -= 1
+                        if item.burn_duration <= 0:
+                            items_to_remove.append(item)
+                    except Exception:
+                        pass
+            
+            # Remove burned-out items
+            for item in items_to_remove:
+                player.equipment.unequip_item(item, add_message=False)
+                try:
+                    # Remove from inventory if present
+                    if item in player.inventory.items:
+                        player.inventory.items.remove(item)
+                except Exception:
+                    pass
+                sounds.torch_burns_out_sound.play()
+                self.engine.message_log.add_message(f"Your {item.name} burns out.", color.error)
+            
+            # Also check legacy slots for backward compatibility
             for slot in ("weapon", "offhand"):
                 item = getattr(player.equipment, slot)
                 if item is not None and getattr(item, "burn_duration", None) is not None:
                     try:
                         item.burn_duration -= 1
                         if item.burn_duration <= 0:
-                            # Remove the burned-out item: unequip and drop/consume
-                            player.equipment.unequip_from_slot(slot, add_message=False)
+                            # Use new unequip method which handles both systems
+                            player.equipment.unequip_item(item, add_message=False)
                             try:
                                 # Remove from inventory if present
                                 if item in player.inventory.items:
@@ -154,14 +199,65 @@ class TurnManager:
             pass
         return None
     
+    def _handle_fast_enemy_turns(self) -> BaseEventHandler | None:
+        """Process turns for enemies that are fast enough to act before the player."""
+        player_threshold = self.engine.player.initiative_counter + self.engine.player.get_effective_speed()
+        fast_actions_taken = False
+        
+        # Track which entities acted in fast phase to prevent double actions
+        if not hasattr(self, '_entities_acted_fast'):
+            self._entities_acted_fast = set()
+        self._entities_acted_fast.clear()  # Reset for new turn
+        
+        for entity in set(self.engine.game_map.actors) - {self.engine.player}:
+            if entity.ai and entity.get_effective_speed() > 100:  # Only fast enemies (effective speed > 100)
+                # Increment entity's initiative
+                entity.initiative_counter += entity.get_effective_speed()
+                
+                # Check if this entity can act before the player's next turn
+                if entity.initiative_counter >= player_threshold:
+                    try:
+                        if not fast_actions_taken:
+                            # Only show this message once per turn cycle
+                            self.engine.message_log.add_message("You sense movement in the shadows...", color.gray)
+                            fast_actions_taken = True
+                        
+                        entity.ai.perform()
+                        entity.initiative_counter -= 100  # Reduce by base action cost
+                        self._entities_acted_fast.add(entity)  # Mark as acted in fast phase
+                        
+                        # Check if player died
+                        if not self.engine.player.is_alive:
+                            from input_handlers import GameOverEventHandler
+                            return GameOverEventHandler(self.engine)
+                            
+                    except Exception:  # Changed from exceptions.Impossible to catch all
+                        entity.initiative_counter -= 100  # Still consume the turn
+        return None
+    
     def _handle_enemy_turns(self) -> None:
-        """Process all enemy AI turns."""
+        """Process all enemy AI turns, but skip those that already acted in fast phase."""
+        # Ensure the fast entities tracker exists
+        if not hasattr(self, '_entities_acted_fast'):
+            self._entities_acted_fast = set()
+        
         for entity in set(self.engine.game_map.actors) - {self.engine.player}:
             if entity.ai:
-                try:
-                    entity.ai.perform()
-                except Exception:  # Changed from exceptions.Impossible to catch all
-                    pass  # Ignore failed enemy actions
+                # Skip entities that already acted in the fast phase this turn
+                if entity in self._entities_acted_fast:
+                    continue
+                    
+                # Increment entity's initiative
+                entity.initiative_counter += entity.get_effective_speed()
+                
+                # Check if this entity should act this turn
+                while entity.initiative_counter >= 100:  # 100 is the base action threshold
+                    try:
+                        entity.ai.perform()
+                        entity.initiative_counter -= 100  # Reduce by base action cost
+                    except Exception:  # Changed from exceptions.Impossible to catch all
+                        entity.initiative_counter -= 100  # Still consume the turn
+                        break  # Stop this entity from acting more this round
     
     def _update_fov(self) -> None:
         """Update the player's field of view."""

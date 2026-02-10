@@ -34,10 +34,14 @@ class MessageLog:
             self.messages.append(Message(text, fg))
 
     def render(
-            self, console: tcod.Console, x:int, y:int, width: int, height: int,
+            self, console: tcod.console.Console, x:int, y:int, width: int, height: int,
     ) -> None:
         # Render this over the log. x,y, wid, height, is region rendered to console
+        
+        # Message log content renders within the bordered area
+        import color
 
+        # Render messages 
         self.render_messages(console, x, y, width, height, self.messages)
 
     @staticmethod
@@ -51,7 +55,7 @@ class MessageLog:
     @classmethod
     def render_messages(
         cls,
-        console: tcod.Console,
+        console: tcod.console.Console,
         x: int,
         y: int,
         width: int,

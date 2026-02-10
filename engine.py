@@ -45,6 +45,10 @@ class Engine:
         # Damage indicator system
         self.damage_indicator_timer = 0
         self.damage_indicator_duration = 20  # frames to show damage indicator
+        
+        # Movement sound system
+        self.last_movement_time = 0
+        self.min_time_between_sounds = 0.15  # Minimum 150ms between walk sounds
 
     def get_adjacent_tiles(self, x: int, y: int) -> list[tuple[int, int]]:
         # Returns adjacent (including diagonals) tiles
@@ -57,6 +61,20 @@ class Engine:
 
         return adjacent
 
+    def should_play_movement_sound(self) -> bool:
+        """Check if movement sound should play (prevents rapid-fire from holding keys)."""
+        import time
+        current_time = time.time()
+        
+        # Check if enough time has passed since the last movement sound
+        time_since_last = current_time - self.last_movement_time
+        
+        if time_since_last >= self.min_time_between_sounds:
+            self.last_movement_time = current_time
+            return True
+        else:
+            return False
+    
     def tick(self, console: Console):
         # Calculate tick rate per second
         now = time.monotonic()
@@ -131,6 +149,11 @@ class Engine:
                                 self.animation_queue.append(FireSmoke((entity.x, entity.y)))
                         except Exception:
                             pass
+        
+            # Update ambient sounds based on player proximity
+            import sounds
+
+            sounds.update_all_ambient_sounds(self.player, self.game_map.entities, self.game_map)
         except Exception:
             import traceback
             traceback.print_exc()
@@ -427,7 +450,12 @@ class Engine:
             self.render_damage_indicator(console)
             self.damage_indicator_timer -= 1
 
-        self.message_log.render(console=console, x=21, y=43, width=39, height=4)
+        # Draw UI border and background first, before all text elements
+        render_functions.render_bottom_ui_border(
+            console=console
+        )
+
+        self.message_log.render(console=console, x=21, y=43, width=58, height=3)
 
         render_functions.render_bar(
             console=console,
@@ -451,6 +479,11 @@ class Engine:
             map=self.game_map
         )
 
+        render_functions.render_attack_type(
+            console=console,
+            attack_type=getattr(self.player, "attack_type", "None")
+        )
+
         render_functions.render_effects(
             console=console,
             effects=self.player.effects
@@ -466,25 +499,18 @@ class Engine:
         )
 
         render_functions.render_names_at_mouse_location(
-            console=console, x=1, y=43, engine=self
+            console=console, x=1, y=42, engine=self
             )
         
-        render_functions.render_separator(
-            console=console,
-        )
-        
-        render_functions.render_equipment(
-            console=console, x=61, y=43, engine=self
-        )
         if self.debug:
-            render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.current_handler.__class__.__name__, len(self.game_map.entities))
+            render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities))
 
     def trigger_damage_indicator(self):
         """Trigger the damage indicator visual effect"""
         self.damage_indicator_timer = self.damage_indicator_duration
         # Debug: Add a message to see if this is being called
-        if hasattr(self, 'message_log'):
-            self.message_log.add_message("Damage indicator triggered!", (255, 255, 0))  # Yellow debug message
+        #if hasattr(self, 'message_log'):
+        #    self.message_log.add_message("Damage indicator triggered!", (255, 255, 0))  # Yellow debug message
     
     def render_damage_indicator(self, console):
         """Render red corners on screen edges when player takes damage"""

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from email.mime import base
+from random import random as random_float
 from typing import TYPE_CHECKING
 
 import color
@@ -61,6 +62,18 @@ class Fighter(BaseComponent):
     
     def die(self) -> None:
         sounds.play_death_sound()
+        
+        # Create large blood pool when entity dies
+        if hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'liquid_system'):
+            from liquid_system import LiquidType
+            # Create larger blood pool on death
+            self.parent.gamemap.liquid_system.create_splash(
+                self.parent.x, self.parent.y,
+                LiquidType.BLOOD,
+                radius=1,  # Larger radius for death
+                max_depth=1  # Maximum blood depth
+            )
+        
         if self.engine.player is self.parent:
             death_message = "YOU DIED IDIOT"
             death_message_color = color.player_die
@@ -137,15 +150,148 @@ class Fighter(BaseComponent):
         amount_recovered = new_hp_value - self.hp
 
         self.hp = new_hp_value
+        
+        # Also heal damaged body parts if entity has them
+        body_parts_healed = self._heal_body_parts(amount)
+        
+        # Add body part healing message if any parts were healed
+        if body_parts_healed and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
+            try:
+                self.parent.gamemap.engine.message_log.add_message(
+                    f"Your injuries begin to mend.",
+                    color.health_recovered
+                )
+            except:
+                pass
 
         return amount_recovered
     
-    def take_damage(self, amount: int) -> None:
+    def take_damage(self, amount: int, targeted_part=None) -> None:
+        # Capture the entity name before it potentially dies/changes
+        entity_name = self.parent.name
+        
+        # Always reduce overall HP first
         self.hp -= amount
+        
+        # If entity has body parts, damage them as well for tactical effects
+        if hasattr(self.parent, 'body_parts') and self.parent.body_parts:
+            if targeted_part:
+                # Target specific body part
+                damaged_part = self.parent.body_parts.damage_specific_part(targeted_part, amount)
+            else:
+                # Damage random part
+                damaged_part = self.parent.body_parts.damage_random_part(amount)
+            
+            # Check if entity dies from body part destruction (in addition to HP loss)
+            if not self.parent.body_parts.is_alive():
+                self.hp = 0  # Force death from vital part destruction
+            
+            # Add detailed damage message for body parts (using original name)
+            if (damaged_part and hasattr(self.parent, 'gamemap') and 
+                hasattr(self.parent.gamemap, 'engine') and self.hp > 0):  # Only show if still alive
+                part_name = damaged_part.name
+                if damaged_part.is_destroyed:
+                    message = f"{entity_name}'s {part_name} is destroyed!"
+                    message_color = color.enemy_die
+                else:
+                    message = f"{entity_name}'s {part_name} is {damaged_part.damage_level}!"
+                    message_color = color.health_recovered
+
+                # Check if damaged limb should cause weapon dropping
+                self._check_weapon_drop(damaged_part)
+        
+        # Add blood spilling when taking damage
+        if hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'liquid_system'):
+            from liquid_system import LiquidType
+            # Create small blood splash for damage
+            blood_amount = min(2, max(1, amount // 4))  # Less blood than melee
+            self.parent.gamemap.liquid_system.create_splash(
+                self.parent.x, self.parent.y,
+                LiquidType.BLOOD,
+                radius=1,  # Small radius
+                max_depth=blood_amount
+            )
         
         # Trigger damage indicator if this is the player
         if (hasattr(self.parent, 'gamemap') and 
             hasattr(self.parent.gamemap, 'engine') and
             self.parent is self.parent.gamemap.engine.player):
             self.parent.gamemap.engine.trigger_damage_indicator()
+    
+    def _check_weapon_drop(self, damaged_part) -> None:
+        """Drop weapons if grasping limbs are severely wounded."""
+        if not damaged_part.can_grasp or not hasattr(self.parent, 'equipment'):
+            return
+        
+        # Drop weapons if hand/arm is severely wounded (≤ 25% HP) or destroyed
+        damage_ratio = damaged_part.current_hp / damaged_part.max_hp
+
+        check_drop = False
+        if damage_ratio <= 0.5:
+            if random_float() < 0.5: #50% chance to drop weapon if 50% or less
+                check_drop = True
+        if damage_ratio <= 0.25:
+            check_drop = True
+        if check_drop:  # Severely wounded or worse
+            
+            # Determine which hand was damaged
+            from components.body_parts import BodyPartType
+            if damaged_part.part_type == BodyPartType.LEFT_HAND:
+                self._drop_from_hand('offhand', 'left hand')
+            elif damaged_part.part_type == BodyPartType.RIGHT_HAND:
+                self._drop_from_hand('weapon', 'right hand')
+            elif damaged_part.part_type == BodyPartType.LEFT_ARM:
+                # For arm damage, drop from connected hand
+                self._drop_from_hand('offhand', 'left hand')
+            elif damaged_part.part_type == BodyPartType.RIGHT_ARM:
+                self._drop_from_hand('weapon', 'right hand')
+
+    def _drop_from_hand(self, slot_name: str, hand_name: str) -> None:
+        """Drop item from specific hand slot."""
+        equipment = self.parent.equipment
+        item_to_drop = getattr(equipment, slot_name, None)
+        
+        if item_to_drop:
+            # Unequip and drop to ground
+            equipment.unequip_item(item_to_drop, add_message=False)
+            # Remove from inventory to prevent duplication
+            if hasattr(self.parent, 'inventory') and item_to_drop in self.parent.inventory.items:
+                self.parent.inventory.items.remove(item_to_drop)
+            item_to_drop.place(self.parent.x, self.parent.y, self.parent.gamemap)
+            
+            # Add message
+            try:
+                self.parent.gamemap.engine.message_log.add_message(
+                    f"{self.parent.name} drops {item_to_drop.name} from their {hand_name}!",
+                    color.health_recovered
+                )
+            except:
+                pass
+    
+    def _heal_body_parts(self, amount: int) -> bool:
+        """Heal damaged body parts with healing amount. Returns True if any parts were healed."""
+        if not hasattr(self.parent, 'body_parts') or not self.parent.body_parts:
+            return False
+        
+        # Get all damaged body parts
+        damaged_parts = self.parent.body_parts.get_damaged_parts()
+        if not damaged_parts:
+            return False
+        
+        # Distribute healing among damaged parts
+        # Each part gets a portion of the healing based on how damaged it is
+        total_healing_distributed = 0
+        parts_healed = False
+        
+        for part in damaged_parts:
+            # Each damaged limb gets 50% of the potion's base healing value
+            part_healing = max(1, int(amount * 0.5))  # 50% of potion value to each limb
+            
+            if part_healing > 0:
+                actual_healing = part.heal(part_healing)
+                if actual_healing > 0:
+                    parts_healed = True
+                    total_healing_distributed += actual_healing
+        
+        return parts_healed
 

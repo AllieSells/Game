@@ -84,6 +84,219 @@ def new_game() -> Engine:
 
     return engine
 
+def new_debug_game() -> Engine:
+    """Return a debug game session with an empty wallless map."""
+    map_width = 80
+    map_height = 40
+    
+    player = copy.deepcopy(entity_factories.player)
+    engine = Engine(player=player)
+    
+    # Create a simple empty map
+    from game_map import GameMap
+    import tile_types
+    import numpy as np
+    
+    # Create empty map with all floor tiles
+    game_map = GameMap(engine, map_width, map_height, entities=[player], type="debug", name="Debug Level")
+    game_map.tiles[:] = tile_types.floor
+    
+    # Make the entire map fully lit
+    import numpy as np
+    lit_array = np.full((map_width, map_height), True, dtype=bool)
+    for x in range(map_width):
+        for y in range(map_height):
+            current_tile = game_map.tiles[x, y]
+            # Create new tile with lit=True while preserving other properties
+            new_tile = (
+                True,  # lit
+                current_tile[1],  # name  
+                current_tile[2],  # walkable
+                current_tile[3],  # transparent
+                current_tile[4],  # dark
+                current_tile[5],  # light
+                current_tile[6],  # interactable
+            )
+            game_map.tiles[x, y] = new_tile
+    
+    # Add test walls and doors for sound obstruction testing
+    
+    # Test 1: Campfire behind a wall (heavy obstruction)
+    # Build wall at x=15, from y=5 to y=15
+    for y in range(5, 16):
+        game_map.tiles[15, y] = tile_types.wall
+        # Make wall lit too
+        current_tile = game_map.tiles[15, y]
+        new_tile = (
+            True,  # lit
+            current_tile[1],  # name  
+            current_tile[2],  # walkable
+            current_tile[3],  # transparent
+            current_tile[4],  # dark
+            current_tile[5],  # light
+            current_tile[6],  # interactable
+        )
+        game_map.tiles[15, y] = new_tile
+    campfire1 = copy.deepcopy(entity_factories.campfire)
+    campfire1.spawn(game_map, 12, 10)  # Campfire behind wall
+    
+    # Test 2: Campfire behind a closed door (medium obstruction) 
+    # Build wall with door at x=35, from y=15 to y=25
+    for y in range(15, 26):
+        if y == 20:  # Door position
+            game_map.tiles[35, y] = tile_types.closed_door
+        else:
+            game_map.tiles[35, y] = tile_types.wall
+        # Make door/wall lit 
+        current_tile = game_map.tiles[35, y]
+        new_tile = (
+            True,  # lit
+            current_tile[1],  # name  
+            current_tile[2],  # walkable
+            current_tile[3],  # transparent
+            current_tile[4],  # dark
+            current_tile[5],  # light
+            current_tile[6],  # interactable
+        )
+        game_map.tiles[35, y] = new_tile
+    campfire2 = copy.deepcopy(entity_factories.campfire)
+    campfire2.spawn(game_map, 32, 20)  # Campfire behind door
+    
+    # Test 3: Campfire behind an open door (minimal obstruction)
+    # Build wall with open door at x=55, from y=10 to y=20  
+    for y in range(10, 21):
+        if y == 15:  # Open door position
+            game_map.tiles[55, y] = tile_types.open_door
+        else:
+            game_map.tiles[55, y] = tile_types.wall
+        # Make door/wall lit
+        current_tile = game_map.tiles[55, y]
+        new_tile = (
+            True,  # lit
+            current_tile[1],  # name  
+            current_tile[2],  # walkable
+            current_tile[3],  # transparent
+            current_tile[4],  # dark
+            current_tile[5],  # light
+            current_tile[6],  # interactable
+        )
+        game_map.tiles[55, y] = new_tile
+    campfire3 = copy.deepcopy(entity_factories.campfire)
+    campfire3.spawn(game_map, 52, 15)  # Campfire behind open door
+    
+    # Test 4: Unobstructed campfire for comparison
+    campfire4 = copy.deepcopy(entity_factories.campfire)
+    campfire4.spawn(game_map, 25, 30)  # Open area campfire
+
+    
+    # Place player in center
+    player.place(map_width // 2, map_height // 2, game_map)
+    
+    # Add some test liquid coatings for demonstration
+    from liquid_system import LiquidType
+    
+    # Water splash near player
+    game_map.liquid_system.create_splash(
+        map_width // 2 + 5, map_height // 2 + 3, 
+        LiquidType.WATER, radius=3, max_depth=2
+    )
+    
+    # Blood splatter
+    game_map.liquid_system.create_splash(
+        map_width // 2 - 7, map_height // 2 - 2,
+        LiquidType.BLOOD, radius=2, max_depth=3
+    )
+    
+    # Oil spill
+    game_map.liquid_system.create_splash(
+        map_width // 2 + 8, map_height // 2 - 5,
+        LiquidType.OIL, radius=4, max_depth=2
+    )
+    
+    # Slime trail
+    game_map.liquid_system.create_trail(
+        map_width // 2 - 10, map_height // 2 + 8,
+        map_width // 2 - 3, map_height // 2 + 12,
+        LiquidType.SLIME, width=1
+    )
+    
+    # Give player one of every item for testing
+    try:
+        all_items = [
+            entity_factories.lesser_health_potion,
+            entity_factories.lightning_scroll, 
+            entity_factories.confusion_scroll,
+            entity_factories.fireball_scroll,
+            entity_factories.torch,
+            entity_factories.dagger,
+            entity_factories.sword,
+            entity_factories.leather_armor,
+            entity_factories.chain_mail,
+            entity_factories.dev_tool,
+            entity_factories.backpack,
+            entity_factories.coin,
+        ]
+        
+        # Add items to inventory properly
+        for item_template in all_items:
+            try:
+                item = copy.deepcopy(item_template)
+                item.parent = player.inventory
+                if item.consumable or item.equippable:
+                    player.inventory.items.append(item)
+            except:
+                pass
+    except:
+        pass
+    
+    # Spawn test enemies around the player
+    try:
+        center_x = map_width // 2
+        center_y = map_height // 2
+        
+        # Spawn enemies at various positions
+        test_enemies = [
+            (entity_factories.orc, center_x + 8, center_y),
+            (entity_factories.orc, center_x - 8, center_y),
+            (entity_factories.troll, center_x, center_y + 8),
+            (entity_factories.shade, center_x + 5, center_y + 5),
+        ]
+        
+        for enemy_template, x, y in test_enemies:
+            if (0 <= x < map_width and 0 <= y < map_height and 
+                game_map.tiles["walkable"][x, y]):
+                enemy = copy.deepcopy(enemy_template)
+                enemy.spawn(game_map, x, y)
+    except:
+        pass
+    
+    # Simple GameWorld for debug
+    engine.game_world = GameWorld(
+        engine=engine,
+        max_rooms=0,
+        room_min_size=0,
+        room_max_size=0,
+        map_width=map_width,
+        map_height=map_height,
+    )
+    engine.game_world.current_floor = 0
+    engine.game_map = game_map
+    
+    engine.update_fov()
+    
+    # Import and set turn manager
+    from turn_manager import TurnManager
+    engine.turn_manager = TurnManager(engine)
+    
+    from message_log import MessageLog
+    engine.message_log = MessageLog()
+    engine.message_log.add_message("Welcome to Debug Level!", color.welcome_text)
+    engine.message_log.add_message("Empty map with test enemies and all items.", color.gray)
+    engine.message_log.add_message("Features: Sound test areas, liquid coating system", color.yellow)
+    engine.message_log.add_message("Check your inventory (I) and test wandering enemies!", color.yellow)
+    
+    return engine
+
 def load_game(filename: str) -> Engine:
     # Load engine instance from file
     with open(filename, "rb") as f:
@@ -290,6 +503,30 @@ class LoadingScreen(input_handlers.BaseEventHandler):
         return self
 
 
+class DebugLevelScreen(input_handlers.BaseEventHandler):
+    """Create a simple debug level immediately."""
+    
+    def __init__(self, parent_menu):
+        self.parent_menu = parent_menu
+        self.engine = new_debug_game()
+    
+    def handle_events(self, event: tcod.event.Event) -> input_handlers.BaseEventHandler:
+        """Immediately transition to debug level."""
+        from input_handlers import MainGameEventHandler
+        return MainGameEventHandler(self.engine)
+    
+    def on_render(self, console: tcod.Console) -> None:
+        """This shouldn't be called since we transition immediately."""
+        console.clear()
+        console.print(
+            console.width // 2,
+            console.height // 2,
+            "Loading Debug Level...",
+            fg=color.white,
+            alignment=tcod.CENTER,
+        )
+
+
 class MainMenu(input_handlers.BaseEventHandler):
     """Handle the main menu rendering and input."""
 
@@ -316,7 +553,7 @@ class MainMenu(input_handlers.BaseEventHandler):
 
         menu_width = 24
         for i, text in enumerate(
-            ["[N] Play a new game", "[C] Continue last game", "[Q] Quit"]
+            ["[N] Play a new game", "[C] Continue last game", "[D] Debug Level", "[Q] Quit"]
         ):
             console.print(
                 console.width // 2,
@@ -346,5 +583,8 @@ class MainMenu(input_handlers.BaseEventHandler):
         elif event.sym == tcod.event.KeySym.N:
             # Skip character creation and start game directly
             return LoadingScreen(self)
+        elif event.sym == tcod.event.KeySym.D:
+            # Create debug level
+            return DebugLevelScreen(self)
 
         return None

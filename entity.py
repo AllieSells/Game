@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from components.inventory import Inventory
     from components.level import Level
     from components.effect import Effect
+    from components.body_parts import BodyParts, AnatomyType
     from game_map import GameMap
 
 T = TypeVar("T", bound="Entity")
@@ -99,11 +100,12 @@ class Actor(Entity):
         fighter: Optional[Fighter] = None,
         inventory: Optional[Inventory] = None,
         level: Optional[Level] = None,
+        body_parts: Optional[BodyParts] = None,
         effects: Optional[list] = None,
         lucidity: int = None,
         max_lucidity: int = None,
         type: str = "None",
-        dialogue_context: list = [],
+        dialogue_context: list = None,
         knowledge: dict = None,
         description: str = "",
         unknown_name: Optional[str] = None,
@@ -114,6 +116,14 @@ class Actor(Entity):
         gold: int = 0,
         hunger: float = 100.0,
         saturation: float = 100.0,
+        attack_type: Optional[str] = "random",
+        speed: int = 100,  # Higher = faster, 100 = normal speed
+        dodge_chance: float = 0.0,  # Chance to dodge attacks (0.0 to 1.0)
+        preferred_dodge_direction: Optional[str] = random.choice(["north", "south", "east", "west"]), 
+        verb_base: Optional[str] = None,
+        verb_present: Optional[str] = None,
+        verb_past: Optional[str] = None,
+        verb_participial: Optional[str] = None,
     ):
         super().__init__(
             x=x,
@@ -149,13 +159,19 @@ class Actor(Entity):
             self.level = level
             self.level.parent = self
 
+        # Initialize body parts component
+        self.body_parts: Optional[BodyParts] = None
+        if body_parts is not None:
+            self.body_parts = body_parts
+            self.body_parts.parent = self
+
         # Effects: a list of Effect instances applied to this actor
         # Initialize inside __init__ to avoid circular import issues at module top-level
         self.effects = effects if effects is not None else []
         self.lucidity = lucidity if lucidity is not None else 100
         self.max_lucidity = max_lucidity if max_lucidity is not None else 100
         self.type = type
-        self.dialogue_context = []
+        self.dialogue_context = dialogue_context
         self.knowledge = {
             "name": self.name,
         }
@@ -168,7 +184,16 @@ class Actor(Entity):
         self.gold = gold
         self.hunger = hunger
         self.saturation = saturation
-
+        self.current_attack_type = attack_type
+        self.speed = speed
+        self.initiative_counter = 0  # Tracks when this entity should act
+        self.verb_base = verb_base or "attack"
+        self.verb_present = verb_present or self.verb_base + "s"
+        self.verb_past = verb_past or self.verb_base + "ed"
+        self.verb_participial = verb_participial or self.verb_base + "ing"
+        self.dodge_chance = dodge_chance
+        self.preferred_dodge_direction = preferred_dodge_direction
+    
     def add_effect(self, effect: 'Effect') -> None:
         """Attach an Effect to this actor."""
         if not hasattr(self, "effects"):
@@ -178,6 +203,22 @@ class Actor(Entity):
     def remove_effect(self, effect_type: str) -> None:
         """Remove an Effect based on type"""
         self.effects = [e for e in self.effects if e.type != effect_type]
+    
+    def get_effective_speed(self) -> int:
+        """Get speed modified by body part damage (destroyed legs/feet reduce speed)."""
+        base_speed = self.speed
+        
+        # If no body parts system, use full speed
+        if not self.body_parts:
+            return base_speed
+        
+        # Get movement penalty (0.0 = no penalty, 1.0 = can't move)
+        penalty = self.body_parts.get_movement_penalty()
+        
+        # Convert penalty to speed multiplier (penalty 0.0 -> multiplier 1.0, penalty 1.0 -> multiplier 0.1)
+        speed_multiplier = max(0.1, 1.0 - penalty)  # Minimum 10% speed even with severe damage
+        
+        return int(base_speed * speed_multiplier)
         
     @property
     def is_alive(self) -> bool:
@@ -570,6 +611,11 @@ class Item(Entity):
             drop_sound = None,
             equip_sound = None,
             unequip_sound = None,
+            verb_base: Optional[str] = None,
+            verb_present: Optional[str] = None,
+            verb_past: Optional[str] = None,
+            verb_participial: Optional[str] = None,
+
 
     ):
         super().__init__(
@@ -602,4 +648,8 @@ class Item(Entity):
         self.equip_sound = equip_sound
         self.unequip_sound = unequip_sound
         self.drop_sound = drop_sound
+        self.verb_base = verb_base or "use"
+        self.verb_present = verb_present or self.verb_base + "s"
+        self.verb_past = verb_past or self.verb_base + "d"
+        self.verb_participial = verb_participial or self.verb_base + "ing"
         

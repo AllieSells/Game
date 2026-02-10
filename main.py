@@ -52,10 +52,7 @@ def main() -> None:
 
                 if isinstance(handler, input_handlers.EventHandler):
                     handler.engine.tick(console=console)
-
-
-                context.present(console)
-
+ 
                 try:
                     for event in tcod.event.get():
                         context.convert_event(event)
@@ -64,7 +61,7 @@ def main() -> None:
                     traceback.print_exc() #prints error to stderr
                     if isinstance(handler, input_handlers.EventHandler):
                         handler.engine.message_log.add_message(
-                            traceback.format_exc(), color.error
+                            traceback.format_exc(), color.error 
                         )
 
         except exceptions.QuitWithoutSaving:
@@ -77,3 +74,4 @@ def main() -> None:
             raise
 
 main()
+

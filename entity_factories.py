@@ -7,6 +7,7 @@ from components.fighter import Fighter
 from components.inventory import Inventory
 from components.level import Level
 from components.container import Container
+from components.body_parts import BodyParts, AnatomyType
 from entity import Actor, Item
 from render_order import RenderOrder
 import components.names as names
@@ -22,11 +23,15 @@ player = Actor(
     fighter=Fighter(hp=30, base_defense=2, base_power=5),
     inventory=Inventory(capacity=26),
     level=Level(level_up_base=200),
+    body_parts=BodyParts(AnatomyType.HUMANOID),
     # Temporary demo effect so the status-effects panel shows during testing
     effects = [],
     lucidity = 100,
     max_lucidity = 100,
     hunger = 100.0,
+    speed=100,  # Normal/base speed
+    dodge_chance=0.15,  # 15% chance to dodge attacks
+    preferred_dodge_direction="north",  # Tendency to dodge towards the north (for flavor)
 
 )
 
@@ -41,6 +46,7 @@ shade = Actor(
     fighter=Fighter(hp=10, base_defense=2, base_power=5, leave_corpse=False),
     inventory=Inventory(capacity=5),
     level=Level(xp_given=0),
+    speed=130,  # Very fast - supernatural creature
     opinion=0,
 )
 
@@ -53,6 +59,13 @@ orc = Actor(
     fighter=Fighter(hp=10, base_defense=0, base_power=3),
     inventory=Inventory(capacity=0),
     level=Level(xp_given=35),
+    speed=120,  # Fast enough to sometimes act before player
+    body_parts=BodyParts(AnatomyType.HUMANOID),
+    verb_base="claw",
+    verb_present="claws",
+    verb_past="clawed",
+    verb_participial="clawing",
+    dodge_chance=0.05, 
     )
 
 troll = Actor(
@@ -64,13 +77,20 @@ troll = Actor(
     fighter=Fighter(hp=16, base_defense=1, base_power=4),
     inventory=Inventory(capacity=0),
     level=Level(xp_given=100),
+    speed=80,  # Slower than normal - big and lumbering
+    body_parts=BodyParts(AnatomyType.HUMANOID),
+    verb_base="smash",
+    verb_present="smashes",
+    verb_past="smashed",
+    verb_participial="smashing",
+    dodge_chance=0.01,  
     )
 
-health_potion = Item(
+lesser_health_potion = Item(
     char="!",
     color=(127,0,255),
-    name="Health Potion",
-    consumable=consumable.HealingConsumables(amount=4),
+    name="Lesser Health Potion",
+    consumable=consumable.HealingConsumables(amount=8),
     description="A small vial filled with a red liquid.",
     equip_sound=sounds.play_equip_glass_sound,
     unequip_sound=sounds.play_unequip_glass_sound,
@@ -132,23 +152,43 @@ torch = Item(
     color=(255, 200, 50),
     name="Torch",
     equippable=equippable.Torch(),
-    burn_duration=300,
+    burn_duration=600,
     description="A wooden torch that can be carried to provide light.",
     pickup_sound=sounds.pick_up_wood_sound,
     drop_sound=sounds.drop_wood_sound,
     equip_sound=sounds.play_torch_pull_sound,
     unequip_sound=sounds.play_torch_extinguish_sound,
+    verb_base="smash",
+    verb_present="smashes",
+    verb_past="smashed",
+    verb_participial="smashing",
 )
 
 dagger = Item(
     char="/", color=(0, 191, 255), name="Dagger",
-    equippable=equippable.Dagger()
+    equippable=equippable.Dagger(),
+    pickup_sound=sounds.pick_up_blade_sound,
+    drop_sound=sounds.drop_blade_sound,
+    equip_sound=sounds.play_equip_blade_sound,
+    unequip_sound=sounds.play_unequip_blade_sound,
+    verb_base="stab",
+    verb_present="stabs",
+    verb_past="stabbed",
+    verb_participial="stabbing",
 
 )
 
 sword = Item(
     char="/", color=(0, 191, 255), name="Sword",
-    equippable=equippable.Sword()
+    equippable=equippable.Sword(),
+    pickup_sound=sounds.pick_up_blade_sound,
+    drop_sound=sounds.drop_blade_sound,
+    equip_sound=sounds.play_equip_blade_sound,
+    unequip_sound=sounds.play_unequip_blade_sound,
+    verb_base="slash",
+    verb_present="slashes",
+    verb_past="slashed",
+    verb_participial="slashing",
 )
 
 leather_armor = Item(
@@ -206,6 +246,7 @@ villager = Actor(
     sentient=True,
     is_known=False,
     type = "NPC",
+    body_parts=BodyParts(AnatomyType.HUMANOID),
 )
 
 quest_giver = Actor(
@@ -220,6 +261,7 @@ quest_giver = Actor(
     is_known=False,
     sentient=True,
     type = "NPC",
+    body_parts=BodyParts(AnatomyType.HUMANOID),
 )
 
 coin = Item(

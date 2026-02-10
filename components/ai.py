@@ -10,6 +10,7 @@ from tcod import libtcodpy
 from actions import Action, MeleeAction, BumpAction, MovementAction, WaitAction
 
 import color
+import sounds
 
 import tile_functions
 
@@ -109,15 +110,28 @@ class BaseAI(Action):
             )
             
             if result is not None:
-                # If we opened a door, track it for later closing
-                if tile_name == "Door":
-                    self.opened_doors.append((x, y))
-                # If we closed a door, remove it from tracking
-                elif tile_name == "Open Door":
-                    try:
-                        self.opened_doors.remove((x, y))
-                    except ValueError:
-                        pass  # Door wasn't in our tracking list
+                # Add sound effects for door interactions
+                try:
+                    if tile_name == "Door":
+                        # Door was opened
+                        sounds.play_door_open_sound()
+                        self.opened_doors.append((x, y))
+                    elif tile_name == "Open Door":
+                        # Door was closed
+                        sounds.play_door_close_sound()
+                        try:
+                            self.opened_doors.remove((x, y))
+                        except ValueError:
+                            pass  # Door wasn't in our tracking list
+                except Exception:
+                    # Don't let sound errors break door functionality
+                    if tile_name == "Door":
+                        self.opened_doors.append((x, y))
+                    elif tile_name == "Open Door":
+                        try:
+                            self.opened_doors.remove((x, y))
+                        except ValueError:
+                            pass
                 return True
             return False
                 
@@ -146,11 +160,20 @@ class BaseAI(Action):
                 result = tile_functions.close_door(
                     self.entity.gamemap.engine, self.entity, x, y
                 )
+                if result is not None:
+                    try:
+                        sounds.play_door_close_sound()
+                    except Exception:
+                        pass  # Don't let sound errors break door functionality
                 return result is not None
             except ImportError:
                 # Fallback: directly change the tile
                 import tile_types
                 self.entity.gamemap.tiles[x, y] = tile_types.closed_door
+                try:
+                    sounds.play_door_close_sound()  # Add sound for fallback case too
+                except Exception:
+                    pass
                 return True
                 
         except Exception:
@@ -272,25 +295,80 @@ class HostileEnemy(BaseAI):
     def __init__(self, entity: Actor):
         super().__init__(entity)
         self.path: List[Tuple[int, int]] = []
+        # Simple wandering behavior
+        self.wander_wait_turns = random.randint(0, 2)
+        self.wander_range = 4
+        self.home_x = entity.x
+        self.home_y = entity.y
+        # Normal speed
+        self.movement_speed = 1
+        self.movement_counter = 0
 
     def perform(self) -> None:
+        # Move every turn
+        if not self.should_move_this_turn():
+            return WaitAction(self.entity).perform()
+            
+        self.check_and_close_doors()
+        
         target = self.engine.player
         dx = target.x - self.entity.x
         dy = target.y - self.entity.y
         distance = max(abs(dx), abs(dy))
-        # Use per-enemy FOV so enemies can spot the player even when the player
-        # doesn't see them.
+        
+        # Chase player if visible
         if self.can_see_actor(target):
+            self.wander_wait_turns = 0
+            self.path = []
+            
             if distance <= 1:
                 return MeleeAction(self.entity, dx, dy).perform()
             
-            self.path = self.get_path_to(target.x, target.y)
+            self.path = self.get_path_with_doors(target.x, target.y)
+        else:
+            # Wander when player not visible
+            if self.wander_wait_turns > 0:
+                self.wander_wait_turns -= 1
+                return WaitAction(self.entity).perform()
+            
+            if not self.path:
+                # Simple wandering: pick random destination near home
+                dest_x = self.home_x + random.randint(-self.wander_range, self.wander_range)
+                dest_y = self.home_y + random.randint(-self.wander_range, self.wander_range)
+                
+                if (0 <= dest_x < self.engine.game_map.width and
+                    0 <= dest_y < self.engine.game_map.height and
+                    self.engine.game_map.tiles["walkable"][dest_x, dest_y]):
+                    
+                    self.path = self.get_path_with_doors(dest_x, dest_y)
+                
+                if not self.path:
+                    self.wander_wait_turns = random.randint(1, 3)
+                    return WaitAction(self.entity).perform()
         
+        # Move along path
         if self.path:
             dest_x, dest_y = self.path.pop(0)
-            return MovementAction(
+            
+            # Handle door opening with sound
+            if self.entity.gamemap.tiles["name"][dest_x, dest_y] == "Door":
+                if self.toggle_door_at(dest_x, dest_y):
+                    return WaitAction(self.entity).perform()
+                else:
+                    self.path = []
+                    self.wander_wait_turns = random.randint(1, 2)
+                    return WaitAction(self.entity).perform()
+            
+            # Move
+            result = MovementAction(
                 self.entity, dest_x - self.entity.x, dest_y - self.entity.y,
             ).perform()
+            
+            # Set wait time after reaching destination
+            if not self.path:
+                self.wander_wait_turns = random.randint(1, 3)
+            
+            return result
         
         return WaitAction(self.entity).perform()
 

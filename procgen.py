@@ -40,7 +40,7 @@ max_flora_by_floor = [
 item_chances: Dict[int, List[Tuple[Entity, int]]] = {
     # Item weights, floor: [(entity, weight), ...]
 
-    0: [(entity_factories.health_potion, 35), (entity_factories.lightning_scroll, 25)],
+    0: [(entity_factories.lesser_health_potion, 35), (entity_factories.lightning_scroll, 25)],
     2: [(entity_factories.confusion_scroll, 10)],
     4: [(entity_factories.lightning_scroll, 25), (entity_factories.sword, 5)],
     6: [(entity_factories.fireball_scroll, 25), (entity_factories.chain_mail, 15)],
@@ -196,7 +196,11 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) 
                     import copy as _copy
                     item_copy = _copy.deepcopy(chosen_item)
                     item_copy.parent = entity.inventory
-                    entity.equipment.equip_to_slot(slot, item_copy, False)
+                    # For weapons, place in main hand only (weapon slot)
+                    if slot == "weapon":
+                        entity.equipment.equip_to_slot("weapon", item_copy, False)
+                    else:
+                        entity.equipment.equip_to_slot(slot, item_copy, False)
                     print(f"Equipped {entity.name} with {item_copy.name} in slot {slot}")
 
     # Place campfire using centralized logic
@@ -789,7 +793,7 @@ def generate_dungeon(
 ) -> GameMap:
     # Generates new map
     player = engine.player
-    dungeon = GameMap(engine, map_width, map_height, entities=[player])
+    dungeon = GameMap(engine, map_width, map_height, entities=[player], type="dungeon", name="Dungeon")
 
     rooms: List[RectangularRoom] = []
 
@@ -828,7 +832,7 @@ def generate_dungeon(
             try:
                 # Build a small loot list: health potion + torch (deepcopy to avoid shared parents)
                 import copy as _copy
-                loot = [_copy.deepcopy(entity_factories.health_potion), _copy.deepcopy(entity_factories.torch), entity_factories.get_random_coins(1, 10), _copy.deepcopy(entity_factories.lightning_scroll)]
+                loot = [_copy.deepcopy(entity_factories.lesser_health_potion), _copy.deepcopy(entity_factories.torch), entity_factories.get_random_coins(1, 10), _copy.deepcopy(entity_factories.lightning_scroll)]
                 test_chest = entity_factories.make_chest_with_loot(loot, capacity=6)
                 cx, cy = new_room.center
                 chest_x, chest_y = min(dungeon.width - 1, cx + 1), cy

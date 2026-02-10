@@ -100,7 +100,7 @@ def parse_colored_text(text: str, default_color=color.white) -> list:
     return parts
 
 
-def print_colored_markup(console: tcod.Console, x: int, y: int, text: str, default_color=color.white) -> int:
+def print_colored_markup(console: tcod.console.Console, x: int, y: int, text: str, default_color=color.white) -> int:
     """
     Print text with color markup directly to console.
     
@@ -121,7 +121,7 @@ def print_colored_markup(console: tcod.Console, x: int, y: int, text: str, defau
     return print_colored_text(console, x, y, parts)
 
 
-def print_colored_text(console: tcod.Console, x: int, y: int, text_parts: list) -> int:
+def print_colored_text(console: tcod.console.Console, x: int, y: int, text_parts: list) -> int:
     """
     Print text with multiple colors on the same line.
     

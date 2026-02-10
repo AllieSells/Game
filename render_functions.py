@@ -46,11 +46,26 @@ def get_names_at_location(x: int, y: int, game_map: GameMap) -> str:
     # Get tile name
     tile = (game_map.tiles['name'][x, y]).capitalize()
     
+    # Check for liquid coating
+    liquid_info = ""
+    if hasattr(game_map, 'liquid_system'):
+        coating = game_map.liquid_system.get_coating(x, y)
+        if coating:
+            from liquid_system import LiquidType
+            liquid_names = {
+                LiquidType.WATER: "water",
+                LiquidType.BLOOD: "blood",
+                LiquidType.OIL: "oil", 
+                LiquidType.SLIME: "slime"
+            }
+            liquid_name = liquid_names.get(coating.liquid_type, "unknown liquid")
+            liquid_info = f" coated in {liquid_name}"
+    
     # If no entities, show tile name instead
     if not names:
-        names = tile
+        names = tile + liquid_info
     else:
-        names = f"{names} ({tile})"
+        names = f"{names} ({tile}{liquid_info})"
     
     return names
 
@@ -105,50 +120,53 @@ def status_effect_overlay(console: 'Console', effects: list) -> None:
 def render_bar(
         console: 'Console', current_value: int, maximum_value: int, total_width: int
 ) -> None:
-    bar_width = int(float(current_value) / maximum_value * total_width)
-
-    console.draw_rect(x=0, y=43, width=total_width, height=1, ch=1, bg=color.bar_empty)
-
+    bar_width = int(float(current_value) / maximum_value * (total_width - 2))  # Account for border
+    
+    # Health bar with red/green gradient
+    health_ratio = current_value / maximum_value
+    if health_ratio > 0.6:
+        bar_color = (0, 120, 0)  # Green
+    elif health_ratio > 0.3:
+        bar_color = (120, 120, 0)  # Yellow
+    else:
+        bar_color = (120, 0, 0)  # Red
+        
     if bar_width > 0:
         console.draw_rect(
-            x=0, y=43, width=bar_width, height=1, ch=1, bg=color.bar_filled
+            x=1, y=44, width=bar_width, height=1, ch=1, bg=bar_color
         )
 
     console.print(
-        x=1, y=43, string=f"HP: {current_value}/{maximum_value}", fg=color.bar_text
+        x=2, y=44, string=f"HP: {current_value}/{maximum_value}", fg=color.fantasy_text
     )
 
 # Lucidity bar render
 def render_lucidity_bar(
         console: 'Console', current_value: int, maximum_value: int, total_width: int
 ) -> None:
-    bar_width = int(float(current_value) / maximum_value * total_width)
-
-    console.draw_rect(x=0, y=44, width=total_width, height=1, ch=1, bg=color.lucidity_bar_empty)
+    bar_width = int(float(current_value) / maximum_value * (total_width - 2))  # Account for border
 
     if bar_width > 0:
         console.draw_rect(
-            x=0, y=44, width=bar_width, height=1, ch=1, bg=color.lucidity_bar_filled
+            x=1, y=45, width=bar_width, height=1, ch=1, bg=(80, 80, 140)
         )
 
     console.print(
-        x=1, y=44, string=f"Lucidity: {current_value}/{maximum_value}", fg=color.bar_text
+        x=2, y=45, string=f"Lucidity: {current_value}/{maximum_value}", fg=color.fantasy_text
     )
 
 def render_player_level(
         console: 'Console', current_value: int, maximum_value: int, total_value: int, total_width: int
 ) -> None:
-    bar_width = int(float(current_value) / maximum_value * total_width)
-
-    console.draw_rect(x=0, y=45, width=total_width, height=1, ch=1, bg=color.xp_bar_empty)
-
+    bar_width = int(float(current_value) / maximum_value * (total_width - 2))  # Account for border
+    
     if bar_width > 0:
         console.draw_rect(
-            x=0, y=45, width=bar_width, height=1, ch=1, bg=color.xp_bar_filled
+            x=1, y=46, width=bar_width, height=1, ch=1, bg=(120, 60, 200)
         )
 
     console.print(
-        x=1, y=45, string=f"Level: {current_value}/{maximum_value} ({total_value})", fg=color.bar_text
+        x=2, y=46, string=f"Level: {current_value}/{maximum_value} ({total_value})", fg=color.fantasy_text
     )
 
 
@@ -158,18 +176,25 @@ def render_dungeon_level(
 ) -> None:
     # Render the level the player is on, at the given location
     x = 0
-    y = 47
+    y = 48
 
-    console.print(x=x+1, y=y, string=f"Dungeon: {dungeon_level}")
+    console.print(x=x+2, y=y, string=f"Dungeon: {dungeon_level}", fg=color.bronze_text)
 
 def render_gold(
         console: 'Console', gold_amount: int,
 ) -> None:
     # Render the player's gold amount at the given location
     x = 0
-    y = 46
+    y = 47
 
-    console.print(x=x+1, y=y, string=f"Gold: {gold_amount}")
+    console.print(x=x+2, y=y, string=f"Gold: {gold_amount}", fg=color.gold_accent)
+
+# Render attack type
+def render_attack_type(
+        console: 'Console', attack_type: str,
+) -> None:
+    text = f"Attacking: {attack_type.title() if attack_type else 'Random'}"
+    text_utils.print_colored_markup(console=console, x=2, y=40, text=text)
 
 # Status effect render
 def render_effects(console: 'Console', effects: list) -> None:
@@ -180,43 +205,44 @@ def render_effects(console: 'Console', effects: list) -> None:
             effect_display += effect.name + " "
         except Exception:
             pass
-    text_utils.print_colored_markup(x=2, y=41, console=console, text=effect_display)
+    text_utils.print_colored_markup(console=console, x=2, y=41, text=effect_display, default_color=color.bronze_text)
 
 
 
-def render_separator(console: tcod.Console, y: int = 42, vline_xs: list[int] = [20, 60], vline_height: int = 7):
+def render_bottom_ui_border(console: tcod.Console):
     """
-    Draw a horizontal separator with vertical bars forming T junctions.
-    vline_xs: list of x positions for vertical bars
+    Draw a simple border around the entire bottom UI area with a vertical divider.
     """
-    # Draw horizontal line
-    console.hline(0, y, console.width, ord('─'))
-
-    max_y = console.height
-
-    for vline_x in vline_xs:
-        # Clamp vertical line height
-        height = min(vline_height, max_y - (y + 1))
-
-        # Draw vertical line
-        console.vline(vline_x, y + 1, height, ord('│'))
-
-        # Draw T junction at intersection
-        console.print(vline_x, y, "┬")
-
-        # Apply colors along vertical line
-        for yy in range(y + 1, y + 1 + height):
-            console.fg[vline_x, yy] = color.white
-            console.bg[vline_x, yy] = color.black
-
-        # Apply colors to T junction
-        console.fg[vline_x, y] = color.white
-        console.bg[vline_x, y] = color.black
-
-    # Apply colors for horizontal line
-    for x in range(console.width):
-        console.fg[x, y] = color.white
-        console.bg[x, y] = color.black
+    # Bottom UI starts at y=42 and goes to bottom of screen
+    ui_top = 42
+    ui_bottom = console.height - 1
+    ui_left = 0
+    ui_right = console.width - 1
+    divider_x = 20  # Vertical divider between stats and message log
+    
+    # Fill entire interior with parchment background
+    console.draw_rect(x=ui_left+1, y=ui_top+1, width=ui_right-ui_left-1, height=ui_bottom-ui_top-1, ch=ord(' '), bg=color.parchment_dark)
+    
+    # Draw horizontal borders
+    for x in range(ui_left, ui_right + 1):
+        console.print(x, ui_top, "─", fg=color.bronze_border)  # Top border
+        console.print(x, ui_bottom, "─", fg=color.bronze_border)  # Bottom border
+    
+    # Draw vertical borders
+    for y in range(ui_top + 1, ui_bottom):
+        console.print(ui_left, y, "│", fg=color.bronze_border)  # Left border
+        console.print(ui_right, y, "│", fg=color.bronze_border)  # Right border
+        console.print(divider_x, y, "│", fg=color.bronze_border)  # Center divider
+    
+    # Draw corners
+    console.print(ui_left, ui_top, "┌", fg=color.bronze_border)  # Top-left
+    console.print(ui_right, ui_top, "┐", fg=color.bronze_border)  # Top-right  
+    console.print(ui_left, ui_bottom, "└", fg=color.bronze_border)  # Bottom-left
+    console.print(ui_right, ui_bottom, "┘", fg=color.bronze_border)  # Bottom-right
+    
+    # Draw T-junctions where divider meets top/bottom borders
+    console.print(divider_x, ui_top, "┬", fg=color.bronze_border)  # Top T-junction
+    console.print(divider_x, ui_bottom, "┴", fg=color.bronze_border)  # Bottom T-junction
 
 
 

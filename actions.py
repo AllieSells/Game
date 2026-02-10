@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional, Tuple, TYPE_CHECKING
+import random
 
 import color
 import engine
@@ -11,6 +12,13 @@ if TYPE_CHECKING:
     from engine import Engine
     from entity import Actor, Entity, Item
     from components.container import Container
+    from components.body_parts import BodyPartType
+else:
+    # Runtime import for BodyPartType if needed
+    try:
+        from components.body_parts import BodyPartType
+    except ImportError:
+        BodyPartType = None
 
 
 import sounds
@@ -281,41 +289,214 @@ class ActionWithDirection(Action):
     def perform(self) -> None:
         raise NotImplementedError()
     
+
+
 class MeleeAction(ActionWithDirection):
+    """Melee action that targets a specific body part."""
+    
+    def __init__(self, entity: Actor, dx: int, dy: int, target_part: Optional['BodyPartType'] = None):
+        super().__init__(entity, dx, dy)
+        self.target_part = target_part
+    
     def perform(self) -> None:
         target = self.target_actor
 
+        # Check for target
         if not target:
             raise exceptions.Impossible("Nothing to attack.")
-
-        damage = self.entity.fighter.power - target.fighter.defense
-
-        attack_desc = f"{self.entity.name.capitalize()} attacks {target.name}"
         
-        ## Sounds
-        # Check if player has weapon
-        if self.entity.equipment:
-            # If enemy has armor, play different sound
-            if target.equipment and target.equipment.armor:
-                sounds.play_attack_sound_weapon_to_armor()
+        # Base damage calculation
+        base_damage = self.entity.fighter.power - target.fighter.defense
+        
+        # Get target body part and apply targeting effects
+        hit_part = None
+        damage_modifier = 1.0
+        hit_difficulty_modifier = 0.0  # Positive = easier to hit, negative = harder
+
+        # Body part targeting modifiers (damage_modifier, hit_difficulty_modifier)
+        BODY_PART_MODIFIERS = {
+            "HEAD": (1.5, -30),    # 50% more damage to head, much harder to hit
+            "TORSO": (1.0, 15),    # Normal damage, easier to hit (large target)
+            "LEG": (0.9, -5),      # Slightly less damage, slightly harder to hit
+            "ARM": (0.9, -10),     # Slightly less damage, harder to hit  
+            "HAND": (0.8, -25),    # Reduced damage, very hard to hit
+            "FOOT": (0.8, -25),    # Reduced damage, very hard to hit
+        }
+
+        # Check if any part is targeted
+        #print("DEBUG: target_part:", self.target_part)
+        if not self.target_part:
+            # If no part targeted, use the existing random part selection
+            if hasattr(target, 'body_parts'):
+                random_part = target.body_parts.get_random_part()
+                self.target_part = random_part.part_type if random_part else None
+
+        #print(f"DEBUG: Targeting {target.name}'s {self.target_part.name if self.target_part else 'random part'}")
+        
+        if self.target_part and hasattr(target, 'body_parts') and target.body_parts:
+            # Get the actual BodyPart object using the enum as key
+            hit_part = target.body_parts.body_parts.get(self.target_part)
+            
+            if hit_part and not hit_part.is_destroyed:
+                # Apply targeting modifiers based on body part type
+                part_type_name = hit_part.part_type.name
+                
+                # Look up modifiers in dictionary
+                if part_type_name in BODY_PART_MODIFIERS:
+                    damage_modifier, hit_difficulty_modifier = BODY_PART_MODIFIERS[part_type_name]
+                else:
+                    # Check for partial matches (for complex body part names)
+                    for key in BODY_PART_MODIFIERS:
+                        if key in part_type_name:
+                            damage_modifier, hit_difficulty_modifier = BODY_PART_MODIFIERS[key]
+                            break
             else:
-                sounds.play_attack_sound_weapon_to_no_armor()
+                # If targeted part is destroyed, hit a random available part instead
+                random_part = target.body_parts.get_random_part()
+                if random_part:
+                    self.target_part = random_part.part_type
+                    hit_part = random_part
+                    if hit_part and not hit_part.is_destroyed:
+                        part_type_name = hit_part.part_type.name
+                        
+                        # Apply modifiers for the new random part
+                        if part_type_name in BODY_PART_MODIFIERS:
+                            damage_modifier, hit_difficulty_modifier = BODY_PART_MODIFIERS[part_type_name]
+                        else:
+                            for key in BODY_PART_MODIFIERS:
+                                if key in part_type_name:
+                                    damage_modifier, hit_difficulty_modifier = BODY_PART_MODIFIERS[key]
+                                    break
         
+        # Calculate final damage
+        final_damage = max(0, int(base_damage * damage_modifier))
+        print(f"DEBUG: hit_part={hit_part.name if hit_part else None}, final_damage={final_damage}")
         
-        # Add slash animation
+        # Determine hit success based on difficulty
+        hit_chance = 85 + hit_difficulty_modifier  # Base 85% hit chance
+        hit_roll = random.randint(1, 100)
+        hit_success = hit_roll <= hit_chance
+
+        # Dodge calculation for entity 
+        dodge_success = False
+        if hit_success:
+            if random.random() < target.dodge_chance:
+                hit_success = False
+                dodge_success = True
+
+        # Dodge moves entity to adjacent tile if successful
+        if dodge_success:
+            adjacent_positions = [
+                (target.x + 1, target.y), (target.x - 1, target.y),
+                (target.x, target.y + 1), (target.x, target.y - 1)
+            ]
+            # attempts to choose preferred dodge direction first, then randomizes the rest
+            if target.preferred_dodge_direction:
+                preferred_order = {
+                    "north": [(target.x, target.y - 1), (target.x + 1, target.y), (target.x - 1, target.y), (target.x, target.y + 1)],
+                    "south": [(target.x, target.y + 1), (target.x + 1, target.y), (target.x - 1, target.y), (target.x, target.y - 1)],
+                    "east": [(target.x + 1, target.y), (target.x, target.y - 1), (target.x, target.y + 1), (target.x - 1, target.y)],
+                    "west": [(target.x - 1, target.y), (target.x, target.y - 1), (target.x, target.y + 1), (target.x + 1, target.y)]
+                }
+                adjacent_positions = preferred_order.get(target.preferred_dodge_direction.lower(), adjacent_positions)
+            for new_x, new_y in adjacent_positions:
+                if self.engine.game_map.in_bounds(new_x, new_y) and self.engine.game_map.tiles["walkable"][new_x, new_y] and not self.engine.game_map.get_blocking_entity_at_location(new_x, new_y):
+                    target.x = new_x
+                    target.y = new_y
+                    self.engine.message_log.add_message(f"{target.name} dodges to the side!", color.teal)
+                    break
+        
+        # Create attack description
+
+        ## Add verb from item verb tags 
+        # Check for equipped weapon and use its verb if available
+        weapon_verb = None
+        if self.entity.equipment and self.entity.equipment.weapon:
+            weapon = self.entity.equipment.weapon
+            # Check for verb attributes on weapon (present tense for combat)
+            if hasattr(weapon, 'verb_present') and weapon.verb_present:
+                weapon_verb = weapon.verb_present
+            elif hasattr(weapon, 'verb_base') and weapon.verb_base:
+                weapon_verb = weapon.verb_base + "s"  # Convert base to present tense
+        
+        # Fallback to entity verb if no weapon verb found
+        if not weapon_verb:
+            if hasattr(self.entity, 'verb_present') and self.entity.verb_present:
+                weapon_verb = self.entity.verb_present
+            elif hasattr(self.entity, 'verb_base') and self.entity.verb_base:
+                weapon_verb = self.entity.verb_base + "s"
+        
+        # Final fallback to "attacks"
+        if not weapon_verb:
+            weapon_verb = "attacks"
+
+        # Description assembly
+        if hit_part:
+            attack_desc = f"{self.entity.name.capitalize()} {weapon_verb} {target.name}'s {hit_part.name}"
+        else:
+            attack_desc = f"{self.entity.name.capitalize()} {weapon_verb} {target.name}"
+
+        
+        # Play hit sound if hit
+        if hit_success and final_damage > 0:
+            # If final blow, play different sound
+            if target.fighter.hp - final_damage <= 0:
+                sounds.play_attack_sound_finishing_blow()
+            elif self.entity.equipment:
+                if target.equipment and target.equipment.armor:
+                    sounds.play_attack_sound_weapon_to_armor()
+                else:
+                    sounds.play_attack_sound_weapon_to_no_armor()
+        # Play block sound if attack hits but does no damage
+        elif hit_success and final_damage == 0:
+            sounds.play_block_sound()
+        
+        # Play miss sound if attack misses
+        elif not hit_success:
+            sounds.play_miss_sound()
+
+        
+        # Add animation
         from animations import SlashAnimation
-        self.engine.animation_queue.append(SlashAnimation(target.x, target.y))
+        if hit_success:
+            self.engine.animation_queue.append(SlashAnimation(target.x, target.y))
 
         if self.entity is self.engine.player:
             attack_color = color.player_atk
         else:
             attack_color = color.enemy_atk
 
-        if damage > 0:
-            self.engine.message_log.add_message(
-                f"{attack_desc} for {damage} hit points.", attack_color
+        if not hit_success:
+            if dodge_success:
+                self.engine.message_log.add_message(
+                    f"{attack_desc}, but {target.name} dodges!", color.teal
                 )
-            target.fighter.hp -= damage
+            else:
+                self.engine.message_log.add_message(
+                    f"{attack_desc}, but misses!", color.white
+                )
+        elif final_damage > 0:
+            # Apply damage to specific body part (should always have a valid part)
+            if hit_part:
+                part_damage = hit_part.take_damage(final_damage)
+                target.fighter.take_damage(part_damage, targeted_part=self.target_part)
+                
+                # Special messages for different damage levels
+                if hit_part.is_destroyed:
+                    self.engine.message_log.add_message(
+                        f"{attack_desc} and destroys it for {part_damage} damage!", color.red
+                    )
+                else:
+                    self.engine.message_log.add_message(
+                        f"{attack_desc} for {part_damage} damage.", attack_color
+                    )
+            else:
+                # This should never happen - but adding for debugging
+                print(f"ERROR: No valid body part found! target_part={self.target_part}, has_body_parts={hasattr(target, 'body_parts')}")
+                target.fighter.take_damage(final_damage)
+                self.engine.message_log.add_message(
+                    f"{attack_desc} for {final_damage} hit points. [NO BODY PART ERROR]", color.red
+                )
             
             # Trigger damage indicator if player takes damage
             if target is self.engine.player:
@@ -330,6 +511,22 @@ class MovementAction(ActionWithDirection):
     def perform(self) -> None:
         dest_x, dest_y = self.dest_xy
 
+        # Check if entity can move (has working legs/locomotion)
+        if hasattr(self.entity, 'body_parts') and self.entity.body_parts:
+            if not self.entity.body_parts.can_move():
+                if self.entity == self.engine.player:
+                    raise exceptions.Impossible("You can't move with your legs destroyed!")
+                else:
+                    raise exceptions.Impossible("The creature can't move!")
+            
+            # Warn player about movement penalties from leg injuries
+            if self.entity == self.engine.player:
+                penalty = self.entity.body_parts.get_movement_penalty()
+                if penalty > 0.5:  # Significant penalty (> 50%)
+                    if not hasattr(self, '_shown_movement_warning'):
+                        self.engine.message_log.add_message("Your damaged legs make movement difficult!", color.yellow)
+                        self._shown_movement_warning = True
+
         if not self.engine.game_map.in_bounds(dest_x, dest_y):
             raise exceptions.Impossible("That way is blocked.")  # Destination is out of bounds.
         
@@ -339,7 +536,10 @@ class MovementAction(ActionWithDirection):
             raise exceptions.Impossible("That way is blocked.")  # Destination is blocked by an entity.
         
         self.entity.move(self.dx, self.dy)
-        #sounds.play_walk_sound()
+        
+        # Only play walk sound if not moving rapidly or holding key
+        if self.engine.should_play_movement_sound():
+            sounds.play_walk_sound()
 
 
 class BumpAction(ActionWithDirection):

@@ -1,5 +1,5 @@
 
-
+orange = (0xFF, 0xA0, 0x0)
 white = (0xFF, 0xFF, 0xFF)
 black = (0x0, 0x0, 0x0)
 red = (0xFF, 0x0, 0x0)
@@ -48,6 +48,15 @@ lucidity_bar_empty = (0x40, 0x10, 0x10)
 
 xp_bar_empty = (0, 0, 0)
 xp_bar_filled = (6, 100, 255)
+
+# Fantasy UI theme colors
+parchment_bg = (45, 35, 25)
+parchment_light = (50, 40, 30) 
+parchment_dark = (40, 30, 22)
+bronze_border = (139, 105, 60)
+bronze_text = (160, 120, 70)
+gold_accent = (220, 180, 50)
+fantasy_text = (200, 170, 140)
 
 menu_title = (255, 255, 63)
 menu_text = white
