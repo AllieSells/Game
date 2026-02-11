@@ -149,6 +149,35 @@ def print_colored_text(console: tcod.console.Console, x: int, y: int, text_parts
     return current_x
 
 
+def print_colored_text_with_bg(console: tcod.console.Console, x: int, y: int, text_parts: list, bg_color) -> int:
+    """
+    Print text with multiple colors and consistent background on the same line.
+    
+    Args:
+        console: The tcod console to print to
+        x: Starting x position
+        y: Y position
+        text_parts: List of tuples (text, color)
+        bg_color: Background color applied to all text
+    
+    Returns:
+        The final x position after all text is printed
+        
+    Example:
+        parts = [
+            ("Hello ", color.white),
+            ("World", color.blue),
+            ("!", color.red)
+        ]
+        print_colored_text_with_bg(console, 10, 5, parts, (45, 35, 25))
+    """
+    current_x = x
+    for text, text_color in text_parts:
+        console.print(current_x, y, text, fg=text_color, bg=bg_color)
+        current_x += len(text)
+    return current_x
+
+
 def wrap_colored_text(text: str, max_width: int, default_color=color.white) -> list:
     """
     Wrap colored markup text to fit within a specified width.

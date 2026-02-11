@@ -189,12 +189,12 @@ def render_gold(
 
     console.print(x=x+2, y=y, string=f"Gold: {gold_amount}", fg=color.gold_accent)
 
-# Render attack type
-def render_attack_type(
-        console: 'Console', attack_type: str,
+# Render dodge direction
+def render_combat_stats(
+        console: 'Console', dodge_direction: str = "North", attack_type: str = "Random", 
 ) -> None:
-    text = f"Attacking: {attack_type.title() if attack_type else 'Random'}"
-    text_utils.print_colored_markup(console=console, x=2, y=40, text=text)
+    text = f"Dodging: {dodge_direction.title() if dodge_direction else 'Random'} Targeting: {attack_type.title() if attack_type else 'Random'}"
+    text_utils.print_colored_markup(console=console, x=1, y=40, text=text)
 
 # Status effect render
 def render_effects(console: 'Console', effects: list) -> None:
@@ -205,7 +205,7 @@ def render_effects(console: 'Console', effects: list) -> None:
             effect_display += effect.name + " "
         except Exception:
             pass
-    text_utils.print_colored_markup(console=console, x=2, y=41, text=effect_display, default_color=color.bronze_text)
+    text_utils.print_colored_markup(console=console, x=1, y=41, text=effect_display, default_color=color.bronze_text)
 
 
 

@@ -83,17 +83,17 @@ class EquipmentUI(AskUserEventHandler):
     def _create_equipment_slots(self) -> List[EquipmentSlot]:
         """Create equipment slots for list display."""
         return [
-            EquipmentSlot("R.Hand", 0, 0, [EquipmentType.WEAPON, EquipmentType.SHIELD], "○", "●"),
-            EquipmentSlot("L.Hand", 0, 1, [EquipmentType.WEAPON, EquipmentType.SHIELD], "○", "●"), 
-            EquipmentSlot("Head", 0, 2, [EquipmentType.HELMET], "○", "●"),
-            EquipmentSlot("Torso", 0, 3, [EquipmentType.ARMOR], "○", "●"),
-            EquipmentSlot("L.Arm", 0, 4, [EquipmentType.GAUNTLETS], "○", "●"),
-            EquipmentSlot("R.Arm", 0, 5, [EquipmentType.GAUNTLETS], "○", "●"),
-            EquipmentSlot("L.Leg", 0, 6, [EquipmentType.LEGGINGS], "○", "●"),
-            EquipmentSlot("R.Leg", 0, 7, [EquipmentType.LEGGINGS], "○", "●"),
-            EquipmentSlot("L.Foot", 0, 8, [EquipmentType.BOOTS], "○", "●"),
-            EquipmentSlot("R.Foot", 0, 9, [EquipmentType.BOOTS], "○", "●"),
-            EquipmentSlot("Back", 0, 10, [EquipmentType.BACKPACK], "○", "●"),
+            EquipmentSlot("R.Hand", 0, 0, [EquipmentType.WEAPON, EquipmentType.SHIELD], "o", "•"),
+            EquipmentSlot("L.Hand", 0, 1, [EquipmentType.WEAPON, EquipmentType.SHIELD], "o", "•"), 
+            EquipmentSlot("Head", 0, 2, [EquipmentType.HELMET], "o", "•"),
+            EquipmentSlot("Torso", 0, 3, [EquipmentType.ARMOR], "o", "•"),
+            EquipmentSlot("L.Arm", 0, 4, [EquipmentType.GAUNTLETS], "o", "•"),
+            EquipmentSlot("R.Arm", 0, 5, [EquipmentType.GAUNTLETS], "o", "•"),
+            EquipmentSlot("L.Leg", 0, 6, [EquipmentType.LEGGINGS], "o", "•"),
+            EquipmentSlot("R.Leg", 0, 7, [EquipmentType.LEGGINGS], "o", "•"),
+            EquipmentSlot("L.Foot", 0, 8, [EquipmentType.BOOTS], "o", "•"),
+            EquipmentSlot("R.Foot", 0, 9, [EquipmentType.BOOTS], "o", "•"),
+            EquipmentSlot("Back", 0, 10, [EquipmentType.BACKPACK], "o", "•"),
         ]
     
     def on_render(self, console: tcod.Console) -> None:
@@ -131,6 +131,8 @@ class EquipmentUI(AskUserEventHandler):
     def _draw_slots_list(self, console: tcod.Console, base_x: int, base_y: int,
                         window_width: int, window_height: int) -> None:
         """Draw equipment slots as a simple list."""
+        from text_utils import print_colored_text_with_bg
+        
         list_x = base_x + 3
         list_y = base_y + 3
         
@@ -144,14 +146,15 @@ class EquipmentUI(AskUserEventHandler):
                 bg_color = (45, 35, 25)
                 marker = "  "
                 if i == self.selected_slot:
+                    fg_color = color.white
                     bg_color = (80, 60, 30)
                     marker = "> "
             elif i == self.selected_slot:
-                fg_color = color.cyan
+                fg_color = color.white
                 bg_color = (80, 60, 30)
                 marker = "> "
             elif equipped_item:
-                fg_color = color.green 
+                fg_color = color.white
                 bg_color = (45, 35, 25)
                 marker = "  "
             else:
@@ -159,56 +162,82 @@ class EquipmentUI(AskUserEventHandler):
                 bg_color = (45, 35, 25) 
                 marker = "  "
             
-            # Draw slot entry
+            # Determine HP color
+            slot_hp = self._get_slot_hp(slot)
+            if slot_hp <= 0:
+                part_color = color.dark_red
+            elif slot_hp < 30:
+                part_color = color.red
+            elif slot_hp < 70:
+                part_color = color.yellow
+            else:
+                part_color = color.green
+            
+            # Build text parts for colored printing
             slot_char = slot.equipped_char if equipped_item else slot.char
-            slot_text = f"{marker}{slot_char} {slot.name:<8}"
+            text_parts = [
+                (f"{marker}{slot_char}{slot.name:6} [", fg_color),
+                (f"{slot_hp:>3}%", part_color),
+                ("]", fg_color)
+            ]
             
-            # Add equipped item name or injury status
-            if is_disabled:
-                slot_text += ": Too injured to use"
-            elif equipped_item:
+            if equipped_item:
                 item_name = equipped_item.name[:20]  # Longer truncation for wider window
-                slot_text += f": {item_name}"
+                text_parts.append((":", fg_color))
+                text_parts.append((item_name, equipped_item.rarity_color))
             
-            console.print(list_x, list_y + i, slot_text, fg=fg_color, bg=bg_color)
+            print_colored_text_with_bg(console, list_x, list_y + i, text_parts, bg_color)
     
     def _draw_items_list(self, console: tcod.Console, base_x: int, base_y: int,
                         window_width: int, window_height: int) -> None:
         """Draw list of available items for the selected slot."""
+        from text_utils import print_colored_text_with_bg
+        
         if not self.slots:
             return
             
         selected_slot = self.slots[self.selected_slot]
         compatible_items = self._get_compatible_items(selected_slot)
         
-        # Items list area (right side of window)
-        list_x = base_x + 35
-        list_y = base_y + 3
+        # Items list area (right side of window, with more space)
+        list_x = base_x + 40
+        list_y = base_y + 2
+        max_items_width = window_width - 42  # Leave room on the right
         
         console.print(list_x, list_y, "Available Items:", fg=color.yellow, bg=(45, 35, 25))
-        list_y += 2
+        list_y += 1
         
         # Show compatible items
         if not compatible_items:
-            console.print(list_x, list_y, "No items available", fg=color.gray, bg=(45, 35, 25))
+            console.print(list_x, list_y, "None", fg=color.gray, bg=(45, 35, 25))
             return
         
         # Clamp selected item to valid range
         self.selected_item = max(0, min(self.selected_item, len(compatible_items) - 1))
         
-        for i, item in enumerate(compatible_items):
-            if i >= 8:  # Limit items shown
+        # Draw items without cap, scrolling if needed
+        start_index = max(0, self.selected_item - 8)  # Keep selection visible, show ~9 items
+        
+        for display_i, i in enumerate(range(start_index, len(compatible_items))):
+            if display_i >= window_height - 7:  # Respect window height
                 break
-                
-            item_color = color.cyan if i == self.selected_item else color.white
-            marker = "> " if i == self.selected_item else "  "
+            
+            item = compatible_items[i]
+            is_selected = i == self.selected_item
+            bg_color = (80, 60, 30) if is_selected else (45, 35, 25)
+            marker = "> " if is_selected else "  "
             
             # Check if item is equipped and add (e) marker
             equipped_marker = " (e)" if self._is_item_equipped(item) else ""
-            item_name = item.name[:22] + equipped_marker  # Shorter truncation to fit (e) marker
+            item_name = item.name[:max_items_width - 4] + equipped_marker  # Leave room for marker
             
-            console.print(list_x, list_y + i, f"{marker}{item_name}", 
-                        fg=item_color, bg=(45, 35, 25))
+            # Build text parts with rarity color for item name
+            text_parts = [
+                (marker, color.white if not is_selected else color.white),
+                (item_name, item.rarity_color)
+            ]
+            
+            print_colored_text_with_bg(console, list_x, list_y + display_i, text_parts, bg_color)
     
     def _get_compatible_items(self, slot: EquipmentSlot) -> List[Item]:
         """Get items that can be equipped in the given slot, with equipped items sorted to bottom."""
@@ -231,6 +260,43 @@ class EquipmentUI(AskUserEventHandler):
                 equipment.armor == item or
                 equipment.backpack == item or
                 item in equipment.equipped_items.values())
+
+    def _get_slot_hp(self, slot: EquipmentSlot) -> int:
+        """"Returns the limb HP ratio associated with a slot, default 100."""
+        if not hasattr(self.engine.player, 'body_parts') or not self.engine.player.body_parts:
+            return 100
+        
+        # Map slot names to body part types
+        slot_to_body_part = {
+            "L.Hand": "LEFT_HAND",
+            "R.Hand": "RIGHT_HAND", 
+            "L.Arm": "LEFT_ARM",
+            "R.Arm": "RIGHT_ARM",
+            "L.Leg": "LEFT_LEG",
+            "R.Leg": "RIGHT_LEG",
+            "L.Foot": "LEFT_FOOT",
+            "R.Foot": "RIGHT_FOOT",
+            "Head": "HEAD",
+            "Torso": "TORSO",
+            "Back": "TORSO"  # Back slot uses torso for injury check
+        }
+
+        body_part_name = slot_to_body_part.get(slot.name)
+        if not body_part_name:
+            return 100
+
+        # Find the body part
+        from components.body_parts import BodyPartType
+        try:
+            part_type = BodyPartType[body_part_name]
+            if part_type in self.engine.player.body_parts.body_parts:
+                part = self.engine.player.body_parts.body_parts[part_type]
+                hp_ratio = int((part.current_hp / part.max_hp) * 100)
+                return hp_ratio
+        except (KeyError, AttributeError):
+            pass
+        return 100
+
     
     def _is_slot_disabled(self, slot: EquipmentSlot) -> bool:
         """Check if a slot is disabled due to injury."""
@@ -310,13 +376,13 @@ class EquipmentUI(AskUserEventHandler):
             if self.slots:
                 compatible_items = self._get_compatible_items(self.slots[self.selected_slot])
                 if compatible_items:
-                    self.selected_item = max(0, self.selected_item - 1)
+                    self.selected_item = (self.selected_item - 1) % len(compatible_items)
             return None
         elif key == tcod.event.KeySym.RIGHT:
             if self.slots:
                 compatible_items = self._get_compatible_items(self.slots[self.selected_slot])
                 if compatible_items:
-                    self.selected_item = min(len(compatible_items) - 1, self.selected_item + 1)
+                    self.selected_item = (self.selected_item + 1) % len(compatible_items)
             return None
         
         # Equip selected item

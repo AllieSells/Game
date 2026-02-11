@@ -24,7 +24,7 @@ T = TypeVar("T", bound="Entity")
 
 # Import names
 from components import names
-
+import color
 
 class Entity:
 
@@ -615,6 +615,7 @@ class Item(Entity):
             verb_present: Optional[str] = None,
             verb_past: Optional[str] = None,
             verb_participial: Optional[str] = None,
+            rarity_color: color = color.white,
 
 
     ):
@@ -652,4 +653,5 @@ class Item(Entity):
         self.verb_present = verb_present or self.verb_base + "s"
         self.verb_past = verb_past or self.verb_base + "d"
         self.verb_participial = verb_participial or self.verb_base + "ing"
+        self.rarity_color = rarity_color
         

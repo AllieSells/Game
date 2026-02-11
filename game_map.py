@@ -150,6 +150,30 @@ class GameMap:
                 self.tiles["light_level"] + light_intensity
             )
     
+    def _apply_lighting_to_entity_color(self, entity_color: tuple, x: int, y: int) -> tuple:
+        """Apply lighting effects to entity color based on tile light level."""
+        try:
+            # Get light level at entity position (0.0 = dark, 1.0 = full light)
+            light_level = self.tiles["light_level"][x, y]
+            light_level = float(light_level)  # Ensure it's a regular float
+            light_level = max(0.0, min(1.0, light_level))  # Clamp between 0 and 1
+            
+            # Apply lighting: dark multiplier increases with light level
+            # 0.2 = very dark (20% brightness), 1.0 = full brightness
+            brightness = 0.2 + (0.8 * light_level)
+            
+            # Apply brightness to entity color
+            r, g, b = entity_color
+            lit_color = (
+                int(r * brightness),
+                int(g * brightness), 
+                int(b * brightness)
+            )
+            return lit_color
+        except Exception:
+            # Fallback to original color if anything fails
+            return entity_color
+    
     def _render_tiles_with_gradient(self, console: Console) -> None:
         """Render tiles with gradient interpolation between dark and light based on light levels."""
         import tile_types
@@ -292,7 +316,9 @@ class GameMap:
                 continue
             pos = (entity.x, entity.y)
             if self.visible[entity.x, entity.y]:
-                console.print(x=entity.x, y=entity.y, string=entity.char, fg=entity.color)
+                # Apply dynamic lighting to entity color
+                lit_color = self._apply_lighting_to_entity_color(entity.color, entity.x, entity.y)
+                console.print(x=entity.x, y=entity.y, string=entity.char, fg=lit_color)
                 drawn_positions.add(pos)
             else:
                 # If tile has been explored but is not currently visible, show a generic marker
@@ -327,7 +353,9 @@ class GameMap:
                 continue
             pos = (entity.x, entity.y)
             if self.visible[entity.x, entity.y]:
-                console.print(x=entity.x, y=entity.y, string=entity.char, fg=entity.color)
+                # Apply dynamic lighting to entity color
+                lit_color = self._apply_lighting_to_entity_color(entity.color, entity.x, entity.y)
+                console.print(x=entity.x, y=entity.y, string=entity.char, fg=lit_color)
                 drawn_positions.add(pos)
             else:
                 # Do not show '*' for non-visible actors; items already handled above.

@@ -479,10 +479,13 @@ class Engine:
             map=self.game_map
         )
 
-        render_functions.render_attack_type(
+        render_functions.render_combat_stats(
             console=console,
-            attack_type=getattr(self.player, "attack_type", "None")
+            dodge_direction=getattr(self.player, "preferred_dodge_direction", "None"),
+            attack_type=getattr(self.player, "current_attack_type", "None")
         )
+
+        #print(self.player.current_attack_type)
 
         render_functions.render_effects(
             console=console,

@@ -162,6 +162,7 @@ torch = Item(
     verb_present="smashes",
     verb_past="smashed",
     verb_participial="smashing",
+    rarity_color=color.common
 )
 
 dagger = Item(
@@ -175,6 +176,7 @@ dagger = Item(
     verb_present="stabs",
     verb_past="stabbed",
     verb_participial="stabbing",
+    rarity_color=color.common
 
 )
 
@@ -189,6 +191,7 @@ sword = Item(
     verb_present="slashes",
     verb_past="slashed",
     verb_participial="slashing",
+    rarity_color=color.common
 )
 
 leather_armor = Item(
@@ -200,6 +203,7 @@ leather_armor = Item(
     unequip_sound=sounds.play_unequip_leather_sound,
     pickup_sound=sounds.pick_up_leather_sound,
     drop_sound=sounds.drop_leather_sound,
+    rarity_color=color.common
 )
 
 chain_mail = Item(
