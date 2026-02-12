@@ -167,41 +167,15 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) 
         x = random.randint(room.x1+1, room.x2-1)
         y= random.randint(room.y1+1, room.y2-1)
 
-
         if not any(entity.x == x and entity.y == y for entity in dungeon.entities):
-            entity.spawn(dungeon, x, y)
-
-        # Roll equipment for monster based on dict values
-        mob_equip_dict = {
-            "Orc": {
-                "weapon":{
-                    entity_factories.dagger: 10,
-                    None: 50
-                },
-                "armor":{
-                    entity_factories.leather_armor: 15,
-                    None: 45
-                }
-            }
-        }
-        # Roll for mob equipment
-        if entity.name in mob_equip_dict:
-            equip_rolls = mob_equip_dict[entity.name]
-            for slot, items in equip_rolls.items():
-                item_names = list(items.keys())
-                item_weights = list(items.values())
-                chosen_item = random.choices(item_names, weights=item_weights, k=1)[0]
-                if chosen_item is not None:
-                    # Deep copy
-                    import copy as _copy
-                    item_copy = _copy.deepcopy(chosen_item)
-                    item_copy.parent = entity.inventory
-                    # For weapons, place in main hand only (weapon slot)
-                    if slot == "weapon":
-                        entity.equipment.equip_to_slot("weapon", item_copy, False)
-                    else:
-                        entity.equipment.equip_to_slot(slot, item_copy, False)
-                    print(f"Equipped {entity.name} with {item_copy.name} in slot {slot}")
+            # Spawn mob with appropriate equipment
+            if entity.name == "Orc":
+                entity_factories.spawn_mob_with_equipment(entity, dungeon, x, y, entity_factories.orc_equipment)
+            elif entity.name == "Troll":
+                entity_factories.spawn_mob_with_equipment(entity, dungeon, x, y, entity_factories.troll_equipment)
+            else:
+                # Default: spawn without special equipment
+                entity.spawn(dungeon, x, y)
 
     # Place campfire using centralized logic
     place_campfires(dungeon, "dungeon_room", room=room)

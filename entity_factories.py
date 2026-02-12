@@ -23,7 +23,7 @@ player = Actor(
     fighter=Fighter(hp=30, base_defense=2, base_power=5),
     inventory=Inventory(capacity=26),
     level=Level(level_up_base=200),
-    body_parts=BodyParts(AnatomyType.HUMANOID),
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=30),
     # Temporary demo effect so the status-effects panel shows during testing
     effects = [],
     lucidity = 100,
@@ -60,12 +60,12 @@ orc = Actor(
     inventory=Inventory(capacity=0),
     level=Level(xp_given=35),
     speed=120,  # Fast enough to sometimes act before player
-    body_parts=BodyParts(AnatomyType.HUMANOID),
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
     verb_base="claw",
     verb_present="claws",
     verb_past="clawed",
     verb_participial="clawing",
-    dodge_chance=0.05, 
+    dodge_chance=0.15, 
     )
 
 troll = Actor(
@@ -78,12 +78,12 @@ troll = Actor(
     inventory=Inventory(capacity=0),
     level=Level(xp_given=100),
     speed=80,  # Slower than normal - big and lumbering
-    body_parts=BodyParts(AnatomyType.HUMANOID),
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=16),
     verb_base="smash",
     verb_present="smashes",
     verb_past="smashed",
     verb_participial="smashing",
-    dodge_chance=0.01,  
+    dodge_chance=0.05,  
     )
 
 lesser_health_potion = Item(
@@ -96,6 +96,7 @@ lesser_health_potion = Item(
     unequip_sound=sounds.play_unequip_glass_sound,
     pickup_sound=sounds.pick_up_glass_sound,
     drop_sound=sounds.drop_glass_sound,
+    rarity_color=color.common
 )
 lightning_scroll = Item(
     char="~",
@@ -107,6 +108,7 @@ lightning_scroll = Item(
     unequip_sound=sounds.play_unequip_paper_sound,
     pickup_sound=sounds.pick_up_paper_sound,
     drop_sound=sounds.drop_paper_sound,
+    rarity_color=color.common
 )
 
 confusion_scroll = Item(
@@ -119,6 +121,7 @@ confusion_scroll = Item(
     unequip_sound=sounds.play_unequip_paper_sound,
     pickup_sound=sounds.pick_up_paper_sound,
     drop_sound=sounds.drop_paper_sound,
+    rarity_color=color.common
 )
 
 fireball_scroll = Item(
@@ -131,6 +134,7 @@ fireball_scroll = Item(
     unequip_sound=sounds.play_unequip_paper_sound,
     pickup_sound=sounds.pick_up_paper_sound,
     drop_sound=sounds.drop_paper_sound,
+    rarity_color=color.common
 )
 
 campfire = Item(
@@ -250,7 +254,7 @@ villager = Actor(
     sentient=True,
     is_known=False,
     type = "NPC",
-    body_parts=BodyParts(AnatomyType.HUMANOID),
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
 )
 
 quest_giver = Actor(
@@ -265,7 +269,7 @@ quest_giver = Actor(
     is_known=False,
     sentient=True,
     type = "NPC",
-    body_parts=BodyParts(AnatomyType.HUMANOID),
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
 )
 
 coin = Item(
@@ -275,6 +279,7 @@ coin = Item(
     description="A shiny gold coin.",
     value=1,
     weight=0.01,
+    rarity_color=color.coins,
 )
 
 fungus = Item(
@@ -362,6 +367,7 @@ def get_random_coins(min_amount: int, max_amount: int) -> Item:
         unequip_sound=def_unequip_sound,
         pickup_sound=def_pickup_sound,
         drop_sound=def_drop_sound,
+        rarity_color=color.coins
     )
 
 
@@ -398,3 +404,62 @@ def make_chest_with_loot(items: list, capacity: int = 10) -> Actor:
     new_chest.container = cont
     return new_chest
 
+# Equipment tables for mob spawning
+# Uses percentages (0-100) for each item type
+# Mobs can be equipped with multiple items if chances align
+
+orc_equipment = {
+    "weapon": {
+        dagger: 17,      # 17% chance to spawn with dagger
+        None: 83         # 83% chance to spawn without weapon
+    },
+    "armor": {
+        leather_armor: 25,  # 25% chance to spawn with armor
+        None: 75            # 75% chance to spawn without armor
+    }
+}
+
+troll_equipment = {
+    "weapon": {
+        dagger: 5,       # 5% chance to spawn with dagger
+        None: 95         # 95% chance to spawn without weapon
+    },
+    "armor": {
+        leather_armor: 20,  # 20% chance to spawn with armor
+        None: 80            # 80% chance to spawn without armor
+    }
+}
+
+
+def spawn_mob_with_equipment(mob_template: Actor, gamemap, x: int, y: int, equipment_table: dict) -> Actor:
+    """Spawn a mob with randomly equipped items based on the equipment table.
+    
+    equipment_table format:
+    {
+        "slot_name": {
+            item_template: weight,
+            None: weight  # None means no item
+        },
+        ...
+    }
+    """
+    import copy as _copy
+    import random
+    
+    # Spawn the mob
+    mob = mob_template.spawn(gamemap, x, y)
+    
+    # Equip items based on the equipment table
+    for slot, items in equipment_table.items():
+        item_names = list(items.keys())
+        item_weights = list(items.values())
+        chosen_item = random.choices(item_names, weights=item_weights, k=1)[0]
+        
+        if chosen_item is not None:
+            # Deep copy to avoid shared references
+            item_copy = _copy.deepcopy(chosen_item)
+            item_copy.parent = mob.inventory
+            # Use tag-based equip system
+            mob.equipment.equip_item(item_copy, add_message=False)
+    
+    return mob

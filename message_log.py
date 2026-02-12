@@ -40,6 +40,10 @@ class MessageLog:
         
         # Message log content renders within the bordered area
         import color
+        from render_functions import MenuRenderer
+        
+        # Draw parchment background for message log area
+        MenuRenderer.draw_parchment_background(console, x, y, width, height + 3)
 
         # Render messages 
         self.render_messages(console, x, y, width, height, self.messages)
@@ -62,7 +66,7 @@ class MessageLog:
         height: int,
         messages: Reversible[Message],
     ) -> None:
-        # Renders messages. MessAges start at last message and go back
+        # Renders messages. Messages start at last message and go back
         y_offset = height + 2
 
         for message in reversed(messages):

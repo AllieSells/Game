@@ -118,6 +118,7 @@ class Actor(Entity):
         saturation: float = 100.0,
         attack_type: Optional[str] = "random",
         speed: int = 100,  # Higher = faster, 100 = normal speed
+        manipulation: int = 100, # Higher = better at using items, opening doors, etc. 100 = normal manipulation
         dodge_chance: float = 0.0,  # Chance to dodge attacks (0.0 to 1.0)
         preferred_dodge_direction: Optional[str] = random.choice(["north", "south", "east", "west"]), 
         verb_base: Optional[str] = None,
@@ -186,6 +187,7 @@ class Actor(Entity):
         self.saturation = saturation
         self.current_attack_type = attack_type
         self.speed = speed
+        self.manipulation = manipulation
         self.initiative_counter = 0  # Tracks when this entity should act
         self.verb_base = verb_base or "attack"
         self.verb_present = verb_present or self.verb_base + "s"
@@ -203,6 +205,22 @@ class Actor(Entity):
     def remove_effect(self, effect_type: str) -> None:
         """Remove an Effect based on type"""
         self.effects = [e for e in self.effects if e.type != effect_type]
+
+    def get_effective_manipulation(self) -> int:
+        """Calculate effective manipulation based on effects and body part conditions"""
+        base_manipulation = self.manipulation
+
+        # If no body parts system, return base manipulation
+        if not self.body_parts:
+            return base_manipulation
+        
+        # Get manipulation penalty (0.0 = no penalty, 1.0 = can't manipulate)
+        penalty = self.body_parts.get_manipulation_penalty()
+
+        # Convert penalty to manipulation multiplier (penalty 0.0 -> multiplier 1.0, penalty 1.0 -> multiplier 0.1)
+        manipulation_multiplier = max(0.1, 1.0 - penalty)  # Minimum 10% manipulation even with severe damage
+
+        return int(base_manipulation * manipulation_multiplier)
     
     def get_effective_speed(self) -> int:
         """Get speed modified by body part damage (destroyed legs/feet reduce speed)."""

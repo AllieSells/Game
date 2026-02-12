@@ -64,11 +64,15 @@ class InteractAction(Action):
             ):
                 # Container found at target location
                 container = ent.container
+                is_corpse = getattr(ent, "type", None) == "Dead"
+                
                 if len(container.items) == 0:
-                    raise exceptions.Impossible("The chest is empty.")
+                    empty_msg = "There is nothing left to loot." if is_corpse else "The chest is empty."
+                    raise exceptions.Impossible(empty_msg)
                 else:
                     # Send to input handler to display contents
-                    sounds.play_chest_open_sound()
+                    if not is_corpse:
+                        sounds.play_chest_open_sound()
                     from input_handlers import ContainerEventHandler
                     return ContainerEventHandler(self.engine, container)
 
@@ -208,10 +212,15 @@ class OpenAction(Action):
             ):
                 # Container found
                 container = ent.container
+                is_corpse = getattr(ent, "type", None) == "Dead"
+                
                 if len(container.items) == 0:
-                    raise exceptions.Impossible("The chest is empty.")
+                    empty_msg = "There is nothing left to loot." if is_corpse else "The chest is empty."
+                    raise exceptions.Impossible(empty_msg)
                 else:
                     # Send to input handler to display contents
+                    if not is_corpse:
+                        sounds.play_chest_open_sound()
                     from input_handlers import ContainerEventHandler
                     return ContainerEventHandler(self.engine, container)
         raise exceptions.Impossible("Nothing nearby to open.")
@@ -304,6 +313,19 @@ class MeleeAction(ActionWithDirection):
         # Check for target
         if not target:
             raise exceptions.Impossible("Nothing to attack.")
+        
+        # Manipulation check
+        for part in self.entity.body_parts.get_all_parts().values():
+            if "manipulate" in part.tags:
+                if part.damage_level_float > 0.5:
+                    if random.random() < 0.5:
+                        self.entity.fighter._drop_grasped_items(part)
+                    print("DEBUG: Manipulation partially impaired by damage to part:", part.name)
+                elif part.damage_level_float >= 1.0:
+                    self.entity.fighter._drop_grasped_items(part)
+                else:
+                    print("DEBUG: Manipulation possible with part:", part.name)
+
         
         # Base damage calculation
         base_damage = self.entity.fighter.power - target.fighter.defense
@@ -473,7 +495,7 @@ class MeleeAction(ActionWithDirection):
                 )
             else:
                 self.engine.message_log.add_message(
-                    f"{attack_desc}, but misses!", color.white
+                    f"{attack_desc}, but misses!", color.dark_gray
                 )
         elif final_damage > 0:
             # Apply damage to specific body part (should always have a valid part)

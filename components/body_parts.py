@@ -58,18 +58,19 @@ class BodyPart:
     """Represents a single body part."""
     part_type: BodyPartType
     name: str
-    max_hp: int
+    max_hp_ratio: float  # Relative HP compared to total entity HP
+    max_hp: int = 0  # Calculated max HP for this part
     current_hp: int = None
     is_vital: bool = False  # Death if destroyed
     is_limb: bool = False   # Can be severed/disabled
     can_grasp: bool = False  # Can equip weapons/shields
     protection: int = 0     # Natural armor
+    tags: Set[str] = field(default_factory=set)  # Equipment tags this part can accommodate (e.g., "hand", "grasp", "manipulate")
     status_effects: Set[str] = field(default_factory=set)
     
     def __post_init__(self):
         if self.current_hp is None:
             self.current_hp = self.max_hp
-    
     @property
     def is_destroyed(self) -> bool:
         """Check if body part is completely destroyed."""
@@ -81,7 +82,13 @@ class BodyPart:
         return self.current_hp < self.max_hp
     
     @property
-    def damage_level(self) -> str:
+    def damage_level_float(self) -> float:
+        """Get damage level as a float (0.0 = no damage, 1.0 = destroyed)."""
+        if self.max_hp <= 0:
+            return 1.0
+        return 1.0 - (self.current_hp / self.max_hp)
+    @property
+    def damage_level_text(self) -> str:
         """Get description of damage level."""
         if not self.is_damaged:
             return "healthy"
@@ -116,8 +123,9 @@ class BodyParts(BaseComponent):
     
     parent: Actor
     
-    def __init__(self, anatomy_type: AnatomyType = AnatomyType.HUMANOID):
+    def __init__(self, anatomy_type: AnatomyType = AnatomyType.HUMANOID, max_hp: int = 100):
         self.anatomy_type = anatomy_type
+        self.max_hp = max_hp  # Store parent's max HP for calculating body part HP
         self.body_parts: Dict[BodyPartType, BodyPart] = {}
         self.vital_parts_destroyed = 0
         
@@ -133,47 +141,63 @@ class BodyParts(BaseComponent):
     
     def _create_humanoid_anatomy(self) -> None:
         """Create humanoid body parts (humans, elves, orcs, etc.)."""
+        # Use the max_hp passed in during initialization
+        parent_max_hp = self.max_hp
+        
         self.body_parts = {
             BodyPartType.HEAD: BodyPart(
-                BodyPartType.HEAD, "head", 15, is_vital=True
+                BodyPartType.HEAD, "head", .5, max_hp=int(0.5 * parent_max_hp), is_vital=True,
+                tags={"head", "armor"}
             ),
             BodyPartType.NECK: BodyPart(
-                BodyPartType.NECK, "neck", 8, is_vital=True
+                BodyPartType.NECK, "neck", .267, max_hp=int(0.267 * parent_max_hp), is_vital=True
             ),
             BodyPartType.TORSO: BodyPart(
-                BodyPartType.TORSO, "torso", 30, is_vital=True
+                BodyPartType.TORSO, "torso", 1.0, max_hp=int(1.0 * parent_max_hp), is_vital=True,
+                tags={"torso", "armor"}
             ),
             BodyPartType.LEFT_ARM: BodyPart(
-                BodyPartType.LEFT_ARM, "left arm", 12, is_limb=True
+                BodyPartType.LEFT_ARM, "left arm", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"arm", "armor"}
             ),
             BodyPartType.RIGHT_ARM: BodyPart(
-                BodyPartType.RIGHT_ARM, "right arm", 12, is_limb=True
+                BodyPartType.RIGHT_ARM, "right arm", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"arm", "armor"}
             ),
             BodyPartType.LEFT_HAND: BodyPart(
-                BodyPartType.LEFT_HAND, "left hand", 6, is_limb=True, can_grasp=True
+                BodyPartType.LEFT_HAND, "left hand", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True, can_grasp=True,
+                tags={"hand", "grasp", "manipulate", "hold", "use"}
             ),
             BodyPartType.RIGHT_HAND: BodyPart(
-                BodyPartType.RIGHT_HAND, "right hand", 6, is_limb=True, can_grasp=True
+                BodyPartType.RIGHT_HAND, "right hand", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True, can_grasp=True,
+                tags={"hand", "grasp", "manipulate", "hold", "use"}
             ),
             BodyPartType.LEFT_LEG: BodyPart(
-                BodyPartType.LEFT_LEG, "left leg", 15, is_limb=True
+                BodyPartType.LEFT_LEG, "left leg", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion"}
             ),
             BodyPartType.RIGHT_LEG: BodyPart(
-                BodyPartType.RIGHT_LEG, "right leg", 15, is_limb=True
+                BodyPartType.RIGHT_LEG, "right leg", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion"}
             ),
             BodyPartType.LEFT_FOOT: BodyPart(
-                BodyPartType.LEFT_FOOT, "left foot", 6, is_limb=True
+                BodyPartType.LEFT_FOOT, "left foot", .2, max_hp=int(0.2 * parent_max_hp), is_limb=True,
+                tags={"foot", "locomotion", "armor"}
             ),
             BodyPartType.RIGHT_FOOT: BodyPart(
-                BodyPartType.RIGHT_FOOT, "right foot", 6, is_limb=True
+                BodyPartType.RIGHT_FOOT, "right foot", .2, max_hp=int(0.2 * parent_max_hp), is_limb=True,
+                tags={"foot", "locomotion", "armor"}
             ),
         }
     
     def _create_simple_anatomy(self) -> None:
         """Create simple anatomy (slimes, golems, etc.)."""
+        parent_max_hp = self.max_hp
+        
         self.body_parts = {
             BodyPartType.TORSO: BodyPart(
-                BodyPartType.TORSO, "body", 50, is_vital=True, protection=1
+                BodyPartType.TORSO, "body", 1.0, max_hp=parent_max_hp, is_vital=True, protection=1,
+                tags={"torso", "armor"}
             ),
         }
     
@@ -211,6 +235,12 @@ class BodyParts(BaseComponent):
         if not self.body_parts:
             return None
         return random.choice(list(self.body_parts.values()))
+    
+    def get_part_health_ratio(self, part: BodyPart) -> float:
+        """Get a body part's current health as a decimal ratio (0.0 to 1.0)."""
+        if part.max_hp <= 0:
+            return 0.0
+        return part.current_hp / part.max_hp
     
     def damage_random_part(self, damage: int) -> Optional[BodyPart]:
         """Damage a random body part. Returns the damaged part."""
@@ -268,6 +298,8 @@ class BodyParts(BaseComponent):
         hands = self.get_weapon_hands()
         return len(hands) > 0
     
+
+    
     def get_movement_penalty(self) -> float:
         """Get movement speed penalty based on leg damage (0.0 = no penalty, 1.0 = can't move)."""
         if self.anatomy_type == AnatomyType.SIMPLE:
@@ -297,6 +329,32 @@ class BodyParts(BaseComponent):
         leg_ratio = functional_legs / total_legs
         return 1.0 - leg_ratio
     
+    def get_manipulation_penalty(self) -> float:
+        """Get manipulation penalty based on hand/arm damage (0.0 = no penalty, 1.0 = can't manipulate)."""
+        if self.anatomy_type == AnatomyType.SIMPLE:
+            return 0.0  # Simple creatures don't have manipulation limbs
+        
+        hand_parts = [
+            BodyPartType.LEFT_HAND, BodyPartType.RIGHT_HAND,
+            BodyPartType.LEFT_ARM, BodyPartType.RIGHT_ARM
+        ]
+        
+        total_hands = 0
+        functional_hands = 0
+        
+        for part_type in hand_parts:
+            part = self.get_part(part_type)
+            if part:
+                total_hands += 1
+                if not part.is_destroyed:
+                    functional_hands += 1
+        
+        if total_hands == 0:
+            return 0.0
+        
+        hand_ratio = functional_hands / total_hands
+        return 1.0 - hand_ratio
+    
     def heal_all_parts(self, amount: int) -> int:
         """Heal all body parts equally. Returns total healing done."""
         total_healing = 0
@@ -312,9 +370,24 @@ class BodyParts(BaseComponent):
             if part.is_destroyed:
                 descriptions.append(f"{part.name}: destroyed")
             elif part.is_damaged:
-                descriptions.append(f"{part.name}: {part.damage_level}")
+                descriptions.append(f"{part.name}: {part.damage_level_text}")
         
         if not descriptions:
             descriptions.append("All body parts are healthy.")
         
         return descriptions
+    
+    def can_equip_item(self, required_tags: Set[str]) -> bool:
+        """Check if any body part has all required tags to equip an item."""
+        for part in self.body_parts.values():
+            if not part.is_destroyed and required_tags.issubset(part.tags):
+                return True
+        return False
+    
+    def get_parts_matching_tags(self, required_tags: Set[str]) -> List[BodyPart]:
+        """Get all undestroyed body parts that have all required tags."""
+        matching = []
+        for part in self.body_parts.values():
+            if not part.is_destroyed and required_tags.issubset(part.tags):
+                matching.append(part)
+        return matching

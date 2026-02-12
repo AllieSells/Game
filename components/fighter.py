@@ -128,6 +128,76 @@ class Fighter(BaseComponent):
         self.parent.render_order = RenderOrder.CORPSE
         self.parent.type = "Dead"
 
+        # Make corpse lootable by creating a container with all their items
+        from components.container import Container
+        container = Container(capacity=26)  # Standard corpse capacity
+        
+        # Add all grasped items to the container
+        if hasattr(self.parent, 'equipment') and self.parent.equipment:
+            equipment = self.parent.equipment
+            
+            # Add all grasped items (weapons, shields, etc.)
+            if hasattr(equipment, 'grasped_items'):
+                for item in list(equipment.grasped_items):
+                    equipment.unequip_item(item, add_message=False)
+                    container.add(item)
+            
+            # Add all equipped items (armor, boots, etc.)
+            if hasattr(equipment, 'equipped_items'):
+                for item in list(equipment.equipped_items.values()):
+                    equipment.unequip_item(item, add_message=False)
+                    container.add(item)
+        
+        # Add all inventory items to the container
+        if hasattr(self.parent, 'inventory') and self.parent.inventory:
+            for item in list(self.parent.inventory.items):
+                self.parent.inventory.items.remove(item)
+                container.add(item)
+        
+        # Attach container to corpse
+        container.parent = self.parent
+        self.parent.container = container
+        
+        # If another entity is already on this tile, find a nearby walkable tile for the corpse
+        corpse_x = self.parent.x
+        corpse_y = self.parent.y
+        gamemap = self.parent.gamemap
+        
+        # Check if tile is crowded (has other entities besides the corpse)
+        other_entities_here = [e for e in gamemap.entities if e.x == corpse_x and e.y == corpse_y and e != self.parent]
+        if other_entities_here:
+            # Find nearby walkable and transparent tile
+            found_tile = False
+            for radius in range(1, 6):  # Search up to 5 tiles away
+                for dx in range(-radius, radius + 1):
+                    for dy in range(-radius, radius + 1):
+                        if abs(dx) != radius and abs(dy) != radius:
+                            continue  # Only check perimeter of current radius
+                        
+                        check_x = corpse_x + dx
+                        check_y = corpse_y + dy
+                        
+                        if gamemap.in_bounds(check_x, check_y):
+                            tile = gamemap.tiles[check_x, check_y]
+                            # Check if tile is walkable and transparent
+                            if tile["walkable"] and tile["transparent"]:
+                                # Check if no blocking entities are there
+                                blocking = None
+                                for entity in gamemap.entities:
+                                    if entity.blocks_movement and entity.x == check_x and entity.y == check_y:
+                                        blocking = entity
+                                        break
+                                
+                                if not blocking:
+                                    # Move corpse to this tile
+                                    self.parent.place(check_x, check_y, gamemap)
+                                    found_tile = True
+                                    break
+                    if found_tile:
+                        break
+                if found_tile:
+                    break
+
         try:
             self.engine.message_log.add_message(death_message, death_message_color)
         except Exception:
@@ -194,7 +264,7 @@ class Fighter(BaseComponent):
                     message = f"{entity_name}'s {part_name} is destroyed!"
                     message_color = color.enemy_die
                 else:
-                    message = f"{entity_name}'s {part_name} is {damaged_part.damage_level}!"
+                    message = f"{entity_name}'s {part_name} is {damaged_part.damage_level_text}!"
                     message_color = color.health_recovered
 
                 # Check if damaged limb should cause weapon dropping
@@ -228,41 +298,46 @@ class Fighter(BaseComponent):
 
         check_drop = False
         if damage_ratio <= 0.5:
-            if random_float() < 0.5: #50% chance to drop weapon if 50% or less
+            if random_float() < 0.5:  # 50% chance to drop weapon if 50% or less
                 check_drop = True
         if damage_ratio <= 0.25:
             check_drop = True
-        if check_drop:  # Severely wounded or worse
-            
-            # Determine which hand was damaged
-            from components.body_parts import BodyPartType
-            if damaged_part.part_type == BodyPartType.LEFT_HAND:
-                self._drop_from_hand('offhand', 'left hand')
-            elif damaged_part.part_type == BodyPartType.RIGHT_HAND:
-                self._drop_from_hand('weapon', 'right hand')
-            elif damaged_part.part_type == BodyPartType.LEFT_ARM:
-                # For arm damage, drop from connected hand
-                self._drop_from_hand('offhand', 'left hand')
-            elif damaged_part.part_type == BodyPartType.RIGHT_ARM:
-                self._drop_from_hand('weapon', 'right hand')
-
-    def _drop_from_hand(self, slot_name: str, hand_name: str) -> None:
-        """Drop item from specific hand slot."""
-        equipment = self.parent.equipment
-        item_to_drop = getattr(equipment, slot_name, None)
         
+        if check_drop:
+            # Drop any grasped items (tag-based system)
+            self._drop_grasped_items(damaged_part)
+
+    def _drop_grasped_items(self, damaged_part) -> None:
+        """Drop items being grasped by a damaged body part."""
+        equipment = self.parent.equipment
+        from components.body_parts import BodyPartType
+        
+        # Determine which item to drop based on which hand was damaged
+        item_to_drop = None
+        
+        # Check if left hand/arm was damaged -> drop offhand (only if it exists)
+        if damaged_part.part_type in (BodyPartType.LEFT_HAND, BodyPartType.LEFT_ARM):
+            item_to_drop = getattr(equipment, 'offhand', None)
+        # Check if right hand/arm was damaged -> drop weapon (only if it exists)
+        elif damaged_part.part_type in (BodyPartType.RIGHT_HAND, BodyPartType.RIGHT_ARM):
+            item_to_drop = getattr(equipment, 'weapon', None)
+        # If damaged part is not a recognized hand/arm, don't drop anything
+        
+        # Only proceed if the damaged hand actually has an item
         if item_to_drop:
             # Unequip and drop to ground
             equipment.unequip_item(item_to_drop, add_message=False)
+            
             # Remove from inventory to prevent duplication
             if hasattr(self.parent, 'inventory') and item_to_drop in self.parent.inventory.items:
                 self.parent.inventory.items.remove(item_to_drop)
+            
             item_to_drop.place(self.parent.x, self.parent.y, self.parent.gamemap)
             
             # Add message
             try:
                 self.parent.gamemap.engine.message_log.add_message(
-                    f"{self.parent.name} drops {item_to_drop.name} from their {hand_name}!",
+                    f"{self.parent.name} drops {item_to_drop.name} from their {damaged_part.name}!",
                     color.health_recovered
                 )
             except:

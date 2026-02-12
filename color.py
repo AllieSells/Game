@@ -19,6 +19,8 @@ light_grey = light_gray
 dark_red = (0x80, 0x0, 0x0)
 dark_blue = (0x0, 0x0, 0x80)
 dark_green = (0x0, 0x80, 0x0)
+dark_gray = (0x40, 0x40, 0x40)
+dark_grey = dark_gray
 
 
 # rarity colors
@@ -27,6 +29,7 @@ uncommon = green
 rare = blue
 epic = purple
 legendary = orange
+coins = (163, 140, 69)
 
 
 player_atk = (0xE0, 0xE0, 0xE0)

@@ -298,8 +298,9 @@ class HostileEnemy(BaseAI):
         # Simple wandering behavior
         self.wander_wait_turns = random.randint(0, 2)
         self.wander_range = 4
-        self.home_x = entity.x
-        self.home_y = entity.y
+        # Initialize home position as None - will be set on first use to actual spawn position
+        self.home_x = None
+        self.home_y = None
         # Normal speed
         self.movement_speed = 1
         self.movement_counter = 0
@@ -310,6 +311,11 @@ class HostileEnemy(BaseAI):
             return WaitAction(self.entity).perform()
             
         self.check_and_close_doors()
+        
+        # Initialize home position on first move to capture actual spawn location
+        if self.home_x is None or self.home_y is None:
+            self.home_x = self.entity.x
+            self.home_y = self.entity.y
         
         target = self.engine.player
         dx = target.x - self.entity.x

@@ -27,6 +27,7 @@ import color
 from dialogue_generator import ConversationNode
 import engine
 import exceptions
+from render_functions import MenuRenderer
 
 from text_utils import *
 import sounds
@@ -308,10 +309,10 @@ class CharacterScreenEventHandler(AskUserEventHandler):
         y = 1
 
         # Draw main fantasy parchment background
-        self._draw_parchment_background(console, x, y, total_width, height)
+        MenuRenderer.draw_parchment_background(console, x, y, total_width, height)
         
         # Draw ornate main border
-        self._draw_ornate_border(console, x, y, total_width, height, self.TITLE)
+        MenuRenderer.draw_ornate_border(console, x, y, total_width, height, self.TITLE)
 
         player = self.engine.player
 
@@ -381,52 +382,6 @@ class CharacterScreenEventHandler(AskUserEventHandler):
         footer_text = "✦ [Esc] Close ✦"
         footer_x = x + (total_width - len(footer_text)) // 2
         console.print(footer_x, y + height - 2, footer_text, fg=(180, 140, 100))
-
-    def _draw_parchment_background(self, console, x: int, y: int, width: int, height: int):
-        """Draw a beautiful parchment-like background."""
-        # Rich parchment color gradient
-        base_bg = (45, 35, 25)      # Base parchment
-        light_bg = (50, 38, 28)     # Slightly lighter
-        
-        for py in range(height):
-            for px in range(width):
-                # Create subtle texture variation
-                bg_color = light_bg if (px + py) % 3 == 0 else base_bg
-                console.print(x + px, y + py, " ", bg=bg_color)
-
-    def _draw_ornate_border(self, console, x: int, y: int, width: int, height: int, title: str):
-        """Draw a smooth fantasy border with decorative elements."""
-        # Elegant color scheme
-        border_fg = (139, 105, 60)     # Rich bronze
-        accent_fg = (205, 164, 87)     # Bright gold
-        title_fg = (255, 215, 0)       # Pure gold
-        bg = (35, 25, 18)              # Dark background for border
-        
-        # Simple, smooth corners and borders
-        # Top border
-        console.print(x, y, "╔", fg=accent_fg, bg=bg)
-        for i in range(1, width - 1):
-            console.print(x + i, y, "═", fg=border_fg, bg=bg)
-        console.print(x + width - 1, y, "╗", fg=accent_fg, bg=bg)
-        
-        # Bottom border
-        console.print(x, y + height - 1, "╚", fg=accent_fg, bg=bg)
-        for i in range(1, width - 1):
-            console.print(x + i, y + height - 1, "═", fg=border_fg, bg=bg)
-        console.print(x + width - 1, y + height - 1, "╝", fg=accent_fg, bg=bg)
-        
-        # Side borders - smooth
-        for i in range(1, height - 1):
-            console.print(x, y + i, "║", fg=border_fg, bg=bg)
-            console.print(x + width - 1, y + i, "║", fg=border_fg, bg=bg)
-        
-        # Clean title
-        title_decorated = f"✦ {title} ✦"
-        title_start = x + (width - len(title_decorated)) // 2
-        # Clear title area
-        for tx in range(len(title_decorated)):
-            console.print(title_start + tx, y, " ", bg=bg)
-        console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
 
     def _draw_decorative_divider(self, console, x: int, y: int, height: int):
         """Draw a smooth decorative vertical divider."""
@@ -556,7 +511,9 @@ class DialogueEventHandler(AskUserEventHandler):
 
         current_menu_data = self.menu_structure[self.current_menu]
         
-        console.draw_frame(x, y, width, height, current_menu_data["title"], fg=color.white, bg=color.black)
+        # Draw parchment background and ornate border
+        MenuRenderer.draw_parchment_background(console, x, y, width, height)
+        MenuRenderer.draw_ornate_border(console, x, y, width, height, current_menu_data["title"])
         
         # Display current dialogue if available
         if hasattr(self, 'current_dialogue') and self.current_dialogue:
@@ -787,7 +744,8 @@ class ContainerEventHandler(AskUserEventHandler):
         
         # Draw ornate main border
         container_name = getattr(self.container.parent, 'name', 'Container')
-        title = f"Container: {container_name}"
+        is_corpse = getattr(self.container.parent, 'type', None) == 'Dead'
+        title = f"Corpse" if is_corpse else f"Container: {container_name}"
         self._draw_ornate_border(console, x, y, total_width, height, title)
 
         # Calculate panel dimensions
@@ -815,7 +773,7 @@ class ContainerEventHandler(AskUserEventHandler):
         
         # Panel headers
         player_header = "✦ Your Inventory ✦"
-        container_header = f"✦ {container_name} ✦"
+        container_header = f"✦ Corpse ✦" if is_corpse else f"✦ {container_name} ✦"
         
         # Center headers in panels
         player_header_x = left_x + (panel_width - len(player_header)) // 2
@@ -861,12 +819,11 @@ class ContainerEventHandler(AskUserEventHandler):
                 if is_selected:
                     # Selection background
                     for hx in range(panel_width - 4):
-                        console.print(left_x + 2 + hx, item_start_y + i, " ", bg=(45, 25, 15))
-                    console.print(left_x + 2, item_start_y + i, "✦", fg=(255, 223, 127), bg=(45, 25, 15))
-                    console.print(left_x + 4, item_start_y + i, item_string, fg=(255, 248, 220), bg=(45, 25, 15))
+                        console.print(left_x + 2 + hx, item_start_y + i, " ", bg=(80, 60, 30))
+                    console.print(left_x + 2, item_start_y + i, "✦", fg=(255, 223, 127), bg=(80, 60, 30))
+                    console.print(left_x + 4, item_start_y + i, item_string, fg=item.rarity_color, bg=(80, 60, 30))
                 else:
-                    item_color = (220, 200, 160) if is_equipped else (200, 180, 140)
-                    console.print(left_x + 4, item_start_y + i, item_string, fg=item_color, bg=panel_bg)
+                    console.print(left_x + 4, item_start_y + i, item_string, fg=item.rarity_color, bg=panel_bg)
         else:
             console.print(left_x + 4, item_start_y, "~ Empty ~", fg=(120, 100, 80), bg=panel_bg)
 
@@ -884,11 +841,11 @@ class ContainerEventHandler(AskUserEventHandler):
                 if is_selected:
                     # Selection background
                     for hx in range(panel_width - 4):
-                        console.print(right_x + 2 + hx, item_start_y + i, " ", bg=(45, 25, 15))
-                    console.print(right_x + 2, item_start_y + i, "✦", fg=(255, 223, 127), bg=(45, 25, 15))
-                    console.print(right_x + 4, item_start_y + i, item_string, fg=(255, 248, 220), bg=(45, 25, 15))
+                        console.print(right_x + 2 + hx, item_start_y + i, " ", bg=(80, 60, 30))
+                    console.print(right_x + 2, item_start_y + i, "✦", fg=(255, 223, 127), bg=(80, 60, 30))
+                    console.print(right_x + 4, item_start_y + i, item_string, fg=item.rarity_color, bg=(80, 60, 30))
                 else:
-                    console.print(right_x + 4, item_start_y + i, item_string, fg=(200, 180, 140), bg=panel_bg)
+                    console.print(right_x + 4, item_start_y + i, item_string, fg=item.rarity_color, bg=panel_bg)
         else:
             console.print(right_x + 4, item_start_y, "~ Empty ~", fg=(120, 100, 80), bg=panel_bg)
         
@@ -1136,10 +1093,10 @@ class InventoryEventHandler(AskUserEventHandler):
         y = 1
 
         # Draw main fantasy parchment background
-        self._draw_parchment_background(console, x, y, total_width, height)
+        MenuRenderer.draw_parchment_background(console, x, y, total_width, height)
         
         # Draw ornate main border
-        self._draw_ornate_border(console, x, y, total_width, height, self.TITLE)
+        MenuRenderer.draw_ornate_border(console, x, y, total_width, height, self.TITLE)
         
         # Draw illuminated category sidebar
         self._draw_illuminated_sidebar(console, x+1, y + 3, sidebar_width - 2, height - 6)
@@ -1181,12 +1138,11 @@ class InventoryEventHandler(AskUserEventHandler):
                 if is_selected:
                     # Elegant selection background with gradient effect
                     self._draw_selection_highlight(console, items_x, current_y, items_width - 2)
-                    console.print(items_x + 1, current_y, "✦", fg=(255, 223, 127), bg=(45, 25, 15))  # Beautiful star
-                    console.print(items_x + 3, current_y, item_string, fg=(255, 248, 220), bg=(45, 25, 15))
+                    console.print(items_x + 1, current_y, "✦", fg=(255, 223, 127), bg=(80, 60, 30))  # Beautiful star
+                    console.print(items_x + 3, current_y, item_string, fg=item.rarity_color, bg=(80, 60, 30))
                 else:
                     console.print(items_x + 1, current_y, " ")
-                    item_color = (200, 180, 140) if not is_equipped else (220, 200, 160)
-                    console.print(items_x + 3, current_y, item_string, fg=item_color)
+                    console.print(items_x + 3, current_y, item_string, fg=item.rarity_color)
                 
                 current_y += 1
 
@@ -1203,66 +1159,6 @@ class InventoryEventHandler(AskUserEventHandler):
         instructions = "✦ [↑↓] Navigate · [←→] Category · [Enter] Select · [Esc] Return ✦"
         inst_x = x + (total_width - len(instructions)) // 2
         console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
-    
-    def _draw_parchment_background(self, console, x: int, y: int, width: int, height: int):
-        """Draw a beautiful parchment-like background."""
-        # Rich parchment color gradient
-        parch_colors = [
-            (52, 42, 30),   # Dark parchment
-            (58, 47, 34),   # Medium parchment  
-            (62, 50, 36),   # Light parchment
-        ]
-        
-        # Fill with organic parchment pattern
-        for fy in range(height):
-            for fx in range(width):
-                # Create subtle texture variation
-                color_idx = (fx + fy) % len(parch_colors)
-                if (fx + fy * 3) % 7 == 0:
-                    color_idx = (color_idx + 1) % len(parch_colors)
-                console.print(x + fx, y + fy, " ", bg=parch_colors[color_idx])
-    
-    def _draw_ornate_border(self, console, x: int, y: int, width: int, height: int, title: str):
-        """Draw a smooth fantasy border with decorative elements."""
-        # Elegant color scheme
-        border_fg = (139, 105, 60)     # Rich bronze
-        accent_fg = (205, 164, 87)     # Bright gold
-        title_fg = (255, 215, 0)       # Pure gold
-        bg = (35, 25, 18)              # Dark background for border
-        
-        # Simple, smooth corners and borders
-        # Top border
-        console.print(x, y, "╔", fg=accent_fg, bg=bg)
-        for i in range(1, width - 1):
-            console.print(x + i, y, "═", fg=border_fg, bg=bg)
-        console.print(x + width - 1, y, "╗", fg=accent_fg, bg=bg)
-        
-        # Bottom border
-        console.print(x, y + height - 1, "╚", fg=accent_fg, bg=bg)
-        for i in range(1, width - 1):
-            console.print(x + i, y + height - 1, "═", fg=border_fg, bg=bg)
-        console.print(x + width - 1, y + height - 1, "╝", fg=accent_fg, bg=bg)
-        
-        # Side borders - smooth
-        for i in range(1, height - 1):
-            console.print(x, y + i, "║", fg=border_fg, bg=bg)
-            console.print(x + width - 1, y + i, "║", fg=border_fg, bg=bg)
-        
-        # Clean title
-        title_decorated = f"✦ {title} ✦"
-        title_start = x + (width - len(title_decorated)) // 2
-        # Clear title area
-        for tx in range(len(title_decorated)):
-            console.print(title_start + tx, y, " ", bg=bg)
-        console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
-        
-        # Ornate title with decorative flourishes
-        title_decorated = f"✦ {title} ✦"
-        title_start = x + (width - len(title_decorated)) // 2
-        # Clear title area
-        for tx in range(len(title_decorated)):
-            console.print(title_start + tx, y, " ", bg=bg)
-        console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
     
     def _draw_illuminated_sidebar(self, console, x: int, y: int, width: int, height: int):
         """Draw an illuminated manuscript-style category sidebar."""
@@ -1334,9 +1230,9 @@ class InventoryEventHandler(AskUserEventHandler):
             intensity = max(0.3, 1.0 - (distance / center * 0.4))
             
             bg_color = (
-                int(45 * intensity),
-                int(25 * intensity), 
-                int(15 * intensity)
+                int(80 * intensity),
+                int(60 * intensity), 
+                int(30 * intensity)
             )
             console.print(x + hx, y, " ", bg=bg_color)
     
@@ -2571,13 +2467,9 @@ class LookHandler(SelectIndexHandler):
             # Cursor in bottom half, prefer top positioning
             sidebar_y = 2
         
-        # Draw sidebar frame
-        console.draw_frame(
-            x=sidebar_x, y=sidebar_y, 
-            width=sidebar_width, height=sidebar_height,
-            title="Inspect", clear=True,
-            fg=color.white, bg=color.black
-        )
+        # Draw sidebar frame with parchment styling
+        MenuRenderer.draw_parchment_background(console, sidebar_x, sidebar_y, sidebar_width, sidebar_height)
+        MenuRenderer.draw_ornate_border(console, sidebar_x, sidebar_y, sidebar_width, sidebar_height, "Inspect")
         
         # Show current item info at the top
         info_y = sidebar_y + 2
@@ -2586,7 +2478,7 @@ class LookHandler(SelectIndexHandler):
             # Center the item counter
             counter_text = f"{self.detail_index + 1} of {len(items_and_entities)}"
             counter_x = sidebar_x + (sidebar_width - len(counter_text)) // 2
-            console.print(counter_x, info_y, counter_text, fg=color.grey)
+            console.print(counter_x, info_y, counter_text, fg=color.grey, bg=(45, 35, 25))
             info_y += 1
             
         # Center the visual preview horizontally in the sidebar
@@ -2608,9 +2500,9 @@ class LookHandler(SelectIndexHandler):
             
         # Show navigation instructions
         instructions_y = sidebar_y + sidebar_height - 4
-        console.print(sidebar_x + 2, instructions_y, "Alt+←→: Cycle items", fg=color.grey)
-        console.print(sidebar_x + 2, instructions_y + 1, "Shift+↑↓: Scroll text", fg=color.grey)
-        console.print(sidebar_x + 2, instructions_y + 2, "Enter: Exit details", fg=color.grey)
+        console.print(sidebar_x + 2, instructions_y, "Alt+←→: Cycle items", fg=color.grey, bg=(45, 35, 25))
+        console.print(sidebar_x + 2, instructions_y + 1, "Shift+↑↓: Scroll text", fg=color.grey, bg=(45, 35, 25))
+        console.print(sidebar_x + 2, instructions_y + 2, "Enter: Exit details", fg=color.grey, bg=(45, 35, 25))
 
     def render_visual_preview(self, console: tcod.Console, current_item: dict, look_x: int, look_y: int, preview_x: int, preview_y: int) -> None:
         """Render a visual preview of the object being inspected."""
@@ -2797,24 +2689,116 @@ class LookHandler(SelectIndexHandler):
                 wrapped_desc = self.wrap_text(entity.description, max_width)
                 lines.extend(wrapped_desc)
                 lines.append("")  # Empty line for spacing
+
             
             # Add body part information for entities with body parts
             if hasattr(entity, 'body_parts') and entity.body_parts:
                 body_parts = entity.body_parts                
+
+                # Build comprehensive equipment description
+                if hasattr(entity, 'equipment') and entity.equipment:
+                    equipment = entity.equipment
+                    equipment_descriptions = []
+                    
+                    # Check grasped items (weapons, shields, etc.)
+                    if hasattr(equipment, 'grasped_items'):
+                        for item in equipment.grasped_items:
+                            item_name = item.name.lower()
+                            # Add article based on first letter (skip for uncountable/mass nouns like armor)
+                            uncountable_keywords = ["armor", "mail", "plate", "leather", "chain"]
+                            has_uncountable = any(keyword in item_name for keyword in uncountable_keywords)
+                            
+                            if has_uncountable:
+                                item_with_article = item_name
+                            else:
+                                article = "an" if item_name[0] in "aeiou" else "a"
+                                item_with_article = f"{article} {item_name}"
+                            
+                            if hasattr(item, 'equippable') and item.equippable:
+                                required_tags = item.equippable.required_tags
+                                # Find which body part(s) can equip this item
+                                matching_parts = body_parts.get_parts_matching_tags(required_tags)
+                                
+                                if matching_parts:
+                                    part = matching_parts[0]
+                                    part_name = part.name
+                                    
+                                    # Determine verb based on tags
+                                    if "grasp" in required_tags or "hand" in required_tags:
+                                        equipment_descriptions.append(f"holds {item_with_article} in its {part_name}")
+                                    else:
+                                        equipment_descriptions.append(f"has {item_with_article} on its {part_name}")
+                    
+                    # Check equipped items (armor, boots, etc.)
+                    if hasattr(equipment, 'equipped_items'):
+                        for item in equipment.equipped_items.values():
+                            item_name = item.name.lower()
+                            # Add article based on first letter (skip for uncountable/mass nouns like armor)
+                            uncountable_keywords = ["armor", "mail", "plate", "leather", "chain"]
+                            has_uncountable = any(keyword in item_name for keyword in uncountable_keywords)
+                            
+                            if has_uncountable:
+                                item_with_article = item_name
+                            else:
+                                article = "an" if item_name[0] in "aeiou" else "a"
+                                item_with_article = f"{article} {item_name}"
+                            
+                            if hasattr(item, 'equippable') and item.equippable:
+                                required_tags = item.equippable.required_tags
+                                # Find which body part(s) can equip this item
+                                matching_parts = body_parts.get_parts_matching_tags(required_tags)
+                                
+                                if matching_parts:
+                                    part = matching_parts[0]
+                                    part_name = part.name
+                                    
+                                    # Determine verb based on tags
+                                    if "head" in required_tags:
+                                        equipment_descriptions.append(f"wears {item_with_article} on its {part_name}")
+                                    elif "foot" in required_tags or "leg" in required_tags:
+                                        equipment_descriptions.append(f"wears {item_with_article} on its {part_name}")
+                                    elif "arm" in required_tags:
+                                        equipment_descriptions.append(f"wears {item_with_article} on its {part_name}")
+                                    elif "back" in required_tags:
+                                        equipment_descriptions.append(f"wears {item_with_article} on its back")
+                                    else:
+                                        equipment_descriptions.append(f"has {item_with_article} on its {part_name}")
+                    
+                    # Combine all equipment descriptions into one sentence
+                    if equipment_descriptions:
+                        equipment_text = f"<white>It {'. It '.join(equipment_descriptions)}.</white>"
+                        wrapped_equipment = wrap_colored_text_to_strings(equipment_text, max_width)
+                        lines.extend(wrapped_equipment)
+                        lines.append("")
+                
+                # Show container contents if available (e.g., corpse loot) - simple list format
+                if hasattr(entity, 'container') and entity.container and entity.container.items:
+                    container_items = entity.container.items
+                    if container_items:
+                        item_names = []
+                        for item in container_items:
+                            item_names.append(item.name.lower())
+                        
+                        items_text = f"<white>{', '.join(item_names)}</white>"
+                        wrapped_items = wrap_colored_text_to_strings(items_text, max_width)
+                        lines.extend(wrapped_items)
+                        lines.append("")
+    
+
                 damaged_parts = body_parts.get_damaged_parts()
 
                 for part in damaged_parts:
                     injury_text = ""  # Reset for each part
-                    if part.damage_level == "damaged":
+                    if part.damage_level_text == "damaged":
                         injury_text = f"<white>It's {part.name} is damaged.</white>"
-                    elif part.damage_level == "wounded":
+                    elif part.damage_level_text == "wounded":
                         injury_text = f"<yellow>It's {part.name} is wounded.</yellow>"
-                    elif part.damage_level == "badly wounded":
+                    elif part.damage_level_text == "badly wounded":
                         injury_text = f"<orange>It's {part.name} is badly wounded.</orange>"
-                    elif part.damage_level == "severely wounded":
+                    elif part.damage_level_text == "severely wounded":
                         injury_text = f"<orange>It's {part.name} is severely wounded.</orange>"
-                    elif part.damage_level == "destroyed":
-                        injury_text = f"<red>It's {part.name} is missing.</red>"
+                    elif part.damage_level_text == "destroyed":
+                        injury_text = f"<red>It's {part.name} is maimed.</red>"
 
                     wrapped_injury = wrap_colored_text_to_strings(injury_text, max_width)
                     print(wrapped_injury)
@@ -3320,6 +3304,11 @@ class HistoryViewer(EventHandler):
         super().on_render(console)  # Draw the main state as the background.
 
         log_console = tcod.Console(console.width - 6, console.height - 6)
+        
+        from render_functions import MenuRenderer
+        
+        # Draw parchment background
+        MenuRenderer.draw_parchment_background(log_console, 0, 0, log_console.width, log_console.height)
 
         # Draw a frame with a custom banner title.
         log_console.draw_frame(0, 0, log_console.width, log_console.height)
@@ -3328,29 +3317,25 @@ class HistoryViewer(EventHandler):
         )
 
         # Render the message log using the cursor parameter.
+        # Use height - 5 to account for the +2 offset in render_messages and avoid clipping into border
         self.engine.message_log.render_messages(
             log_console,
             1,
             1,
             log_console.width - 2,
-            log_console.height - 2,
+            log_console.height - 5,
             self.engine.message_log.messages[: self.cursor + 1],
         )
         log_console.blit(console, 3, 3)
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[MainGameEventHandler]:
-        # Fancy conditional movement to make it feel right.
+        # Smooth scrolling that clamps at edges instead of wrapping around
         if event.sym in CURSOR_Y_KEYS:
             adjust = CURSOR_Y_KEYS[event.sym]
-            if adjust < 0 and self.cursor == 0:
-                # Only move from the top to the bottom when you're on the edge.
-                self.cursor = self.log_length - 1
-            elif adjust > 0 and self.cursor == self.log_length - 1:
-                # Same with bottom to top movement.
-                self.cursor = 0
-            else:
-                # Otherwise move while staying clamped to the bounds of the history log.
-                self.cursor = max(0, min(self.cursor + adjust, self.log_length - 1))
+            new_cursor = self.cursor + adjust
+            # Only update cursor if it's within valid bounds
+            if 0 <= new_cursor < self.log_length:
+                self.cursor = new_cursor
         elif event.sym == tcod.event.K_HOME:
             self.cursor = 0  # Move directly to the top message.
         elif event.sym == tcod.event.K_END:
@@ -3443,7 +3428,7 @@ class EntityDebugHandler(SelectIndexHandler):
                 for part_type, part in body_parts.body_parts.items():
                     # Part name and HP
                     hp_text = f"{part.current_hp}/{part.max_hp}"
-                    hp_ratio = part.current_hp / part.max_hp if part.max_hp > 0 else 0
+                    hp_ratio = body_parts.get_part_health_ratio(part)
                     
                     # Color based on health
                     if hp_ratio <= 0:

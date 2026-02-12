@@ -20,6 +20,45 @@ if TYPE_CHECKING:
     from game_map import GameMap
 
 
+class MenuRenderer:
+    """Provides reusable rendering utilities for menus and UIs."""
+    
+    @staticmethod
+    def draw_parchment_background(console: tcod.Console, x: int, y: int, 
+                                   width: int, height: int, 
+                                   bg_color: Tuple[int, int, int] = (45, 35, 25)) -> None:
+        """Draw a parchment-style background for a menu window."""
+        console.draw_rect(x=x, y=y, width=width, height=height, ch=ord(' '), bg=bg_color)
+    
+    @staticmethod
+    def draw_ornate_border(console: tcod.Console, x: int, y: int, 
+                          width: int, height: int, title: str = "",
+                          border_fg: Tuple[int, int, int] = (139, 105, 60),
+                          title_fg: Tuple[int, int, int] = (255, 215, 0),
+                          bg: Tuple[int, int, int] = (45, 35, 25)) -> None:
+        """Draw an ornate border with fantasy styling and optional title.
+        
+        Args:
+            console: The tcod console to draw on
+            x: X coordinate of the window
+            y: Y coordinate of the window
+            width: Width of the window
+            height: Height of the window
+            title: Optional title to display at the top
+            border_fg: Color of the border
+            title_fg: Color of the title
+            bg: Background color
+        """
+        # Draw border
+        console.draw_frame(x, y, width, height, fg=border_fg, bg=bg)
+        
+        # Draw ornate title if provided
+        if title:
+            title_decorated = f"✦ {title} ✦"
+            title_start = x + (width - len(title_decorated)) // 2
+            console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
+
+
 
 def get_names_at_location(x: int, y: int, game_map: GameMap) -> str:
     x, y = int(x), int(y)

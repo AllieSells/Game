@@ -11,6 +11,7 @@ import tcod
 import color
 from equipment_types import EquipmentType
 from input_handlers import AskUserEventHandler
+from render_functions import MenuRenderer
 import actions
 
 if TYPE_CHECKING:
@@ -106,8 +107,8 @@ class EquipmentUI(AskUserEventHandler):
         y = (console.height - window_height) // 2
         
         # Draw window frame
-        self._draw_parchment_background(console, x, y, window_width, window_height)
-        self._draw_ornate_border(console, x, y, window_width, window_height, "Equipment")
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Equipment")
         
         # Draw equipment slots list
         self._draw_slots_list(console, x, y, window_width, window_height)
@@ -291,7 +292,7 @@ class EquipmentUI(AskUserEventHandler):
             part_type = BodyPartType[body_part_name]
             if part_type in self.engine.player.body_parts.body_parts:
                 part = self.engine.player.body_parts.body_parts[part_type]
-                hp_ratio = int((part.current_hp / part.max_hp) * 100)
+                hp_ratio = int(self.engine.player.body_parts.get_part_health_ratio(part) * 100)
                 return hp_ratio
         except (KeyError, AttributeError):
             pass
@@ -335,28 +336,6 @@ class EquipmentUI(AskUserEventHandler):
             pass
         
         return False
-    
-    def _draw_parchment_background(self, console: tcod.Console, x: int, y: int, 
-                                 width: int, height: int) -> None:
-        """Draw parchment-style background."""
-        for py in range(height):
-            for px in range(width):
-                console.rgb["bg"][x + px, y + py] = (45, 35, 25)
-    
-    def _draw_ornate_border(self, console: tcod.Console, x: int, y: int, 
-                          width: int, height: int, title: str) -> None:
-        """Draw ornate border with fantasy styling."""
-        border_fg = (139, 105, 60)  # Bronze
-        title_fg = (255, 215, 0)    # Gold
-        bg = (45, 35, 25)           # Parchment background
-        
-        # Draw border
-        console.draw_frame(x, y, width, height, fg=border_fg, bg=bg)
-        
-        # Ornate title
-        title_decorated = f"✦ {title} ✦"
-        title_start = x + (width - len(title_decorated)) // 2
-        console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
     
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[AskUserEventHandler]:
         key = event.sym
