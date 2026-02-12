@@ -150,7 +150,8 @@ class BodyParts(BaseComponent):
                 tags={"head", "armor"}
             ),
             BodyPartType.NECK: BodyPart(
-                BodyPartType.NECK, "neck", .267, max_hp=int(0.267 * parent_max_hp), is_vital=True
+                BodyPartType.NECK, "neck", .267, max_hp=int(0.267 * parent_max_hp), is_vital=True,
+                tags={"neck", "armor"}
             ),
             BodyPartType.TORSO: BodyPart(
                 BodyPartType.TORSO, "torso", 1.0, max_hp=int(1.0 * parent_max_hp), is_vital=True,

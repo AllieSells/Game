@@ -327,9 +327,6 @@ class MeleeAction(ActionWithDirection):
                     print("DEBUG: Manipulation possible with part:", part.name)
 
         
-        # Base damage calculation
-        base_damage = self.entity.fighter.power - target.fighter.defense
-        
         # Get target body part and apply targeting effects
         hit_part = None
         damage_modifier = 1.0
@@ -338,6 +335,7 @@ class MeleeAction(ActionWithDirection):
         # Body part targeting modifiers (damage_modifier, hit_difficulty_modifier)
         BODY_PART_MODIFIERS = {
             "HEAD": (1.5, -30),    # 50% more damage to head, much harder to hit
+            "NECK": (1.3, -50),    # 30% more damage to neck, very hard to hit
             "TORSO": (1.0, 15),    # Normal damage, easier to hit (large target)
             "LEG": (0.9, -5),      # Slightly less damage, slightly harder to hit
             "ARM": (0.9, -10),     # Slightly less damage, harder to hit  
@@ -349,7 +347,7 @@ class MeleeAction(ActionWithDirection):
         #print("DEBUG: target_part:", self.target_part)
         if not self.target_part:
             # If no part targeted, use the existing random part selection
-            if hasattr(target, 'body_parts'):
+            if hasattr(target, 'body_parts') and target.body_parts:
                 random_part = target.body_parts.get_random_part()
                 self.target_part = random_part.part_type if random_part else None
 
@@ -390,6 +388,19 @@ class MeleeAction(ActionWithDirection):
                                     damage_modifier, hit_difficulty_modifier = BODY_PART_MODIFIERS[key]
                                     break
         
+        # Calculate localized defense
+        defense = 0
+        if hit_part:
+            defense = hit_part.protection + target.fighter.base_defense
+            if hasattr(target, "equipment") and target.equipment:
+                defense += target.equipment.get_defense_for_part(hit_part.name)
+                print("DEBUG: Calculating defense for hit part:", hit_part.name, "base defense:", target.fighter.base_defense)
+        else:
+             defense = target.fighter.defense
+
+        # Calculate base damage
+        base_damage = self.entity.fighter.power - defense
+
         # Calculate final damage
         final_damage = max(0, int(base_damage * damage_modifier))
         print(f"DEBUG: hit_part={hit_part.name if hit_part else None}, final_damage={final_damage}")
@@ -501,7 +512,6 @@ class MeleeAction(ActionWithDirection):
             # Apply damage to specific body part (should always have a valid part)
             if hit_part:
                 part_damage = hit_part.take_damage(final_damage)
-                target.fighter.take_damage(part_damage, targeted_part=self.target_part)
                 
                 # Special messages for different damage levels
                 if hit_part.is_destroyed:
@@ -512,13 +522,15 @@ class MeleeAction(ActionWithDirection):
                     self.engine.message_log.add_message(
                         f"{attack_desc} for {part_damage} damage.", attack_color
                     )
+
+                target.fighter.take_damage(part_damage, targeted_part=self.target_part)
             else:
                 # This should never happen - but adding for debugging
                 print(f"ERROR: No valid body part found! target_part={self.target_part}, has_body_parts={hasattr(target, 'body_parts')}")
-                target.fighter.take_damage(final_damage)
                 self.engine.message_log.add_message(
                     f"{attack_desc} for {final_damage} hit points. [NO BODY PART ERROR]", color.red
                 )
+                target.fighter.take_damage(final_damage)
             
             # Trigger damage indicator if player takes damage
             if target is self.engine.player:

@@ -35,6 +35,10 @@ class Sword(Equippable):
         super().__init__(equipment_type=EquipmentType.WEAPON, power_bonus=4, required_tags={"hand", "grasp"})
 
 
+class LeatherCap(Equippable):
+    def __init__(self) -> None:
+        super().__init__(equipment_type=EquipmentType.HELMET, defense_bonus=1, required_tags={"head"})
+
 class LeatherArmor(Equippable):
     def __init__(self) -> None:
         super().__init__(equipment_type=EquipmentType.ARMOR, defense_bonus=1, required_tags={"torso"})

@@ -70,10 +70,12 @@ def new_game() -> Engine:
 
     dagger = copy.deepcopy(entity_factories.dagger)
     leather_armor = copy.deepcopy(entity_factories.leather_armor)
+    leather_cap = copy.deepcopy(entity_factories.leather_cap)
 
 
     dagger.parent = player.inventory
     leather_armor.parent = player.inventory
+    leather_cap.parent = player.inventory
 
     player.inventory.items.append(dagger)
     player.equipment.toggle_equip(dagger, add_message=False)
@@ -81,6 +83,8 @@ def new_game() -> Engine:
     player.inventory.items.append(leather_armor)
     player.equipment.toggle_equip(leather_armor, add_message=False)
 
+    player.inventory.items.append(leather_cap)
+    player.equipment.toggle_equip(leather_cap, add_message=False)
 
     return engine
 

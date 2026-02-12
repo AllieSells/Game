@@ -77,11 +77,28 @@ class Equipment(BaseComponent):
         if not hasattr(self.parent, 'body_parts') or not self.parent.body_parts:
             return False, "Entity has no body parts"
         
-        # Check if any body part has all required tags
-        if not self.parent.body_parts.can_equip_item(item.equippable.required_tags):
-            required = ", ".join(item.equippable.required_tags)
-            return False, f"No body parts can equip this (requires: {required})"
-        
+        # Check based on equipment type
+        # Weapons/Shields generally need to be held in one hand (all tags on one part)
+        if item.equippable.equipment_type in [EquipmentType.WEAPON, EquipmentType.SHIELD]:
+            if not self.parent.body_parts.can_equip_item(item.equippable.required_tags):
+                required = ", ".join(item.equippable.required_tags)
+                return False, f"No body parts can equip this (requires single part with: {required})"
+        else:
+            # Armor can span multiple parts (e.g. Torso + Neck). 
+            # Check if we have parts matching ALL the required tags cumulatively? 
+            # OR just strictly check if we have coverage? 
+            # For now, let's relax to: "Do we have parts that match these tags?"
+            # Actually, let's assume if any tag matches a part, it can be worn, 
+            # but we want to ensure the entity actually HAS the anatomy.
+            
+            missing_tags = []
+            available_tags = set()
+            for part in self.parent.body_parts.get_all_parts().values():
+                available_tags.update(part.tags)
+            
+            if not item.equippable.required_tags.issubset(available_tags):
+                 return False, f"Anatomy incompatible (requires: {item.equippable.required_tags})"
+
         return True, "Can equip"
 
     # Return slot item is in
@@ -223,6 +240,13 @@ class Equipment(BaseComponent):
         # Play equip sound
         self._play_equip_sound(item)
 
+        # Update body part coverage for armor items
+        if eq_type_name not in ["WEAPON", "SHIELD"] and hasattr(self.parent, "body_parts"):
+            for part in self.parent.body_parts.get_all_parts().values():
+                # Check if this part has the tags required by the item
+                if item.equippable.required_tags.issubset(part.tags):
+                   self.body_part_coverage[part.name] = item
+
     def unequip_item(self, item: Item, add_message: bool = True) -> None:
         """Unequip an item using the modular system."""
         if not item.equippable:
@@ -269,7 +293,52 @@ class Equipment(BaseComponent):
         return (item in self.grasped_items or 
                 item in self.equipped_items.values() or
                 item in self.body_part_coverage.values())
+
+    def get_defense_for_part(self, part_name: str) -> int:
+        """Get defense bonus provided by equipment for a specific body part."""
+        # Lazy init coverage if needed (handling load/init race conditions)
+        # If we have equipped armor but no coverage data, rebuild it naturally
+        if not self.body_part_coverage and self.equipped_items and hasattr(self.parent, "body_parts"):
+            self._update_all_coverage()
+
+        if part_name in self.body_part_coverage:
+            item = self.body_part_coverage[part_name]
+            if item.equippable:
+                return item.equippable.defense_bonus
+        return 0
     
+    def _update_all_coverage(self) -> None:
+        """Recalculate coverage for all equipped items."""
+        from equipment_types import EquipmentType
+        
+        # Clear existing coverage
+        self.body_part_coverage = {}
+        
+        # helper to process an item
+        def process_item(item: Item):
+            if not item.equippable: return
+            if not hasattr(self.parent, "body_parts"): return
+            
+            # Skip weapons/shields as they don't provide passive coverage usually
+            # (Logic matches equip_item)
+            if item.equippable.equipment_type in [EquipmentType.WEAPON, EquipmentType.SHIELD]:
+                return
+
+            for part in self.parent.body_parts.get_all_parts().values():
+                # For armor, we check intersection rather than subset.
+                # If the item has "neck" tag and part has "neck" tag, it covers it.
+                # But we ensure we don't accidentally match irrelevant tags 
+                # (though body part names are usually good proxies, we use tags)
+                
+                # Intersection of item requirements and part tags
+                # We expect the item to have specific location tags (torso, leg, etc)
+                common_tags = item.equippable.required_tags.intersection(part.tags)
+                if common_tags:
+                    self.body_part_coverage[part.name] = item
+
+        for item in self.equipped_items.values():
+            process_item(item)
+
     def _play_equip_sound(self, item: Item) -> None:
         """Play equipment sound for an item."""
         if hasattr(item, "equip_sound") and item.equip_sound is not None:

@@ -198,6 +198,18 @@ sword = Item(
     rarity_color=color.common
 )
 
+leather_cap = Item(
+    char="n",
+    color=(139, 69, 19),
+    name="Leather Cap",
+    equippable=equippable.LeatherCap(),
+    equip_sound=sounds.play_equip_leather_sound,
+    unequip_sound=sounds.play_unequip_leather_sound,
+    pickup_sound=sounds.pick_up_leather_sound,
+    drop_sound=sounds.drop_leather_sound,
+    rarity_color=color.common
+)
+
 leather_armor = Item(
     char="[",
     color=(139, 69, 19),

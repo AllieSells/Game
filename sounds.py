@@ -104,18 +104,18 @@ def play_death_sound():
 #Door sounds
 def play_door_open_sound():
     door_open_sounds = [
-        pygame.mixer.Sound("C:/Users/User/New folder/Game/RP/sfx/doors/open1.wav"),
-        pygame.mixer.Sound("C:/Users/User/New folder/Game/RP/sfx/doors/open2.wav"),
-        pygame.mixer.Sound("C:/Users/User/New folder/Game/RP/sfx/doors/open3.wav"),
+        pygame.mixer.Sound("RP/sfx/doors/open1.wav"),
+        pygame.mixer.Sound("RP/sfx/doors/open2.wav"),
+        pygame.mixer.Sound("RP/sfx/doors/open3.wav"),
     ]
     sound = random.choice(door_open_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.1))
 
 def play_door_close_sound():
     door_close_sounds = [
-        pygame.mixer.Sound("C:/Users/User/New folder/Game/RP/sfx/doors/close1.wav"),
-        pygame.mixer.Sound("C:/Users/User/New folder/Game/RP/sfx/doors/close2.wav"),
-        pygame.mixer.Sound("C:/Users/User/New folder/Game/RP/sfx/doors/close3.wav"),
+        pygame.mixer.Sound("RP/sfx/doors/close1.wav"),
+        pygame.mixer.Sound("RP/sfx/doors/close2.wav"),
+        pygame.mixer.Sound("RP/sfx/doors/close3.wav"),
     ]
     sound = random.choice(door_close_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.1))
@@ -155,9 +155,9 @@ torch_burns_out_sound = pygame.mixer.Sound("RP/sfx/burn_out.wav")
 
 def play_chest_open_sound():
     chest_open_sounds = [
-        pygame.mixer.Sound("C:/Users/User/New folder/Game/RP/sfx/chest_open/chest_open1.mp3"),
-        pygame.mixer.Sound("C:/Users/User/New folder/Game/RP/sfx/chest_open/chest_open2.mp3"),
-        pygame.mixer.Sound("C:/Users/User/New folder/Game/RP/sfx/chest_open/chest_open3.mp3"),
+        pygame.mixer.Sound("RP/sfx/chest_open/chest_open1.mp3"),
+        pygame.mixer.Sound("RP/sfx/chest_open/chest_open2.mp3"),
+        pygame.mixer.Sound("RP/sfx/chest_open/chest_open3.mp3"),
     ]
     sound = random.choice(chest_open_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.1))
