@@ -370,23 +370,17 @@ class Engine:
 
 
     def update_fov(self) -> None:
-        # check if player has a torch in either hand; be robust if slots are None
+        # check if player has a torch in grasped items
+        has_torch = False
         try:
-            weapon_name = (
-                self.player.equipment.weapon.name if self.player.equipment and self.player.equipment.weapon else None
-            )
+            if self.player.equipment:
+                # Check grasped items for torches
+                for item in self.player.equipment.grasped_items.values():
+                    if hasattr(item, 'name') and item.name == "Torch":
+                        has_torch = True
+                        break
         except Exception:
-            weapon_name = None
-
-        try:
-            offhand_name = (
-                self.player.equipment.offhand.name if self.player.equipment and self.player.equipment.offhand else None
-            )
-        except Exception:
-            offhand_name = None
-
-        # Determine if player is holding a torch
-        has_torch = (weapon_name == "Torch" or offhand_name == "Torch")
+            has_torch = False
 
         # Check if player's current tile is lit by any light source
         near_light_source = False

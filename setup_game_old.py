@@ -1326,7 +1326,7 @@ class MainMenu(input_handlers.BaseEventHandler):
         console.print(
             console.width // 2,
             console.height - 3,
-            "oxenfree\n2025\nVersion 0.11 Pre-Alpha",
+            "oxenfree\n2026\nVersion 0.18.1 Beta",
             fg=color.menu_title,
             alignment=tcod.CENTER,
         )

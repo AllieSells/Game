@@ -138,7 +138,7 @@ class Fighter(BaseComponent):
             
             # Add all grasped items (weapons, shields, etc.)
             if hasattr(equipment, 'grasped_items'):
-                for item in list(equipment.grasped_items):
+                for item in list(equipment.grasped_items.values()):
                     equipment.unequip_item(item, add_message=False)
                     container.add(item)
             
@@ -221,8 +221,8 @@ class Fighter(BaseComponent):
 
         self.hp = new_hp_value
         
-        # Also heal damaged body parts if entity has them
-        body_parts_healed = self._heal_body_parts(amount)
+        # Also heal damaged body parts if entity has them (use actual amount recovered)
+        body_parts_healed = self._heal_body_parts(amount_recovered)
         
         # Add body part healing message if any parts were healed
         if body_parts_healed and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
@@ -310,20 +310,15 @@ class Fighter(BaseComponent):
     def _drop_grasped_items(self, damaged_part) -> None:
         """Drop items being grasped by a damaged body part."""
         equipment = self.parent.equipment
-        from components.body_parts import BodyPartType
         
-        # Determine which item to drop based on which hand was damaged
-        item_to_drop = None
+        # Check if the damaged part can actually grasp items
+        if not damaged_part.can_grasp and "grasp" not in damaged_part.tags:
+            return
         
-        # Check if left hand/arm was damaged -> drop offhand (only if it exists)
-        if damaged_part.part_type in (BodyPartType.LEFT_HAND, BodyPartType.LEFT_ARM):
-            item_to_drop = getattr(equipment, 'offhand', None)
-        # Check if right hand/arm was damaged -> drop weapon (only if it exists)
-        elif damaged_part.part_type in (BodyPartType.RIGHT_HAND, BodyPartType.RIGHT_ARM):
-            item_to_drop = getattr(equipment, 'weapon', None)
-        # If damaged part is not a recognized hand/arm, don't drop anything
+        # Find items being held by this specific body part
+        item_to_drop = equipment.grasped_items.get(damaged_part.name)
         
-        # Only proceed if the damaged hand actually has an item
+        # Only proceed if this part actually has an item
         if item_to_drop:
             # Unequip and drop to ground
             equipment.unequip_item(item_to_drop, add_message=False)
@@ -343,30 +338,23 @@ class Fighter(BaseComponent):
             except:
                 pass
     
-    def _heal_body_parts(self, amount: int) -> bool:
-        """Heal damaged body parts with healing amount. Returns True if any parts were healed."""
+    def _heal_body_parts(self, amount_recovered: int) -> bool:
+        """Heal damaged body parts proportionally to the player's HP recovery."""
         if not hasattr(self.parent, 'body_parts') or not self.parent.body_parts:
             return False
         
-        # Get all damaged body parts
-        damaged_parts = self.parent.body_parts.get_damaged_parts()
-        if not damaged_parts:
-            return False
+        # Calculate healing ratio: portion of missing HP actually restored
+        old_hp = self.hp - amount_recovered
+        missing_hp = self.max_hp - old_hp
+        healing_ratio = (amount_recovered / missing_hp) if missing_hp > 0 else 0
         
-        # Distribute healing among damaged parts
-        # Each part gets a portion of the healing based on how damaged it is
-        total_healing_distributed = 0
         parts_healed = False
-        
-        for part in damaged_parts:
-            # Each damaged limb gets 50% of the potion's base healing value
-            part_healing = max(1, int(amount * 0.5))  # 50% of potion value to each limb
-            
-            if part_healing > 0:
-                actual_healing = part.heal(part_healing)
+        for part in self.parent.body_parts.body_parts.values():
+            part_missing = part.max_hp - part.current_hp
+            part_heal = int(part_missing * healing_ratio)
+            if part_heal > 0:
+                actual_healing = part.heal(part_heal)
                 if actual_healing > 0:
                     parts_healed = True
-                    total_healing_distributed += actual_healing
-        
         return parts_healed
 

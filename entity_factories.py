@@ -14,78 +14,6 @@ import components.names as names
 import sounds
 from text_utils import *
 
-player = Actor(
-    char="☺",
-    color=(52, 222, 235),
-    name = "Player",
-    ai_cls=HostileEnemy,
-    equipment=Equipment(),
-    fighter=Fighter(hp=30, base_defense=2, base_power=5),
-    inventory=Inventory(capacity=26),
-    level=Level(level_up_base=200),
-    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=30),
-    # Temporary demo effect so the status-effects panel shows during testing
-    effects = [],
-    lucidity = 100,
-    max_lucidity = 100,
-    hunger = 100.0,
-    speed=100,  # Normal/base speed
-    dodge_chance=0.15,  # 15% chance to dodge attacks
-    preferred_dodge_direction="north",  # Tendency to dodge towards the north (for flavor)
-
-)
-
-shade = Actor(
-    char="S",
-    sight_radius=1000,
-    color=(100, 100, 100),
-    name = "Shade",
-    description="A dark figure, barely visible in the dim light. Stories say they wait for you in the shadows, but cannot cross into the light.",
-    ai_cls=DarkHostileEnemy,
-    equipment=Equipment(),
-    fighter=Fighter(hp=10, base_defense=2, base_power=5, leave_corpse=False),
-    inventory=Inventory(capacity=5),
-    level=Level(xp_given=0),
-    speed=130,  # Very fast - supernatural creature
-    opinion=0,
-)
-
-orc = Actor(
-    char="o",
-    color=(63, 127, 90),
-    name = "Orc",
-    ai_cls=HostileEnemy,
-    equipment=Equipment(),
-    fighter=Fighter(hp=10, base_defense=0, base_power=3),
-    inventory=Inventory(capacity=0),
-    level=Level(xp_given=35),
-    speed=120,  # Fast enough to sometimes act before player
-    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
-    verb_base="claw",
-    verb_present="claws",
-    verb_past="clawed",
-    verb_participial="clawing",
-    dodge_chance=0.15, 
-    )
-
-troll = Actor(
-    char="T",
-    color=(63, 127, 90),
-    name = "Troll",
-    ai_cls=HostileEnemy,
-    equipment=Equipment(),
-    fighter=Fighter(hp=16, base_defense=1, base_power=4),
-    inventory=Inventory(capacity=0),
-    level=Level(xp_given=100),
-    speed=80,  # Slower than normal - big and lumbering
-    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=16),
-    verb_base="smash",
-    verb_present="smashes",
-    verb_past="smashed",
-    verb_participial="smashing",
-    dodge_chance=0.05,  
-    )
-
 lesser_health_potion = Item(
     char="!",
     color=(127,0,255),
@@ -242,6 +170,131 @@ backpack = Item(
     equippable=equippable.Backpack(),
 )
 
+coin = Item(
+    char="$",
+    color=(255, 223, 0),
+    name="Coin",
+    description="A shiny gold coin.",
+    value=1,
+    weight=0.01,
+    rarity_color=color.coins,
+)
+
+fungus = Item(
+    char="%",
+    color=(0, 255, 0),
+    name="Fungus",
+    description="",
+)
+
+# =====================================================
+# ACTORS - All actor definitions grouped together
+# =====================================================
+
+player = Actor(
+    char="☺",
+    color=(52, 222, 235),
+    name = "Player",
+    ai_cls=HostileEnemy,
+    equipment=Equipment(),
+    fighter=Fighter(hp=30, base_defense=2, base_power=5),
+    inventory=Inventory(capacity=26),
+    level=Level(level_up_base=200),
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=30),
+    # Temporary demo effect so the status-effects panel shows during testing
+    effects = [],
+    lucidity = 100,
+    max_lucidity = 100,
+    hunger = 100.0,
+    speed=100,  # Normal/base speed
+    dodge_chance=0.15,  # 15% chance to dodge attacks
+    preferred_dodge_direction="north",  # Tendency to dodge towards the north (for flavor)
+)
+
+spider = Actor(
+    char="M",
+    sight_radius=6,
+    color=(161, 156, 146),
+    name = "Giant Spider",
+    description="A large arachnid",
+)
+
+shade = Actor(
+    char="S",
+    sight_radius=1000,
+    color=(100, 100, 100),
+    name = "Shade",
+    description="A dark figure, barely visible in the dim light. Stories say they wait for you in the shadows, but cannot cross into the light.",
+    ai_cls=DarkHostileEnemy,
+    equipment=Equipment(),
+    fighter=Fighter(hp=10, base_defense=2, base_power=5, leave_corpse=False),
+    inventory=Inventory(capacity=5),
+    level=Level(xp_given=0),
+    speed=130,  # Very fast - supernatural creature
+    opinion=0,
+)
+
+goblin = Actor(
+    char="g",
+    color=(63, 127, 90),
+    name = "Goblin",
+    ai_cls=HostileEnemy,
+    equipment=Equipment(),
+    fighter=Fighter(hp=10, base_defense=0, base_power=3),
+    inventory=Inventory(capacity=0),
+    level=Level(xp_given=35),
+    speed=120,  # Fast enough to sometimes act before player
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
+    description="",
+    verb_base="claw",
+    verb_present="claws",
+    verb_past="clawed",
+    verb_participial="clawing",
+    dodge_chance=0.15, 
+    equipment_table={
+        "weapon": {
+            dagger: 20,
+            None: 80
+        },
+        "armor": {
+            leather_cap: 25,
+            None: 75
+        },
+        "armor": {
+            leather_armor: 25,
+            None: 75
+        }
+    }
+)
+
+troll = Actor(
+    char="T",
+    color=(63, 127, 90),
+    name="Troll",
+    ai_cls=HostileEnemy,
+    equipment=Equipment(),
+    fighter=Fighter(hp=16, base_defense=1, base_power=4),
+    inventory=Inventory(capacity=0),
+    level=Level(xp_given=100),
+    speed=80,
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=16),
+    verb_base="smash",
+    verb_present="smashes",
+    verb_past="smashed",
+    verb_participial="smashing",
+    dodge_chance=0.05,
+    equipment_table={
+        "weapon": {
+            dagger: 5,
+            None: 95
+        },
+        "armor": {
+            leather_armor: 20,
+            None: 80
+        }
+    }
+)
+
 chest = Actor(
     char="C",
     color=(222, 153, 52),
@@ -284,22 +337,9 @@ quest_giver = Actor(
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
 )
 
-coin = Item(
-    char="$",
-    color=(255, 223, 0),
-    name="Coin",
-    description="A shiny gold coin.",
-    value=1,
-    weight=0.01,
-    rarity_color=color.coins,
-)
-
-fungus = Item(
-    char="%",
-    color=(0, 255, 0),
-    name="Fungus",
-    description="",
-)
+# =====================================================
+# FUNCTIONS
+# =====================================================
 
 def get_random_fungus() -> Item:
     import random
@@ -415,63 +455,3 @@ def make_chest_with_loot(items: list, capacity: int = 10) -> Actor:
     # Expose the container on the actor for easy checks
     new_chest.container = cont
     return new_chest
-
-# Equipment tables for mob spawning
-# Uses percentages (0-100) for each item type
-# Mobs can be equipped with multiple items if chances align
-
-orc_equipment = {
-    "weapon": {
-        dagger: 17,      # 17% chance to spawn with dagger
-        None: 83         # 83% chance to spawn without weapon
-    },
-    "armor": {
-        leather_armor: 25,  # 25% chance to spawn with armor
-        None: 75            # 75% chance to spawn without armor
-    }
-}
-
-troll_equipment = {
-    "weapon": {
-        dagger: 5,       # 5% chance to spawn with dagger
-        None: 95         # 95% chance to spawn without weapon
-    },
-    "armor": {
-        leather_armor: 20,  # 20% chance to spawn with armor
-        None: 80            # 80% chance to spawn without armor
-    }
-}
-
-
-def spawn_mob_with_equipment(mob_template: Actor, gamemap, x: int, y: int, equipment_table: dict) -> Actor:
-    """Spawn a mob with randomly equipped items based on the equipment table.
-    
-    equipment_table format:
-    {
-        "slot_name": {
-            item_template: weight,
-            None: weight  # None means no item
-        },
-        ...
-    }
-    """
-    import copy as _copy
-    import random
-    
-    # Spawn the mob
-    mob = mob_template.spawn(gamemap, x, y)
-    
-    # Equip items based on the equipment table
-    for slot, items in equipment_table.items():
-        item_names = list(items.keys())
-        item_weights = list(items.values())
-        chosen_item = random.choices(item_names, weights=item_weights, k=1)[0]
-        
-        if chosen_item is not None:
-            # Deep copy to avoid shared references
-            item_copy = _copy.deepcopy(chosen_item)
-            item_copy.parent = mob.inventory
-            # Use tag-based equip system
-            mob.equipment.equip_item(item_copy, add_message=False)
-    
-    return mob

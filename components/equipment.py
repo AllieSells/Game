@@ -16,40 +16,24 @@ import sounds
 class Equipment(BaseComponent):
     parent: Actor
 
-    def __init__(self, weapon: Optional[Item] = None, backpack: Optional[Item] = None, armor: Optional[Item] = None, offhand: Optional[Item] = None):
-        # Legacy slot system for backward compatibility
-        self.weapon = weapon
-        self.backpack = backpack
-        self.armor = armor
-        self.offhand = offhand
-        
-        # New modular equipment tracking
+    def __init__(self):
+        # Modern modular equipment tracking
         self.equipped_items: Dict[str, Item] = {}  # Maps equipment categories to items
         self.body_part_coverage: Dict[str, Item] = {}  # Maps covered body parts to covering items
-        self.grasped_items: Set[Item] = set()  # Items currently being grasped
-        
-        # Sync legacy items into new system
-        if weapon:
-            self.grasped_items.add(weapon)
-        if armor:
-            self.equipped_items["ARMOR"] = armor
-        if backpack:
-            self.equipped_items["BACKPACK"] = backpack
-        if offhand:
-            self.grasped_items.add(offhand)
+        self.grasped_items: Dict[str, Item] = {}  # Maps specific body part names to grasped items
 
     @property
     def defense_bonus(self) -> int:
         bonus = 0
 
-        if self.weapon is not None and self.weapon.equippable is not None:
-            bonus += self.weapon.equippable.defense_bonus
-
-        if self.armor is not None and self.armor.equippable is not None:
-            bonus += self.armor.equippable.defense_bonus
-
-        if self.offhand is not None and self.offhand.equippable is not None:
-            bonus += self.offhand.equippable.defense_bonus
+        # Calculate defense from all equipped items
+        for item in self.equipped_items.values():
+            if item.equippable is not None:
+                bonus += item.equippable.defense_bonus
+                
+        for item in self.grasped_items.values():
+            if item.equippable is not None:
+                bonus += item.equippable.defense_bonus
 
         return bonus
 
@@ -57,14 +41,14 @@ class Equipment(BaseComponent):
     def power_bonus(self) -> int:
         bonus = 0
 
-        if self.weapon is not None and self.weapon.equippable is not None:
-            bonus += self.weapon.equippable.power_bonus
-
-        if self.armor is not None and self.armor.equippable is not None:
-            bonus += self.armor.equippable.power_bonus
-
-        if self.offhand is not None and self.offhand.equippable is not None:
-            bonus += self.offhand.equippable.power_bonus
+        # Calculate power from all equipped items
+        for item in self.equipped_items.values():
+            if item.equippable is not None:
+                bonus += item.equippable.power_bonus
+                
+        for item in self.grasped_items.values():
+            if item.equippable is not None:
+                bonus += item.equippable.power_bonus
 
         return bonus
     
@@ -103,19 +87,23 @@ class Equipment(BaseComponent):
 
     # Return slot item is in
     def get_slot(self, item: Item) -> Optional[str]:
-        if self.weapon == item:
-            return "weapon"
-        elif self.armor == item:
-            return "armor"
-        elif self.offhand == item:
-            return "offhand"
-        elif self.backpack == item:
-            return "backpack"
+        # Check equipped_items system
+        for eq_type_name, equipped_item in self.equipped_items.items():
+            if equipped_item == item:
+                return eq_type_name
+                
+        # Check if it's a grasped item (weapons/shields)
+        for body_part_name, grasped_item in self.grasped_items.items():
+            if grasped_item == item:
+                return body_part_name
+                
         return None
 
     def item_is_equipped(self, item: Item) -> bool:
-        """Check if an item is currently equipped (legacy method, use is_item_equipped)."""
-        return self.is_item_equipped(item)
+        """Check if an item is currently equipped."""
+        return (item in self.equipped_items.values() or 
+                item in self.grasped_items.values() or
+                item in self.body_part_coverage.values())
 
     def unequip_message(self, item_name: str) -> None:
         self.parent.gamemap.engine.message_log.add_message(
@@ -142,7 +130,18 @@ class Equipment(BaseComponent):
         self._play_equip_sound(item)
 
     def unequip_from_slot(self, slot: str, add_message: bool) -> None:
-        current_item = getattr(self, slot)
+        current_item = None
+        
+        # Check if it's an equipment type slot
+        if slot in self.equipped_items:
+            current_item = self.equipped_items[slot]
+        else:
+            # Check if it's a grasped item by equipment type
+            for item in self.grasped_items.values():
+                if (hasattr(item, 'equippable') and item.equippable and 
+                    item.equippable.equipment_type.name == slot):
+                    current_item = item
+                    break
         
         if current_item is None:
             return
@@ -150,35 +149,8 @@ class Equipment(BaseComponent):
         if add_message:
             self.unequip_message(current_item.name)
         
-        # Play unequip sound
-        if hasattr(current_item, "unequip_sound") and current_item.unequip_sound is not None:
-            try:
-                current_item.unequip_sound()
-            except Exception as e:
-                print(f"Error calling unequip sound: {e}")
-
-        # Clean up both legacy slot and new modular system
-        setattr(self, slot, None)
-        
-        # Also remove from new modular system
-        if current_item in self.grasped_items:
-            self.grasped_items.remove(current_item)
-        
-        # Remove from equipped items
-        items_to_remove = []
-        for eq_type_name, item in self.equipped_items.items():
-            if item == current_item:
-                items_to_remove.append(eq_type_name)
-        for eq_type_name in items_to_remove:
-            del self.equipped_items[eq_type_name]
-        
-        # Remove from body part coverage
-        parts_to_remove = []
-        for part, item in self.body_part_coverage.items():
-            if item == current_item:
-                parts_to_remove.append(part)
-        for part in parts_to_remove:
-            del self.body_part_coverage[part]
+        # The actual unequip logic is handled by unequip_item() method
+        self.unequip_item(current_item, add_message=False)
 
     def toggle_equip(self, equippable_item: Item, add_message: bool = True) -> None:
         """Toggle equipping an item using the new modular system."""
@@ -210,29 +182,52 @@ class Equipment(BaseComponent):
         
         # Handle grasped items (weapons, shields)
         if eq_type in [EquipmentType.WEAPON, EquipmentType.SHIELD]:
-            self.grasped_items.add(item)
-            # Update legacy slots for backward compatibility  
-            if eq_type == EquipmentType.WEAPON:
-                if not self.weapon:
-                    self.weapon = item
-                elif not self.offhand:
-                    self.offhand = item
-            elif eq_type == EquipmentType.SHIELD:
-                if not self.offhand:
-                    self.offhand = item
-                elif not self.weapon:
-                    self.weapon = item
-        
-        # Update general equipment tracking
-        eq_type_name = eq_type.name
-        if eq_type_name not in ["WEAPON", "SHIELD"]:  # These go in grasped_items
+            # Find a hand to grasp the item (prefer empty hands, but use occupied ones if needed)
+            if hasattr(self.parent, 'body_parts'):
+                available_hands = []
+                occupied_hands = []
+                
+                for part_type, part in self.parent.body_parts.body_parts.items():
+                    if part.can_grasp and not part.is_destroyed:
+                        if part.name not in self.grasped_items:
+                            available_hands.append(part)
+                        else:
+                            occupied_hands.append(part)
+                
+                # Prefer empty hands, but use occupied ones if no empty hands
+                if available_hands:
+                    chosen_hand = available_hands[0]
+                elif occupied_hands:
+                    # Replace item in first occupied hand
+                    chosen_hand = occupied_hands[0]
+                    old_item = self.grasped_items[chosen_hand.name]
+                    if add_message:
+                        self.unequip_message(old_item.name)
+                else:
+                    # No hands at all (shouldn't happen for humanoids)
+                    if add_message and hasattr(self.parent, 'gamemap'):
+                        self.parent.gamemap.engine.message_log.add_message(
+                            f"No hands to hold {item.name}!"
+                        )
+                    return
+                
+                self.grasped_items[chosen_hand.name] = item
+            else:
+                # Fallback if no body parts system
+                if len(self.grasped_items) < 2:
+                    hand_name = f"hand_{len(self.grasped_items) + 1}"
+                    self.grasped_items[hand_name] = item
+                else:
+                    # Replace item in first hand
+                    first_hand = list(self.grasped_items.keys())[0]
+                    old_item = self.grasped_items[first_hand]
+                    if add_message:
+                        self.unequip_message(old_item.name)
+                    self.grasped_items[first_hand] = item
+        else:
+            # Update general equipment tracking for non-grasped items
+            eq_type_name = eq_type.name
             self.equipped_items[eq_type_name] = item
-            
-            # Update legacy slots
-            if eq_type_name == "ARMOR":
-                self.armor = item
-            elif eq_type_name == "BACKPACK":
-                self.backpack = item
         
         if add_message:
             self.equip_message(item.name)
@@ -241,7 +236,7 @@ class Equipment(BaseComponent):
         self._play_equip_sound(item)
 
         # Update body part coverage for armor items
-        if eq_type_name not in ["WEAPON", "SHIELD"] and hasattr(self.parent, "body_parts"):
+        if eq_type not in [EquipmentType.WEAPON, EquipmentType.SHIELD] and hasattr(self.parent, "body_parts"):
             for part in self.parent.body_parts.get_all_parts().values():
                 # Check if this part has the tags required by the item
                 if item.equippable.required_tags.issubset(part.tags):
@@ -255,13 +250,12 @@ class Equipment(BaseComponent):
         eq_type = item.equippable.equipment_type
         
         # Remove from grasped items
-        if item in self.grasped_items:
-            self.grasped_items.remove(item)
-            # Update legacy slots
-            if self.weapon == item:
-                self.weapon = None
-            elif self.offhand == item:
-                self.offhand = None
+        body_parts_to_remove = []
+        for body_part_name, grasped_item in self.grasped_items.items():
+            if grasped_item == item:
+                body_parts_to_remove.append(body_part_name)
+        for body_part_name in body_parts_to_remove:
+            del self.grasped_items[body_part_name]
         
         # Remove from body part coverage
         parts_to_remove = []
@@ -275,12 +269,6 @@ class Equipment(BaseComponent):
         eq_type_name = eq_type.name
         if eq_type_name in self.equipped_items and self.equipped_items[eq_type_name] == item:
             del self.equipped_items[eq_type_name]
-            
-            # Update legacy slots
-            if eq_type_name == "ARMOR":
-                self.armor = None
-            elif eq_type_name == "BACKPACK":
-                self.backpack = None
         
         if add_message:
             self.unequip_message(item.name)
@@ -290,7 +278,9 @@ class Equipment(BaseComponent):
     
     def is_item_equipped(self, item: Item) -> bool:
         """Check if an item is currently equipped."""
-        return (item in self.grasped_items or 
+    def is_item_equipped(self, item: Item) -> bool:
+        """Check if an item is currently equipped."""
+        return (item in self.grasped_items.values() or 
                 item in self.equipped_items.values() or
                 item in self.body_part_coverage.values())
 
@@ -338,6 +328,44 @@ class Equipment(BaseComponent):
 
         for item in self.equipped_items.values():
             process_item(item)
+
+    def equip_to_specific_hand(self, item: Item, hand_name: str, add_message: bool = True) -> None:
+        """Directly equip an item to a specific hand, replacing what's there."""
+        if not item.equippable:
+            return
+        
+        eq_type = item.equippable.equipment_type
+        if eq_type not in [EquipmentType.WEAPON, EquipmentType.SHIELD]:
+            # Not a grasped item, use regular equip
+            self.equip_item(item, add_message)
+            return
+        
+        # Check if hand already has something
+        if hand_name in self.grasped_items:
+            old_item = self.grasped_items[hand_name]
+            if add_message:
+                self.unequip_message(old_item.name)
+        
+        # Equip new item to specific hand
+        self.grasped_items[hand_name] = item
+        
+        if add_message:
+            self.equip_message(item.name)
+        
+        # Play equip sound
+        self._play_equip_sound(item)
+
+    def unequip_from_specific_hand(self, hand_name: str, add_message: bool = True) -> None:
+        """Directly unequip item from a specific hand."""
+        if hand_name in self.grasped_items:
+            item = self.grasped_items[hand_name]
+            del self.grasped_items[hand_name]
+            
+            if add_message:
+                self.unequip_message(item.name)
+            
+            # Play unequip sound
+            self._play_unequip_sound(item)
 
     def _play_equip_sound(self, item: Item) -> None:
         """Play equipment sound for an item."""

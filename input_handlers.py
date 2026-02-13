@@ -648,40 +648,41 @@ class LevelUpEventHandler(AskUserEventHandler):
     def on_render(self, console: tcod.Console) -> None:
         super().on_render(console)
 
-        if self.engine.player.x <= 30:
-            x = 40
-        else:
-            x = 0
+        # Center the menu on the screen
+        width = 50
+        height = 12
+        x = (console.width - width) // 2
+        y = (console.height - height) // 2
 
-        console.draw_frame(
-            x=x,
-            y=0,
-            width=35,
-            height=8,
-            title=self.TITLE,
-            clear=True,
-            fg=(255, 255, 255),
-            bg=(0, 0, 0),
-        )
+        # Draw parchment background and ornate border
+        MenuRenderer.draw_parchment_background(console, x, y, width, height)
+        MenuRenderer.draw_ornate_border(console, x, y, width, height, self.TITLE)
 
-        console.print(x=x+1, y=1, string="You Level Up!")
-        console.print(x=x+1, y=2, string="Select an attribute to increase")
+        # Content positioning
+        content_x = x + 2
+        content_y = y + 2
 
+        console.print(x=content_x, y=content_y, string="You have grown stronger.", fg=(255, 223, 127))
+        console.print(x=content_x, y=content_y + 1, string="Pick an attribute to increase:", fg=(200, 180, 140))
+
+        # Option list
         console.print(
-            x=x + 1,
-            y=4,
-            string=f"a) Constitution (+20 HP from {self.engine.player.fighter.max_hp})"
-
+            x=content_x + 2,
+            y=content_y + 4,
+            string=f"a) Constitution (+20 HP from {self.engine.player.fighter.max_hp})",
+            fg=(220, 200, 160)
         )
         console.print(
-            x=x + 1,
-            y=5,
+            x=content_x + 2,
+            y=content_y + 6,
             string=f"b) Strength (+1 attack, from {self.engine.player.fighter.power})",
+            fg=(220, 200, 160)
         )
         console.print(
-            x=x + 1,
-            y=6,
+            x=content_x + 2,
+            y=content_y + 8,
             string=f"c) Agility (+1 defense, from {self.engine.player.fighter.defense})",
+            fg=(220, 200, 160)
         )
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
@@ -914,6 +915,11 @@ class ContainerEventHandler(AskUserEventHandler):
                     slot = self.engine.player.equipment.get_slot(item)
                     self.engine.player.equipment.unequip_from_slot(slot, add_message=True)
 
+                # Check container capacity
+                if len(self.container.items) >= self.container.capacity:
+                    self.engine.message_log.add_message("Container is full.", color.error)
+                    return self
+
                 self.engine.player.inventory.items.remove(item)
                 # Move item into the container and update its parent so
                 # later logic (consumption, transfers) sees the correct owner.
@@ -924,19 +930,16 @@ class ContainerEventHandler(AskUserEventHandler):
                     pass
 
                 if hasattr(item, "drop_sound") and item.drop_sound is not None:
-                    #print(f"DEBUG: About to call drop sound for {item.name}")
                     try:
                         item.drop_sound()
-                        #print(f"DEBUG: Successfully called drop sound for {item.name}")
                     except Exception as e:
                         print(f"DEBUG: Error calling drop sound: {e}")
-                else:
-                    print(f"DEBUG: No drop sound for {item}")
                 
                 self.engine.message_log.add_message(f"You transfer the {item.name}.")
-            except Exception:
-                print(traceback.format_exc(), color.error)
-                self.engine.message_log.add_message(f"Could not transfer {item.name} to {self.container.name}.", color.error)
+            except Exception as e:
+                print(f"DEBUG: Transfer failed with exception: {e}")
+                print(traceback.format_exc())
+                self.engine.message_log.add_message(f"Could not transfer {item.name}.", color.error)
         else:
             # Transfer from container to player
             try:
@@ -2702,7 +2705,7 @@ class LookHandler(SelectIndexHandler):
                     
                     # Check grasped items (weapons, shields, etc.)
                     if hasattr(equipment, 'grasped_items'):
-                        for item in equipment.grasped_items:
+                        for item in equipment.grasped_items.values():
                             item_name = item.name.lower()
                             # Add article based on first letter (skip for uncountable/mass nouns like armor)
                             uncountable_keywords = ["armor", "mail", "plate", "leather", "chain"]

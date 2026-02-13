@@ -252,16 +252,16 @@ class GameMap:
         try:
             player = self.engine.player
             # Torch lighting: if player holds a Torch, light radius is 7
+            has_torch = False
             try:
-                weapon_name = player.equipment.weapon.name if player.equipment and player.equipment.weapon else None
+                if player.equipment:
+                    # Check grasped items for torches
+                    for item in player.equipment.grasped_items.values():
+                        if hasattr(item, 'name') and item.name == "Torch":
+                            has_torch = True
+                            break
             except Exception:
-                weapon_name = None
-            try:
-                offhand_name = player.equipment.offhand.name if player.equipment and player.equipment.offhand else None
-            except Exception:
-                offhand_name = None
-
-            has_torch = (weapon_name == "Torch" or offhand_name == "Torch")
+                has_torch = False
 
             if has_torch:
                 px, py = player.x, player.y
@@ -514,6 +514,13 @@ class GameWorld:
             except Exception:
                 pass
 
+            # Refresh ambient sounds for the restored map
+            try:
+                import sounds
+                sounds.refresh_all_ambient_sounds(self.engine.player, next_map.entities, next_map)
+            except Exception:
+                pass
+
             return
 
         # No cached lower map: generate a new floor
@@ -524,6 +531,13 @@ class GameWorld:
             px, py = self.engine.player.x, self.engine.player.y
             self.engine.game_map.tiles[px, py] = tile_types.up_stairs
             self.engine.game_map.upstairs_location = (px, py)
+        except Exception:
+            pass
+
+        # Refresh ambient sounds for the new map
+        try:
+            import sounds
+            sounds.refresh_all_ambient_sounds(self.engine.player, self.engine.game_map.entities, self.engine.game_map)
         except Exception:
             pass
 
@@ -578,6 +592,13 @@ class GameWorld:
         # Restore recorded floor number
         try:
             self.current_floor = prev_floor
+        except Exception:
+            pass
+
+        # Refresh ambient sounds for the restored map
+        try:
+            import sounds
+            sounds.refresh_all_ambient_sounds(self.engine.player, prev_map.entities, prev_map)
         except Exception:
             pass
 

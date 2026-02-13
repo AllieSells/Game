@@ -318,15 +318,18 @@ def render_names_at_mouse_location(
 def render_equipment(
         console: 'Console', x: int, y: int, engine: 'Engine'
 ) -> None:
-    armor_name = engine.player.equipment.armor.name if engine.player.equipment.armor else "None"
-    held_name = engine.player.equipment.weapon.name if engine.player.equipment.weapon else "None"
-    offhand_name = engine.player.equipment.offhand.name if getattr(engine.player.equipment, 'offhand', None) else "None"
-    back_name = engine.player.equipment.backpack.name if engine.player.equipment.backpack else "None"
+    armor_name = engine.player.equipment.equipped_items.get('ARMOR').name if engine.player.equipment.equipped_items.get('ARMOR') else "None"
+    # Get grasped items (weapons, shields, etc.)
+    grasped_names = []
+    for item in engine.player.equipment.grasped_items.values():
+        grasped_names.append(item.name)
+    held_items = ", ".join(grasped_names) if grasped_names else "None"
+    
+    backpack_name = engine.player.equipment.equipped_items.get('BACKPACK').name if engine.player.equipment.equipped_items.get('BACKPACK') else "None"
     console.print(x=x, y=y, string="Equipment:")
     console.print(x=x, y=y+1, string=f"Body: {armor_name}")
-    console.print(x=x, y=y+2, string=f"Back: {back_name}")
-    console.print(x=x, y=y+3, string=f"Hands: {held_name}")
-    console.print(x=x, y=y+4, string=f"Offhand: {offhand_name}")
+    console.print(x=x, y=y+2, string=f"Back: {backpack_name}")
+    console.print(x=x, y=y+3, string=f"Hands: {held_items}")
     
     
 def render_animations(console: tcod.Console, engine: 'Engine') -> None:

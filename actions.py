@@ -23,6 +23,21 @@ else:
 
 import sounds
 
+# Body part targeting modifiers (damage_modifier, hit_difficulty_modifier)
+# hit_difficulty_modifier: Positive = easier to hit, negative = harder to hit
+
+
+# Second value adds to base 85% hit chance, so a -20 would make it 65% base hit chance, while a +30 would make it 115% (capped at 100% in code)
+BODY_PART_MODIFIERS = {
+    "HEAD": (1.5, -50),    # 50% more damage to head, much harder to hit (35% base hit chance)
+    "NECK": (1.5, -70),    # 30% more damage to neck, very hard to hit (15% base hit chance)
+    "TORSO": (1.0, 15),    # Normal damage, easier to hit (large target) (100% base hit chance)
+    "LEG": (0.9, -10),      # Slightly less damage, slightly harder to hit (75% base hit chance)
+    "ARM": (0.9, -10),     # Slightly less damage, harder to hit (75% base hit chance)
+    "HAND": (0.75, -35),    # Reduced damage, very hard to hit (50% base hit chance)
+    "FOOT": (0.75, -35),    # Reduced damage, very hard to hit (50% base hit chance)
+}
+
 class Action:
     def __init__(self, entity: Actor) -> None:
         super().__init__()
@@ -66,8 +81,8 @@ class InteractAction(Action):
                 container = ent.container
                 is_corpse = getattr(ent, "type", None) == "Dead"
                 
-                if len(container.items) == 0:
-                    empty_msg = "There is nothing left to loot." if is_corpse else "The chest is empty."
+                if len(container.items) == 0 and is_corpse:
+                    empty_msg = "There is nothing left to loot."
                     raise exceptions.Impossible(empty_msg)
                 else:
                     # Send to input handler to display contents
@@ -332,17 +347,6 @@ class MeleeAction(ActionWithDirection):
         damage_modifier = 1.0
         hit_difficulty_modifier = 0.0  # Positive = easier to hit, negative = harder
 
-        # Body part targeting modifiers (damage_modifier, hit_difficulty_modifier)
-        BODY_PART_MODIFIERS = {
-            "HEAD": (1.5, -30),    # 50% more damage to head, much harder to hit
-            "NECK": (1.3, -50),    # 30% more damage to neck, very hard to hit
-            "TORSO": (1.0, 15),    # Normal damage, easier to hit (large target)
-            "LEG": (0.9, -5),      # Slightly less damage, slightly harder to hit
-            "ARM": (0.9, -10),     # Slightly less damage, harder to hit  
-            "HAND": (0.8, -25),    # Reduced damage, very hard to hit
-            "FOOT": (0.8, -25),    # Reduced damage, very hard to hit
-        }
-
         # Check if any part is targeted
         #print("DEBUG: target_part:", self.target_part)
         if not self.target_part:
@@ -444,13 +448,21 @@ class MeleeAction(ActionWithDirection):
         ## Add verb from item verb tags 
         # Check for equipped weapon and use its verb if available
         weapon_verb = None
-        if self.entity.equipment and self.entity.equipment.weapon:
-            weapon = self.entity.equipment.weapon
-            # Check for verb attributes on weapon (present tense for combat)
-            if hasattr(weapon, 'verb_present') and weapon.verb_present:
-                weapon_verb = weapon.verb_present
-            elif hasattr(weapon, 'verb_base') and weapon.verb_base:
-                weapon_verb = weapon.verb_base + "s"  # Convert base to present tense
+        weapon = None
+        if self.entity.equipment:
+            # Find the first weapon in grasped items
+            for item in self.entity.equipment.grasped_items.values():
+                if (hasattr(item, 'equippable') and item.equippable and 
+                    item.equippable.equipment_type.name == 'WEAPON'):
+                    weapon = item
+                    break
+            
+            if weapon:
+                # Check for verb attributes on weapon (present tense for combat)
+                if hasattr(weapon, 'verb_present') and weapon.verb_present:
+                    weapon_verb = weapon.verb_present
+                elif hasattr(weapon, 'verb_base') and weapon.verb_base:
+                    weapon_verb = weapon.verb_base + "s"  # Convert base to present tense
         
         # Fallback to entity verb if no weapon verb found
         if not weapon_verb:
@@ -476,7 +488,7 @@ class MeleeAction(ActionWithDirection):
             if target.fighter.hp - final_damage <= 0:
                 sounds.play_attack_sound_finishing_blow()
             elif self.entity.equipment:
-                if target.equipment and target.equipment.armor:
+                if target.equipment and target.equipment.equipped_items.get('ARMOR'):
                     sounds.play_attack_sound_weapon_to_armor()
                 else:
                     sounds.play_attack_sound_weapon_to_no_armor()

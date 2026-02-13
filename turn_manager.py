@@ -155,7 +155,7 @@ class TurnManager:
             player = self.engine.player
             # Check all grasped items for burn duration (new modular system)
             items_to_remove = []
-            for item in player.equipment.grasped_items.copy():
+            for item in list(player.equipment.grasped_items.values()):
                 if getattr(item, "burn_duration", None) is not None:
                     try:
                         item.burn_duration -= 1

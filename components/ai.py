@@ -483,24 +483,16 @@ class DarkHostileEnemy(BaseAI):
                 lit_mask = _np.zeros((gm.width, gm.height), dtype=bool, order="F")
 
                 # Check player-held torch
+                has_torch = False
                 try:
-                    weapon_name = (
-                        self.engine.player.equipment.weapon.name
-                        if self.engine.player.equipment and self.engine.player.equipment.weapon
-                        else None
-                    )
+                    if self.engine.player.equipment:
+                        # Check grasped items for torches
+                        for item in self.engine.player.equipment.grasped_items.values():
+                            if hasattr(item, 'name') and item.name == "Torch":
+                                has_torch = True
+                                break
                 except Exception:
-                    weapon_name = None
-                try:
-                    offhand_name = (
-                        self.engine.player.equipment.offhand.name
-                        if self.engine.player.equipment and self.engine.player.equipment.offhand
-                        else None
-                    )
-                except Exception:
-                    offhand_name = None
-
-                has_torch = (weapon_name == "Torch" or offhand_name == "Torch")
+                    has_torch = False
                 if has_torch:
                     rr = 7
                     px, py = self.engine.player.x, self.engine.player.y

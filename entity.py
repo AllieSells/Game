@@ -79,13 +79,36 @@ class Entity:
         clone.y = y
         clone.parent = gamemap
         gamemap.entities.add(clone)
+        
+        # If this is an Actor with an equipment table, equip items based on probability
+        if isinstance(clone, Actor) and hasattr(clone, 'equipment_table') and clone.equipment_table:
+            clone._apply_equipment_table()
+        
         return clone
+    
+    def _apply_equipment_table(self) -> None:
+        """Apply random equipment from the equipment table to this actor."""
+        if not self.equipment_table or not self.equipment:
+            return
+        
+        for slot, items in self.equipment_table.items():
+            item_names = list(items.keys())
+            item_weights = list(items.values())
+            chosen_item = random.choices(item_names, weights=item_weights, k=1)[0]
+            
+            if chosen_item is not None:
+                # Deep copy to avoid shared references
+                item_copy = copy.deepcopy(chosen_item)
+                item_copy.parent = self.inventory
+                # Use tag-based equip system
+                self.equipment.equip_item(item_copy, add_message=False)
 
     def move(self, dx: int, dy: int) -> None:
         #movement controls
 
         self.x += dx
         self.y += dy
+
 class Actor(Entity):
     def __init__(
         self,
@@ -125,6 +148,7 @@ class Actor(Entity):
         verb_present: Optional[str] = None,
         verb_past: Optional[str] = None,
         verb_participial: Optional[str] = None,
+        equipment_table: Optional[dict] = None,  # Random equipment spawning table
     ):
         super().__init__(
             x=x,
@@ -195,6 +219,7 @@ class Actor(Entity):
         self.verb_participial = verb_participial or self.verb_base + "ing"
         self.dodge_chance = dodge_chance
         self.preferred_dodge_direction = preferred_dodge_direction
+        self.equipment_table = equipment_table  # Store equipment table for spawning
     
     def add_effect(self, effect: 'Effect') -> None:
         """Attach an Effect to this actor."""

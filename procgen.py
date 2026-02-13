@@ -48,7 +48,7 @@ item_chances: Dict[int, List[Tuple[Entity, int]]] = {
 
 enemy_chances: Dict[int, List[Tuple[Entity, int]]] = {
     # Entity weights, floor: [(entity, weight), ...]
-    0: [(entity_factories.orc, 80)],
+    0: [(entity_factories.goblin, 80)],
     3: [(entity_factories.troll, 15)],
     5: [(entity_factories.troll, 30)],
     7: [(entity_factories.troll, 60)],
@@ -168,14 +168,8 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) 
         y= random.randint(room.y1+1, room.y2-1)
 
         if not any(entity.x == x and entity.y == y for entity in dungeon.entities):
-            # Spawn mob with appropriate equipment
-            if entity.name == "Orc":
-                entity_factories.spawn_mob_with_equipment(entity, dungeon, x, y, entity_factories.orc_equipment)
-            elif entity.name == "Troll":
-                entity_factories.spawn_mob_with_equipment(entity, dungeon, x, y, entity_factories.troll_equipment)
-            else:
-                # Default: spawn without special equipment
-                entity.spawn(dungeon, x, y)
+            # Spawn mob with equipment automatically applied via spawn()
+            entity.spawn(dungeon, x, y)
 
     # Place campfire using centralized logic
     place_campfires(dungeon, "dungeon_room", room=room)

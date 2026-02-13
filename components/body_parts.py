@@ -15,6 +15,12 @@ import random
 if TYPE_CHECKING:
     from entity import Actor
 
+# Import hit difficulty modifiers from actions module
+# Avoid circular import by importing at function level
+def _get_body_part_modifiers():
+    from actions import BODY_PART_MODIFIERS
+    return BODY_PART_MODIFIERS
+
 
 class BodyPartType(Enum):
     """Types of body parts."""
@@ -159,35 +165,35 @@ class BodyParts(BaseComponent):
             ),
             BodyPartType.LEFT_ARM: BodyPart(
                 BodyPartType.LEFT_ARM, "left arm", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
-                tags={"arm", "armor"}
+                tags={"arm", "armor", "left", "left_arm"}
             ),
             BodyPartType.RIGHT_ARM: BodyPart(
                 BodyPartType.RIGHT_ARM, "right arm", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
-                tags={"arm", "armor"}
+                tags={"arm", "armor", "right", "right_arm"}
             ),
             BodyPartType.LEFT_HAND: BodyPart(
                 BodyPartType.LEFT_HAND, "left hand", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True, can_grasp=True,
-                tags={"hand", "grasp", "manipulate", "hold", "use"}
+                tags={"hand", "grasp", "manipulate", "hold", "use", "left", "left_hand"}
             ),
             BodyPartType.RIGHT_HAND: BodyPart(
                 BodyPartType.RIGHT_HAND, "right hand", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True, can_grasp=True,
-                tags={"hand", "grasp", "manipulate", "hold", "use"}
+                tags={"hand", "grasp", "manipulate", "hold", "use", "right", "right_hand"}
             ),
             BodyPartType.LEFT_LEG: BodyPart(
                 BodyPartType.LEFT_LEG, "left leg", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
-                tags={"leg", "locomotion"}
+                tags={"leg", "locomotion", "left", "left_leg"}
             ),
             BodyPartType.RIGHT_LEG: BodyPart(
                 BodyPartType.RIGHT_LEG, "right leg", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
-                tags={"leg", "locomotion"}
+                tags={"leg", "locomotion", "right", "right_leg"}
             ),
             BodyPartType.LEFT_FOOT: BodyPart(
                 BodyPartType.LEFT_FOOT, "left foot", .2, max_hp=int(0.2 * parent_max_hp), is_limb=True,
-                tags={"foot", "locomotion", "armor"}
+                tags={"foot", "locomotion", "armor", "left", "left_foot"}
             ),
             BodyPartType.RIGHT_FOOT: BodyPart(
                 BodyPartType.RIGHT_FOOT, "right foot", .2, max_hp=int(0.2 * parent_max_hp), is_limb=True,
-                tags={"foot", "locomotion", "armor"}
+                tags={"foot", "locomotion", "armor", "right", "right_foot"}
             ),
         }
     
@@ -251,17 +257,24 @@ class BodyParts(BaseComponent):
         if not available_parts:
             return None
         
-        # Weight body parts by size/importance
+        # Use hit difficulty modifiers from BODY_PART_MODIFIERS to calculate weights
+        # Higher modifier = easier to hit = higher weight
+        modifiers = _get_body_part_modifiers()
         weights = []
         for part in available_parts:
-            if part.part_type == BodyPartType.TORSO:
-                weights.append(30)  # Most likely to be hit
-            elif part.part_type in [BodyPartType.HEAD]:
-                weights.append(10)  # Smaller target
-            elif part.is_limb:
-                weights.append(15)  # Medium target
+            part_type_name = part.part_type.name
+            # Look up hit difficulty in BODY_PART_MODIFIERS
+            hit_difficulty = 0
+            if part_type_name in modifiers:
+                hit_difficulty = modifiers[part_type_name][1]
             else:
-                weights.append(20)  # Default
+                # Check for partial matches
+                for key in modifiers:
+                    if key in part_type_name:
+                        hit_difficulty = modifiers[key][1]
+                        break
+            # Convert to weight: base 100 + modifier (so TORSO=115, HEAD=70, etc.)
+            weights.append(max(1, 100 + hit_difficulty))
         
         damaged_part = random.choices(available_parts, weights=weights)[0]
         actual_damage = damaged_part.take_damage(damage)

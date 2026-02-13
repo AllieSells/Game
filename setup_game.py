@@ -41,6 +41,9 @@ def new_game() -> Engine:
 
 
     player = copy.deepcopy(entity_factories.player)
+    
+    # DEBUG: Set XP close to level up (350 needed for level 2)
+    player.level.current_xp = 0
 
     engine = Engine(player=player)
     print(engine)
@@ -94,6 +97,10 @@ def new_debug_game() -> Engine:
     map_height = 40
     
     player = copy.deepcopy(entity_factories.player)
+    
+    # DEBUG: Set XP close to level up (350 needed for level 2)
+    player.level.current_xp = 340
+    
     engine = Engine(player=player)
     
     # Create a simple empty map
@@ -260,8 +267,8 @@ def new_debug_game() -> Engine:
         
         # Spawn enemies at various positions
         test_enemies = [
-            (entity_factories.orc, center_x + 8, center_y),
-            (entity_factories.orc, center_x - 8, center_y),
+            (entity_factories.goblin, center_x + 8, center_y),
+            (entity_factories.goblin, center_x - 8, center_y),
             (entity_factories.troll, center_x, center_y + 8),
             (entity_factories.shade, center_x + 5, center_y + 5),
         ]

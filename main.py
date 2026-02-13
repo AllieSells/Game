@@ -61,8 +61,7 @@ def main() -> None:
                     traceback.print_exc() #prints error to stderr
                     if isinstance(handler, input_handlers.EventHandler):
                         handler.engine.message_log.add_message(
-                            traceback.format_exc(), color.error 
-                        )
+                            traceback.format_exc(), color.error)
 
         except exceptions.QuitWithoutSaving:
             raise
@@ -75,3 +74,4 @@ def main() -> None:
 
 main()
 
+    

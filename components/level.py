@@ -58,8 +58,22 @@ class Level(BaseComponent):
 
 
     def increase_max_hp(self, amount: int = 20) -> None:
+        old_max_hp = self.parent.fighter.max_hp
         self.parent.fighter.max_hp += amount
         self.parent.fighter.hp += amount
+
+        # Recalculate body part max HP to maintain proportions
+        # Each part gets its share of the new HP pool
+        if hasattr(self.parent, 'body_parts') and self.parent.body_parts:
+            hp_increase = amount
+            for part in self.parent.body_parts.body_parts.values():
+                # Increase part's max_hp proportionally
+                old_part_max = part.max_hp
+                new_part_max = int(part.max_hp_ratio * self.parent.fighter.max_hp)
+                part_increase = new_part_max - old_part_max
+                part.max_hp = new_part_max
+                # Heal the part by the increase amount to maintain health ratio
+                part.current_hp = min(part.max_hp, part.current_hp + part_increase)
 
         self.engine.message_log.add_message("Your health improves!")
 

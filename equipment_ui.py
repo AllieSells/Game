@@ -34,37 +34,30 @@ class EquipmentSlot:
     def get_equipped_item(self, equipment) -> Optional[Item]:
         """Get the item equipped in this slot."""
         for eq_type in self.equipment_types:
-            if eq_type == EquipmentType.WEAPON:
-                # For weapon slots, distinguish between left and right hand strictly
-                if self.name == "L.Hand":
-                    # Left hand ONLY shows offhand slot, nothing else
-                    return equipment.offhand if equipment.offhand else None
-                elif self.name == "R.Hand":
-                    # Right hand ONLY shows main weapon slot
-                    return equipment.weapon
+            if eq_type == EquipmentType.WEAPON or eq_type == EquipmentType.SHIELD:
+                # Map UI slot names to body part names
+                if self.name == "R.Hand":
+                    hand_name = "right hand"
+                elif self.name == "L.Hand": 
+                    hand_name = "left hand"
                 else:
-                    # Generic weapon slot (shouldn't happen with current setup)
-                    return equipment.weapon
-            elif eq_type == EquipmentType.SHIELD:
-                # Shields always go to left hand (offhand)
-                if (equipment.offhand and hasattr(equipment.offhand, 'equippable') and 
-                    hasattr(equipment.offhand.equippable, 'equipment_type') and 
-                    equipment.offhand.equippable.equipment_type == EquipmentType.SHIELD):
-                    if self.name == "L.Hand":
-                        return equipment.offhand
+                    # For other slots that might handle weapons/shields, check all hands
+                    for item in equipment.grasped_items.values():
+                        if (hasattr(item, 'equippable') and item.equippable and 
+                            item.equippable.equipment_type == eq_type):
+                            return item
+                    return None
+                
+                # Check specific hand for this slot
+                if hand_name in equipment.grasped_items:
+                    item = equipment.grasped_items[hand_name]
+                    if (hasattr(item, 'equippable') and item.equippable and 
+                        item.equippable.equipment_type == eq_type):
+                        return item
                 return None
-            elif eq_type == EquipmentType.ARMOR:
-                return equipment.armor
-            elif eq_type == EquipmentType.HELMET:
-                return equipment.equipped_items.get("HELMET")
-            elif eq_type == EquipmentType.BOOTS:
-                return equipment.equipped_items.get("BOOTS")
-            elif eq_type == EquipmentType.GAUNTLETS:
-                return equipment.equipped_items.get("GAUNTLETS")
-            elif eq_type == EquipmentType.LEGGINGS:
-                return equipment.equipped_items.get("LEGGINGS")
-            elif eq_type == EquipmentType.BACKPACK:
-                return equipment.backpack
+            else:
+                # Check equipped_items for other equipment types
+                return equipment.equipped_items.get(eq_type.name)
         return None
 
 
@@ -241,26 +234,35 @@ class EquipmentUI(AskUserEventHandler):
             print_colored_text_with_bg(console, list_x, list_y + display_i, text_parts, bg_color)
     
     def _get_compatible_items(self, slot: EquipmentSlot) -> List[Item]:
-        """Get items that can be equipped in the given slot, with equipped items sorted to bottom."""
+        """Get items that can be equipped in the given slot, including item currently in THIS slot."""
         compatible = []
+        currently_equipped_in_slot = slot.get_equipped_item(self.engine.player.equipment)
+        
         for item in self.available_items:
             if item.equippable.equipment_type in slot.equipment_types:
+                # Always include the item currently equipped in THIS specific slot
+                if item == currently_equipped_in_slot:
+                    compatible.append(item)
+                    continue
+                
+                # Skip items that are equipped in OTHER slots
+                if self._is_item_equipped(item):
+                    continue
+                    
                 can_equip, _ = self.engine.player.equipment.can_equip_item(item)
-                if can_equip or slot.get_equipped_item(self.engine.player.equipment) == item:
+                if can_equip:
                     compatible.append(item)
         
-        # Sort items: unequipped first, equipped last
-        compatible.sort(key=lambda item: self._is_item_equipped(item))
+        # Sort items: unequipped items first, item currently in this slot last
+        compatible.sort(key=lambda item: item == currently_equipped_in_slot)
         return compatible
     
     def _is_item_equipped(self, item: Item) -> bool:
         """Check if an item is currently equipped in any slot."""
         equipment = self.engine.player.equipment
-        return (equipment.weapon == item or 
-                equipment.offhand == item or
-                equipment.armor == item or
-                equipment.backpack == item or
-                item in equipment.equipped_items.values())
+        return (item in equipment.grasped_items.values() or
+                item in equipment.equipped_items.values() or
+                item in equipment.body_part_coverage.values())
 
     def _get_slot_hp(self, slot: EquipmentSlot) -> int:
         """"Returns the limb HP ratio associated with a slot, default 100."""
@@ -331,7 +333,7 @@ class EquipmentUI(AskUserEventHandler):
                 part = self.engine.player.body_parts.body_parts[part_type]
                 # Slot is disabled if body part is destroyed or severely wounded (≤ 25% HP)
                 damage_ratio = part.current_hp / part.max_hp
-                return damage_ratio <= 0.25
+                return damage_ratio <= 0.0
         except (KeyError, AttributeError):
             pass
         
@@ -364,13 +366,9 @@ class EquipmentUI(AskUserEventHandler):
                     self.selected_item = (self.selected_item + 1) % len(compatible_items)
             return None
         
-        # Equip selected item
+        # Equip/Unequip selected item
         elif key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.KP_ENTER or key == tcod.event.KeySym.SPACE:
             return self._handle_equip_selected()
-        
-        # Unequip current item
-        elif key == tcod.event.KeySym.DELETE:
-            return self._handle_unequip()
         
         # Exit
         elif key == tcod.event.KeySym.ESCAPE:
@@ -380,7 +378,7 @@ class EquipmentUI(AskUserEventHandler):
         return super().ev_keydown(event)
     
     def _handle_equip_selected(self) -> Optional[AskUserEventHandler]:
-        """Equip the currently selected item."""
+        """Equip or unequip the currently selected item."""
         if not self.slots:
             return None
             
@@ -398,43 +396,29 @@ class EquipmentUI(AskUserEventHandler):
             return None  # Stay in equipment UI
         
         compatible_items = self._get_compatible_items(selected_slot)
+        currently_equipped_in_slot = selected_slot.get_equipped_item(self.engine.player.equipment)
         
         if compatible_items and self.selected_item < len(compatible_items):
-            item_to_equip = compatible_items[self.selected_item]
+            selected_item = compatible_items[self.selected_item]
             
-            # Handle specific slot targeting for hands
-            if selected_slot.name == "L.Hand" and item_to_equip.equippable.equipment_type == EquipmentType.WEAPON:
-                # Force equip to offhand for left hand slot
-                if self.engine.player.equipment.offhand != item_to_equip:
-                    # If something is in offhand, swap it
-                    if self.engine.player.equipment.offhand:
-                        self.engine.player.equipment.unequip_item(self.engine.player.equipment.offhand, add_message=False)
-                    # If item is in weapon slot, move it to offhand
-                    if self.engine.player.equipment.weapon == item_to_equip:
-                        self.engine.player.equipment.weapon = None
-                        self.engine.player.equipment.grasped_items.discard(item_to_equip)
-                    self.engine.player.equipment.offhand = item_to_equip
-                    self.engine.player.equipment.grasped_items.add(item_to_equip)
-                    self.engine.player.equipment._play_equip_sound(item_to_equip)
-                    self.engine.player.equipment.equip_message(item_to_equip.name)
-            elif selected_slot.name == "R.Hand" and item_to_equip.equippable.equipment_type == EquipmentType.WEAPON:
-                # Force equip to weapon for right hand slot
-                if self.engine.player.equipment.weapon != item_to_equip:
-                    # If something is in weapon, swap it
-                    if self.engine.player.equipment.weapon:
-                        self.engine.player.equipment.unequip_item(self.engine.player.equipment.weapon, add_message=False)
-                    # If item is in offhand slot, move it to weapon
-                    if self.engine.player.equipment.offhand == item_to_equip:
-                        self.engine.player.equipment.offhand = None
-                        self.engine.player.equipment.grasped_items.discard(item_to_equip)
-                    self.engine.player.equipment.weapon = item_to_equip
-                    self.engine.player.equipment.grasped_items.add(item_to_equip)
-                    self.engine.player.equipment._play_equip_sound(item_to_equip)
-                    self.engine.player.equipment.equip_message(item_to_equip.name)
+            # Check if selected item is currently equipped in THIS slot
+            if selected_item == currently_equipped_in_slot:
+                # Unequip the item
+                if selected_slot.name == "L.Hand":
+                    self.engine.player.equipment.unequip_from_specific_hand("left hand")
+                elif selected_slot.name == "R.Hand":
+                    self.engine.player.equipment.unequip_from_specific_hand("right hand")
+                else:
+                    self.engine.player.equipment.unequip_item(selected_item, add_message=True)
             else:
-                # Standard equipping for other slots
-                action = actions.EquipAction(self.engine.player, item_to_equip)
-                action.perform()
+                # Equip the item
+                if selected_slot.name == "L.Hand":
+                    self.engine.player.equipment.equip_to_specific_hand(selected_item, "left hand")
+                elif selected_slot.name == "R.Hand":
+                    self.engine.player.equipment.equip_to_specific_hand(selected_item, "right hand")
+                else:
+                    action = actions.EquipAction(self.engine.player, selected_item)
+                    action.perform()
         
         return None  # Stay in equipment UI
     
@@ -459,17 +443,13 @@ class EquipmentUI(AskUserEventHandler):
         equipped_item = selected_slot.get_equipped_item(self.engine.player.equipment)
         
         if equipped_item:
-            # Handle specific hand slot unequipping
+            # Handle specific slot targeting for hands
             if selected_slot.name == "L.Hand":
-                if self.engine.player.equipment.offhand == equipped_item:
-                    self.engine.player.equipment.unequip_item(equipped_item, add_message=True)
-                elif self.engine.player.equipment.weapon == equipped_item and not self.engine.player.equipment.offhand:
-                    self.engine.player.equipment.unequip_item(equipped_item, add_message=True)
+                self.engine.player.equipment.unequip_from_specific_hand("left hand")
             elif selected_slot.name == "R.Hand":
-                if self.engine.player.equipment.weapon == equipped_item:
-                    self.engine.player.equipment.unequip_item(equipped_item, add_message=True)
+                self.engine.player.equipment.unequip_from_specific_hand("right hand")
             else:
-                # Standard unequipping for other slots
+                # Use standard unequip for other slots
                 self.engine.player.equipment.unequip_item(equipped_item, add_message=True)
         
         return None  # Stay in equipment UI
