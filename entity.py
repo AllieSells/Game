@@ -100,8 +100,16 @@ class Entity:
                 # Deep copy to avoid shared references
                 item_copy = copy.deepcopy(chosen_item)
                 item_copy.parent = self.inventory
-                # Use tag-based equip system
-                self.equipment.equip_item(item_copy, add_message=False)
+                
+                # Try to equip if possible
+                equipped = False
+                if item_copy.equippable:
+                    self.equipment.equip_item(item_copy, add_message=False)
+                    equipped = self.equipment.is_item_equipped(item_copy)
+                
+                # If it wasn't equipped (not equippable or failed to equip), add to inventory
+                if not equipped:
+                    self.inventory.items.append(item_copy)
 
     def move(self, dx: int, dy: int) -> None:
         #movement controls

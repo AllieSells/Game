@@ -796,20 +796,23 @@ def generate_dungeon(
             player.place(*new_room.center, dungeon)
             # Guaranteed campfire in first room
             place_campfires(dungeon, "dungeon_first_room", room=new_room, player_pos=new_room.center)
-            # Spawn a test chest for debugging in the first room, one tile to the right
-            try:
+            # Spawn a chest on first floor only
+            if engine.game_world.current_floor == 1:
                 # Build a small loot list: health potion + torch (deepcopy to avoid shared parents)
                 import copy as _copy
-                loot = [_copy.deepcopy(entity_factories.lesser_health_potion), _copy.deepcopy(entity_factories.torch), entity_factories.get_random_coins(1, 10), _copy.deepcopy(entity_factories.lightning_scroll)]
+                loot = [
+                    _copy.deepcopy(entity_factories.lesser_health_potion),
+                    _copy.deepcopy(entity_factories.torch),
+                    _copy.deepcopy(entity_factories.dagger),
+                    _copy.deepcopy(entity_factories.leather_armor),
+                    _copy.deepcopy(entity_factories.leather_cap),
+                ]
                 test_chest = entity_factories.make_chest_with_loot(loot, capacity=6)
                 cx, cy = new_room.center
                 chest_x, chest_y = min(dungeon.width - 1, cx + 1), cy
                 # Only place if empty
                 if not any(e.x == chest_x and e.y == chest_y for e in dungeon.entities):
                     test_chest.place(chest_x, chest_y, dungeon)
-            except Exception:
-                # If anything goes wrong, skip the test chest spawn
-                pass
         else:
             for x, y in tunnel_between(rooms[-1].center, new_room.center):
                 dungeon.tiles[x,y] = tile_types.random_floor_tile()

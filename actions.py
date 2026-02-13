@@ -485,7 +485,7 @@ class MeleeAction(ActionWithDirection):
         # Play hit sound if hit
         if hit_success and final_damage > 0:
             # If final blow, play different sound
-            if target.fighter.hp - final_damage <= 0:
+            if target.fighter.hp <=  final_damage:
                 sounds.play_attack_sound_finishing_blow()
             elif self.entity.equipment:
                 if target.equipment and target.equipment.equipped_items.get('ARMOR'):

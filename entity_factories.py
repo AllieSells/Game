@@ -187,6 +187,128 @@ fungus = Item(
     description="",
 )
 
+
+
+# =====================================================
+# FUNCTIONS
+# =====================================================
+
+def get_random_fungus() -> Item:
+    import random
+    fungus_types = {
+            "prefix": ["Cap", "Spot", "Gill", "Twist", "Iron", "Glow", "Silent", "Blood", "Red", "Blue", "Yellow",
+                       "Purple", "Green", "Black", "White", "Silver", "Golden", "Shiny", "Smoke", "Dust", "Oak", "Pine", "Birch", "Maple",
+                       "Dark"],
+            "suffix": ["cap", "cap", "cap", "cap", "cup", "stem", "sprout", "spore", "bloom", "shroom", "-agaric", "root", "stalk", "puff"]
+        }
+
+    prefix = random.choice(fungus_types["prefix"])
+    suffix = random.choice(fungus_types["suffix"])
+    name = f"{prefix}{suffix}"
+    description = "Placeholder"
+    color = (random.randint(100, 255), random.randint(100, 255), random.randint(100, 255))
+
+    # Color calibration based on name
+    if "Blue" in prefix:
+        color = (max(color[0]-50, 75), max(color[1]-50, 75), 255)
+    elif "Red" in prefix:
+        color = (255, max(color[1]-50, 75), max(color[2]-50, 75))
+
+    elif "Green" in prefix:
+        color = (max(color[0]-50, 75), 255, max(color[2]-50, 75))
+    elif "Yellow" in prefix:
+        color = (255, 255, max(color[2]-100, 75))
+    elif "Purple" in prefix:
+        color = (255, max(color[1]-100, 75), 255)
+    elif "Black" in prefix:
+        color = (0, 0, 0)
+    elif "White" in prefix:
+        color = (255, 255, 255)
+
+    if "cap" in suffix or "cup" in suffix or "-agaric" in suffix or "puff" in suffix:
+        char = ","
+    else:
+        char = "."
+    if name == "Capcap":
+        name = blue("L")+red("e")+green("g")+yellow("e")+purple("n")+white("d")+green("a")+cyan("r")+red("y") + " " + purple("C")+yellow("a")+white("p")+cyan("c")+purple("a")+green("p")
+        
+    
+    return Item(
+        char=char,
+        color=color,
+        name=name,
+        description=description,
+    )
+
+def get_random_coins(min_amount: int, max_amount: int) -> Item:
+    import random
+    amount = random.randint(min_amount, max_amount)
+    if amount == 1:
+        def_name = "Coin (1)"
+        def_description = "A shiny gold coin."
+    else:
+        def_name = "Pile of Coins (" + str(amount) + ")"
+        def_description = f"A pile of {amount} gold coins."
+
+    if amount == 1:
+        def_equip_sound = sounds.play_equip_coin_sound
+        def_unequip_sound = sounds.play_unequip_coin_sound
+        def_pickup_sound = sounds.pick_up_coin_sound
+        def_drop_sound = sounds.drop_coin_sound
+    else:
+        def_equip_sound = sounds.pick_up_manycoins_sound
+        def_unequip_sound = sounds.pick_up_manycoins_sound
+        def_pickup_sound = sounds.pick_up_manycoins_sound
+        def_drop_sound = sounds.drop_manycoins_sound
+    return Item(
+        char="$",
+        color=(255, 223, 0),    
+        name=def_name,
+        description=def_description,
+        value=amount,
+        weight=0.01 * amount,
+        equip_sound=def_equip_sound,
+        unequip_sound=def_unequip_sound,
+        pickup_sound=def_pickup_sound,
+        drop_sound=def_drop_sound,
+        rarity_color=color.coins
+    )
+
+
+
+
+# Attach a Container component to a chest template (not an Actor constructor arg
+# since the Actor expects certain component types). We'll create a light-weight
+# chest_entity factory that will 'spawn' and then attach a Container to it when
+# placed on the map via code elsewhere.
+def make_chest_with_loot(items: list, capacity: int = 10) -> Actor:
+    c = chest.spawn  # This is the Actor.spawn method; we want a template clone
+    # Instead we'll build a fresh Actor instance based on the chest template
+    new_chest = Actor(
+        char=chest.char,
+        color=chest.color,
+        name=chest.name,
+        ai_cls=None,
+        equipment=Equipment(),
+        fighter=None,
+        inventory=Inventory(capacity=0),
+        level=Level(xp_given=0),
+        description="A sturdy chest.",
+        sentient=False,
+    )
+    # Attach a Container component and populate it
+    cont = Container(capacity=capacity)
+    cont.parent = new_chest
+    for it in items:
+        cont.add(it)
+    # Make chest block movement so it occupies a tile
+    new_chest.blocks_movement = False
+    new_chest.render_order = RenderOrder.CHEST  # Below actors, above items
+    # Expose the container on the actor for easy checks
+    new_chest.container = cont
+    return new_chest
+
+
 # =====================================================
 # ACTORS - All actor definitions grouped together
 # =====================================================
@@ -252,6 +374,15 @@ goblin = Actor(
     verb_participial="clawing",
     dodge_chance=0.15, 
     equipment_table={
+        "coins": {
+            get_random_coins(1,5): 30,
+            None: 70
+
+        },
+        "potion": {
+            lesser_health_potion: 10,
+            None: 90
+        },
         "weapon": {
             dagger: 20,
             None: 80
@@ -336,122 +467,3 @@ quest_giver = Actor(
     type = "NPC",
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
 )
-
-# =====================================================
-# FUNCTIONS
-# =====================================================
-
-def get_random_fungus() -> Item:
-    import random
-    fungus_types = {
-            "prefix": ["Cap", "Spot", "Gill", "Twist", "Iron", "Glow", "Silent", "Blood", "Red", "Blue", "Yellow",
-                       "Purple", "Green", "Black", "White", "Silver", "Golden", "Shiny", "Smoke", "Dust", "Oak", "Pine", "Birch", "Maple",
-                       "Dark"],
-            "suffix": ["cap", "cap", "cap", "cap", "cup", "stem", "sprout", "spore", "bloom", "shroom", "-agaric", "root", "stalk", "puff"]
-        }
-
-    prefix = random.choice(fungus_types["prefix"])
-    suffix = random.choice(fungus_types["suffix"])
-    name = f"{prefix}{suffix}"
-    description = "Placeholder"
-    color = (random.randint(100, 255), random.randint(100, 255), random.randint(100, 255))
-
-    # Color calibration based on name
-    if "Blue" in prefix:
-        color = (max(color[0]-50, 75), max(color[1]-50, 75), 255)
-    elif "Red" in prefix:
-        color = (255, max(color[1]-50, 75), max(color[2]-50, 75))
-
-    elif "Green" in prefix:
-        color = (max(color[0]-50, 75), 255, max(color[2]-50, 75))
-    elif "Yellow" in prefix:
-        color = (255, 255, max(color[2]-100, 75))
-    elif "Purple" in prefix:
-        color = (255, max(color[1]-100, 75), 255)
-    elif "Black" in prefix:
-        color = (0, 0, 0)
-    elif "White" in prefix:
-        color = (255, 255, 255)
-
-    if "cap" in suffix or "cup" in suffix or "-agaric" in suffix or "puff" in suffix:
-        char = ","
-    else:
-        char = "."
-    if name == "Capcap":
-        name = blue("L")+red("e")+green("g")+yellow("e")+purple("n")+white("d")+green("a")+cyan("r")+red("y") + " " + purple("C")+yellow("a")+white("p")+cyan("c")+purple("a")+green("p")
-        
-    
-    return Item(
-        char=char,
-        color=color,
-        name=name,
-        description=description,
-    )
-
-def get_random_coins(min_amount: int, max_amount: int) -> Item:
-    import random
-    amount = random.randint(min_amount, max_amount)
-    if amount == 1:
-        def_name = "Coin"
-        def_description = "A shiny gold coin."
-    else:
-        def_name = "Pile of Coins"
-        def_description = f"A pile of {amount} gold coins."
-
-    if amount == 1:
-        def_equip_sound = sounds.play_equip_coin_sound
-        def_unequip_sound = sounds.play_unequip_coin_sound
-        def_pickup_sound = sounds.pick_up_coin_sound
-        def_drop_sound = sounds.drop_coin_sound
-    else:
-        def_equip_sound = sounds.pick_up_manycoins_sound
-        def_unequip_sound = sounds.pick_up_manycoins_sound
-        def_pickup_sound = sounds.pick_up_manycoins_sound
-        def_drop_sound = sounds.drop_manycoins_sound
-    return Item(
-        char="$",
-        color=(255, 223, 0),    
-        name=def_name,
-        description=def_description,
-        value=amount,
-        weight=0.01 * amount,
-        equip_sound=def_equip_sound,
-        unequip_sound=def_unequip_sound,
-        pickup_sound=def_pickup_sound,
-        drop_sound=def_drop_sound,
-        rarity_color=color.coins
-    )
-
-
-
-
-# Attach a Container component to a chest template (not an Actor constructor arg
-# since the Actor expects certain component types). We'll create a light-weight
-# chest_entity factory that will 'spawn' and then attach a Container to it when
-# placed on the map via code elsewhere.
-def make_chest_with_loot(items: list, capacity: int = 10) -> Actor:
-    c = chest.spawn  # This is the Actor.spawn method; we want a template clone
-    # Instead we'll build a fresh Actor instance based on the chest template
-    new_chest = Actor(
-        char=chest.char,
-        color=chest.color,
-        name=chest.name,
-        ai_cls=None,
-        equipment=Equipment(),
-        fighter=None,
-        inventory=Inventory(capacity=0),
-        level=Level(xp_given=0),
-        description="A sturdy chest.",
-        sentient=False,
-    )
-    # Attach a Container component and populate it
-    cont = Container(capacity=capacity)
-    cont.parent = new_chest
-    for it in items:
-        cont.add(it)
-    # Make chest block movement so it occupies a tile
-    new_chest.blocks_movement = False
-    new_chest.render_order = RenderOrder.CHEST  # Below actors, above items
-    # Expose the container on the actor for easy checks
-    new_chest.container = cont
-    return new_chest
