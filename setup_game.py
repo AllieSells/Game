@@ -16,7 +16,8 @@ from engine import Engine
 import entity_factories
 from game_map import GameWorld
 import input_handlers
-
+from render_functions import MenuRenderer
+import sounds
 
 
 # Load the background image and remove the alpha channel.
@@ -47,6 +48,9 @@ def new_game() -> Engine:
 
     engine = Engine(player=player)
     print(engine)
+    
+    # Set world generation flag to suppress equipment sounds
+    engine.is_generating_world = True
 
     engine.game_world = GameWorld(
         engine=engine,
@@ -65,6 +69,9 @@ def new_game() -> Engine:
 
     engine.game_world.generate_floor()
     engine.update_fov()
+    
+    # Clear world generation flag after generation is complete
+    engine.is_generating_world = False
 
     engine.message_log.add_message("Press ? For Controls")
     engine.message_log.add_message(
@@ -84,6 +91,9 @@ def new_debug_game() -> Engine:
     player.level.current_xp = 340
     
     engine = Engine(player=player)
+    
+    # Set world generation flag to suppress equipment sounds
+    engine.is_generating_world = True
     
     # Create a simple empty map
     from game_map import GameMap
@@ -288,6 +298,9 @@ def new_debug_game() -> Engine:
     engine.message_log.add_message("Features: Sound test areas, liquid coating system", color.yellow)
     engine.message_log.add_message("Check your inventory (I) and test wandering enemies!", color.yellow)
     
+    # Clear world generation flag after debug setup is complete
+    engine.is_generating_world = False
+    
     return engine
 
 def load_game(filename: str) -> Engine:
@@ -336,9 +349,19 @@ class LoadingScreen(input_handlers.BaseEventHandler):
     
     def on_render(self, console: tcod.Console) -> None:
         try:
-            """Render the loading screen."""
+            """Render the loading screen with parchment styling."""
             # Use the same background as main menu
             console.draw_semigraphics(background_image, 0, 0)
+            
+            # Calculate window dimensions and position
+            window_width = 60
+            window_height = 20
+            x = (console.width - window_width) // 2
+            y = (console.height - window_height) // 2
+            
+            # Draw parchment background and ornate border
+            MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+            MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "World Generation")
             
             # Animate dots
             self.frame_count += 1
@@ -355,19 +378,18 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             
             # Display loading message
             console.print(
-                console.width // 2,
-                console.height // 2 - 2,
+                x + (window_width // 2),
+                y + 3,
                 current_text,
-                fg=color.menu_title,
-                bg=color.black,
+                fg=color.gold_accent,
+                bg=color.parchment_bg,
                 alignment=tcod.CENTER,
-                bg_blend=tcod.BKGND_ALPHA(64),
             )
             
-            # Show progress bar
-            bar_width = 50
-            bar_x = (console.width - bar_width) // 2
-            bar_y = console.height // 2 + 1
+            # Show ornate progress bar
+            bar_width = window_width - 8  # Leave margin inside window
+            bar_x = x + 4
+            bar_y = y + 5
             
             # Calculate progress percentage
             if self.generation_complete:
@@ -375,35 +397,73 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             else:
                 progress = self.current_step / len(self.generation_steps)
             
-            # Draw progress bar frame
-            console.print(bar_x, bar_y, "[" + " " * (bar_width - 2) + "]", fg=color.white)
+            # Draw ornate progress bar frame with fantasy styling
+            console.print(bar_x, bar_y, "╟", fg=color.bronze_border, bg=color.parchment_bg)
+            console.print(bar_x + bar_width - 1, bar_y, "╢", fg=color.bronze_border, bg=color.parchment_bg)
             
-            # Fill progress bar
+            # Fill the bar interior
             fill_width = int((bar_width - 2) * progress)
-            if fill_width > 0:
-                console.print(bar_x + 1, bar_y, "=" * fill_width, fg=color.green if self.generation_complete else color.yellow)
+            for i in range(bar_width - 2):
+                if i < fill_width:
+                    if self.generation_complete:
+                        char = "█"
+                        fg = color.gold_accent
+                    else:
+                        char = "▓"
+                        fg = color.bronze_text
+                else:
+                    char = "░"
+                    fg = color.dark_gray
+                console.print(bar_x + 1 + i, bar_y, char, fg=fg, bg=color.parchment_bg)
             
-            # Show percentage
+            # Show percentage with ornate styling
             percentage = int(progress * 100)
             console.print(
-                console.width // 2,
+                x + (window_width // 2),
                 bar_y + 2,
-                f"{percentage}%",
-                fg=color.white,
+                f"◦ {percentage}% Complete ◦",
+                fg=color.bronze_text,
+                bg=color.parchment_bg,
                 alignment=tcod.CENTER,
             )
             
-            # Show completed steps
-            step_y = console.height // 2 + 4
+            # Show completed steps in a fancy list
+            step_y = y + 9
+            steps_shown = 0
             for i, step in enumerate(self.generation_steps[:self.current_step]):
-                if step_y + i < console.height - 3:  # Make sure we don't go off screen
+                if step_y + steps_shown < y + window_height - 3:  # Make sure we don't go off screen
+                    # Use ornate checkmark and fantasy styling
+                    step_text = f"✦ {step.replace('...', '')}"
                     console.print(
-                        console.width // 2,
-                        step_y + i,
-                        f"✓ {step.replace('...', '')}",
-                        fg=color.green,
-                        alignment=tcod.CENTER,
+                        x + 3,
+                        step_y + steps_shown,
+                        step_text[:window_width - 6],  # Truncate if too long
+                        fg=color.fantasy_text,
+                        bg=color.parchment_bg,
                     )
+                    steps_shown += 1
+            
+            # Show instructions
+            if not self.generation_complete:
+                instructions_y = y + window_height - 2
+                console.print(
+                    x + (window_width // 2),
+                    instructions_y,
+                    "[Esc] Cancel",
+                    fg=color.light_gray,
+                    bg=color.parchment_bg,
+                    alignment=tcod.CENTER,
+                )
+            else:
+                instructions_y = y + window_height - 2
+                console.print(
+                    x + (window_width // 2),
+                    instructions_y,
+                    "[Any Key] Continue",
+                    fg=color.gold_accent,
+                    bg=color.parchment_bg,
+                    alignment=tcod.CENTER,
+                )
             
             # If generation hasn't started, start it
             if not self.generation_started:
@@ -522,62 +582,153 @@ class DebugLevelScreen(input_handlers.BaseEventHandler):
 
 class MainMenu(input_handlers.BaseEventHandler):
     """Handle the main menu rendering and input."""
+    
+    def __init__(self):
+        super().__init__()
+        self.menu_options = [
+            ("Play a new game", "start_new"),
+            ("Continue last game", "load_game"), 
+            ("Debug Level", "debug_level"),
+            ("Quit", "quit")
+        ]
+        self.selected_option = 0
+        # Start menu ambience only if not already playing
+        sounds.start_menu_ambience()
 
     def on_render(self, console: tcod.Console) -> None:
-        """Render the main menu on a background image."""
+        """Render the main menu with parchment styling and arrow key selection."""
         console.draw_semigraphics(background_image, 0, 0)
 
+        # Calculate menu window dimensions and position
+        window_width = 40
+        window_height = 16
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height) // 2 - 2
+
+        # Draw parchment background and ornate border
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "WORK IN PROGRESS TITLE?")
+
+        # Draw menu options with selection highlighting
+        menu_start_y = y + 4
+        for i, (option_text, _) in enumerate(self.menu_options):
+            is_selected = i == self.selected_option
+            bg_color = (80, 60, 30) if is_selected else (45, 35, 25)
+            fg_color = color.gold_accent if is_selected else color.fantasy_text
+            marker = "> " if is_selected else "  "
+            marker2 = " <" if is_selected else "  "
+            
+            # Draw option with background
+            option_y = menu_start_y + i * 2
+            full_text = f"{marker}{option_text}{marker2}".center(window_width - 4)
+            
+            # Draw background for the entire line
+            for dx in range(window_width - 2):
+                console.print(x + 1 + dx, option_y, " ", bg=bg_color)
+            
+            console.print(
+                x + (window_width // 2),
+                option_y,
+                full_text.strip(),
+                fg=fg_color,
+                bg=bg_color,
+                alignment=tcod.CENTER
+            )
+
+        # Draw footer information with parchment styling
+        footer_y = y + window_height - 3
         console.print(
-            console.width // 2,
-            console.height // 2 - 4,
-            "WORK IN PROGRESS TITLE?",
-            fg=color.menu_title,
-            bg=color.black,
+            x + (window_width // 2),
+            footer_y,
+            "oxenfree",
+            fg=color.bronze_text,
+            bg=color.parchment_bg,
             alignment=tcod.CENTER,
-            bg_blend=tcod.BKGND_ALPHA(64),
         )
         console.print(
-            console.width // 2,
-            console.height - 3,
-            "oxenfree\n2025\nVersion 0.11 Pre-Alpha",
-            fg=color.menu_title,
+            x + (window_width // 2),
+            footer_y + 1,
+            "2026 - Version 0.1.2 Beta",
+            fg=color.bronze_text,
+            bg=color.parchment_bg,
             alignment=tcod.CENTER,
         )
 
-        menu_width = 24
-        for i, text in enumerate(
-            ["[N] Play a new game", "[C] Continue last game", "[D] Debug Level", "[Q] Quit"]
-        ):
-            console.print(
-                console.width // 2,
-                console.height // 2 - 2 + i,
-                text.ljust(menu_width),
-                fg=color.menu_text,
-                bg=color.black,
-                alignment=tcod.CENTER,
-                bg_blend=tcod.BKGND_ALPHA(64),
-            )
+        # Draw instructions outside the window
+        instructions_y = y + window_height + 1
+        console.print(
+            console.width // 2,
+            instructions_y,
+            "[↑↓] Navigate  [Space] Select  [Esc] Quit",
+            fg=color.fantasy_text,
+            alignment=tcod.CENTER,
+        )
 
     def ev_keydown(
         self, event: tcod.event.KeyDown
     ) -> Optional[input_handlers.BaseEventHandler]:
-        if event.sym in (tcod.event.KeySym.Q, tcod.event.K_ESCAPE):
-            raise SystemExit()
+        sounds.play_menu_move_sound()
+        if event.sym == tcod.event.KeySym.UP:
+            self.selected_option = (self.selected_option - 1) % len(self.menu_options)
+            return None
+        elif event.sym == tcod.event.KeySym.DOWN:
+            self.selected_option = (self.selected_option + 1) % len(self.menu_options)
+            return None
+        elif event.sym in (tcod.event.KeySym.RETURN, tcod.event.KeySym.KP_ENTER, tcod.event.KeySym.SPACE):
+            return self._handle_selection()
+        elif event.sym in (tcod.event.KeySym.Q, tcod.event.K_ESCAPE):
+            if self.selected_option == 3:  # Quit option
+                raise SystemExit()
+            else:
+                # Move selection to Quit option
+                self.selected_option = 3
+                return None
+            
+        # Legacy key support (optional - can be removed if desired)
         elif event.sym == tcod.event.KeySym.C:
+            self.selected_option = 1  # Continue option
+            return self._handle_selection()
+        elif event.sym == tcod.event.KeySym.N:
+            self.selected_option = 0  # New game option 
+            return self._handle_selection()
+        elif event.sym == tcod.event.KeySym.D:
+            self.selected_option = 2  # Debug option
+            return self._handle_selection()
+
+        return None
+    
+    def _handle_selection(self) -> Optional[input_handlers.BaseEventHandler]:
+        """Handle the currently selected menu option."""
+        if self.selected_option >= len(self.menu_options):
+            return None
+            
+        _, action = self.menu_options[self.selected_option]
+        
+        if action == "quit":
+            sounds.stop_menu_ambience()
+            raise SystemExit()
+        elif action == "load_game":
+            # Stop menu ambience when leaving menu
+            sounds.stop_menu_ambience()
             print("TEST")
             try:
+                sounds.play_stairs_sound()
                 return input_handlers.MainGameEventHandler(load_game("savegame.sav"))
             except FileNotFoundError:
                 return input_handlers.PopupMessage(self, "No saved game to load.")
             except Exception as exc:
                 traceback.print_exc() # print to stderr
                 return input_handlers.PopupMessage(self, f"Failed to load save :\n{exc}")
-            pass
-        elif event.sym == tcod.event.KeySym.N:
+        elif action == "start_new":
+            # Stop menu ambience when leaving menu  
+            sounds.stop_menu_ambience()
             # Skip character creation and start game directly
+            sounds.play_stairs_sound()
             return LoadingScreen(self)
-        elif event.sym == tcod.event.KeySym.D:
+        elif action == "debug_level":
+            # Stop menu ambience when leaving menu
+            sounds.stop_menu_ambience() 
             # Create debug level
             return DebugLevelScreen(self)
-
+        
         return None

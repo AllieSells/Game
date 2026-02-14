@@ -801,10 +801,10 @@ def generate_dungeon(
                 # Build a small loot list: health potion + torch (deepcopy to avoid shared parents)
                 import copy as _copy
                 loot = [
-                    _copy.deepcopy(entity_factories.lesser_health_potion),
+                    _copy.deepcopy(entity_factories.health_potion),
                     _copy.deepcopy(entity_factories.torch),
                     _copy.deepcopy(entity_factories.dagger),
-                    _copy.deepcopy(entity_factories.leather_armor),
+                    _copy.deepcopy(entity_factories.generate_leather_armor()),
                     _copy.deepcopy(entity_factories.leather_cap),
                 ]
                 test_chest = entity_factories.make_chest_with_loot(loot, capacity=6)

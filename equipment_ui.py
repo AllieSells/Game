@@ -17,7 +17,7 @@ import actions
 if TYPE_CHECKING:
     from engine import Engine
     from entity import Item
-
+import sounds
 
 class EquipmentSlot:
     """Represents a visual equipment slot on the body diagram."""
@@ -340,12 +340,15 @@ class EquipmentUI(AskUserEventHandler):
         return False
     
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[AskUserEventHandler]:
+        sounds.play_ui_move_sound()
         key = event.sym
+        
         
         # Slot navigation
         if key == tcod.event.KeySym.UP:
             self.selected_slot = max(0, self.selected_slot - 1)
             self.selected_item = 0  # Reset item selection when changing slots
+            
             return None
         elif key == tcod.event.KeySym.DOWN:
             self.selected_slot = min(len(self.slots) - 1, self.selected_slot + 1)

@@ -369,6 +369,14 @@ class Equipment(BaseComponent):
 
     def _play_equip_sound(self, item: Item) -> None:
         """Play equipment sound for an item."""
+        # Skip sounds during world generation or level transitions
+        try:
+            engine = self.parent.gamemap.engine
+            if getattr(engine, 'is_generating_world', False) or getattr(engine, 'is_transitioning_level', False):
+                return
+        except Exception:
+            pass
+            
         if hasattr(item, "equip_sound") and item.equip_sound is not None:
             try:
                 item.equip_sound()
@@ -377,6 +385,14 @@ class Equipment(BaseComponent):
     
     def _play_unequip_sound(self, item: Item) -> None:
         """Play unequip sound for an item."""
+        # Skip sounds during world generation or level transitions
+        try:
+            engine = self.parent.gamemap.engine
+            if getattr(engine, 'is_generating_world', False) or getattr(engine, 'is_transitioning_level', False):
+                return
+        except Exception:
+            pass
+            
         if hasattr(item, "unequip_sound") and item.unequip_sound is not None:
             try:
                 item.unequip_sound()

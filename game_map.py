@@ -477,6 +477,9 @@ class GameWorld:
         """
         current_map = self.engine.game_map
         player_pos = (self.engine.player.x, self.engine.player.y)
+        
+        # Set level transition flag to suppress equipment sounds
+        self.engine.is_transitioning_level = True
 
         # Push current map onto up_stack (so we can ascend later)
         self.up_stack.append((current_map, player_pos, self.current_floor))
@@ -520,6 +523,9 @@ class GameWorld:
                 sounds.refresh_all_ambient_sounds(self.engine.player, next_map.entities, next_map)
             except Exception:
                 pass
+                
+            # Clear level transition flag after restoration is complete
+            self.engine.is_transitioning_level = False
 
             return
 
@@ -540,6 +546,9 @@ class GameWorld:
             sounds.refresh_all_ambient_sounds(self.engine.player, self.engine.game_map.entities, self.engine.game_map)
         except Exception:
             pass
+            
+        # Clear level transition flag after everything is complete
+        self.engine.is_transitioning_level = False
 
     def ascend(self) -> None:
         """Ascend one level.
@@ -552,6 +561,9 @@ class GameWorld:
         # If nothing to ascend to, do nothing
         if len(self.up_stack) == 0:
             return
+            
+        # Set level transition flag to suppress equipment sounds
+        self.engine.is_transitioning_level = True
 
         current_map = self.engine.game_map
         current_player_pos = (self.engine.player.x, self.engine.player.y)
@@ -601,4 +613,7 @@ class GameWorld:
             sounds.refresh_all_ambient_sounds(self.engine.player, prev_map.entities, prev_map)
         except Exception:
             pass
+            
+        # Clear level transition flag after restoration is complete
+        self.engine.is_transitioning_level = False
 

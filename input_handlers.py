@@ -164,6 +164,7 @@ class EventHandler(BaseEventHandler):
 class AskUserEventHandler(EventHandler):
     # Handles user input for actions with special input
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        
         # any key exits this handler
         if event.sym in {  # Ignore modifier keys.
             tcod.event.K_LSHIFT,
@@ -553,6 +554,7 @@ class DialogueEventHandler(AskUserEventHandler):
         console.print(x + 2, instructions_y, "↑↓: Navigate  Enter: Select  Esc: Exit", fg=color.grey)
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        sounds.play_ui_move_sound()
         current_menu_data = self.menu_structure[self.current_menu]
         options = current_menu_data["options"]
         key = event.sym
@@ -686,6 +688,7 @@ class LevelUpEventHandler(AskUserEventHandler):
         )
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        sounds.play_ui_move_sound()
         player = self.engine.player
         key = event.sym
         index = key - tcod.event.KeySym.A
@@ -856,6 +859,7 @@ class ContainerEventHandler(AskUserEventHandler):
         console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        sounds.play_ui_move_sound()
         player = self.engine.player
         key = event.sym
         modifier = event.mod
@@ -1614,6 +1618,7 @@ class InventoryEventHandler(AskUserEventHandler):
         return lines[:6]
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        sounds.play_ui_move_sound()
         player = self.engine.player
         key = event.sym
         modifier = event.mod

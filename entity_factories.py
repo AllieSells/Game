@@ -13,6 +13,8 @@ from render_order import RenderOrder
 import components.names as names
 import sounds
 from text_utils import *
+from random import random
+import copy
 
 lesser_health_potion = Item(
     char="!",
@@ -25,6 +27,18 @@ lesser_health_potion = Item(
     pickup_sound=sounds.pick_up_glass_sound,
     drop_sound=sounds.drop_glass_sound,
     rarity_color=color.common
+)
+health_potion = Item(
+    char="!",
+    color=(255,0,0),
+    name="Health Potion",
+    consumable=consumable.HealingConsumables(amount=15),
+    description="A medium vial filled with a red liquid.",
+    equip_sound=sounds.play_equip_glass_sound,
+    unequip_sound=sounds.play_unequip_glass_sound,
+    pickup_sound=sounds.pick_up_glass_sound,
+    drop_sound=sounds.drop_glass_sound,
+    rarity_color=color.uncommon
 )
 lightning_scroll = Item(
     char="~",
@@ -274,6 +288,20 @@ def get_random_coins(min_amount: int, max_amount: int) -> Item:
         rarity_color=color.coins
     )
 
+# =====================================================
+# EQUIPMENT GENERATORS
+# =====================================================
+def generate_leather_armor() -> Item:
+    # Deep copy the base leather armor and modify its properties
+    new_armor = copy.deepcopy(leather_armor)
+    # Roll for enchantment
+    if random() < 0.2:  # 20% chance for an enchantment
+        new_armor.equippable.defense_bonus += 1  # Add a small bonus to defense
+        new_armor.name = new_armor.name + " +I"
+        new_armor.rarity_color = color.uncommon
+    return new_armor
+    
+
 
 
 
@@ -392,7 +420,7 @@ goblin = Actor(
             None: 75
         },
         "armor": {
-            leather_armor: 25,
+            generate_leather_armor(): 25,
             None: 75
         }
     }

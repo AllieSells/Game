@@ -100,6 +100,20 @@ def play_death_sound():
     death_sound = pygame.mixer.Sound("RP/sfx/death/humanoid_death.mp3")
     play_sound_with_pitch_variation(death_sound, volume=0.25)
 
+# Menu Sounds
+def play_menu_move_sound():
+    menu_move_sounds = [
+        #pygame.mixer.Sound("RP/sfx/buttons/button1.wav"),
+        pygame.mixer.Sound("RP/sfx/buttons/button2.wav"),
+    ]
+    sound = random.choice(menu_move_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.15), volume=1)
+
+#UI move sound
+def play_ui_move_sound():
+    sound = pygame.mixer.Sound("RP/sfx/buttons/UI/button1.wav")
+    play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.15), volume=0.5)
+
 
 #Door sounds
 def play_door_open_sound():
@@ -483,6 +497,14 @@ AMBIENT_TYPES = {
         proximity_threshold=999,  # Always play in dungeons
         base_volume=0.5
     ),
+    'menu': AmbientSoundType(
+        name='menu',
+        sound_file='RP/sfx/loops/menu/menu.wav',  # Reuse dungeon loop for now
+        entity_names=[None],
+        map_type=None,
+        proximity_threshold=999,  # Always play when active
+        base_volume=0.2
+    ),
     # Future ambient types can be added here:
     # 'water': AmbientSoundType(
     #     name='water', 
@@ -570,6 +592,11 @@ class AmbientSoundManager:
             return
             
         config = AMBIENT_TYPES[ambient_type]
+        
+        # Initialize ambient state if it doesn't exist
+        if ambient_type not in self.active_ambients:
+            self.active_ambients[ambient_type] = {'channel': None, 'sound': None, 'active': False}
+            
         ambient_state = self.active_ambients[ambient_type]
         
         try:
@@ -597,8 +624,11 @@ class AmbientSoundManager:
     
     def update_ambient_sounds(self, player, entities, game_map):
         """Update all ambient sounds based on player proximity."""
-        # Check each ambient type
+        # Check each ambient type (excluding menu which is manually controlled)
         for ambient_type in AMBIENT_TYPES:
+            if ambient_type == 'menu':  # Skip menu - it's manually controlled
+                continue
+                
             config = AMBIENT_TYPES[ambient_type]
             player_near_source = False
             max_sound_strength = 0.0
@@ -623,6 +653,9 @@ class AmbientSoundManager:
 
 # Global ambient sound manager instance
 _ambient_manager = AmbientSoundManager()
+
+# Global menu state tracking
+_menu_ambience_active = False
 
 # CONVENIENCE FUNCTIONS - Maintain backwards compatibility
 
@@ -748,6 +781,27 @@ def start_ambient_sound(ambient_type: str, volume: float = None):
 
 def stop_ambient_sound(ambient_type: str):
     """Stop an ambient sound loop."""
+    global _menu_ambience_active
+    if ambient_type == 'menu':
+        _menu_ambience_active = False
     _ambient_manager.stop_ambient_loop(ambient_type)
+
+def start_menu_ambience():
+    """Start menu ambience if not already playing."""
+    global _menu_ambience_active
+    if not _menu_ambience_active:
+        _menu_ambience_active = True
+        start_ambient_sound('menu', volume=0.75)
+
+def stop_menu_ambience():
+    """Stop menu ambience."""
+    global _menu_ambience_active
+    if _menu_ambience_active:
+        _menu_ambience_active = False
+        stop_ambient_sound('menu')
+
+def is_menu_ambience_playing():
+    """Check if menu ambience is currently playing."""
+    return _menu_ambience_active
 
 

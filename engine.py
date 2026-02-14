@@ -49,6 +49,10 @@ class Engine:
         # Movement sound system
         self.last_movement_time = 0
         self.min_time_between_sounds = 0.15  # Minimum 150ms between walk sounds
+        
+        # Sound control flags
+        self.is_generating_world = False  # Flag to suppress sounds during world generation
+        self.is_transitioning_level = False  # Flag to suppress sounds during level transitions
 
     def get_adjacent_tiles(self, x: int, y: int) -> list[tuple[int, int]]:
         # Returns adjacent (including diagonals) tiles
