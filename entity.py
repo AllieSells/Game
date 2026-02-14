@@ -99,6 +99,8 @@ class Entity:
             if chosen_item is not None:
                 # Deep copy to avoid shared references
                 item_copy = copy.deepcopy(chosen_item)
+                # Roll for enchantment
+                item_copy.
                 item_copy.parent = self.inventory
                 
                 # Try to equip if possible
@@ -705,4 +707,14 @@ class Item(Entity):
         self.verb_past = verb_past or self.verb_base + "d"
         self.verb_participial = verb_participial or self.verb_base + "ing"
         self.rarity_color = rarity_color
+
+
+    def enchant_roll(self, item: Item, enchantment_chance: float) -> Item:
+        """Rolls given chance to apply enchantment"""
+        # Check if item is equippable
+        if item.equippable:
+            if random.random() < enchantment_chance:
+                # Enchant
+                if random.random() < 1.0:
+                    if item.equippable.defense_bonus > 
         

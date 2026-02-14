@@ -112,7 +112,7 @@ def play_menu_move_sound():
 #UI move sound
 def play_ui_move_sound():
     sound = pygame.mixer.Sound("RP/sfx/buttons/UI/button1.wav")
-    play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.15), volume=0.5)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.5), volume=1.0)
 
 
 #Door sounds

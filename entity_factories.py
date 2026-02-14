@@ -300,6 +300,17 @@ def generate_leather_armor() -> Item:
         new_armor.name = new_armor.name + " +I"
         new_armor.rarity_color = color.uncommon
     return new_armor
+
+def roll_enchantment(item: Item) -> Item:
+    # Check if item is equippable first
+    if item.equippable:
+        # Check if item is armor
+        if item.equippable.defense_bonus > 0:
+            item.equippable.defense_bonus += 1
+            item.name = item.name + " +I"
+            item.rarity_color = color.uncommon
+
+
     
 
 

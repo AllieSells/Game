@@ -859,7 +859,6 @@ class ContainerEventHandler(AskUserEventHandler):
         console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
-        sounds.play_ui_move_sound()
         player = self.engine.player
         key = event.sym
         modifier = event.mod
@@ -873,13 +872,20 @@ class ContainerEventHandler(AskUserEventHandler):
 
         # Arrow-key navigation: up/down to move selection, Enter to confirm
         if key == tcod.event.K_UP:
+            # Check if selection is in bounds, then play UI sound
+            if self.selected_index > 0:
+                sounds.play_ui_move_sound()
             self.selected_index = max(0, self.selected_index - 1)
             return None
         elif key == tcod.event.K_DOWN:
+            
             if self.menu == "Player":
                 max_index = max(0, len(self.engine.player.inventory.items) - 1)
             else:
                 max_index = max(0, len(self.container.items) - 1)
+            # Check if selection is in bounds, then play UI sound
+            if self.selected_index < max_index:
+                sounds.play_ui_move_sound()
             self.selected_index = min(max_index, self.selected_index + 1)
             return None
         elif key in CONFIRM_KEYS:

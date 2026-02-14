@@ -340,17 +340,25 @@ class EquipmentUI(AskUserEventHandler):
         return False
     
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[AskUserEventHandler]:
-        sounds.play_ui_move_sound()
         key = event.sym
         
         
         # Slot navigation
         if key == tcod.event.KeySym.UP:
+            # Check if selected slot would have been -1 (out of bounds) before moving up, to play sound only on valid moves
+            if self.selected_slot > 0:
+                sounds.play_ui_move_sound()
+                
             self.selected_slot = max(0, self.selected_slot - 1)
+            
+                
             self.selected_item = 0  # Reset item selection when changing slots
             
             return None
         elif key == tcod.event.KeySym.DOWN:
+            # Check if selected slot would have been out of bounds before moving down, to play sound only on valid moves
+            if self.selected_slot < len(self.slots) - 1:
+                sounds.play_ui_move_sound()
             self.selected_slot = min(len(self.slots) - 1, self.selected_slot + 1)
             self.selected_item = 0  # Reset item selection when changing slots
             return None
@@ -360,12 +368,16 @@ class EquipmentUI(AskUserEventHandler):
             if self.slots:
                 compatible_items = self._get_compatible_items(self.slots[self.selected_slot])
                 if compatible_items:
+                    # Check if items exist before playing sound and changing selection
+                    sounds.play_ui_move_sound()
                     self.selected_item = (self.selected_item - 1) % len(compatible_items)
             return None
         elif key == tcod.event.KeySym.RIGHT:
             if self.slots:
                 compatible_items = self._get_compatible_items(self.slots[self.selected_slot])
                 if compatible_items:
+                    # Check if items exist before playing sound and changing selection
+                    sounds.play_ui_move_sound()
                     self.selected_item = (self.selected_item + 1) % len(compatible_items)
             return None
         
