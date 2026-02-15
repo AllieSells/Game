@@ -2,7 +2,7 @@
 import re
 import tcod
 import color
-
+from typing import Optional, Tuple, TYPE_CHECKING
 
 def parse_colored_text(text: str, default_color=color.white) -> list:
     """
@@ -121,30 +121,15 @@ def print_colored_markup(console: tcod.console.Console, x: int, y: int, text: st
     return print_colored_text(console, x, y, parts)
 
 
-def print_colored_text(console: tcod.console.Console, x: int, y: int, text_parts: list) -> int:
-    """
-    Print text with multiple colors on the same line.
-    
-    Args:
-        console: The tcod console to print to
-        x: Starting x position
-        y: Y position
-        text_parts: List of tuples (text, color)
-    
-    Returns:
-        The final x position after all text is printed
-        
-    Example:
-        parts = [
-            ("Hello ", color.white),
-            ("World", color.blue),
-            ("!", color.red)
-        ]
-        print_colored_text(console, 10, 5, parts)
-    """
+def print_colored_text(console: tcod.console.Console, x: int, y: int, text_parts: list, max_width: Optional[int] = None) -> int:
     current_x = x
     for text, text_color in text_parts:
+        if max_width and current_x + len(text) > max_width:
+            # If text exceeds max width, wrap to next line 
+            y += 1
+            current_x = x
         console.print(current_x, y, text, fg=text_color)
+        # Don't skip y increment here since we're printing on the same line; just move x forward
         current_x += len(text)
     return current_x
 
@@ -176,6 +161,43 @@ def print_colored_text_with_bg(console: tcod.console.Console, x: int, y: int, te
         console.print(current_x, y, text, fg=text_color, bg=bg_color)
         current_x += len(text)
     return current_x
+
+def print_wrapped_colored_text(console: tcod.console.Console, x: int, y: int, text: list, max_width: int, default_color=color.white) -> int:
+    """Prints colored text fragments from list, wrapping to new lines when width is exceeded."""
+    current_x = x
+    current_y = y
+    
+    for i, text_fragment in enumerate(text):
+        text_part = text_fragment[0]
+        print(text_part)  # Debug: print the text part being processed
+        text_color = text_fragment[1]
+        
+        # Skip empty fragments
+        if not text_part:
+            continue
+            
+        # Trim leading space if we're at the start of a line
+        if current_x == x and text_part.startswith(' '):
+            text_part = text_part.lstrip(' ')
+            
+        # Skip if nothing left after trimming
+        if not text_part:
+            continue
+        
+        # Check if it fits on current line
+        if current_x - x + len(text_part) > max_width and current_x > x:
+            current_y += 1
+            current_x = x
+            # Trim leading space after line wrap
+            text_part = text_part.lstrip(' ')
+        
+        # Print the text part
+        if text_part:  # Only print if there's content
+            console.print(current_x, current_y, text_part, fg=text_color)
+            current_x += len(text_part)
+    
+    return current_y
+
 
 
 def wrap_colored_text(text: str, max_width: int, default_color=color.white) -> list:

@@ -30,6 +30,7 @@ import exceptions
 from render_functions import MenuRenderer
 
 from text_utils import *
+from text_engine import TextEngine
 import sounds
 
 
@@ -2628,37 +2629,6 @@ class LookHandler(SelectIndexHandler):
             console.print(center_x - 1, center_y + 1, "└", fg=color.cyan)
             console.print(center_x + 1, center_y + 1, "┘", fg=color.cyan)
 
-    def wrap_text(self, text: str, max_width: int) -> list:
-        """Wrap text to fit within max_width, returning list of lines."""
-        if not text:
-            return []
-        
-        words = text.split()
-        lines = []
-        current_line = []
-        current_length = 0
-        
-        for word in words:
-            # Check if adding this word would exceed the width
-            word_length = len(word)
-            space_length = 1 if current_line else 0
-            
-            if current_length + space_length + word_length <= max_width:
-                current_line.append(word)
-                current_length += space_length + word_length
-            else:
-                # Start a new line
-                if current_line:
-                    lines.append(' '.join(current_line))
-                current_line = [word]
-                current_length = word_length
-        
-        # Add the last line if it has content
-        if current_line:
-            lines.append(' '.join(current_line))
-        
-        return lines
-
     def build_item_description(self, current_item: dict, max_width: int) -> list:
         """Build complete description text as list of lines for scrolling."""
         lines = []
@@ -2669,10 +2639,7 @@ class LookHandler(SelectIndexHandler):
             # Get alive or dead status
             if hasattr(entity, 'is_alive') and not entity.is_alive:
                 if hasattr(entity, 'sentient') and entity.sentient:
-                    status_text = red(entity.name)
-                    wrapped_status = wrap_colored_text_to_strings(status_text, max_width)
-                    lines.extend(wrapped_status)
-                    lines.append("")  # Empty line for spacing
+                    lines.append([(entity.name, color.red)])
 
             # Get name, if known
             if hasattr(entity, 'sentient') and entity.sentient:
@@ -2686,23 +2653,38 @@ class LookHandler(SelectIndexHandler):
                         else:
                             # For entities without knowledge (like chests), show generic message
                             name_text = f"You don't know what this is."
-                        lines.extend(self.wrap_text(name_text, max_width))
-                        lines.append("")  # Empty line for spacing
+                        lines.append([(name_text, color.white)])
                     else:
-                        name_text = f"{entity.name}"
-                        lines.extend(self.wrap_text(name_text, max_width))
-                        lines.append("")  # Empty line for spacing
+                        lines.append([(entity.name, color.white)])
             else:
                 if hasattr(entity, 'name'):
-                    name_text = f"{entity.name}"
-                    lines.extend(wrap_colored_text_to_strings(name_text, max_width))
-                    lines.append("")  # Empty line for spacing
+                    lines.append([(entity.name, color.white)])
                     
             # Add entity description
             if hasattr(entity, 'description') and entity.description:
-                wrapped_desc = self.wrap_text(entity.description, max_width)
-                lines.extend(wrapped_desc)
-                lines.append("")  # Empty line for spacing
+                # Wrap long descriptions to multiple lines
+                description_text = entity.description
+                words = description_text.split()
+                current_line = []
+                current_length = 0
+                
+                for word in words:
+                    word_length = len(word)
+                    space_length = 1 if current_line else 0
+                    
+                    if current_length + space_length + word_length <= max_width:
+                        current_line.append(word)
+                        current_length += space_length + word_length
+                    else:
+                        # Add completed line and start new line
+                        if current_line:
+                            lines.append([(' '.join(current_line), color.white)])
+                        current_line = [word]
+                        current_length = word_length
+                
+                # Add the last line if it has content
+                if current_line:
+                    lines.append([(' '.join(current_line), color.white)])
 
             
             # Add body part information for entities with body parts
@@ -2712,172 +2694,124 @@ class LookHandler(SelectIndexHandler):
                 # Build comprehensive equipment description
                 if hasattr(entity, 'equipment') and entity.equipment:
                     equipment = entity.equipment
-                    equipment_descriptions = []
+                    equipment_parts = []
+
+                    # Use body_part_coverage to get actual body part names instead of equipment slot names
+                    for body_part_name, item in equipment.body_part_coverage.items():
+                        if item:
+                            if hasattr(item, 'name'):
+                                # Format body part name to be more readable
+                                formatted_body_part = body_part_name.replace('_', ' ').lower()
+                                if equipment_parts:  # Add separator if there's already equipment
+                                    equipment_parts.append((", ", color.white))
+                                equipment_parts.extend([
+                                    ("wears ", color.white),
+                                    (item.name, item.rarity_color),
+                                    (" on its ", color.white),
+                                    (formatted_body_part, color.white)
+                                ])
                     
-                    # Check grasped items (weapons, shields, etc.)
-                    if hasattr(equipment, 'grasped_items'):
-                        for item in equipment.grasped_items.values():
-                            item_name = item.name.lower()
-                            # Add article based on first letter (skip for uncountable/mass nouns like armor)
-                            uncountable_keywords = ["armor", "mail", "plate", "leather", "chain"]
-                            has_uncountable = any(keyword in item_name for keyword in uncountable_keywords)
-                            
-                            if has_uncountable:
-                                item_with_article = item_name
-                            else:
-                                article = "an" if item_name[0] in "aeiou" else "a"
-                                item_with_article = f"{article} {item_name}"
-                            
-                            if hasattr(item, 'equippable') and item.equippable:
-                                required_tags = item.equippable.required_tags
-                                # Find which body part(s) can equip this item
-                                matching_parts = body_parts.get_parts_matching_tags(required_tags)
-                                
-                                if matching_parts:
-                                    part = matching_parts[0]
-                                    part_name = part.name
-                                    
-                                    # Determine verb based on tags
-                                    if "grasp" in required_tags or "hand" in required_tags:
-                                        equipment_descriptions.append(f"holds {item_with_article} in its {part_name}")
-                                    else:
-                                        equipment_descriptions.append(f"has {item_with_article} on its {part_name}")
+                    # Also check grasped items (weapons and shields)
+                    for body_part_name, item in equipment.grasped_items.items():
+                        if item:
+                            if hasattr(item, 'name'):
+                                # Format body part name to be more readable
+                                formatted_body_part = body_part_name.replace('_', ' ').lower()
+                                if equipment_parts:  # Add separator if there's already equipment
+                                    equipment_parts.append((", ", color.white))
+                                equipment_parts.extend([
+                                    ("grasps ", color.white),
+                                    (item.name, item.rarity_color),
+                                    (" with its ", color.white),
+                                    (formatted_body_part, color.light_gray)
+                                ])
                     
-                    # Check equipped items (armor, boots, etc.)
-                    if hasattr(equipment, 'equipped_items'):
-                        for item in equipment.equipped_items.values():
-                            item_name = item.name.lower()
-                            # Add article based on first letter (skip for uncountable/mass nouns like armor)
-                            uncountable_keywords = ["armor", "mail", "plate", "leather", "chain"]
-                            has_uncountable = any(keyword in item_name for keyword in uncountable_keywords)
-                            
-                            if has_uncountable:
-                                item_with_article = item_name
-                            else:
-                                article = "an" if item_name[0] in "aeiou" else "a"
-                                item_with_article = f"{article} {item_name}"
-                            
-                            if hasattr(item, 'equippable') and item.equippable:
-                                required_tags = item.equippable.required_tags
-                                # Find which body part(s) can equip this item
-                                matching_parts = body_parts.get_parts_matching_tags(required_tags)
-                                
-                                if matching_parts:
-                                    part = matching_parts[0]
-                                    part_name = part.name
-                                    
-                                    # Determine verb based on tags
-                                    if "head" in required_tags:
-                                        equipment_descriptions.append(f"wears {item_with_article} on its {part_name}")
-                                    elif "foot" in required_tags or "leg" in required_tags:
-                                        equipment_descriptions.append(f"wears {item_with_article} on its {part_name}")
-                                    elif "arm" in required_tags:
-                                        equipment_descriptions.append(f"wears {item_with_article} on its {part_name}")
-                                    elif "back" in required_tags:
-                                        equipment_descriptions.append(f"wears {item_with_article} on its back")
-                                    else:
-                                        equipment_descriptions.append(f"has {item_with_article} on its {part_name}")
-                    
-                    # Combine all equipment descriptions into one sentence
-                    if equipment_descriptions:
-                        equipment_text = f"<white>It {'. It '.join(equipment_descriptions)}.</white>"
-                        wrapped_equipment = wrap_colored_text_to_strings(equipment_text, max_width)
-                        lines.extend(wrapped_equipment)
-                        lines.append("")
+                    # Combine all equipment into one line
+                    if equipment_parts:
+                        full_equipment_line = [("It ", color.white)] + equipment_parts + [(".", color.white)]
+                        lines.append(full_equipment_line)
                 
                 # Show container contents if available (e.g., corpse loot) - simple list format
                 if hasattr(entity, 'container') and entity.container and entity.container.items:
                     container_items = entity.container.items
                     if container_items:
-                        item_names = []
-                        for item in container_items:
-                            item_names.append(item.name.lower())
+                        container_parts = []
+                        for i, item in enumerate(container_items):
+                            if i > 0:  # Add comma separator between items
+                                container_parts.append((", ", color.white))
+                            container_parts.append((item.name, item.rarity_color))
                         
-                        items_text = f"<white>{', '.join(item_names)}</white>"
-                        wrapped_items = wrap_colored_text_to_strings(items_text, max_width)
-                        lines.extend(wrapped_items)
-                        lines.append("")
+                        # Combine into one line with appropriate colors
+                        if container_parts:
+                            lines.append(container_parts)
+                            lines.append([("", color.white)])
     
 
                 damaged_parts = body_parts.get_damaged_parts()
 
                 for part in damaged_parts:
-                    injury_text = ""  # Reset for each part
+                    injury_parts = []
                     if part.damage_level_text == "damaged":
-                        injury_text = f"<white>It's {part.name} is damaged.</white>"
+                        injury_parts = [("It's ", color.light_red), (part.name, color.light_red), (" is damaged.", color.light_red)]
                     elif part.damage_level_text == "wounded":
-                        injury_text = f"<yellow>It's {part.name} is wounded.</yellow>"
+                        injury_parts = [("It's ", color.yellow), (part.name, color.yellow), (" is wounded.", color.yellow)]
                     elif part.damage_level_text == "badly wounded":
-                        injury_text = f"<orange>It's {part.name} is badly wounded.</orange>"
+                        injury_parts = [("It's ", color.orange), (part.name, color.orange), (" is badly wounded.", color.orange)]
                     elif part.damage_level_text == "severely wounded":
-                        injury_text = f"<orange>It's {part.name} is severely wounded.</orange>"
+                        injury_parts = [("It's ", color.orange), (part.name, color.orange), (" is severely wounded.", color.orange)]
                     elif part.damage_level_text == "destroyed":
-                        injury_text = f"<red>It's {part.name} is maimed.</red>"
+                        injury_parts = [("It's ", color.red), (part.name, color.red), (" is maimed.", color.red)]
 
-                    wrapped_injury = wrap_colored_text_to_strings(injury_text, max_width)
-                    print(wrapped_injury)
-                    lines.extend(wrapped_injury)
+                    if injury_parts:
+                        lines.append(injury_parts)
                 
                 # Movement impairment
                 movement_penalty = body_parts.get_movement_penalty()
                 if movement_penalty > 0.7:
-                    movement_text = red("It can barely move due to its injuries.")
-                    wrapped_movement = wrap_colored_text_to_strings(movement_text, max_width)
-                    lines.extend(wrapped_movement)
-                    lines.append("")
+                    lines.append([("It can barely move due to its injuries.", color.red)])
+                    lines.append([("", color.white)])
                 elif movement_penalty > 0.3:
-                    movement_text = yellow("Its movement appears impaired.")
-                    wrapped_movement = wrap_colored_text_to_strings(movement_text, max_width)  
-                    lines.extend(wrapped_movement)
-                    lines.append("\n")
+                    lines.append([("Its movement appears impaired.", color.yellow)])
+                    lines.append([("", color.white)])
             
             # Add lock status if applicable
             if hasattr(entity, "container") and entity.container.locked:
-                lock_text = red("It has a lock.")
-                # Use proper colored text wrapping
-                wrapped_lock = wrap_colored_text_to_strings(lock_text, max_width)
-                lines.extend(wrapped_lock)
-                lines.append("")  # Empty line for spacing
+                lines.append([("It has a lock.", color.red)])
+                lines.append([("", color.white)])  # Empty line for spacing
 
             # Add opinion if sentient
             if hasattr(entity, 'sentient') and entity.sentient:
                 if hasattr(entity, "opinion"):
                     if entity.opinion >= 66:
-                        opinion_text = green(f"{(entity.knowledge['pronouns']['subject']).capitalize()} smiles at you")
+                        opinion_parts = [(f"{(entity.knowledge['pronouns']['subject']).capitalize()} smiles at you", color.green)]
                     elif entity.opinion >= 33:
-                        opinion_text = yellow(f"{(entity.knowledge['pronouns']['subject']).capitalize()} looks at you unfeelingly.")
+                        opinion_parts = [(f"{(entity.knowledge['pronouns']['subject']).capitalize()} looks at you unfeelingly.", color.yellow)]
                     else:
-                        opinion_text = red(f"{(entity.knowledge['pronouns']['subject']).capitalize()} frowns at you")
-                    # Use proper colored text wrapping
-                    wrapped_opinion = wrap_colored_text_to_strings(opinion_text, max_width)
-                    lines.extend(wrapped_opinion)
-                    lines.append("")  # Empty line for spacing
+                        opinion_parts = [(f"{(entity.knowledge['pronouns']['subject']).capitalize()} frowns at you", color.red)]
+                    lines.append(opinion_parts)
+                    lines.append([("", color.white)])  # Empty line for spacing
             
             # Add value if applicable
             if hasattr(entity, 'value'):
                 if entity.value > 0:
-                    value_text = f"Estimated value: <yellow>{entity.value} gold.</yellow>"
-                    lines.extend(wrap_colored_text_to_strings(value_text, max_width))      
+                    value_parts = [("Estimated value: ", color.white), (f"{entity.value} gold.", color.yellow)]
+                    lines.append(value_parts)      
         # Tile handling
         elif current_item['type'] == 'tile':
             tile_info = current_item['object']
             
             # Add tile information
-            # Preserve the name verbatim (don't lower-case markup tags)
-            type_text = f"This is a {tile_info['name']}."
-            lines.extend(wrap_colored_text_to_strings(type_text, max_width))
+            lines.append([("This is a ", color.white), (f"{tile_info['name']}.", color.white)])
             
-            walkable_text = f"{'You can walk here.' if tile_info['walkable'] else 'You cannot walk here.'}"
-            lines.extend(wrap_colored_text_to_strings(walkable_text, max_width))
+            walkable_text = "You can walk here." if tile_info['walkable'] else "You cannot walk here."
+            lines.append([(walkable_text, color.white)])
             
-            transparent_text = f"{'You can see through this.' if tile_info['transparent'] else 'You cannot see through this.'}"
-            lines.extend(wrap_colored_text_to_strings(transparent_text, max_width))
+            transparent_text = "You can see through this." if tile_info['transparent'] else "You cannot see through this."
+            lines.append([(transparent_text, color.white)])
             
             if tile_info.get('interactable', False):
-                interact_text = cyan(f"You can interact with this {(tile_info['name']).lower()}.")
-                # Use proper colored text wrapping
-                wrapped_interact = wrap_colored_text_to_strings(interact_text, max_width)
-                lines.extend(wrapped_interact)
+                interact_text = f"You can interact with this {(tile_info['name']).lower()}."
+                lines.append([(interact_text, color.cyan)])
             
             # Add liquid coating information if present
             if hasattr(self.engine.game_map, 'liquid_system'):
@@ -2895,18 +2829,19 @@ class LookHandler(SelectIndexHandler):
                     }
                     
                     liquid_colors = {
-                        LiquidType.WATER: blue,
-                        LiquidType.BLOOD: red,
-                        LiquidType.OIL: yellow,
-                        LiquidType.SLIME: green
+                        LiquidType.WATER: color.blue,
+                        LiquidType.BLOOD: color.red,
+                        LiquidType.OIL: color.yellow,
+                        LiquidType.SLIME: color.green
                     }
                     
                     liquid_name = liquid_names.get(coating.liquid_type, "unknown liquid")
-                    color_func = liquid_colors.get(coating.liquid_type, lambda x: x)
+                    liquid_color = liquid_colors.get(coating.liquid_type, color.white)
                     
-                    coating_text = color_func(f"It is coated in {liquid_name}.")
-                    wrapped_coating = wrap_colored_text_to_strings(coating_text, max_width)
-                    lines.extend(wrapped_coating)
+                    lines.append([
+                        ("It is coated in ", liquid_color),
+                        (f"{liquid_name}.", liquid_color)
+                    ])
         
         return lines
 
@@ -2923,10 +2858,18 @@ class LookHandler(SelectIndexHandler):
         start_line = self.scroll_offset
         end_line = min(len(text_lines), start_line + height)
         
-        # Display the visible lines
+        # Display the visible lines with proper y positioning
+        current_y = y
         for i, line_idx in enumerate(range(start_line, end_line)):
             if line_idx < len(text_lines):
-                print_colored_markup(console, x + 2, y + i, text_lines[line_idx], default_color=color.white)
+                lines_to_wrap = text_lines[line_idx]
+                # Update current_y with the returned y position from print_wrapped_colored_text
+                current_y = print_wrapped_colored_text(console=console, x=x+1, y=current_y, text=lines_to_wrap, max_width=width)
+                current_y += 1  # Add spacing between logical lines
+                
+                # Stop if we've filled the available height
+                if current_y >= y + height:
+                    break
         
         # Show scroll indicators if there's more content
         if start_line > 0:
@@ -2934,48 +2877,7 @@ class LookHandler(SelectIndexHandler):
         if end_line < len(text_lines):
             console.print(x + width - 3, y + height - 1, "↓", fg=color.yellow)
 
-    def render_entity_details(self, console: tcod.Console, entity, sidebar_x: int, info_y: int, sidebar_width: int) -> None:
-        """Render details for an entity (actor/NPC)."""
-        max_text_width = sidebar_width - 4  # Leave space for indentation and borders
-        if hasattr(entity, 'description') and entity.description:
-            
-            # Wrap description text
-            wrapped_lines = self.wrap_text(entity.description, max_text_width)
-            for line in wrapped_lines:
-                console.print(sidebar_x + 2, info_y, line, fg=color.green)
-                info_y += 1
 
-
-
-    def render_tile_details(self, console: tcod.Console, tile_info, sidebar_x: int, info_y: int, sidebar_width: int) -> None:
-        """Render details for a tile."""
-        max_text_width = sidebar_width - 4  # Leave space for indentation and borders
-        
-        # Wrap each piece of tile information
-        type_text = f"Type: {tile_info['name']}"
-        wrapped_type = self.wrap_text(type_text, max_text_width)
-        for line in wrapped_type:
-            console.print(sidebar_x + 2, info_y, line, fg=color.green)
-            info_y += 1
-            
-        walkable_text = f"Walkable: {'Yes' if tile_info['walkable'] else 'No'}"
-        wrapped_walkable = self.wrap_text(walkable_text, max_text_width)
-        for line in wrapped_walkable:
-            console.print(sidebar_x + 2, info_y, line, fg=color.white)
-            info_y += 1
-            
-        transparent_text = f"Transparent: {'Yes' if tile_info['transparent'] else 'No'}"
-        wrapped_transparent = self.wrap_text(transparent_text, max_text_width)
-        for line in wrapped_transparent:
-            console.print(sidebar_x + 2, info_y, line, fg=color.white)
-            info_y += 1
-            
-        if tile_info.get('interactable', False):
-            interact_text = "Interactable: Yes"
-            wrapped_interact = self.wrap_text(interact_text, max_text_width)
-            for line in wrapped_interact:
-                console.print(sidebar_x + 2, info_y, line, fg=color.yellow)
-                info_y += 1
 
     def get_items_and_entities_at(self, x: int, y: int) -> list:
         """Get all items and entities at the specified location (only if visible)."""
@@ -2998,7 +2900,7 @@ class LookHandler(SelectIndexHandler):
                         display_name = entity.unknown_name
 
                 if hasattr(entity, "is_alive") and not entity.is_alive:
-                    display_name = red(f"Corpse of {display_name}")
+                    display_name = f"Corpse of {display_name}"
 
                 
                 results.append({
@@ -3006,6 +2908,8 @@ class LookHandler(SelectIndexHandler):
                     'type': 'entity',
                     'object': entity
                 })
+
+        
                 
 
                     

@@ -49,6 +49,7 @@ class Entity:
         self.name = name
         self.blocks_movement = blocks_movement
         self.render_order = render_order
+        self.grammar_countable = False
         if parent:
             self.parent = parent
             parent.entities.add(self)
@@ -100,7 +101,7 @@ class Entity:
                 # Deep copy to avoid shared references
                 item_copy = copy.deepcopy(chosen_item)
                 # Roll for enchantment
-                item_copy.
+                item_copy.roll_for_enchantment(enchantment_chance=1.0)
                 item_copy.parent = self.inventory
                 
                 # Try to equip if possible
@@ -709,12 +710,16 @@ class Item(Entity):
         self.rarity_color = rarity_color
 
 
-    def enchant_roll(self, item: Item, enchantment_chance: float) -> Item:
+    def roll_for_enchantment(self, enchantment_chance: float ) -> Item:
         """Rolls given chance to apply enchantment"""
         # Check if item is equippable
-        if item.equippable:
+        if self.equippable:
             if random.random() < enchantment_chance:
                 # Enchant
-                if random.random() < 1.0:
-                    if item.equippable.defense_bonus > 
+                if random.random() < enchantment_chance:
+                    if self.equippable.defense_bonus > 0:
+                        self.equippable.defense_bonus += 1
+                        self.name = self.name + " +I"
+                        self.rarity_color = color.uncommon
+        return self
         

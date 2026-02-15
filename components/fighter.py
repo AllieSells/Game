@@ -124,7 +124,7 @@ class Fighter(BaseComponent):
         self.parent.blocks_movement = False
         self.parent.ai = None
         import text_utils
-        self.parent.name = text_utils.red(f"This is the lifeless remains of {self.parent.name}")
+        self.parent.name = f"Corpse of {self.parent.name}"
         self.parent.render_order = RenderOrder.CORPSE
         self.parent.type = "Dead"
 
