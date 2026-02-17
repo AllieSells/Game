@@ -92,7 +92,7 @@ class TurnManager:
         self.total_player_moves += 1
 
 
-        print(f"Hunger: {player.hunger:.2f}, Saturation: {player.saturation:.2f}, Mult: {hunger_mult:.2f}, TotalMoves: {self.total_player_moves}")
+        #print(f"Hunger: {player.hunger:.2f}, Saturation: {player.saturation:.2f}, Mult: {hunger_mult:.2f}, TotalMoves: {self.total_player_moves}")
         
         # 2. Process enemy turns
         self._handle_enemy_turns()

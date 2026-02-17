@@ -46,7 +46,7 @@ class Level(BaseComponent):
         self.engine.message_log.add_message(f"You gain {xp} experience points.")
 
         if self.requires_level_up:
-            sounds.level_up_sound.play()
+            sounds.play_level_up_sound()
             self.engine.message_log.add_message(
                 f"You advance to level {self.current_level + 1}!"
             )

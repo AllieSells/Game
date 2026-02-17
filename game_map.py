@@ -406,7 +406,7 @@ class GameWorld:
             self.room_max_size = room_max_size
 
             self.current_floor = current_floor
-            self.floors_since_village = 0  # Track floors since last village
+            self.floors_since_village = -1  # Track floors since last village
             # Stacks to support navigating between previously visited maps.
             # up_stack: maps above the current map (you can ascend to these)
             # down_stack: maps below the current map (you can descend to these if you previously ascended)
@@ -444,6 +444,7 @@ class GameWorld:
         # Village equation chance
         village_chance = ((self.floors_since_village)^2) / 25
         gen_chance = random.random()
+        #print(f"Vil chance: {village_chance}, Gen chance: {gen_chance}, Floors since village: {self.floors_since_village}")
         if gen_chance < village_chance:
 
             # Generate village and reset counter

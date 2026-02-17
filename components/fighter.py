@@ -333,7 +333,7 @@ class Fighter(BaseComponent):
             try:
                 self.parent.gamemap.engine.message_log.add_message(
                     f"{self.parent.name} drops {item_to_drop.name} from their {damaged_part.name}!",
-                    color.health_recovered
+                    color.blue
                 )
             except:
                 pass

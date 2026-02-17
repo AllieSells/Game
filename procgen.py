@@ -340,6 +340,63 @@ def place_village_entities(building: Building, village: GameMap, floor_number: i
             pass
 
 
+def generate_circle_based_grass(game_map: GameMap, map_width: int, map_height: int) -> None:
+    """Generate natural grass distribution using overlapping circles with priority system."""
+    # Track which tiles have been placed (first value never overwrites second)
+    placed = [[False for _ in range(map_height)] for _ in range(map_width)]
+    
+    # Generate multiple circles for natural distribution - front to back priority
+    num_circles = random.randint(12, 20)  # More circles for better coverage
+    
+    for circle_idx in range(num_circles):
+        # Random center point for each circle
+        circle_x = random.randint(-map_width // 4, map_width + map_width // 4)  # Allow circles to extend beyond map
+        circle_y = random.randint(-map_height // 4, map_height + map_height // 4)
+        
+        # Random radius - varying sizes for natural distribution
+        radius = random.randint(map_width // 6, map_width // 2)
+        
+        # Get a grass type for this entire circle
+        grass_type = tile_types.fill_random_grasses()
+        
+        # Fill circle area
+        for x in range(max(0, circle_x - radius), min(map_width, circle_x + radius + 1)):
+            for y in range(max(0, circle_y - radius), min(map_height, circle_y + radius + 1)):
+                # Check if point is within circle bounds
+                distance_sq = (x - circle_x) ** 2 + (y - circle_y) ** 2
+                if distance_sq <= radius ** 2:
+                    # Only place if not already placed (priority system: first never overwrites second)
+                    if not placed[x][y]:
+                        game_map.tiles[x, y] = grass_type
+                        placed[x][y] = True
+    
+    # Fill any remaining unplaced tiles with default grass
+    for x in range(map_width):
+        for y in range(map_height):
+            if not placed[x][y]:
+                game_map.tiles[x, y] = tile_types.fill_random_grasses()
+                placed[x][y] = True
+
+
+def generate_overworld_chunk(
+        map_width: int,
+        map_height: int,
+        engine: Engine,
+) -> GameMap:
+    """Generate an overworld chunk with natural grass distribution."""
+    player = engine.player
+    chunk = GameMap(engine, map_width, map_height, entities=[player], type="overworld", name="Overworld")
+    
+    # Use circle-based natural grass distribution
+    generate_circle_based_grass(chunk, map_width, map_height)
+    
+    # Place player in center  
+    player.place(map_width // 2, map_height // 2, chunk)
+    
+    return chunk
+            
+
+
 
 def generate_village(
         map_width: int,
@@ -750,6 +807,8 @@ def apply_wall_merging(dungeon: GameMap) -> None:
     # Second pass: apply all updates
     for x, y, new_tile in walls_to_update:
         dungeon.tiles[x, y] = new_tile
+
+
 
 def generate_dungeon(
         max_rooms: int,

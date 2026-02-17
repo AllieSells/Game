@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Optional
 
 import numpy as np
 import random
@@ -41,6 +41,21 @@ SHROUD = np.array((ord(" "), (255, 255, 255), (10, 10, 10)), dtype=graphic_dt)
 
 def random_floor_char() -> int:
     return ord(random.choice([" ", " ", " ", " ", " ", " ", ".", ",", "`"]))
+
+
+def fill_random_grasses() -> np.ndarray:
+    # Generates a grass tile
+    char = random_floor_char()
+
+    return new_tile(
+        name="Grass",
+        walkable=True,
+        transparent=True,
+        # Use the same character for both dark and light, but with different colors
+        dark=(char, (50, 100, 50), (10, 10, 10)),
+        light=(char, (100, 200, 100), (30, 30, 30)),
+    )
+
 
 def random_floor_tile():
     """Generate a random floor tile with varied appearance."""
