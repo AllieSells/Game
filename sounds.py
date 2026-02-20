@@ -186,6 +186,16 @@ def play_transfer_item_sound():
     sound = random.choice(transfer_item_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.95, 1.2))
 
+def play_grass_walk_sound():
+    if random.random() < 0.3:
+        return  # 30% chance to not play a sound for variety
+    walk_sounds = [
+        pygame.mixer.Sound("RP/sfx/walk/grass/walk1.wav"),
+        pygame.mixer.Sound("RP/sfx/walk/grass/walk2.wav"),
+    ]
+    sound = random.choice(walk_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.5), volume=0.5)
+
 def play_walk_sound():
     if random.random() < 0.3:
         return  # 30% chance to not play a sound for variety

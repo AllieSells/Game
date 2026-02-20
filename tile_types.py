@@ -40,20 +40,25 @@ def new_tile(
 SHROUD = np.array((ord(" "), (255, 255, 255), (10, 10, 10)), dtype=graphic_dt)
 
 def random_floor_char() -> int:
-    return ord(random.choice([" ", " ", " ", " ", " ", " ", ".", ",", "`"]))
+    return ord(random.choice([" ", " ", " ", " ", " ", " ", ".", ",", " "]))
 
 
 def fill_random_grasses() -> np.ndarray:
     # Generates a grass tile
     char = random_floor_char()
 
+    grass_color = (random.randint(35, 40), random.randint(105, 110), random.randint(35, 40))
+    dark_grass_color = (grass_color[0] // 2, grass_color[1] // 2, grass_color[2] // 2)
+    grass_foreground_lit = grass_color[0]-5, grass_color[1]-5, grass_color[2]-5
+    grass_foreground_dark = dark_grass_color[0]-5, dark_grass_color[1]-5, dark_grass_color[2]-5
+
     return new_tile(
         name="Grass",
         walkable=True,
         transparent=True,
         # Use the same character for both dark and light, but with different colors
-        dark=(char, (50, 100, 50), (10, 10, 10)),
-        light=(char, (100, 200, 100), (30, 30, 30)),
+        dark=(random_floor_char(), (grass_foreground_dark), (dark_grass_color)),
+        light=(random_floor_char(), (grass_foreground_lit), (grass_color)),
     )
 
 

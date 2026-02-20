@@ -81,7 +81,7 @@ def new_game() -> Engine:
     return engine
 
 def new_debug_game() -> Engine:
-    """Return a debug game session with only grass generation."""
+    """Return a debug game session using overworld chunk generation."""
     map_width = 80
     map_height = 40
     
@@ -92,51 +92,41 @@ def new_debug_game() -> Engine:
     # Set world generation flag to suppress equipment sounds
     engine.is_generating_world = True
     
-    # Import necessary modules
-    from game_map import GameMap
+    # Import overworld chunk generator
+    from procgen import generate_overworld_chunk
+    import numpy as np
+    
+    # Generate overworld chunk for debug (this creates the GameMap with player placed)
+    game_map = generate_overworld_chunk(map_width, map_height, engine)
+    
+    # Change map type to debug for proper FOV behavior
+    game_map.type = "debug"
+    game_map.name = "Debug Level"
+    
+    # Add some random walls for testing FOV and pathfinding
     import tile_types
     import random
     
-    # Create empty map with circle-based natural grass distribution
-    game_map = GameMap(engine, map_width, map_height, entities=[player], type="debug", name="Debug Level")
-    
-    # Use circle-based natural grass distribution (same as overworld)
-    # Track which tiles have been placed (first value never overwrites second)
-    placed = [[False for _ in range(map_height)] for _ in range(map_width)]
-    
-    # Generate multiple circles for natural distribution - front to back priority
-    num_circles = random.randint(12, 20)  # More circles for better coverage
-    
-    for circle_idx in range(num_circles):
-        # Random center point for each circle
-        circle_x = random.randint(-map_width // 4, map_width + map_width // 4)  # Allow circles to extend beyond map
-        circle_y = random.randint(-map_height // 4, map_height + map_height // 4)
+    # Place random walls scattered across the map
+    num_walls = random.randint(15, 25)
+    for _ in range(num_walls):
+        wall_x = random.randint(5, map_width - 6)
+        wall_y = random.randint(5, map_height - 6)
         
-        # Random radius - varying sizes for natural distribution
-        radius = random.randint(map_width // 6, map_width // 2)
-        
-        # Get a grass type for this entire circle
-        grass_type = tile_types.fill_random_grasses()
-        
-        # Fill circle area
-        for x in range(max(0, circle_x - radius), min(map_width, circle_x + radius + 1)):
-            for y in range(max(0, circle_y - radius), min(map_height, circle_y + radius + 1)):
-                # Check if point is within circle bounds
-                distance_sq = (x - circle_x) ** 2 + (y - circle_y) ** 2
-                if distance_sq <= radius ** 2:
-                    # Only place if not already placed (priority system: first never overwrites second)
-                    if not placed[x][y]:
-                        game_map.tiles[x, y] = grass_type
-                        placed[x][y] = True
-    
-    # Fill any remaining unplaced tiles with default grass
-    for x in range(map_width):
-        for y in range(map_height):
-            if not placed[x][y]:
-                game_map.tiles[x, y] = tile_types.fill_random_grasses()
+        # Don't place walls too close to player spawn (center)
+        center_x, center_y = map_width // 2, map_height // 2
+        if abs(wall_x - center_x) < 3 and abs(wall_y - center_y) < 3:
+            continue
+            
+        # Place a small wall cluster (1x1 to 3x3)
+        cluster_size = random.randint(1, 3)
+        for dx in range(cluster_size):
+            for dy in range(cluster_size):
+                if wall_x + dx < map_width and wall_y + dy < map_height:
+                    if random.random() < 0.7:  # 70% chance for each wall tile in cluster
+                        game_map.tiles[wall_x + dx, wall_y + dy] = tile_types.wall
     
     # Make the entire map fully lit
-    import numpy as np
     for x in range(map_width):
         for y in range(map_height):
             current_tile = game_map.tiles[x, y]
@@ -151,9 +141,6 @@ def new_debug_game() -> Engine:
                 current_tile[6],  # interactable
             )
             game_map.tiles[x, y] = new_tile
-    
-    # Place player in center
-    player.place(map_width // 2, map_height // 2, game_map)
     
     # Simple GameWorld for debug
     engine.game_world = GameWorld(

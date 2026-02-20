@@ -16,12 +16,13 @@ if TYPE_CHECKING:
 
 class GameMap:
     def __init__(
-            self, engine: Engine, width: int, height: int, entities: Iterable[Entity] = (), type: str = "dungeon", name: str = "Dungeon"
+            self, engine: Engine, width: int, height: int, entities: Iterable[Entity] = (), type: str = "dungeon", name: str = "Dungeon", sunlit: bool = False
     ):
         self.engine = engine
         self.width, self.height = width, height
         self.entities = set(entities)
         self.type = type
+        self.sunlit = sunlit
         
         # Initialize tiles. For dungeon maps, populate per-tile using
         # tile_types.random_wall_tile() so we get variation (mossy walls etc.).
@@ -248,6 +249,9 @@ class GameMap:
         # Update tile lighting with gradient falloff based on distance to light sources  
         # Reset all tiles to zero light level first
         self.tiles["light_level"][:] = 0.0
+
+        if getattr(self, "sunlit", True):
+            self.tiles["light_level"][:] = 1.0  # Sunlit maps are fully lit
         
         try:
             player = self.engine.player

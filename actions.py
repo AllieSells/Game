@@ -585,8 +585,12 @@ class MovementAction(ActionWithDirection):
         
         # Only play walk sound if not moving rapidly or holding key
         if self.engine.should_play_movement_sound():
-            sounds.play_walk_sound()
-
+            # Check tile type for sound variation
+            tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
+            if tile_name == "Grass":
+                sounds.play_grass_walk_sound()
+            if tile_name == "Floor":
+                sounds.play_walk_sound()
 
 class BumpAction(ActionWithDirection):
     def perform(self) -> None:

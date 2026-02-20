@@ -354,10 +354,9 @@ def generate_circle_based_grass(game_map: GameMap, map_width: int, map_height: i
         circle_y = random.randint(-map_height // 4, map_height + map_height // 4)
         
         # Random radius - varying sizes for natural distribution
-        radius = random.randint(map_width // 6, map_width // 2)
+        radius = random.randint(2,5)
         
         # Get a grass type for this entire circle
-        grass_type = tile_types.fill_random_grasses()
         
         # Fill circle area
         for x in range(max(0, circle_x - radius), min(map_width, circle_x + radius + 1)):
@@ -367,7 +366,7 @@ def generate_circle_based_grass(game_map: GameMap, map_width: int, map_height: i
                 if distance_sq <= radius ** 2:
                     # Only place if not already placed (priority system: first never overwrites second)
                     if not placed[x][y]:
-                        game_map.tiles[x, y] = grass_type
+                        game_map.tiles[x, y] = tile_types.fill_random_grasses()
                         placed[x][y] = True
     
     # Fill any remaining unplaced tiles with default grass
@@ -385,7 +384,7 @@ def generate_overworld_chunk(
 ) -> GameMap:
     """Generate an overworld chunk with natural grass distribution."""
     player = engine.player
-    chunk = GameMap(engine, map_width, map_height, entities=[player], type="overworld", name="Overworld")
+    chunk = GameMap(engine, map_width, map_height, entities=[player], type="overworld", name="Overworld", sunlit=True)  # Sunlit for overworld
     
     # Use circle-based natural grass distribution
     generate_circle_based_grass(chunk, map_width, map_height)

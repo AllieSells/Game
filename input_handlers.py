@@ -2752,15 +2752,15 @@ class LookHandler(SelectIndexHandler):
                 for part in damaged_parts:
                     injury_parts = []
                     if part.damage_level_text == "damaged":
-                        injury_parts = [("It's ", color.light_red), (part.name, color.light_red), (" is damaged.", color.light_red)]
+                        injury_parts = [("Its ", color.light_red), (part.name, color.light_red), (" is damaged.", color.light_red)]
                     elif part.damage_level_text == "wounded":
-                        injury_parts = [("It's ", color.yellow), (part.name, color.yellow), (" is wounded.", color.yellow)]
+                        injury_parts = [("Its ", color.yellow), (part.name, color.yellow), (" is wounded.", color.yellow)]
                     elif part.damage_level_text == "badly wounded":
-                        injury_parts = [("It's ", color.orange), (part.name, color.orange), (" is badly wounded.", color.orange)]
+                        injury_parts = [("Its ", color.orange), (part.name, color.orange), (" is badly wounded.", color.orange)]
                     elif part.damage_level_text == "severely wounded":
-                        injury_parts = [("It's ", color.orange), (part.name, color.orange), (" is severely wounded.", color.orange)]
+                        injury_parts = [("Its ", color.orange), (part.name, color.orange), (" is severely wounded.", color.orange)]
                     elif part.damage_level_text == "destroyed":
-                        injury_parts = [("It's ", color.red), (part.name, color.red), (" is maimed.", color.red)]
+                        injury_parts = [("Its ", color.red), (part.name, color.red), (" is maimed.", color.red)]
 
                     if injury_parts:
                         lines.append(injury_parts)
