@@ -90,6 +90,7 @@ class LiquidSystem:
         self.game_map = game_map
         # Position -> LiquidCoating mapping
         self.coatings: Dict[Tuple[int, int], LiquidCoating] = {}
+        
     
     def add_liquid(self, x: int, y: int, liquid_type: LiquidType, depth: int = 1) -> None:
         """Add liquid coating to a tile."""

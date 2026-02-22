@@ -102,14 +102,14 @@ class InteractAction(Action):
                 # Convert "Door" tile to "Open Door" tile
                 import tile_types
                 self.engine.game_map.tiles[target_x, target_y] = tile_types.open_door
-                sounds.play_door_open_sound()
+                sounds.play_door_open_sound_at(target_x, target_y, self.engine.player, self.engine.game_map)
                 self.engine.message_log.add_message("You open the door.")
 
             elif name == "Open Door":
                 # Convert "Open Door" tile to "Door" tile
                 import tile_types
                 self.engine.game_map.tiles[target_x, target_y] = tile_types.closed_door
-                sounds.play_door_close_sound()
+                sounds.play_door_close_sound_at(target_x, target_y, self.engine.player, self.engine.game_map)
                 self.engine.message_log.add_message("You close the door.")
 
             else:
@@ -582,15 +582,46 @@ class MovementAction(ActionWithDirection):
             raise exceptions.Impossible("That way is blocked.")  # Destination is blocked by an entity.
         
         self.entity.move(self.dx, self.dy)
+
+        # Always play footstep sounds for non-player entities (enemies)
+        if self.entity != self.engine.player:
+            # Play footstep sound with positional muffling
+            dx = dest_x - self.engine.player.x
+            dy = dest_y - self.engine.player.y
+            distance = (dx * dx + dy * dy) ** 0.5
+            
+            if distance <= 10:  # Within hearing range
+                # Check tile type for sound variation
+                tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
+                if tile_name == "Grass":
+                    sounds.play_movement_sound_at(sounds.play_grass_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
+                else:
+                    sounds.play_movement_sound_at(sounds.play_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
+
+        # If not in view, display sound tile animation (for all entities)
+        from animations import HeardSoundAnimation
+        if not self.engine.game_map.visible[dest_x, dest_y]:
+            # Use different color for enemy footsteps vs other sounds
+            if self.entity != self.engine.player:
+                color = (150, 150, 150)  # Gray for footsteps
+            else:
+                color = (255, 255, 0)  # Yellow for other sounds
+            self.engine.animation_queue.append(HeardSoundAnimation((dest_x, dest_y), self.engine.player, color))
         
-        # Only play walk sound if not moving rapidly or holding key
-        if self.engine.should_play_movement_sound():
-            # Check tile type for sound variation
-            tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
-            if tile_name == "Grass":
-                sounds.play_grass_walk_sound()
-            if tile_name == "Floor":
-                sounds.play_walk_sound()
+        # Only play walk sound for player if not moving rapidly or holding key
+        if self.entity == self.engine.player and self.engine.should_play_movement_sound():
+            # Check if near player 
+            dx = dest_x - self.engine.player.x
+            dy = dest_y - self.engine.player.y
+            distance = (dx * dx + dy * dy) ** 0.5
+
+            if distance <= 8:
+                # Check tile type for sound variation
+                tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
+                if tile_name == "Grass":
+                    sounds.play_grass_walk_sound()
+                if tile_name == "Floor":
+                    sounds.play_walk_sound()
 
 class BumpAction(ActionWithDirection):
     def perform(self) -> None:

@@ -3,7 +3,54 @@ from tcod.map import compute_fov
 import tcod
 from tcod import libtcodpy
 
+class HeardSoundAnimation:
+    def __init__(self, position, player, color=(255, 255, 0)):
+        self.position = position
+        self.player = player
+        self.color = color
+        self.frames = 10  # duration in frames
+        self.render_priority = 1  # Render above items but below actors
 
+    def tick(self, console, game_map):
+        x, y = self.position
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        # Calculate distance from player
+        dx = x - self.player.x
+        dy = y - self.player.y
+        distance = (dx * dx + dy * dy) ** 0.5
+        
+        # If not visible and within 10 tiles of player, show sound tile animation
+        if not game_map.visible[x, y] and distance <= 10:
+            console.print(x, y, "!", fg=self.color)  # Colored sound tile
+
+        self.frames -= 1
+
+class HeardDoorAnimation:
+    def __init__(self, position, player):
+        self.position = position
+        self.player = player
+        self.frames = 15  # duration in frames - longer for door sounds
+        self.render_priority = 1  # Render above items but below actors
+
+    def tick(self, console, game_map):
+        x, y = self.position
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        # Calculate distance from player
+        dx = x - self.player.x
+        dy = y - self.player.y
+        distance = (dx * dx + dy * dy) ** 0.5
+        
+        # If not visible and within 10 tiles of player, show door sound animation
+        if not game_map.visible[x, y] and distance <= 10:
+            console.print(x, y, "!", fg=(0, 150, 255))  # Blue sound tile for doors
+
+        self.frames -= 1
 
 class LightningAnimation:
     def __init__(self, path):

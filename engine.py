@@ -398,7 +398,7 @@ class Engine:
 
 
         # Torch increases FOV radius; campfires only affect Darkness (lighting), not FOV
-        radius = 7 if has_torch else 2
+        radius = 6 if has_torch else 3
 
         if self.game_map.sunlit:
             radius = max(radius, 1000)  # Sunlit areas have large FOV regardless of torch
@@ -415,19 +415,22 @@ class Engine:
 
         self.game_map.explored |= self.game_map.visible
 
-        # Apply or remove the persistent Darkness effect depending on lighting
+        # Apply or remove the persistent Darkness effect based on tile light level
         try:
             # Deferred import to avoid circular imports at module load time
             from components.effect import Effect
 
             has_darkness = any(getattr(e, "name", "") == "Darkness" for e in self.player.effects)
-
-            # Check if tile player is on is lit
-            tile_lit = False
-            print(self.game_map.tiles["light_level"][self.player.x, self.player.y])
-            if self.game_map.in_bounds(self.player.x, self.player.y) and self.game_map.tiles["light_level"][self.player.x, self.player.y] == 0:
             
-                # Player is in darkness: ensure they have the Darkness effect
+            # Check current tile's light level
+            current_light_level = 0.0
+            if self.game_map.in_bounds(self.player.x, self.player.y):
+                current_light_level = self.game_map.tiles["light_level"][self.player.x, self.player.y]
+            
+            # Consider tiles with only ambient light (≤ 0.1) as "dark" for darkness effects
+            # This accounts for the dim view system that provides minimal visibility
+            if current_light_level <= 0.1:
+                # Player is in darkness (no real light sources): ensure they have the Darkness effect
                 if not has_darkness:
                     try:
                         # duration=None => persistent until removed
@@ -435,7 +438,7 @@ class Engine:
                     except Exception:
                         pass
             else:
-                # Player is lit: remove any Darkness effects
+                # Player has actual light sources: remove any Darkness effects
                 if has_darkness:
                     for e in list(self.player.effects):
                         try:

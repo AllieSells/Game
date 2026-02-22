@@ -404,7 +404,7 @@ goblin = Actor(
     fighter=Fighter(hp=10, base_defense=0, base_power=3),
     inventory=Inventory(capacity=0),
     level=Level(xp_given=35),
-    speed=120,  # Fast enough to sometimes act before player
+    speed=110,  # Fast enough to sometimes act before player
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
     description="",
     verb_base="claw",

@@ -27,13 +27,8 @@ def open_door(engine: "Engine", actor: "Actor", x: int, y: int) -> Optional[str]
         # Change the tile to an open door
         engine.game_map.tiles[x, y] = tile_types.open_door
         
-        # Add message to log, if visible to the player
-        #if engine.game_map.visible[x, y]:
-        #    message = f"{actor.name} opens the door."
-        #    if hasattr(engine, 'message_log'):
-        #        engine.message_log.add_message(message, color.grey)
-        
-        return message
+        # Return success message  
+        return "Door opened"
         
     except Exception as e:
         return None
@@ -58,13 +53,8 @@ def close_door(engine: "Engine", actor: "Actor", x: int, y: int) -> Optional[str
         # Change the tile to a closed door
         engine.game_map.tiles[x, y] = tile_types.closed_door
         
-        # Add message to log, only if visible to the player
-        #if engine.game_map.visible[x, y]:
-        #    message = f"{actor.name} closes the door."
-        #    if hasattr(engine, 'message_log'):
-        #        engine.message_log.add_message(message, color.grey)
-        
-        return message
+        # Return success message
+        return "Door closed"
         
     except Exception as e:
         return None

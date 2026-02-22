@@ -405,6 +405,8 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             self.completion_delay += 1
             if self.completion_delay > 60:  # Wait about 1 second at 60 FPS
                 from input_handlers import MainGameEventHandler
+                # Start dungeon music when entering the game
+                sounds.start_dungeon_music()
                 return MainGameEventHandler(self.engine)
         
         # Allow ESC to cancel and return to main menu at any time
@@ -415,6 +417,8 @@ class LoadingScreen(input_handlers.BaseEventHandler):
         if self.generation_complete and isinstance(event, tcod.event.KeyDown):
             if self.engine is not None:
                 from input_handlers import MainGameEventHandler
+                # Start dungeon music when entering the game
+                sounds.start_dungeon_music()
                 return MainGameEventHandler(self.engine)
             else:
                 # Generation failed, return to main menu
@@ -461,6 +465,8 @@ class MainMenu(input_handlers.BaseEventHandler):
         self.selected_option = 0
         # Start menu ambience only if not already playing
         sounds.start_menu_ambience()
+        # Start menu music
+        sounds.start_menu_music()
 
     def on_render(self, console: tcod.Console) -> None:
         """Render the main menu with parchment styling and arrow key selection."""
@@ -515,7 +521,7 @@ class MainMenu(input_handlers.BaseEventHandler):
         console.print(
             x + (window_width // 2),
             footer_y + 1,
-            "2026 - Version 0.1.2 Beta",
+            "2026 - Version 0.18.7 Beta",
             fg=color.bronze_text,
             bg=color.parchment_bg,
             alignment=tcod.CENTER,
@@ -573,14 +579,19 @@ class MainMenu(input_handlers.BaseEventHandler):
         
         if action == "quit":
             sounds.stop_menu_ambience()
+            sounds.stop_all_music()
             raise SystemExit()
         elif action == "load_game":
             # Stop menu ambience when leaving menu
             sounds.stop_menu_ambience()
+            sounds.stop_all_music()
             print("TEST")
             try:
                 sounds.play_stairs_sound()
-                return input_handlers.MainGameEventHandler(load_game("savegame.sav"))
+                engine = load_game("savegame.sav")
+                # Start dungeon music
+                sounds.start_dungeon_music()
+                return input_handlers.MainGameEventHandler(engine)
             except FileNotFoundError:
                 return input_handlers.PopupMessage(self, "No saved game to load.")
             except Exception as exc:
@@ -589,13 +600,34 @@ class MainMenu(input_handlers.BaseEventHandler):
         elif action == "start_new":
             # Stop menu ambience when leaving menu  
             sounds.stop_menu_ambience()
+            sounds.stop_all_music()
             # Skip character creation and start game directly
             sounds.play_stairs_sound()
             return LoadingScreen(self)
         elif action == "debug_level":
             # Stop menu ambience when leaving menu
-            sounds.stop_menu_ambience() 
+            sounds.stop_menu_ambience()
+            sounds.stop_all_music()
             # Create debug level
             return DebugLevelScreen(self)
         
         return None
+
+
+# Set up music tracks - add your music files here!
+def initialize_music():
+    """Initialize music tracks. Call this to add your music files."""
+    # Example: uncomment and use your actual music files
+    # sounds.add_dungeon_track("RP/music/dungeon_ambient1.ogg")
+    # sounds.add_dungeon_track("RP/music/dungeon_ambient2.ogg") 
+    # sounds.add_menu_track("RP/music/menu_theme1.ogg")
+    # sounds.add_menu_track("RP/music/menu_theme2.ogg")
+    
+    # For testing, you can use existing sound files as music:
+    # sounds.add_dungeon_track("RP/sfx/loops/dungeon/ambience.wav")
+    # sounds.add_menu_track("RP/sfx/loops/menu/theme.wav")
+    
+    pass
+
+# Initialize music tracks when module loads
+initialize_music()

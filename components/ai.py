@@ -80,129 +80,88 @@ class BaseAI(Action):
 
     def can_open_door(self, x: int, y: int) -> bool:
         """Check if this AI can open a door at the given position."""
-        try:
-            # Check if it's actually a door
-            if not self.is_door_tile(x, y):
-                return False
-            
-            # Check if the entity is adjacent to the door
-            dx = abs(self.entity.x - x)
-            dy = abs(self.entity.y - y)
-            is_adjacent = (dx <= 1 and dy <= 1 and (dx + dy) > 0)
-            
-            return is_adjacent
-        except Exception:
+        if not self.entity.gamemap.in_bounds(x, y):
             return False
+            
+        # Check if it's a door
+        tile_name = self.entity.gamemap.tiles["name"][x, y]
+        if tile_name not in ["Door", "Open Door"]:
+            return False
+            
+        # Check if adjacent (including diagonals)
+        dx = abs(self.entity.x - x)
+        dy = abs(self.entity.y - y)
+        return dx <= 1 and dy <= 1 and (dx + dy) > 0
 
     def toggle_door_at(self, x: int, y: int) -> bool:
         """Try to toggle a door at the given position. Returns True if successful."""
-        try:
-            if not self.can_open_door(x, y):
-                return False
-            
-            # Check what type of door it is before toggling
-            tile_name = self.entity.gamemap.tiles["name"][x, y]
-            
-            # Use the tile interaction system to toggle the door
-            import tile_functions
-            result = tile_functions.toggle_door(
-                self.entity.gamemap.engine, self.entity, x, y
-            )
-            
-            if result is not None:
-                # Add sound effects for door interactions
-                try:
-                    if tile_name == "Door":
-                        # Door was opened
-                        sounds.play_door_open_sound()
-                        self.opened_doors.append((x, y))
-                    elif tile_name == "Open Door":
-                        # Door was closed
-                        sounds.play_door_close_sound()
-                        try:
-                            self.opened_doors.remove((x, y))
-                        except ValueError:
-                            pass  # Door wasn't in our tracking list
-                except Exception:
-                    # Don't let sound errors break door functionality
-                    if tile_name == "Door":
-                        self.opened_doors.append((x, y))
-                    elif tile_name == "Open Door":
-                        try:
-                            self.opened_doors.remove((x, y))
-                        except ValueError:
-                            pass
-                return True
+        if not self.can_open_door(x, y):
             return False
-                
-        except Exception:
-            return False
+            
+        tile_name = self.entity.gamemap.tiles["name"][x, y]
+        
+        # Use tile interaction system to toggle door
+        import tile_functions
+        result = tile_functions.toggle_door(self.entity.gamemap.engine, self.entity, x, y)
+        
+        if result is not None:
+            # Play sound and track door state
+            if tile_name == "Door":  # Was closed, now opened
+                sounds.play_door_open_sound_at(x, y, self.entity.gamemap.engine.player, self.entity.gamemap)
+                self.opened_doors.append((x, y))
+            elif tile_name == "Open Door":  # Was open, now closed
+                sounds.play_door_close_sound_at(x, y, self.entity.gamemap.engine.player, self.entity.gamemap)
+                if (x, y) in self.opened_doors:
+                    self.opened_doors.remove((x, y))
+            return True
+            
+        return False
 
     def close_door_at(self, x: int, y: int) -> bool:
         """Try to close a door at the given position. Returns True if successful."""
-        try:
-            # Check if it's an open door
-            if not self.entity.gamemap.in_bounds(x, y):
-                return False
-            
-            tile_name = self.entity.gamemap.tiles["name"][x, y]
-            if tile_name != "Open Door":
-                return False
-            
-            # Check if there's an entity blocking the door
-            blocking_entity = self.entity.gamemap.get_blocking_entity_at_location(x, y)
-            if blocking_entity:
-                return False  # Can't close if blocked
-            
-            # Use the tile interaction system to close the door
-            try:
-                import tile_functions
-                result = tile_functions.close_door(
-                    self.entity.gamemap.engine, self.entity, x, y
-                )
-                if result is not None:
-                    try:
-                        sounds.play_door_close_sound()
-                    except Exception:
-                        pass  # Don't let sound errors break door functionality
-                return result is not None
-            except ImportError:
-                # Fallback: directly change the tile
-                import tile_types
-                self.entity.gamemap.tiles[x, y] = tile_types.closed_door
-                try:
-                    sounds.play_door_close_sound()  # Add sound for fallback case too
-                except Exception:
-                    pass
-                return True
-                
-        except Exception:
+        if not self.entity.gamemap.in_bounds(x, y):
             return False
+            
+        # Must be an open door
+        if self.entity.gamemap.tiles["name"][x, y] != "Open Door":
+            return False
+            
+        # Can't close if something is blocking it
+        if self.entity.gamemap.get_blocking_entity_at_location(x, y):
+            return False
+            
+        # Use tile interaction system to close door
+        import tile_functions
+        result = tile_functions.close_door(self.entity.gamemap.engine, self.entity, x, y)
+        
+        if result is not None:
+            sounds.play_door_close_sound_at(x, y, self.entity.gamemap.engine.player, self.entity.gamemap)
+            return True
+            
+        return False
 
     def check_and_close_doors(self) -> bool:
-        """Check if AI has moved away from any opened doors and close them. Returns True if any doors were closed."""
+        """Close doors that AI has moved away from. Returns True if any doors were closed."""
         if not self.opened_doors:
             return False
-        
-        current_pos = (self.entity.x, self.entity.y)
+            
         doors_closed = False
+        current_pos = (self.entity.x, self.entity.y)
         
-        # Check each door we've opened
-        for door_pos in list(self.opened_doors):
+        # Check each opened door
+        for door_pos in list(self.opened_doors):  # Copy list to avoid modification during iteration
             door_x, door_y = door_pos
             
-            # Calculate distance from entity to the door
+            # Calculate distance (Chebyshev distance)
             distance = max(abs(current_pos[0] - door_x), abs(current_pos[1] - door_y))
             
-            # If we're more than 1 tile away from the door, close it
+            # Close door if we're more than 1 tile away
             if distance > 1:
                 if self.close_door_at(door_x, door_y):
-                    self.opened_doors.remove(door_pos)
                     doors_closed = True
-                else:
-                    # If we can't close it (blocked), remove from tracking anyway
-                    self.opened_doors.remove(door_pos)
-        
+                # Remove from tracking regardless of success (might be blocked)
+                self.opened_doors.remove(door_pos)
+                
         return doors_closed
 
     def get_path_with_doors(self, dest_x: int, dest_y: int) -> List[Tuple[int, int]]:
@@ -247,6 +206,16 @@ class BaseAI(Action):
             gm = self.entity.gamemap
             if radius is None:
                 radius = getattr(self.entity, "sight_radius", 6)
+
+            # Check if target actor is in darkness (harder to see)
+            target_in_darkness = any(getattr(e, "name", "") == "Darkness" for e in getattr(actor, "effects", []))
+            if target_in_darkness:
+                radius = max(1, radius - 4)  # Significantly reduced sight range in darkness
+            
+            # Check if this entity itself is in darkness (reduced sight) FUTURE IMPLEMENT
+            #self_in_darkness = any(getattr(e, "name", "") == "Darkness" for e in getattr(self.entity, "effects", []))
+            #if self_in_darkness:
+            #    radius = max(1, radius - 2)  # Self in darkness also reduces sight
 
             fov = tcod.map.compute_fov(gm.tiles["transparent"], (self.entity.x, self.entity.y), radius)
             return bool(fov[actor.x, actor.y])
@@ -297,7 +266,7 @@ class HostileEnemy(BaseAI):
         self.path: List[Tuple[int, int]] = []
         # Simple wandering behavior
         self.wander_wait_turns = random.randint(0, 2)
-        self.wander_range = 4
+        self.wander_range = 10
         # Initialize home position as None - will be set on first use to actual spawn position
         self.home_x = None
         self.home_y = None

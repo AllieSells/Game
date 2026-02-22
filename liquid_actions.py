@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from entity import Actor
 
 
+
 class SpillLiquidAction(Action):
     """Action to spill liquid at the entities location."""
     

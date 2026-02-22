@@ -32,25 +32,61 @@ if TYPE_CHECKING:
 
 
 class TurnManager:
-    """Manages all turn-based logic and systems that run after player actions."""
+    """Supreme Turn Manager - Manages initiative-based turn order for all actors."""
     
     def __init__(self, engine: Engine):
         self.engine = engine
         self.total_player_moves = 0  # Track total player moves for hunger system
+        self.turn_queue = []  # List of (initiative, actor) tuples
+        self.current_turn_actor = None
     
     def process_pre_player_turn(self) -> BaseEventHandler | None:
-        """
-        Called before the player acts to handle fast enemy actions.
-        Fast enemies can act before the player if their speed allows it.
+        """Process all actors who should act before the player based on initiative."""
+        return self._process_turn_queue_until_player()
+    
+    def _process_turn_queue_until_player(self) -> BaseEventHandler | None:
+        """Process turns until it's the player's turn or queue is empty."""
+        self._rebuild_turn_queue()
         
-        Returns:
-            BaseEventHandler if we need to switch handlers (like GameOver), None otherwise.
-        """
-        # Process fast enemy turns that can act before the player
-        handler_change = self._handle_fast_enemy_turns()
-        if handler_change:
-            return handler_change
+        while self.turn_queue:
+            # Get the next actor to act (highest initiative)
+            initiative, actor = self.turn_queue.pop(0)
+            
+            # If it's the player's turn, stop here
+            if actor == self.engine.player:
+                return None
+                
+            # Process enemy turn
+            if actor.ai:
+                try:
+                    actor.ai.perform()
+                    actor.initiative_counter -= 100  # Consume action
+                except Exception:
+                    actor.initiative_counter -= 100  # Still consume turn
+                    
+                # Check if player died
+                if not self.engine.player.is_alive:
+                    from input_handlers import GameOverEventHandler
+                    return GameOverEventHandler(self.engine)
+        
         return None
+    
+    def _rebuild_turn_queue(self) -> None:
+        """Rebuild the turn queue based on current initiative values."""
+        self.turn_queue = []
+        
+        # Add all living actors with their current initiative
+        for actor in self.engine.game_map.actors:
+            if actor.is_alive:
+                # Update initiative for this round
+                actor.initiative_counter += actor.get_effective_speed()
+                
+                # Only add to queue if they have enough initiative to act
+                if actor.initiative_counter >= 100:
+                    self.turn_queue.append((actor.initiative_counter, actor))
+        
+        # Sort by initiative (highest first)
+        self.turn_queue.sort(key=lambda x: x[0], reverse=True)
     
     def process_player_turn_end(self) -> BaseEventHandler | None:
         """
@@ -59,9 +95,6 @@ class TurnManager:
         Returns:
             BaseEventHandler if we need to switch handlers (like GameOver), None otherwise.
         """
-        # Increment player's initiative counter
-        self.engine.player.initiative_counter += self.engine.player.get_effective_speed()
-        
         # 1. Handle equipment durability (torches burning out, etc.)
         handler_change = self._handle_equipment_durability()
         if handler_change:
@@ -94,8 +127,8 @@ class TurnManager:
 
         #print(f"Hunger: {player.hunger:.2f}, Saturation: {player.saturation:.2f}, Mult: {hunger_mult:.2f}, TotalMoves: {self.total_player_moves}")
         
-        # 2. Process enemy turns
-        self._handle_enemy_turns()
+        # Process any remaining actor turns after player acted
+        self._process_remaining_turns()
         
         # 3. Update field of view
         self._update_fov()
@@ -199,65 +232,23 @@ class TurnManager:
             pass
         return None
     
-    def _handle_fast_enemy_turns(self) -> BaseEventHandler | None:
-        """Process turns for enemies that are fast enough to act before the player."""
-        player_threshold = self.engine.player.initiative_counter + self.engine.player.get_effective_speed()
-        fast_actions_taken = False
-        
-        # Track which entities acted in fast phase to prevent double actions
-        if not hasattr(self, '_entities_acted_fast'):
-            self._entities_acted_fast = set()
-        self._entities_acted_fast.clear()  # Reset for new turn
-        
-        for entity in set(self.engine.game_map.actors) - {self.engine.player}:
-            if entity.ai and entity.get_effective_speed() > 100:  # Only fast enemies (effective speed > 100)
-                # Increment entity's initiative
-                entity.initiative_counter += entity.get_effective_speed()
-                
-                # Check if this entity can act before the player's next turn
-                if entity.initiative_counter >= player_threshold:
-                    try:
-                        if not fast_actions_taken:
-                            # Only show this message once per turn cycle
-                            self.engine.message_log.add_message("You sense movement in the shadows...", color.gray)
-                            fast_actions_taken = True
-                        
-                        entity.ai.perform()
-                        entity.initiative_counter -= 100  # Reduce by base action cost
-                        self._entities_acted_fast.add(entity)  # Mark as acted in fast phase
-                        
-                        # Check if player died
-                        if not self.engine.player.is_alive:
-                            from input_handlers import GameOverEventHandler
-                            return GameOverEventHandler(self.engine)
-                            
-                    except Exception:  # Changed from exceptions.Impossible to catch all
-                        entity.initiative_counter -= 100  # Still consume the turn
-        return None
+
     
-    def _handle_enemy_turns(self) -> None:
-        """Process all enemy AI turns, but skip those that already acted in fast phase."""
-        # Ensure the fast entities tracker exists
-        if not hasattr(self, '_entities_acted_fast'):
-            self._entities_acted_fast = set()
+    def _process_remaining_turns(self) -> None:
+        """Process any actors who still have initiative to act after the player."""
+        # Consume player's action
+        self.engine.player.initiative_counter -= 100
         
-        for entity in set(self.engine.game_map.actors) - {self.engine.player}:
-            if entity.ai:
-                # Skip entities that already acted in the fast phase this turn
-                if entity in self._entities_acted_fast:
-                    continue
-                    
-                # Increment entity's initiative
-                entity.initiative_counter += entity.get_effective_speed()
-                
-                # Check if this entity should act this turn
-                while entity.initiative_counter >= 100:  # 100 is the base action threshold
-                    try:
-                        entity.ai.perform()
-                        entity.initiative_counter -= 100  # Reduce by base action cost
-                    except Exception:  # Changed from exceptions.Impossible to catch all
-                        entity.initiative_counter -= 100  # Still consume the turn
-                        break  # Stop this entity from acting more this round
+        # Rebuild queue and process remaining turns
+        self._rebuild_turn_queue()
+        
+        for initiative, actor in self.turn_queue:
+            if actor != self.engine.player and actor.ai:
+                try:
+                    actor.ai.perform()
+                    actor.initiative_counter -= 100
+                except Exception:
+                    actor.initiative_counter -= 100
     
     def _update_fov(self) -> None:
         """Update the player's field of view."""
