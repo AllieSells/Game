@@ -15,6 +15,13 @@ class Inventory(BaseComponent):
         self.capacity = capacity
         self.items: List[Item] = []
 
+    def delete(self, item: Item) -> None:
+        """Permanently removes an item from the inventory without dropping it on the map."""
+        try:
+            self.items.remove(item)
+        except ValueError:
+            pass
+
     def drop(self, item: Item) -> None:
         """
         Removes an item from the inventory and restores it to the game map, at the player's current location.

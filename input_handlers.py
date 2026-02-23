@@ -1739,6 +1739,16 @@ class InventoryActivateHandler(InventoryEventHandler):
         # Returns the action for the selected item
         return None
         
+class ThrowSelectionHandler(InventoryEventHandler):
+    # Handles selecting an item to throw
+    TITLE = "Select an item to throw"
+
+    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
+        # Returns the action for throwing the selected item
+        return ThrowTargetHandler(self.engine, item)
+    
+
+
 class QuaffActivateHandler(InventoryEventHandler):
     # Handles using inventory item
     TITLE = "Select potion to quaff"
@@ -1896,6 +1906,50 @@ class SelectIndexHandler(AskUserEventHandler):
     def on_index_selected(self, x: int, y: int) -> Optional[ActionOrHandler]:
         # called when index selected
         raise NotImplementedError()
+
+class ThrowTargetHandler(SelectIndexHandler):
+    # After item selected, this handles where the object should be thrown
+    def __init__(self, engine: Engine, item):
+        super().__init__(engine)
+        self.item = item
+        self.radius = 2
+
+    def on_render(self, console: tcod.Console) -> None:
+        super().on_render(console)
+        # Draw range on top of player location
+        x, y = self.engine.player.x, self.engine.player.y
+        console.draw_frame(
+        x=x - self.radius - 1,
+        y=y - self.radius - 1,
+        width=(self.radius * 2) + 3,
+        height=(self.radius * 2) + 3,
+        fg=color.red,
+        clear=False,
+    )
+    
+    def on_index_selected(self, x: int, y: int) -> Optional[ActionOrHandler]:
+        # Check if walkable
+        if not self.engine.game_map.tiles["walkable"][x, y]:
+            self.engine.message_log.add_message("You cannot throw there.", color.invalid)
+            return None
+
+        # Check if within throw range
+        if self.engine.player.distance(x, y) > 5:
+            self.engine.message_log.add_message("Target is out of range.", color.invalid)
+            return None
+
+        # Finally, check if tile is in player view 
+        if not self.engine.game_map.visible[x, y]:
+            self.engine.message_log.add_message("You cannot see that.", color.invalid)
+            return None
+        #Play throw sound
+        sounds.play_throw_sound()
+        # Wait a few milliseconds to let the throw sound play before dropping the item
+        import time
+        time.sleep(0.1) 
+        # Play Item drop sound
+
+        return actions.ThrowItem(self.engine.player, self.item, x, y)
     
 class TargetingHandler(SelectIndexHandler):
     """Base targeting handler for area/ranged attacks."""
@@ -2819,24 +2873,8 @@ class LookHandler(SelectIndexHandler):
                 x, y = self.engine.mouse_location
                 coating = self.engine.game_map.liquid_system.get_coating(int(x), int(y))
                 if coating:
-                    from liquid_system import LiquidType
-                    
-                    liquid_names = {
-                        LiquidType.WATER: "water",
-                        LiquidType.BLOOD: "blood", 
-                        LiquidType.OIL: "oil",
-                        LiquidType.SLIME: "slime"
-                    }
-                    
-                    liquid_colors = {
-                        LiquidType.WATER: color.blue,
-                        LiquidType.BLOOD: color.red,
-                        LiquidType.OIL: color.yellow,
-                        LiquidType.SLIME: color.green
-                    }
-                    
-                    liquid_name = liquid_names.get(coating.liquid_type, "unknown liquid")
-                    liquid_color = liquid_colors.get(coating.liquid_type, color.white)
+                    liquid_name = coating.liquid_type.get_display_name()
+                    liquid_color = coating.liquid_type.get_display_color()
                     
                     lines.append([
                         ("It is coated in ", liquid_color),
@@ -3008,14 +3046,16 @@ class AreaRangedAttackHandler(SelectIndexHandler):
         console.draw_frame(
             x=x - self.radius - 1,
             y=y - self.radius - 1,
-            width=self.radius ** 2,
-            height = self.radius ** 2,
+            width=(self.radius * 2) + 3,
+            height=(self.radius * 2) + 3,
             fg=color.red,
             clear=False,
         )
 
     def on_index_selected(self, x: int, y: int) -> Optional[Action]:
         return self.callback((x,y))
+
+
 
 class MainGameEventHandler(EventHandler):
 
@@ -3160,6 +3200,9 @@ class MainGameEventHandler(EventHandler):
             return ScrollActivateHandler(self.engine)
         elif key == tcod.event.KeySym.I:
             return InventoryActivateHandler(self.engine)
+        # Throw Handler
+        elif key == tcod.event.KeySym.T:
+            return ThrowSelectionHandler(self.engine)
         elif key == tcod.event.KeySym.E:
             # Visual equipment interface
             from equipment_ui import EquipmentUI
@@ -3476,14 +3519,7 @@ class EntityDebugHandler(SelectIndexHandler):
                 if hasattr(self.engine.game_map, 'liquid_system'):
                     coating = self.engine.game_map.liquid_system.get_coating(cursor_x, cursor_y)
                     if coating:
-                        from liquid_system import LiquidType
-                        liquid_names = {
-                            LiquidType.WATER: "Water",
-                            LiquidType.BLOOD: "Blood", 
-                            LiquidType.OIL: "Oil",
-                            LiquidType.SLIME: "Slime"
-                        }
-                        liquid_name = liquid_names.get(coating.liquid_type, "Unknown liquid")
+                        liquid_name = coating.liquid_type.get_display_name().title()
                         console.print(debug_x + 2, info_y, f"Coating: {liquid_name}", fg=color.cyan)
                         info_y += 1
             else:

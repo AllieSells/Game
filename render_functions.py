@@ -90,14 +90,7 @@ def get_names_at_location(x: int, y: int, game_map: GameMap) -> str:
     if hasattr(game_map, 'liquid_system'):
         coating = game_map.liquid_system.get_coating(x, y)
         if coating:
-            from liquid_system import LiquidType
-            liquid_names = {
-                LiquidType.WATER: "water",
-                LiquidType.BLOOD: "blood",
-                LiquidType.OIL: "oil", 
-                LiquidType.SLIME: "slime"
-            }
-            liquid_name = liquid_names.get(coating.liquid_type, "unknown liquid")
+            liquid_name = coating.liquid_type.get_display_name()
             liquid_info = f" coated in {liquid_name}"
     
     # If no entities, show tile name instead

@@ -33,15 +33,10 @@ class SpillLiquidAction(Action):
                 x, y, self.liquid_type, radius=1, max_depth=self.amount
             )
             
-            liquid_names = {
-                LiquidType.WATER: "water",
-                LiquidType.BLOOD: "blood", 
-                LiquidType.OIL: "oil",
-                LiquidType.SLIME: "slime"
-            }
+            liquid_name = self.liquid_type.get_display_name()
             
             self.engine.message_log.add_message(
-                f"{self.entity.name} spills {liquid_names[self.liquid_type]}!",
+                f"{self.entity.name} spills {liquid_name}!",
                 color.cyan
             )
 

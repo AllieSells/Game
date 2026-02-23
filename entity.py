@@ -4,6 +4,7 @@ import math
 import random
 from typing import Optional, Tuple, Type, TypeVar, TYPE_CHECKING, Union
 
+import liquid_system
 from render_order import RenderOrder
 
 """Entity module for game characters and objects."""
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
     from components.effect import Effect
     from components.body_parts import BodyParts, AnatomyType
     from game_map import GameMap
+    from liquid_system import LiquidType
 
 T = TypeVar("T", bound="Entity")
 
@@ -670,6 +672,10 @@ class Item(Entity):
             verb_past: Optional[str] = None,
             verb_participial: Optional[str] = None,
             rarity_color: color = color.white,
+            tags: Optional[list] = None,
+            liquid_type: Optional[liquid_system.LiquidType] = None,
+            liquid_amount: Optional[int] = None,
+
 
 
     ):
@@ -708,7 +714,9 @@ class Item(Entity):
         self.verb_past = verb_past or self.verb_base + "d"
         self.verb_participial = verb_participial or self.verb_base + "ing"
         self.rarity_color = rarity_color
-
+        self.tags = tags if tags else []
+        self.liquid_type = liquid_type
+        self.liquid_amount = liquid_amount
 
     def roll_for_enchantment(self, enchantment_chance: float ) -> Item:
         """Rolls given chance to apply enchantment"""

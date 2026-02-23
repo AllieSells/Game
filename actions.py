@@ -22,7 +22,6 @@ else:
 
 
 import sounds
-
 # Body part targeting modifiers (damage_modifier, hit_difficulty_modifier)
 # hit_difficulty_modifier: Positive = easier to hit, negative = harder to hit
 
@@ -57,6 +56,17 @@ class Action:
         This method must be overridden by Action subclasses.
         """
         raise NotImplementedError()
+
+
+    def perform(self) -> None:
+        # Placeholder for projectile logic (e.g., shooting an arrow)
+        target = self.target_actor
+        if not target:
+            raise exceptions.Impossible("There is no target to shoot at.")
+        
+        # For now, just display a message and play a sound
+        self.engine.message_log.add_message(f"{self.entity.name} shoots a projectile!", color.orange)
+        sounds.play_shoot_sound()
 
 class InteractAction(Action):
     # Handles 
@@ -622,6 +632,38 @@ class MovementAction(ActionWithDirection):
                     sounds.play_grass_walk_sound()
                 if tile_name == "Floor":
                     sounds.play_walk_sound()
+
+class ThrowItem(ItemAction):
+    def __init__(self, entity: Actor, item: Item, target_x: int, target_y: int):
+        super().__init__(entity, item, target_xy=(target_x, target_y))
+
+    def perform(self) -> None:
+        # Remove item from inventory
+        if self.entity.equipment.item_is_equipped(self.item):
+            self.entity.equipment.toggle_equip(self.item)
+
+        # Also check if contained liquid
+        if self.item.liquid_type:
+            x = self.target_xy[0]
+            y = self.target_xy[1]
+            self.engine.game_map.liquid_system.spill_volume(x=x, y=y, liquid_type=self.item.liquid_type, volume=self.item.liquid_amount)
+        
+
+        if self.item.tags and "fragile" in self.item.tags:
+            # Handle fragile item breakage
+            self.engine.message_log.add_message(f"You throw the {self.item.name}, and it shatters on impact!", color.purple)
+            sounds.play_glass_break_sound()
+            # Delete item
+            self.entity.inventory.delete(self.item)
+            return
+        
+        else:
+            self.entity.inventory.drop(self.item)
+            self.item.drop_sound()
+            # Place item on the ground at target location
+            self.item.x, self.item.y = self.target_xy
+            # Queue a projectile animation from entity to target location
+
 
 class BumpAction(ActionWithDirection):
     def perform(self) -> None:

@@ -589,7 +589,7 @@ def play_grass_walk_sound(entity_x=0, entity_y=0):
     # Add unique stagger delay per entity using position as seed
     # Each entity gets a different delay based on their coordinates
     entity_seed = (entity_x * 31 + entity_y * 17) % 1000  # Create unique value per position
-    delay = (entity_seed / 1000.0) * 0.05  # Convert to 0-50ms delay
+    delay = (entity_seed / 1000.0) * 0.1  # Convert to 0-100ms delay
     
     if delay > 0:
         threading.Timer(delay, _delayed_grass_walk_sound).start()
@@ -697,6 +697,20 @@ def play_attack_sound_weapon_to_armor():
 
     sound = random.choice(attack_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.25))
+
+def play_glass_break_sound():
+    glass_break_sounds = [
+        Sound("RP/sfx/materials/glass/break1.mp3")
+    ]
+    sound = random.choice(glass_break_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.25), volume=0.5)
+
+def play_throw_sound():
+    throw_sounds = [
+        Sound("RP/sfx/throw.mp3")
+    ]
+    sound = random.choice(throw_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.25), volume=0.5)
 
 ## EQUIP
 

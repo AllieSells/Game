@@ -3,6 +3,75 @@ from tcod.map import compute_fov
 import tcod
 from tcod import libtcodpy
 
+class ThrowAnimation:
+    def __init__(self, path):
+        self.path = path
+        self.frames = 5  # duration in frames
+
+    def tick(self, console, game_map):
+        if not self.path:
+            self.frames -= 1
+            return
+
+        for x, y in self.path:
+            x = int(x)
+            y = int(y)
+            if not game_map.in_bounds(x, y):
+                continue
+
+            if game_map.visible[x, y]:
+                console.print(x, y, "*", fg=(255, 255, 0))  # Yellow star for thrown item
+
+        self.frames -= 1
+
+
+class GrassRustleAnimation:
+    def __init__(self, position):
+        self.position = position
+        self.frames = 120  # duration in frames
+        self.render_priority = 0  # Render under entities/items
+
+    def tick(self, console, game_map):
+        x, y = self.position
+
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        if not game_map.visible[x, y]:
+            self.frames -= 1
+            return
+
+        # Base natural green range (no neon chaos)
+        base_green = game_map.tiles["light"][x, y][1][1]  # Get the base green value from the tile's light color
+        base_red = game_map.tiles["light"][x, y][1][0]  # Get the base red value from the tile's light color
+        base_blue = game_map.tiles["light"][x, y][1][2]  # Get the base blue value from the tile's light color
+
+        # Brightness curve - start light, get darker in middle, return to light
+        progress = (120 - self.frames) / 120  # 0.0 to 1.0 progress through animation
+        
+        # Create curve that starts light, gets darker in middle, ends light
+        import math
+        intensity = 1.0 - 0.15 * math.sin(progress * math.pi)  # Varies from 1.0 -> 0.85 -> 1.0
+        multiplier = intensity
+
+        color = (
+            int(base_red * multiplier),
+            int(base_green * multiplier),
+            int(base_blue * multiplier),
+        )
+
+        sequence = ['´', '"', "'", '`', '`', "'", '´']
+        # Map the 60 frames to the 7-character sequence proportionally
+        sequence_index = int((60 - self.frames) / 60 * (len(sequence) - 1))
+        sequence_index = max(0, min(len(sequence) - 1, sequence_index))  # Clamp to valid range
+        char = sequence[sequence_index]
+
+        console.print(x, y, char, fg=color)
+
+        self.frames -= 1
+
+
 class HeardSoundAnimation:
     def __init__(self, position, player, color=(255, 255, 0)):
         self.position = position

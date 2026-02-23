@@ -22,6 +22,30 @@ class LiquidType(Enum):
     BLOOD = auto()
     OIL = auto()
     SLIME = auto()
+    HEALTHPOTION = auto()
+    
+    def get_display_name(self) -> str:
+        """Get the display name for this liquid type."""
+        names = {
+            LiquidType.WATER: "water",
+            LiquidType.BLOOD: "blood", 
+            LiquidType.OIL: "oil",
+            LiquidType.SLIME: "slime",
+            LiquidType.HEALTHPOTION: "a light red liquid"
+        }
+        return names.get(self, "unknown liquid")
+    
+    def get_display_color(self) -> Tuple[int, int, int]:
+        """Get the display color for this liquid type."""
+        import color  # Import here to avoid circular imports
+        colors = {
+            LiquidType.WATER: color.blue,
+            LiquidType.BLOOD: color.red,
+            LiquidType.OIL: color.yellow,
+            LiquidType.SLIME: color.green,
+            LiquidType.HEALTHPOTION: color.light_red
+        }
+        return colors.get(self, color.white)
 
 
 @dataclass
@@ -38,7 +62,8 @@ class LiquidCoating:
             LiquidType.WATER: [ord("˙"), ord("·"), ord("~")],
             LiquidType.BLOOD: [ord("˙"), ord("·"), ord("~")],
             LiquidType.OIL: [ord("˙"), ord("·"), ord("~")], 
-            LiquidType.SLIME: [ord("˙"), ord("·"), ord("∿")]
+            LiquidType.SLIME: [ord("˙"), ord("·"), ord("∿")],
+            LiquidType.HEALTHPOTION: [ord("`"), ord("·"), ord("~")]
         }
         
         char_list = chars[self.liquid_type]
@@ -63,6 +88,10 @@ class LiquidCoating:
             LiquidType.SLIME: {
                 'dark': (30, 60, 30),
                 'light': (50, 120, 50)
+            },
+            LiquidType.HEALTHPOTION: {
+                'dark': (110, 57, 57),
+                'light': (242, 135, 135)
             }
         }
         
@@ -90,6 +119,11 @@ class LiquidSystem:
         self.game_map = game_map
         # Position -> LiquidCoating mapping
         self.coatings: Dict[Tuple[int, int], LiquidCoating] = {}
+
+    def spill_volume(self, x: int, y: int, liquid_type: LiquidType, volume: int) -> None:
+        """Spill a volume of liquid at a location, creating a splash pattern."""
+        self.create_splash(x, y, liquid_type, radius=2, max_depth=min(3, volume))
+
         
     
     def add_liquid(self, x: int, y: int, liquid_type: LiquidType, depth: int = 1) -> None:
@@ -249,7 +283,8 @@ class LiquidSystem:
                 LiquidType.WATER: 0.002,
                 LiquidType.BLOOD: 0.001,
                 LiquidType.OIL: 0.0005,
-                LiquidType.SLIME: 0.0003
+                LiquidType.SLIME: 0.0003,
+                LiquidType.HEALTHPOTION: 0.1  # Magical liquid, very slow evaporation
             }
             
             if random.random() < evap_chance[coating.liquid_type]:

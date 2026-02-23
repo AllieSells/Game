@@ -53,6 +53,11 @@ class Engine:
         # Sound control flags
         self.is_generating_world = False  # Flag to suppress sounds during world generation
         self.is_transitioning_level = False  # Flag to suppress sounds during level transitions
+        
+        # Grass wave system
+        self.grass_wave_timer = 0
+        self.grass_wave_cooldown = 180  # Ticks between waves (about 3 seconds at 60fps)
+        self.active_grass_waves = []
 
     def get_adjacent_tiles(self, x: int, y: int) -> list[tuple[int, int]]:
         # Returns adjacent (including diagonals) tiles
@@ -100,6 +105,23 @@ class Engine:
             else:
                 # very unlikely, but avoid division by zero
                 self.tick_rate = getattr(self, "tick_rate", 0.0)
+
+        # Generate grass waves that sweep across the visible area
+        try:
+            self.grass_wave_timer += 1
+            
+            # Start a new wave periodically
+            if self.grass_wave_timer >= self.grass_wave_cooldown:
+                self.grass_wave_timer = 0
+                # Create a new wave from a random edge
+                self._spawn_grass_wave()
+            
+            # Update existing waves
+            for wave in list(self.active_grass_waves):
+                self._update_grass_wave(wave)
+                
+        except Exception:
+            traceback.print_exc()
 
 
         # Don't call animation rendering here; rendering happens in GameMap.render().
@@ -371,6 +393,113 @@ class Engine:
             return
 
         self._dark_spawn_cooldown = 40
+
+    def _spawn_grass_wave(self):
+        """Create a new grass wave ripple from a random point in the visible area"""
+        if not hasattr(self.game_map, 'visible'):
+            return
+            
+        # Find all visible grass tiles
+        grass_tiles = []
+        for x in range(self.game_map.width):
+            for y in range(self.game_map.height):
+                if (self.game_map.visible[x, y] and 
+                    self.game_map.tiles["name"][x, y] == "Grass"):
+                    grass_tiles.append((x, y))
+        
+        if not grass_tiles:
+            return
+            
+        # Pick a random grass tile as the wave origin
+        origin_x, origin_y = random.choice(grass_tiles)
+        
+        wave = {
+            'origin': (origin_x, origin_y),
+            'radius': 0.0,
+            'speed': random.uniform(0.3, 0.8),  # radius expansion per tick
+            'max_radius': random.randint(4, 8),  # maximum wave radius
+            'intensity': random.uniform(0.4, 0.8),  # animation trigger chance
+            'wave_width': random.uniform(1.0, 2.5),  # thickness of the wave ring
+            'direction': random.uniform(0, 360),  # direction the wave is moving (degrees)
+            'arc_width': random.uniform(120, 180),  # how wide the arc is (degrees)
+        }
+        
+        self.active_grass_waves.append(wave)
+        
+
+    def _update_grass_wave(self, wave):
+        """Update a grass wave ripple and spawn animations in the expanding curved front"""
+        from animations import GrassRustleAnimation
+        import math
+        
+        origin_x, origin_y = wave['origin']
+        radius = wave['radius']
+        speed = wave['speed']
+        max_radius = wave['max_radius']
+        intensity = wave['intensity']
+        wave_width = wave['wave_width']
+        direction = wave['direction']
+        arc_width = wave['arc_width']
+        
+        # Calculate the wave ring - tiles within the wave band
+        inner_radius = max(0, radius - wave_width)
+        outer_radius = radius
+        
+        wave_tiles = []
+        
+        # Convert direction and arc to radians
+        direction_rad = math.radians(direction)
+        arc_half = math.radians(arc_width / 2)
+        
+        # Find tiles in the current wave arc (curved front)
+        search_range = int(outer_radius + 2)  # Add buffer for safety
+        for dx in range(-search_range, search_range + 1):
+            for dy in range(-search_range, search_range + 1):
+                x = origin_x + dx
+                y = origin_y + dy
+                
+                if not self.game_map.in_bounds(x, y):
+                    continue
+                    
+                # Calculate distance and angle from origin
+                distance = (dx * dx + dy * dy) ** 0.5
+                
+                # Check if this tile is in the wave ring distance
+                if not (inner_radius <= distance <= outer_radius):
+                    continue
+                
+                # Calculate angle from origin to this point
+                if dx == 0 and dy == 0:
+                    continue
+                
+                point_angle = math.atan2(dy, dx)
+                
+                # Calculate angular difference from wave direction
+                angle_diff = abs(point_angle - direction_rad)
+                # Handle wrap-around (angles near 0/360 degrees)
+                if angle_diff > math.pi:
+                    angle_diff = 2 * math.pi - angle_diff
+                
+                # Check if this point is within the arc width
+                if angle_diff <= arc_half:
+                    wave_tiles.append((x, y))
+        
+        # Spawn animations on grass tiles in the wave arc
+        for x, y in wave_tiles:
+            if (self.game_map.visible[x, y] and 
+                self.game_map.tiles["name"][x, y] == "Grass" and
+                random.random() < intensity):
+                
+                # Add some randomness to prevent all animations starting at once
+                if random.random() < 0.6:  # 60% chance per tile in wave arc
+                    self.animation_queue.append(GrassRustleAnimation((x, y)))
+        
+        # Update wave radius
+        wave['radius'] += speed
+        
+        # Remove completed waves
+        if wave['radius'] > max_radius:
+            self.active_grass_waves.remove(wave)
 
 
     def update_fov(self) -> None:

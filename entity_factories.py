@@ -15,30 +15,39 @@ import sounds
 from text_utils import *
 from random import random
 import copy
+import liquid_system
+
+
 
 lesser_health_potion = Item(
-    char="!",
-    color=(127,0,255),
+    char="o",
+    color=(247, 143, 143),
     name="Lesser Health Potion",
     consumable=consumable.HealingConsumables(amount=8),
-    description="A small vial filled with a red liquid.",
+    description="A small vial filled with a light red liquid.",
     equip_sound=sounds.play_equip_glass_sound,
     unequip_sound=sounds.play_unequip_glass_sound,
     pickup_sound=sounds.pick_up_glass_sound,
     drop_sound=sounds.drop_glass_sound,
-    rarity_color=color.common
+    rarity_color=color.common,
+    tags = ["potion", "healing", "glass", "container", "fragile"],
+    liquid_type=liquid_system.LiquidType.HEALTHPOTION,
+    liquid_amount=8
 )
 health_potion = Item(
     char="!",
-    color=(255,0,0),
+    color=(242, 135, 135),
     name="Health Potion",
     consumable=consumable.HealingConsumables(amount=15),
-    description="A medium vial filled with a red liquid.",
+    description="A medium vial filled with a light red liquid.",
     equip_sound=sounds.play_equip_glass_sound,
     unequip_sound=sounds.play_unequip_glass_sound,
     pickup_sound=sounds.pick_up_glass_sound,
     drop_sound=sounds.drop_glass_sound,
-    rarity_color=color.uncommon
+    rarity_color=color.uncommon,
+    tags = ["potion", "healing", "glass", "container", "fragile"],
+    liquid_type=liquid_system.LiquidType.HEALTHPOTION,
+    liquid_amount=15
 )
 lightning_scroll = Item(
     char="~",
@@ -50,7 +59,8 @@ lightning_scroll = Item(
     unequip_sound=sounds.play_unequip_paper_sound,
     pickup_sound=sounds.pick_up_paper_sound,
     drop_sound=sounds.drop_paper_sound,
-    rarity_color=color.common
+    rarity_color=color.common,
+    tags = ["scroll", "damage", "lightning", "paper"]
 )
 
 confusion_scroll = Item(
@@ -63,7 +73,8 @@ confusion_scroll = Item(
     unequip_sound=sounds.play_unequip_paper_sound,
     pickup_sound=sounds.pick_up_paper_sound,
     drop_sound=sounds.drop_paper_sound,
-    rarity_color=color.common
+    rarity_color=color.common,
+    tags = ["scroll", "effect", "confusion", "paper"]
 )
 
 fireball_scroll = Item(
@@ -76,7 +87,8 @@ fireball_scroll = Item(
     unequip_sound=sounds.play_unequip_paper_sound,
     pickup_sound=sounds.pick_up_paper_sound,
     drop_sound=sounds.drop_paper_sound,
-    rarity_color=color.common
+    rarity_color=color.common,
+    tags = ["scroll", "damage", "fireball", "paper"]
 )
 
 campfire = Item(
@@ -84,6 +96,7 @@ campfire = Item(
     color=(255, 140, 0),
     name="Campfire",
     description="A small campfire providing warmth and light.",
+    tags = ["fire", "campfire", "light", "wood"]
 )
 
 bonfire = Item(
@@ -91,6 +104,7 @@ bonfire = Item(
     color=(255, 140, 0),
     name="Bonfire",
     description="A large bonfire crackling with intense flames.",
+    tags = ["fire", "bonfire", "light", "wood"]
 )
 
 torch = Item(
@@ -108,7 +122,8 @@ torch = Item(
     verb_present="smashes",
     verb_past="smashed",
     verb_participial="smashing",
-    rarity_color=color.common
+    rarity_color=color.common,
+    tags = ["torch", "light", "wood", "fire"]
 )
 
 dagger = Item(
@@ -122,8 +137,8 @@ dagger = Item(
     verb_present="stabs",
     verb_past="stabbed",
     verb_participial="stabbing",
-    rarity_color=color.common
-
+    rarity_color=color.common,
+    tags = ["dagger", "weapon", "blade", "metal"]
 )
 
 sword = Item(
@@ -137,7 +152,8 @@ sword = Item(
     verb_present="slashes",
     verb_past="slashed",
     verb_participial="slashing",
-    rarity_color=color.common
+    rarity_color=color.common,
+    tags = ["sword", "weapon", "blade", "metal"]
 )
 
 leather_cap = Item(
@@ -149,7 +165,8 @@ leather_cap = Item(
     unequip_sound=sounds.play_unequip_leather_sound,
     pickup_sound=sounds.pick_up_leather_sound,
     drop_sound=sounds.drop_leather_sound,
-    rarity_color=color.common
+    rarity_color=color.common,
+    tags = ["leather", "armor", "headgear"]
 )
 
 leather_armor = Item(
@@ -161,7 +178,8 @@ leather_armor = Item(
     unequip_sound=sounds.play_unequip_leather_sound,
     pickup_sound=sounds.pick_up_leather_sound,
     drop_sound=sounds.drop_leather_sound,
-    rarity_color=color.common
+    rarity_color=color.common,
+    tags = ["leather", "armor", "body armor"]
 )
 
 chain_mail = Item(
