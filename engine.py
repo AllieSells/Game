@@ -216,6 +216,7 @@ class Engine:
         if player is None or gm is None:
             return None
 
+
         candidates = []
         for radius in range(min_radius, max_radius + 1):
             ring = []
