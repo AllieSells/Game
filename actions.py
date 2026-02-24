@@ -57,17 +57,6 @@ class Action:
         """
         raise NotImplementedError()
 
-
-    def perform(self) -> None:
-        # Placeholder for projectile logic (e.g., shooting an arrow)
-        target = self.target_actor
-        if not target:
-            raise exceptions.Impossible("There is no target to shoot at.")
-        
-        # For now, just display a message and play a sound
-        self.engine.message_log.add_message(f"{self.entity.name} shoots a projectile!", color.orange)
-        sounds.play_shoot_sound()
-
 class InteractAction(Action):
     # Handles 
     def __init__(self, entity: Actor, dx: int = 0, dy: int = 0):
@@ -323,7 +312,407 @@ class ActionWithDirection(Action):
     def perform(self) -> None:
         raise NotImplementedError()
     
+class RangedAction(ActionWithDirection):
+    """Directional ranged attack that can target a specific body part."""
 
+    def __init__(self, entity: Actor, dx: int, dy: int, target_part: Optional['BodyPartType'] = None):
+        super().__init__(entity, dx, dy)
+        self.target_part = target_part
+
+    def _get_ready_ranged_items(self):
+        """Return currently readied bow and projectile items, if any."""
+        bow_item = None
+        projectile_item = None
+
+        equipment = getattr(self.entity, "equipment", None)
+        if not equipment:
+            return None, None
+
+        held_items = list(equipment.grasped_items.values()) + list(equipment.equipped_items.values())
+
+        for item in held_items:
+            if not item or not hasattr(item, "equippable") or not item.equippable:
+                continue
+
+            eq_type_name = item.equippable.equipment_type.name
+            item_tags = {tag.lower() for tag in getattr(item, "tags", [])}
+
+            if bow_item is None and (eq_type_name == "RANGED" or "bow" in item_tags):
+                bow_item = item
+
+            if projectile_item is None and (
+                eq_type_name == "PROJECTILE" or "arrow" in item_tags or "ammunition" in item_tags
+            ):
+                projectile_item = item
+
+            if bow_item and projectile_item:
+                break
+
+        return bow_item, projectile_item
+
+    def _find_target_in_line(self, max_range: int = 8) -> tuple[Optional[Actor], Optional[tuple[int, int]], str]:
+        """Find the first actor hit by a shot in this direction or what stops the projectile.
+        
+        Returns:
+            (target_actor, collision_pos, collision_type)
+            - target_actor: The actor hit, or None if no actor hit
+            - collision_pos: Position where projectile stopped (x, y) - last walkable tile before obstacle
+            - collision_type: 'actor', 'obstacle', 'out_of_bounds', or 'max_range'
+        """
+        x, y = self.entity.x, self.entity.y
+        last_walkable_x, last_walkable_y = x, y
+
+        for step in range(max_range):
+            x += self.dx
+            y += self.dy
+
+            # Check bounds first
+            if not self.engine.game_map.in_bounds(x, y):
+                return None, (last_walkable_x, last_walkable_y), 'out_of_bounds'
+
+            # Check for actor at this position
+            target = self.engine.game_map.get_actor_at_location(x, y)
+            if target and target is not self.entity:
+                return target, (x, y), 'actor'
+
+            # Check if the tile is walkable - if not, projectile stops at last walkable position
+            if not self.engine.game_map.tiles["walkable"][x, y]:
+                return None, (last_walkable_x, last_walkable_y), 'obstacle'
+            
+            # Update last walkable position
+            last_walkable_x, last_walkable_y = x, y
+
+        # Reached max range without hitting anything
+        return None, (x, y), 'max_range'
+
+    def _consume_projectile(self, projectile_item) -> None:
+        equipment = getattr(self.entity, "equipment", None)
+        inventory = getattr(self.entity, "inventory", None)
+
+        original_hand_slot = None
+        original_equipped_slot = None
+
+        if equipment:
+            for hand_name, held_item in equipment.grasped_items.items():
+                if held_item == projectile_item:
+                    original_hand_slot = hand_name
+                    break
+
+            if (
+                original_hand_slot is None
+                and hasattr(projectile_item, "equippable")
+                and projectile_item.equippable
+            ):
+                eq_slot_name = projectile_item.equippable.equipment_type.name
+                if equipment.equipped_items.get(eq_slot_name) == projectile_item:
+                    original_equipped_slot = eq_slot_name
+
+        if equipment:
+            equipment.unequip_item(projectile_item, add_message=False)
+
+        if inventory:
+            inventory.delete(projectile_item)
+
+        if not equipment or not inventory:
+            return
+
+        replacement_arrow = None
+        for item in inventory.items:
+            if item == projectile_item:
+                continue
+            if not hasattr(item, "equippable") or not item.equippable:
+                continue
+
+            eq_type_name = item.equippable.equipment_type.name
+            item_tags = {tag.lower() for tag in getattr(item, "tags", [])}
+            is_arrow = (
+                eq_type_name == "PROJECTILE"
+                or "arrow" in item_tags
+                or "ammunition" in item_tags
+            )
+
+            if is_arrow and not equipment.item_is_equipped(item):
+                replacement_arrow = item
+                break
+
+        if not replacement_arrow:
+            if self.entity is self.engine.player:
+                self.engine.message_log.add_message("You are out of arrows.", color.yellow)
+            return
+
+        if original_hand_slot:
+            equipment.grasped_items[original_hand_slot] = replacement_arrow
+        elif original_equipped_slot:
+            equipment.equipped_items[original_equipped_slot] = replacement_arrow
+        else:
+            equipment.equip_item(replacement_arrow, add_message=False)
+
+        if self.entity is self.engine.player:
+            self.engine.message_log.add_message("You ready another arrow.", color.light_gray)
+
+    def perform(self) -> None:
+        bow_item, projectile_item = self._get_ready_ranged_items()
+        if not bow_item or not projectile_item:
+            raise exceptions.Impossible("You need a bow and an arrow readied to fire.")
+
+        # Store projectile info before consuming it
+        projectile_char = projectile_item.char
+        projectile_color = projectile_item.color
+
+        # Always consume projectile when firing (regardless of hit/miss)
+        self._consume_projectile(projectile_item)
+
+        # Play shooting sound
+        sounds.play_throw_sound()  # Use throw sound for bow firing
+
+        target, collision_pos, collision_type = self._find_target_in_line(max_range=8)
+
+        # Use bow verb if available
+        shot_verb = "shoots"
+        if hasattr(bow_item, "verb_present") and bow_item.verb_present:
+            shot_verb = bow_item.verb_present
+        elif hasattr(bow_item, "verb_base") and bow_item.verb_base:
+            shot_verb = bow_item.verb_base + "s"
+
+        # Handle different collision types
+        if collision_type == 'actor' and target:
+            # Hit an actor - proceed with normal combat
+            self._handle_actor_hit(target, shot_verb)
+            # Add projectile animation
+            import tcod.los
+            path = list(tcod.los.bresenham((self.entity.x, self.entity.y), collision_pos).tolist())
+            from animations import ThrowAnimation
+            self.engine.animation_queue.append(ThrowAnimation(path, projectile_char, projectile_color))
+        elif collision_type == 'obstacle':
+            # Hit an obstacle - 50/50 chance to break or fall
+            break_chance = random.random() < 0.5
+            
+            # Add projectile animation to collision point
+            import tcod.los
+            obstacle_x = collision_pos[0] + self.dx
+            obstacle_y = collision_pos[1] + self.dy
+            path = list(tcod.los.bresenham((self.entity.x, self.entity.y), (obstacle_x, obstacle_y)).tolist())
+            from animations import ThrowAnimation
+            self.engine.animation_queue.append(ThrowAnimation(path, projectile_char, projectile_color))
+            
+            sounds.play_throw_sound()  # Use throw sound for projectile hitting obstacle
+            if break_chance:
+                self.engine.message_log.add_message(f"Your arrow hits an obstacle and breaks!", color.gray)
+            else:
+                self.engine.message_log.add_message(f"Your arrow hits an obstacle and falls to the ground.", color.gray)
+                self._drop_projectile_at(collision_pos, None)
+        elif collision_type == 'out_of_bounds':
+            # Add projectile animation to edge of map
+            import tcod.los
+            path = list(tcod.los.bresenham((self.entity.x, self.entity.y), collision_pos).tolist())
+            from animations import ThrowAnimation
+            self.engine.animation_queue.append(ThrowAnimation(path, projectile_char, projectile_color))
+            self.engine.message_log.add_message(f"Your arrow flies out of sight.", color.gray)
+        elif collision_type == 'max_range':
+            # Add projectile animation to max range
+            import tcod.los
+            path = list(tcod.los.bresenham((self.entity.x, self.entity.y), collision_pos).tolist())
+            from animations import ThrowAnimation
+            self.engine.animation_queue.append(ThrowAnimation(path, projectile_char, projectile_color))
+            self.engine.message_log.add_message(f"Your arrow lands in the distance.", color.gray)
+            self._drop_projectile_at(collision_pos, None)
+        else:
+            # No target found in range
+            self.engine.message_log.add_message(f"Your arrow flies through empty air.", color.gray)
+
+    def _drop_projectile_at(self, pos: tuple[int, int], original_projectile) -> None:
+        """Drop a copy of the projectile at the specified position."""
+        try:
+            import copy
+            from entity_factories import arrow  # Assuming there's a basic arrow template
+            
+            # Create a new arrow at the collision position
+            new_arrow = copy.deepcopy(arrow)
+            new_arrow.x, new_arrow.y = pos
+            
+            # Add to game map
+            self.engine.game_map.entities.add(new_arrow)
+            
+        except Exception as e:
+            print(f"Could not drop projectile: {e}")
+            # Silently fail if we can't create the arrow
+    
+    def _handle_actor_hit(self, target: Actor, shot_verb: str) -> None:
+        """Handle hitting an actor with the projectile."""
+        # Manipulation check
+        for part in self.entity.body_parts.get_all_parts().values():
+            if "manipulate" in part.tags:
+                if part.damage_level_float > 0.5:
+                    if random.random() < 0.5:
+                        self.entity.fighter._drop_grasped_items(part)
+                    print("DEBUG: Manipulation partially impaired by damage to part:", part.name)
+                elif part.damage_level_float >= 1.0:
+                    self.entity.fighter._drop_grasped_items(part)
+                else:
+                    print("DEBUG: Manipulation possible with part:", part.name)
+        
+        hit_part = None
+        damage_modifier = 1.0
+        hit_difficulty_modifier = 0.0
+
+        if not self.target_part:
+            if hasattr(target, 'body_parts') and target.body_parts:
+                random_part = target.body_parts.get_random_part()
+                self.target_part = random_part.part_type if random_part else None
+
+        if self.target_part and hasattr(target, 'body_parts') and target.body_parts:
+            hit_part = target.body_parts.body_parts.get(self.target_part)
+            if hit_part and not hit_part.is_destroyed:
+                part_type_name = hit_part.part_type.name
+                if part_type_name in BODY_PART_MODIFIERS:
+                    damage_modifier, hit_difficulty_modifier = BODY_PART_MODIFIERS[part_type_name]
+                else:
+                    for key in BODY_PART_MODIFIERS:
+                        if key in part_type_name:
+                            damage_modifier, hit_difficulty_modifier = BODY_PART_MODIFIERS[key]
+                            break
+            else:
+                # If targeted part is destroyed, hit a random available part instead
+                random_part = target.body_parts.get_random_part()
+                if random_part:
+                    self.target_part = random_part.part_type
+                    hit_part = random_part
+                    if hit_part and not hit_part.is_destroyed:
+                        part_type_name = hit_part.part_type.name
+                        if part_type_name in BODY_PART_MODIFIERS:
+                            damage_modifier, hit_difficulty_modifier = BODY_PART_MODIFIERS[part_type_name]
+                        else:
+                            for key in BODY_PART_MODIFIERS:
+                                if key in part_type_name:
+                                    damage_modifier, hit_difficulty_modifier = BODY_PART_MODIFIERS[key]
+                                    break
+
+        # Calculate defense and damage
+        defense = 0
+        if hit_part:
+            defense = hit_part.protection + target.fighter.base_defense
+            if hasattr(target, "equipment") and target.equipment:
+                defense += target.equipment.get_defense_for_part(hit_part.name)
+        else:
+            defense = target.fighter.defense
+
+        base_damage = self.entity.fighter.power - defense
+        final_damage = max(0, int(base_damage * damage_modifier))
+
+        # Hit chance calculation
+        hit_chance = 85 + hit_difficulty_modifier
+        hit_roll = random.randint(1, 100)
+        hit_success = hit_roll <= hit_chance
+
+        # Dodge calculation
+        dodge_success = False
+        if hit_success:
+            if random.random() < target.dodge_chance:
+                hit_success = False
+                dodge_success = True
+            
+        if dodge_success:
+            adjacent_positions = [
+                (target.x + 1, target.y), (target.x - 1, target.y),
+                (target.x, target.y + 1), (target.x, target.y - 1)
+            ]
+            if target.preferred_dodge_direction:
+                preferred_order = {
+                    "north": [(target.x, target.y - 1), (target.x + 1, target.y), (target.x - 1, target.y), (target.x, target.y + 1)],
+                    "south": [(target.x, target.y + 1), (target.x + 1, target.y), (target.x - 1, target.y), (target.x, target.y - 1)],
+                    "east": [(target.x + 1, target.y), (target.x, target.y - 1), (target.x, target.y + 1), (target.x - 1, target.y)],
+                    "west": [(target.x - 1, target.y), (target.x, target.y - 1), (target.x, target.y + 1), (target.x + 1, target.y)]
+                }
+                adjacent_positions = preferred_order.get(target.preferred_dodge_direction.lower(), adjacent_positions)
+            for new_x, new_y in adjacent_positions:
+                if self.engine.game_map.in_bounds(new_x, new_y) and self.engine.game_map.tiles["walkable"][new_x, new_y] and not self.engine.game_map.get_blocking_entity_at_location(new_x, new_y):
+                    target.x = new_x
+                    target.y = new_y
+                    self.engine.message_log.add_message(f"{target.name} dodges to the side!", color.teal)
+                    break
+
+        # Create attack description
+        if hit_part:
+            attack_desc = f"{self.entity.name.capitalize()} {shot_verb} {target.name}'s {hit_part.name}"
+        else:
+            attack_desc = f"{self.entity.name.capitalize()} {shot_verb} {target.name}"
+
+        # Play sounds
+        if hit_success and final_damage > 0:
+            if target.fighter.hp <= final_damage:
+                sounds.play_attack_sound_finishing_blow()
+            elif target.equipment and target.equipment.equipped_items.get('ARMOR'):
+                sounds.play_attack_sound_weapon_to_armor()
+            else:
+                sounds.play_attack_sound_weapon_to_no_armor()
+        elif hit_success and final_damage == 0:
+            sounds.play_block_sound()
+        else:
+            sounds.play_miss_sound()
+
+        # Set attack color
+        if self.entity is self.engine.player:
+            attack_color = color.player_atk
+        else:
+            attack_color = color.enemy_atk
+
+        # Display results
+        if not hit_success:
+            if dodge_success:
+                self.engine.message_log.add_message(
+                    f"{attack_desc}, but {target.name} dodges!", color.teal
+                )
+            else:
+                self.engine.message_log.add_message(
+                    f"{attack_desc}, but misses!", color.dark_gray
+                )
+            # Arrow always drops when missing/dodged - drop at target location
+            self._drop_projectile_at((target.x, target.y), None)
+        elif final_damage > 0:
+            if hit_part:
+                part_damage = hit_part.take_damage(final_damage)
+                if hit_part.is_destroyed:
+                    self.engine.message_log.add_message(
+                        f"{attack_desc} and destroys it for {part_damage} damage!", color.red
+                    )
+                else:
+                    self.engine.message_log.add_message(
+                        f"{attack_desc} for {part_damage} damage.", attack_color
+                    )
+                target.fighter.take_damage(part_damage, targeted_part=self.target_part)
+            else:
+                self.engine.message_log.add_message(
+                    f"{attack_desc} for {final_damage} hit points.", attack_color
+                )
+                target.fighter.take_damage(final_damage)
+
+            # 50/50 chance to add arrow to target's inventory when hit
+            if hasattr(target, 'inventory') and target.inventory and random.random() < 0.5:
+                try:
+                    import copy
+                    from entity_factories import arrow  # Get arrow template
+                    
+                    # Create a copy of the arrow
+                    recovered_arrow = copy.deepcopy(arrow)
+                    
+                    # Add to target's inventory if there's space
+                    if len(target.inventory.items) < target.inventory.capacity:
+                        recovered_arrow.parent = target.inventory
+                        target.inventory.items.append(recovered_arrow)
+                except Exception as e:
+                    # Silently fail if arrow recovery doesn't work
+                    pass
+
+            if target is self.engine.player:
+                self.engine.trigger_damage_indicator()
+        else:
+            self.engine.message_log.add_message(
+                f"{attack_desc}, but does no damage.", attack_color
+            )
+            # Arrow bounced off armor/blocked - drops to ground
+            self._drop_projectile_at((target.x, target.y), None)
+
+                      
 
 class MeleeAction(ActionWithDirection):
     """Melee action that targets a specific body part."""
@@ -350,8 +739,6 @@ class MeleeAction(ActionWithDirection):
                     self.entity.fighter._drop_grasped_items(part)
                 else:
                     print("DEBUG: Manipulation possible with part:", part.name)
-
-        
         # Get target body part and apply targeting effects
         hit_part = None
         damage_modifier = 1.0
@@ -637,6 +1024,29 @@ class ThrowItem(ItemAction):
     def __init__(self, entity: Actor, item: Item, target_x: int, target_y: int):
         super().__init__(entity, item, target_xy=(target_x, target_y))
 
+    def check_throw_hit(self, x, y) -> None:
+        # Check for actor at target location
+        target = self.engine.game_map.get_actor_at_location(x, y)
+        if target:
+            item_weight = getattr(self.item, 'weight', 1.0)  # Default weight if not specified
+            damage = int(item_weight)
+
+            # Pick random body part to hit
+            if hasattr(target, 'body_parts') and target.body_parts:
+                random_part = target.body_parts.get_random_part()
+                targeted_part = random_part.part_type if random_part else None
+            else:
+                targeted_part = None
+                random_part = None
+
+            # Inflict damage on part
+            if targeted_part and random_part:
+                target.fighter.take_damage(damage, targeted_part=targeted_part)
+                self.engine.message_log.add_message(f"You throw the {self.item.name} and hit {target.name}'s {random_part.name} for {damage} damage!", color.orange)
+            else:
+                target.fighter.take_damage(damage)
+                self.engine.message_log.add_message(f"You throw the {self.item.name} and hit {target.name} for {damage} damage!", color.orange)
+
     def perform(self) -> None:
         # Remove item from inventory
         if self.entity.equipment.item_is_equipped(self.item):
@@ -661,8 +1071,14 @@ class ThrowItem(ItemAction):
             self.entity.inventory.drop(self.item)
             self.item.drop_sound()
             # Place item on the ground at target location
+            self.check_throw_hit(*self.target_xy)
             self.item.x, self.item.y = self.target_xy
+            
             # Queue a projectile animation from entity to target location
+            import tcod.los
+            path = list(tcod.los.bresenham((self.entity.x, self.entity.y), self.target_xy).tolist())
+            from animations import ThrowAnimation
+            self.engine.animation_queue.append(ThrowAnimation(path, self.item.char, self.item.color))
 
 
 class BumpAction(ActionWithDirection):

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 class LiquidType(Enum):
     """Types of liquids that can coat tiles."""
+    NONE = auto()
     WATER = auto()
     BLOOD = auto()
     OIL = auto()
@@ -27,6 +28,7 @@ class LiquidType(Enum):
     def get_display_name(self) -> str:
         """Get the display name for this liquid type."""
         names = {
+            LiquidType.NONE: "none",
             LiquidType.WATER: "water",
             LiquidType.BLOOD: "blood", 
             LiquidType.OIL: "oil",
@@ -39,6 +41,7 @@ class LiquidType(Enum):
         """Get the display color for this liquid type."""
         import color  # Import here to avoid circular imports
         colors = {
+            LiquidType.NONE: color.white,
             LiquidType.WATER: color.blue,
             LiquidType.BLOOD: color.red,
             LiquidType.OIL: color.yellow,
@@ -46,6 +49,18 @@ class LiquidType(Enum):
             LiquidType.HEALTHPOTION: color.light_red
         }
         return colors.get(self, color.white)
+    
+    def get_evaporation_chance(self) -> float:
+        """Get the evaporation chance per turn for this liquid type."""
+        chances = {
+            LiquidType.NONE: 0.0,  # No evaporation for no coating
+            LiquidType.WATER: 0.002,    # 0.2% per turn (lasts ~500 turns)
+            LiquidType.BLOOD: 0.01,    # 1% per turn (lasts ~100 turns)  
+            LiquidType.OIL: 0.0005,     # 0.05% per turn (lasts ~2000 turns)
+            LiquidType.SLIME: 0.0003,   # 0.03% per turn (lasts ~3333 turns)
+            LiquidType.HEALTHPOTION: 0.1  # 10% per turn (lasts ~10 turns)
+        }
+        return chances.get(self, 0.001)
 
 
 @dataclass
@@ -278,16 +293,8 @@ class LiquidSystem:
         for pos, coating in list(self.coatings.items()):
             coating.age += 1
             
-            # Simple evaporation based on liquid type
-            evap_chance = {
-                LiquidType.WATER: 0.002,
-                LiquidType.BLOOD: 0.001,
-                LiquidType.OIL: 0.0005,
-                LiquidType.SLIME: 0.0003,
-                LiquidType.HEALTHPOTION: 0.1  # Magical liquid, very slow evaporation
-            }
-            
-            if random.random() < evap_chance[coating.liquid_type]:
+            # Use liquid type's built-in evaporation chance
+            if random.random() < coating.liquid_type.get_evaporation_chance():
                 coating.depth -= 1
                 if coating.depth <= 0:
                     to_remove.append(pos)

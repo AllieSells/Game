@@ -23,7 +23,13 @@ class Equippable(BaseComponent):
         self.power_bonus = power_bonus
         self.defense_bonus = defense_bonus
         self.required_tags = required_tags or set()  # Tags that body parts must have to equip this item
+class Arrow(Equippable):
+    def __init__(self) -> None:
+        super().__init__(equipment_type=EquipmentType.PROJECTILE, power_bonus=3, required_tags={"hand", "grasp"})
 
+class Bow(Equippable):
+    def __init__(self) -> None:
+        super().__init__(equipment_type=EquipmentType.RANGED, power_bonus=0, required_tags={"hand", "grasp"})
 
 class Dagger(Equippable):
     def __init__(self) -> None:

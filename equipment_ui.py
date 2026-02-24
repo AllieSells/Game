@@ -33,31 +33,48 @@ class EquipmentSlot:
     
     def get_equipped_item(self, equipment) -> Optional[Item]:
         """Get the item equipped in this slot."""
+        if not equipment:
+            return None
+            
         for eq_type in self.equipment_types:
-            if eq_type == EquipmentType.WEAPON or eq_type == EquipmentType.SHIELD:
-                # Map UI slot names to body part names
+            if eq_type in [EquipmentType.WEAPON, EquipmentType.SHIELD, EquipmentType.RANGED, EquipmentType.PROJECTILE]:
+                # Handle hand slots for weapons/shields/ranged/projectiles
                 if self.name == "R.Hand":
                     hand_name = "right hand"
                 elif self.name == "L.Hand": 
                     hand_name = "left hand"
                 else:
                     # For other slots that might handle weapons/shields, check all hands
-                    for item in equipment.grasped_items.values():
-                        if (hasattr(item, 'equippable') and item.equippable and 
-                            item.equippable.equipment_type == eq_type):
-                            return item
+                    if hasattr(equipment, 'grasped_items'):
+                        for item in equipment.grasped_items.values():
+                            if (item and hasattr(item, 'equippable') and item.equippable and 
+                                item.equippable.equipment_type == eq_type):
+                                return item
                     return None
                 
                 # Check specific hand for this slot
-                if hand_name in equipment.grasped_items:
+                if hasattr(equipment, 'grasped_items') and hand_name in equipment.grasped_items:
                     item = equipment.grasped_items[hand_name]
-                    if (hasattr(item, 'equippable') and item.equippable and 
+                    if (item and hasattr(item, 'equippable') and item.equippable and 
                         item.equippable.equipment_type == eq_type):
                         return item
-                return None
             else:
-                # Check equipped_items for other equipment types
-                return equipment.equipped_items.get(eq_type.name)
+                # Check equipped_items for other equipment types (armor, helmets, etc.)
+                if hasattr(equipment, 'equipped_items'):
+                    # Try both the enum itself and its name as key
+                    equipped_item = equipment.equipped_items.get(eq_type)
+                    if equipped_item:
+                        return equipped_item
+                    equipped_item = equipment.equipped_items.get(eq_type.name)
+                    if equipped_item:
+                        return equipped_item
+                        
+                # Also check body_part_coverage if it exists
+                if hasattr(equipment, 'body_part_coverage'):
+                    for item in equipment.body_part_coverage.values():
+                        if (item and hasattr(item, 'equippable') and item.equippable and 
+                            item.equippable.equipment_type == eq_type):
+                            return item
         return None
 
 
@@ -67,18 +84,81 @@ class EquipmentUI(AskUserEventHandler):
     def __init__(self, engine: Engine):
         super().__init__(engine)
         self.selected_slot = 0
-        self.selected_item = 0  # For cycling through items
+        self.selected_item = 0  # For cycling through item groups
         self.slots = self._create_equipment_slots()
         
-        # Available items for equipping
-        self.available_items = [item for item in engine.player.inventory.items 
-                              if hasattr(item, 'equippable') and item.equippable]
+        # Available item groups for equipping - use display groups for stacking
+        self.available_item_groups = []
+        
+        # Add item groups from inventory
+        inventory_groups = engine.player.inventory.get_display_groups()
+        for group in inventory_groups:
+            if hasattr(group['item'], 'equippable') and group['item'].equippable:
+                self.available_item_groups.append(group)
+        
+        # Add equipped items (they might not be in inventory anymore)
+        equipment = engine.player.equipment
+        if equipment:
+            # Add items from grasped_items
+            for item in equipment.grasped_items.values():
+                if item and hasattr(item, 'equippable') and item.equippable:
+                    # Check if already in groups
+                    already_present = False
+                    for group in self.available_item_groups:
+                        if item in group['items']:
+                            already_present = True
+                            break
+                    if not already_present:
+                        # Add as single item group
+                        self.available_item_groups.append({
+                            'item': item,
+                            'items': [item],
+                            'quantity': 1,
+                            'display_name': item.name
+                        })
+            
+            # Add items from equipped_items  
+            for item in equipment.equipped_items.values():
+                if item and hasattr(item, 'equippable') and item.equippable:
+                    # Check if already in groups
+                    already_present = False
+                    for group in self.available_item_groups:
+                        if item in group['items']:
+                            already_present = True
+                            break
+                    if not already_present:
+                        # Add as single item group
+                        self.available_item_groups.append({
+                            'item': item,
+                            'items': [item],
+                            'quantity': 1,
+                            'display_name': item.name
+                        })
+            
+            # Add items from body_part_coverage if it exists
+            if hasattr(equipment, 'body_part_coverage'):
+                for item in equipment.body_part_coverage.values():
+                    if item and hasattr(item, 'equippable') and item.equippable:
+                        # Check if already in groups
+                        already_present = False
+                        for group in self.available_item_groups:
+                            if item in group['items']:
+                                already_present = True
+                                break
+                        if not already_present:
+                            # Add as single item group
+                            self.available_item_groups.append({
+                                'item': item,
+                                'items': [item],
+                                'quantity': 1,
+                                'display_name': item.name
+                            })
     
     def _create_equipment_slots(self) -> List[EquipmentSlot]:
         """Create equipment slots for list display."""
         return [
-            EquipmentSlot("R.Hand", 0, 0, [EquipmentType.WEAPON, EquipmentType.SHIELD], "o", "•"),
-            EquipmentSlot("L.Hand", 0, 1, [EquipmentType.WEAPON, EquipmentType.SHIELD], "o", "•"), 
+            EquipmentSlot("R.Hand", 0, 0, [EquipmentType.WEAPON, EquipmentType.SHIELD, EquipmentType.RANGED, EquipmentType.PROJECTILE], "o", "•"),
+            EquipmentSlot("L.Hand", 0, 1, [EquipmentType.WEAPON, EquipmentType.SHIELD, EquipmentType.RANGED, EquipmentType.PROJECTILE], "o", "•"), 
             EquipmentSlot("Head", 0, 2, [EquipmentType.HELMET], "o", "•"),
             EquipmentSlot("Torso", 0, 3, [EquipmentType.ARMOR], "o", "•"),
             EquipmentSlot("L.Arm", 0, 4, [EquipmentType.GAUNTLETS], "o", "•"),
@@ -178,7 +258,9 @@ class EquipmentUI(AskUserEventHandler):
             if equipped_item:
                 item_name = equipped_item.name[:20]  # Longer truncation for wider window
                 text_parts.append((":", fg_color))
-                text_parts.append((item_name, equipped_item.rarity_color))
+                # Safely get rarity color or use white as fallback
+                item_color = getattr(equipped_item, 'rarity_color', color.white)
+                text_parts.append((item_name, item_color))
             
             print_colored_text_with_bg(console, list_x, list_y + i, text_parts, bg_color)
     
@@ -191,7 +273,7 @@ class EquipmentUI(AskUserEventHandler):
             return
             
         selected_slot = self.slots[self.selected_slot]
-        compatible_items = self._get_compatible_items(selected_slot)
+        compatible_groups = self._get_compatible_item_groups(selected_slot)
         
         # Items list area (right side of window, with more space)
         list_x = base_x + 40
@@ -201,57 +283,90 @@ class EquipmentUI(AskUserEventHandler):
         console.print(list_x, list_y, "Available Items:", fg=color.yellow, bg=(45, 35, 25))
         list_y += 1
         
-        # Show compatible items
-        if not compatible_items:
+# Show compatible item groups
+        if not compatible_groups:
             console.print(list_x, list_y, "None", fg=color.gray, bg=(45, 35, 25))
             return
-        
+
         # Clamp selected item to valid range
-        self.selected_item = max(0, min(self.selected_item, len(compatible_items) - 1))
+        self.selected_item = max(0, min(self.selected_item, len(compatible_groups) - 1))
         
-        # Draw items without cap, scrolling if needed
+        # Draw item groups without cap, scrolling if needed
         start_index = max(0, self.selected_item - 8)  # Keep selection visible, show ~9 items
         
-        for display_i, i in enumerate(range(start_index, len(compatible_items))):
+        for display_i, i in enumerate(range(start_index, len(compatible_groups))):
             if display_i >= window_height - 7:  # Respect window height
                 break
             
-            item = compatible_items[i]
+            group = compatible_groups[i]
+            item = group['item']  # Representative item
+            display_name = group['display_name']  # Includes quantity if > 1
             is_selected = i == self.selected_item
             bg_color = (80, 60, 30) if is_selected else (45, 35, 25)
             marker = "> " if is_selected else "  "
             
-            # Check if item is equipped and add (e) marker
-            equipped_marker = " (e)" if self._is_item_equipped(item) else ""
-            item_name = item.name[:max_items_width - 4] + equipped_marker  # Leave room for marker
+            # Check if any item in group is equipped and add (e) marker
+            equipped_marker = ""
+            for group_item in group['items']:
+                if self._is_item_equipped(group_item):
+                    equipped_marker = " (e)"
+                    break
+            
+            item_display = display_name[:max_items_width - 4] + equipped_marker  # Leave room for marker
             
             # Build text parts with rarity color for item name
             text_parts = [
                 (marker, color.white if not is_selected else color.white),
-                (item_name, item.rarity_color)
+                (item_display, item.rarity_color)
             ]
             
             print_colored_text_with_bg(console, list_x, list_y + display_i, text_parts, bg_color)
     
-    def _get_compatible_items(self, slot: EquipmentSlot) -> List[Item]:
-        """Get items that can be equipped in the given slot, including item currently in THIS slot."""
+    def _get_compatible_item_groups(self, slot: EquipmentSlot) -> List[Dict]:
+        """Get item groups that can be equipped in the given slot, including items currently in THIS slot."""
         compatible = []
         currently_equipped_in_slot = slot.get_equipped_item(self.engine.player.equipment)
         
-        for item in self.available_items:
-            if item.equippable.equipment_type in slot.equipment_types:
-                # Always include the item currently equipped in THIS specific slot
-                if item == currently_equipped_in_slot:
-                    compatible.append(item)
+        for group in self.available_item_groups:
+            representative_item = group['item']
+            if representative_item.equippable.equipment_type in slot.equipment_types:
+                # Check if any item in this group is currently equipped in THIS specific slot
+                has_item_in_slot = any(item == currently_equipped_in_slot for item in group['items'])
+                
+                if has_item_in_slot:
+                    compatible.append(group)
                     continue
                 
-                # Skip items that are equipped in OTHER slots
-                if self._is_item_equipped(item):
-                    continue
-                    
-                can_equip, _ = self.engine.player.equipment.can_equip_item(item)
-                if can_equip:
-                    compatible.append(item)
+                # Check if any items in group are available (not equipped in OTHER slots)
+                available_items = []
+                for item in group['items']:
+                    if not self._is_item_equipped(item):
+                        can_equip, _ = self.engine.player.equipment.can_equip_item(item)
+                        if can_equip:
+                            available_items.append(item)
+                
+                if available_items:
+                    # Create a filtered group with only available items
+                    filtered_group = {
+                        'item': available_items[0],  # Use first available as representative
+                        'items': available_items,      # FIFO: first items in list are equipped first
+                        'quantity': len(available_items),
+                        'display_name': f"{available_items[0].name} (x{len(available_items)})" if len(available_items) > 1 else available_items[0].name
+                    }
+                    compatible.append(filtered_group)
+        
+        return compatible
+    
+    def _get_selected_item_from_group(self, group: Dict) -> 'Item':
+        """Get the item to use from a group using FIFO logic."""
+        # FIFO: return the first available item from the group
+        for item in group['items']:
+            # For equipped items, return the specific equipped one
+            if self._is_item_equipped(item):
+                return item
+        
+        # For unequipped items, return the first one (FIFO)
+        return group['items'][0] if group['items'] else group['item']
         
         # Sort items: unequipped items first, item currently in this slot last
         compatible.sort(key=lambda item: item == currently_equipped_in_slot)
@@ -366,19 +481,19 @@ class EquipmentUI(AskUserEventHandler):
         # Item navigation
         elif key == tcod.event.KeySym.LEFT:
             if self.slots:
-                compatible_items = self._get_compatible_items(self.slots[self.selected_slot])
-                if compatible_items:
-                    # Check if items exist before playing sound and changing selection
+                compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot])
+                if compatible_groups:
+                    # Check if item groups exist before playing sound and changing selection
                     sounds.play_ui_move_sound()
-                    self.selected_item = (self.selected_item - 1) % len(compatible_items)
+                    self.selected_item = (self.selected_item - 1) % len(compatible_groups)
             return None
         elif key == tcod.event.KeySym.RIGHT:
             if self.slots:
-                compatible_items = self._get_compatible_items(self.slots[self.selected_slot])
-                if compatible_items:
-                    # Check if items exist before playing sound and changing selection
+                compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot])
+                if compatible_groups:
+                    # Check if item groups exist before playing sound and changing selection
                     sounds.play_ui_move_sound()
-                    self.selected_item = (self.selected_item + 1) % len(compatible_items)
+                    self.selected_item = (self.selected_item + 1) % len(compatible_groups)
             return None
         
         # Equip/Unequip selected item
@@ -410,11 +525,12 @@ class EquipmentUI(AskUserEventHandler):
                 pass
             return None  # Stay in equipment UI
         
-        compatible_items = self._get_compatible_items(selected_slot)
+        compatible_groups = self._get_compatible_item_groups(selected_slot)
         currently_equipped_in_slot = selected_slot.get_equipped_item(self.engine.player.equipment)
         
-        if compatible_items and self.selected_item < len(compatible_items):
-            selected_item = compatible_items[self.selected_item]
+        if compatible_groups and self.selected_item < len(compatible_groups):
+            selected_group = compatible_groups[self.selected_item]
+            selected_item = self._get_selected_item_from_group(selected_group)
             
             # Check if selected item is currently equipped in THIS slot
             if selected_item == currently_equipped_in_slot:

@@ -14,6 +14,7 @@ import random
 from components import equipment
 import exceptions
 import game_map
+from liquid_system import LiquidType
 from message_log import MessageLog
 import render_functions
 import sounds
@@ -133,6 +134,10 @@ class Engine:
                 self.animation_queue.remove(anim)
             except ValueError:
                 pass
+
+        # Body part coating system moved to turn_manager.py
+
+
         
         try:
             for entity in list(self.game_map.entities):
@@ -147,7 +152,6 @@ class Engine:
                                 # Pass the entity reference instead of static coordinates
                                 self.animation_queue.append(GivingQuestAnimation(entity))
                             except Exception:
-                                import traceback
                                 traceback.print_exc()
                                 pass
                 
@@ -181,7 +185,6 @@ class Engine:
 
             sounds.update_all_ambient_sounds(self.player, self.game_map.entities, self.game_map)
         except Exception:
-            import traceback
             traceback.print_exc()
             pass
 
@@ -619,7 +622,8 @@ class Engine:
         render_functions.render_combat_stats(
             console=console,
             dodge_direction=getattr(self.player, "preferred_dodge_direction", "None"),
-            attack_type=getattr(self.player, "current_attack_type", "None")
+            attack_type=getattr(self.player, "current_attack_type", "None"),
+            player=self.player,
         )
 
         #print(self.player.current_attack_type)

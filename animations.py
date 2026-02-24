@@ -4,24 +4,46 @@ import tcod
 from tcod import libtcodpy
 
 class ThrowAnimation:
-    def __init__(self, path):
+    def __init__(self, path, item_char="|", item_color=(255, 255, 0)):
         self.path = path
-        self.frames = 5  # duration in frames
+        self.frames = 8  # duration in frames
+        self.item_char = item_char
+        self.item_color = item_color
+        self.current_frame = 0
 
     def tick(self, console, game_map):
-        if not self.path:
+        if not self.path or self.frames <= 0:
             self.frames -= 1
             return
+        
+        # Calculate how far along the path we should be
+        progress = self.current_frame / max(1, len(self.path) - 1)
+        current_index = min(int(progress * len(self.path)), len(self.path) - 1)
+        
+        # Show the projectile at current position
+        if current_index < len(self.path):
+            x, y = self.path[current_index]
+            x, y = int(x), int(y)
+            
+            if game_map.in_bounds(x, y) and game_map.visible[x, y]:
+                # Show item character with motion trail
+                console.print(x, y, self.item_char, fg=self.item_color)
+                
+                # Add trail effect - show previous positions fading
+                for i in range(1, min(3, current_index + 1)):
+                    if current_index - i >= 0:
+                        trail_x, trail_y = self.path[current_index - i]
+                        trail_x, trail_y = int(trail_x), int(trail_y)
+                        if game_map.in_bounds(trail_x, trail_y) and game_map.visible[trail_x, trail_y]:
+                            # Fade the trail
+                            fade_color = (
+                                max(50, self.item_color[0] - i * 60),
+                                max(50, self.item_color[1] - i * 60), 
+                                max(50, self.item_color[2] - i * 60)
+                            )
+                            console.print(trail_x, trail_y, "·", fg=fade_color)
 
-        for x, y in self.path:
-            x = int(x)
-            y = int(y)
-            if not game_map.in_bounds(x, y):
-                continue
-
-            if game_map.visible[x, y]:
-                console.print(x, y, "*", fg=(255, 255, 0))  # Yellow star for thrown item
-
+        self.current_frame += 1
         self.frames -= 1
 
 

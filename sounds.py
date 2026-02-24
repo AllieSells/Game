@@ -945,11 +945,11 @@ AMBIENT_TYPES = {
     ),
     'menu': AmbientSoundType(
         name='menu',
-        sound_file='RP/sfx/loops/menu/menu.wav',
+        sound_file='RP/sfx/loops/menu/menu3.mp3',
         entity_names=[None],
         map_type=None,
         proximity_threshold=999,  # Always play when active
-        base_volume=0.2
+        base_volume=0.1
     ),
     'dungeon_music': AmbientSoundType(
         name='dungeon_music', 
@@ -1222,7 +1222,7 @@ def start_menu_ambience():
     global _menu_ambience_active
     if not _menu_ambience_active:
         _menu_ambience_active = True
-        start_ambient_sound('menu', volume=0.75)
+        start_ambient_sound('menu')
 
 def stop_menu_ambience():
     """Stop menu ambience."""

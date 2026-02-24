@@ -335,7 +335,7 @@ class Equipment(BaseComponent):
             return
         
         eq_type = item.equippable.equipment_type
-        if eq_type not in [EquipmentType.WEAPON, EquipmentType.SHIELD]:
+        if eq_type not in [EquipmentType.WEAPON, EquipmentType.SHIELD, EquipmentType.RANGED, EquipmentType.PROJECTILE]:
             # Not a grasped item, use regular equip
             self.equip_item(item, add_message)
             return

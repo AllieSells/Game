@@ -1,17 +1,10 @@
 from __future__ import annotations
 
-from math import e
-from optparse import Option
-
 import os
-
 from typing import Callable, Tuple, Optional, TYPE_CHECKING, Union
-from unittest.mock import Base
 
 import tcod.event
 import random
-
-
 import traceback
 
 import actions
@@ -729,9 +722,9 @@ class ContainerEventHandler(AskUserEventHandler):
     def on_render(self, console: tcod.Console) -> None:
         # Renders inventory menu displaying items in both inventories with fantasy styling
         super().on_render(console)
-        player_items = list(self.engine.player.inventory.items)
+        player_groups = self.engine.player.inventory.get_display_groups()
         container_items = list(self.container.items)
-        number_of_player_items = len(player_items)
+        number_of_player_items = len(player_groups)
         number_of_container_items = len(container_items)
 
         # Enhanced window sizing for beautiful layout
@@ -808,15 +801,17 @@ class ContainerEventHandler(AskUserEventHandler):
         # Draw player inventory items
         item_start_y = left_y + 3
         if number_of_player_items > 0:
-            for i, item in enumerate(player_items):
+            for i, group in enumerate(player_groups):
                 if item_start_y + i >= left_y + panel_height - 1:
                     break  # Don't draw outside panel
                     
                 item_key = chr(ord("a") + i)
+                item = group['item']
+                display_name = group['display_name']
                 is_equipped = self.engine.player.equipment.item_is_equipped(item)
                 is_selected = i == self.selected_index and self.menu == "Player"
 
-                item_string = f"{item_key}) {item.name}"
+                item_string = f"{item_key}) {display_name}"
                 if is_equipped:
                     item_string = f"{item_string} (e)"
 
@@ -864,6 +859,9 @@ class ContainerEventHandler(AskUserEventHandler):
         key = event.sym
         modifier = event.mod
 
+        # Get display groups for selection
+        player_groups = self.engine.player.inventory.get_display_groups()
+
         # Skip filter
 
         # Tab shifts active menu
@@ -881,7 +879,7 @@ class ContainerEventHandler(AskUserEventHandler):
         elif key == tcod.event.K_DOWN:
             
             if self.menu == "Player":
-                max_index = max(0, len(self.engine.player.inventory.items) - 1)
+                max_index = max(0, len(player_groups) - 1)
             else:
                 max_index = max(0, len(self.container.items) - 1)
             # Check if selection is in bounds, then play UI sound
@@ -892,9 +890,10 @@ class ContainerEventHandler(AskUserEventHandler):
         elif key in CONFIRM_KEYS:
             # Confirm selection from the active menu
             if self.menu == "Player":
-                if not self.engine.player.inventory.items:
+                if not player_groups:
                     return None
-                return self.on_item_selected(self.engine.player.inventory.items[self.selected_index])
+                selected_group = player_groups[self.selected_index]
+                return self.on_item_selected(selected_group['item'])
             else:
                 if not self.container.items:
                     return None
@@ -906,7 +905,8 @@ class ContainerEventHandler(AskUserEventHandler):
         if 0 <= index <= 26:
             try:
                 if self.menu == "Player":
-                    selected_item = player.inventory.items[index]
+                    selected_group = player_groups[index]
+                    selected_item = selected_group['item']
                 else:
                     selected_item = self.container.items[index]
             except IndexError:
@@ -1087,10 +1087,14 @@ class InventoryEventHandler(AskUserEventHandler):
         super().on_render(console)
         
         # Build filtered list according to filter function and current category
-        all_items = list(self.engine.player.inventory.items)
+        item_groups = self.engine.player.inventory.get_display_groups()
         category_filter = self.categories[self.current_category][1]
-        filtered_items = [it for it in all_items if self.item_filter(it) and category_filter(it)]
-        number_of_items_in_inventory = len(filtered_items)
+        filtered_groups = []
+        for group in item_groups:
+            if self.item_filter(group['item']) and category_filter(group['item']):
+                filtered_groups.append(group)
+        
+        number_of_items_in_inventory = len(filtered_groups)
 
         # Enhanced window sizing for beautiful layout
         sidebar_width = 14  # Category sidebar
@@ -1133,17 +1137,19 @@ class InventoryEventHandler(AskUserEventHandler):
             if self.selected_index >= number_of_items_in_inventory:
                 self.selected_index = max(0, number_of_items_in_inventory - 1)
 
-            for i, item in enumerate(filtered_items):
+            for i, group in enumerate(filtered_groups):
                 if current_y >= y + height - 3:
                     break  # Don't draw outside the frame
                     
                 item_key = chr(ord("a") + i)
+                item = group['item']
+                display_name = group['display_name']
                 is_equipped = self.engine.player.equipment.item_is_equipped(item)
                 is_selected = i == self.selected_index
 
                 # Create elegant item string 
                 item_type_char = self._get_item_type_char(item)
-                item_string = f"{item_key}] {item_type_char} {item.name}"
+                item_string = f"{item_key}] {item_type_char} {display_name}"
                 
                 if is_equipped:
                     item_string = f"{item_string} (e)"  # (e) for equipped
@@ -1161,7 +1167,8 @@ class InventoryEventHandler(AskUserEventHandler):
                 current_y += 1
 
             # Draw selected item preview with ornate styling
-            selected_item = filtered_items[self.selected_index]
+            selected_group = filtered_groups[self.selected_index]
+            selected_item = selected_group['item']
             self._draw_ornate_preview(console, preview_x, y + 3, preview_width - 1, height - 6, selected_item)
             
         else:
@@ -1631,15 +1638,19 @@ class InventoryEventHandler(AskUserEventHandler):
         modifier = event.mod
 
         # Build filtered list for selection mapping
-        all_items = list(player.inventory.items)
-        filtered_items = [it for it in all_items if self.item_filter(it)]
+        item_groups = player.inventory.get_display_groups()
+        category_filter = self.categories[self.current_category][1]
+        filtered_groups = []
+        for group in item_groups:
+            if self.item_filter(group['item']) and category_filter(group['item']):
+                filtered_groups.append(group)
 
         # Arrow-key navigation: up/down to move selection, left/right for tabs, Enter to confirm
         if key == tcod.event.K_UP:
             self.selected_index = max(0, self.selected_index - 1)
             return None
         if key == tcod.event.K_DOWN:
-            self.selected_index = min(len(filtered_items) - 1 if filtered_items else 0, self.selected_index + 1)
+            self.selected_index = min(len(filtered_groups) - 1 if filtered_groups else 0, self.selected_index + 1)
             return None
         if key == tcod.event.K_LEFT:
             self.current_category = max(0, self.current_category - 1)
@@ -1659,10 +1670,11 @@ class InventoryEventHandler(AskUserEventHandler):
         
         if key in CONFIRM_KEYS:
             # If inventory empty, do nothing
-            if len(filtered_items) == 0:
+            if len(filtered_groups) == 0:
                 return None
             try:
-                selected_item = filtered_items[getattr(self, "selected_index", 0)]
+                selected_group = filtered_groups[getattr(self, "selected_index", 0)]
+                selected_item = selected_group['item']
             except Exception:
                 self.engine.message_log.add_message("Invalid selection.", color.invalid)
                 return None
@@ -1673,7 +1685,8 @@ class InventoryEventHandler(AskUserEventHandler):
 
         if 0 <= index <= 26:
             try:
-                selected_item = filtered_items[index]
+                selected_group = filtered_groups[index]
+                selected_item = selected_group['item']
             except IndexError:
                 self.engine.message_log.add_message("Invalid entry.", color.invalid)
                 return None
@@ -2475,21 +2488,24 @@ class LimbTargetingHandler(AskUserEventHandler):
         return MainGameEventHandler(self.engine)
 
 class LookHandler(SelectIndexHandler):
-    """Enhanced look handler with detailed inspection sidebar."""
+    """Enhanced look handler with detailed inspection sidebar and tabbed interface."""
+    
+    # Class variable to remember last selected tab across instances
+    last_selected_tab = 0
 
     def __init__(self, engine: Engine):
         super().__init__(engine)
-        self.show_details = True  # Always show details now
         self.detail_index = 0  # Index for cycling through items at location
         self.scroll_offset = 0  # For scrolling through text
+        self.current_tab = LookHandler.last_selected_tab  # Start with remembered tab
+        self.tab_names = ["Overview", "Damage", "Coatings"]
 
     def on_index_selected(self, x: int, y: int) -> Optional[ActionOrHandler]:
         """Return to main handler when location is selected."""
         return MainGameEventHandler(self.engine)
 
     def on_render(self, console: tcod.Console) -> None:
-        # Call parent render for cursor highlighting but skip the basic name box
-        # Highlights tile underneath cursor
+        # Highlight tile underneath cursor
         super(SelectIndexHandler, self).on_render(console)
 
         x, y = self.engine.mouse_location
@@ -2497,7 +2513,6 @@ class LookHandler(SelectIndexHandler):
         console.rgb["bg"][x, y] = color.white
         console.rgb["fg"][x, y] = color.black
         
-        # Always show detailed sidebar
         self.render_detailed_sidebar(console)
 
     def render_detailed_sidebar(self, console: tcod.Console) -> None:
@@ -2538,20 +2553,50 @@ class LookHandler(SelectIndexHandler):
         
         # Draw sidebar frame with parchment styling
         MenuRenderer.draw_parchment_background(console, sidebar_x, sidebar_y, sidebar_width, sidebar_height)
-        MenuRenderer.draw_ornate_border(console, sidebar_x, sidebar_y, sidebar_width, sidebar_height, "Inspect")
+        tab_title = f"Inspect - {self.tab_names[self.current_tab]}"
+        MenuRenderer.draw_ornate_border(console, sidebar_x, sidebar_y, sidebar_width, sidebar_height, tab_title)
+        
+        # Draw binder-style tabs sticking out from the appropriate side
+        for i, tab_name in enumerate(self.tab_names):
+            tab_y_pos = sidebar_y + 5 + i * 3  # Spacing between tabs
+            
+            # Position tabs consistently based on sidebar location
+            if sidebar_x == 0:  # Sidebar on left side
+                tab_x_pos = sidebar_x + sidebar_width  # Right edge of sidebar
+            else:  # Sidebar on right side  
+                tab_x_pos = sidebar_x - 9  # Left side, ensure they fit onscreen
+            
+            if i == self.current_tab:
+                # Active tab - draw a small bordered box
+                console.draw_frame(
+                    x=tab_x_pos, y=tab_y_pos, 
+                    width=9, height=3,
+                    clear=True, fg=color.yellow, bg=(60, 50, 30)
+                )
+                # Centered text in active tab
+                console.print(tab_x_pos + 1, tab_y_pos + 1, tab_name[:7], fg=color.yellow, bg=(60, 50, 30))
+            else:
+                # Inactive tab - same size as active tab
+                console.draw_frame(
+                    x=tab_x_pos, y=tab_y_pos, 
+                    width=9, height=3,
+                    clear=True, fg=color.grey, bg=(30, 25, 15)
+                )
+                # Centered text in inactive tab
+                console.print(tab_x_pos + 1, tab_y_pos + 1, tab_name[:7], fg=color.grey, bg=(30, 25, 15))
         
         # Show current item info at the top
         info_y = sidebar_y + 2
         
         if len(items_and_entities) > 1:
-            # Center the item counter
+            # Center the item counter without adding extra line spacing
             counter_text = f"{self.detail_index + 1} of {len(items_and_entities)}"
             counter_x = sidebar_x + (sidebar_width - len(counter_text)) // 2
             console.print(counter_x, info_y, counter_text, fg=color.grey, bg=(45, 35, 25))
-            info_y += 1
+            # Don't increment info_y here to avoid extra spacing
             
         # Center the visual preview horizontally in the sidebar
-        preview_size = 5  # Size of the preview area (3x3 + 2 for frame = 5x5)
+        preview_size = 7  # Size of the preview area
         preview_x = sidebar_x + (sidebar_width - preview_size) // 2
         preview_y = info_y + 1
         self.render_visual_preview(console, current_item, x, y, preview_x, preview_y)
@@ -2561,22 +2606,23 @@ class LookHandler(SelectIndexHandler):
         text_area_width = sidebar_width - 4  # Use full width minus margins
         text_area_height = sidebar_height - (text_details_y - sidebar_y) - 3  # Leave space for instructions
         
-        # Build complete text content
-        full_text = self.build_item_description(current_item, text_area_width)
+        # Build complete text content based on current tab
+        full_text = self.build_tabbed_content(current_item, text_area_width)
         
         # Render scrollable text
         self.render_scrollable_text(console, full_text, sidebar_x, text_details_y, text_area_width, text_area_height)
             
         # Show navigation instructions
-        instructions_y = sidebar_y + sidebar_height - 4
-        console.print(sidebar_x + 2, instructions_y, "Alt+←→: Cycle items", fg=color.grey, bg=(45, 35, 25))
-        console.print(sidebar_x + 2, instructions_y + 1, "Shift+↑↓: Scroll text", fg=color.grey, bg=(45, 35, 25))
-        console.print(sidebar_x + 2, instructions_y + 2, "Enter: Exit details", fg=color.grey, bg=(45, 35, 25))
+        instructions_y = sidebar_y + sidebar_height - 5
+        console.print(sidebar_x + 2, instructions_y, "Alt+↑↓/Scroll: Switch tabs", fg=color.grey, bg=(45, 35, 25))
+        console.print(sidebar_x + 2, instructions_y + 1, "Alt+←→: Cycle items", fg=color.grey, bg=(45, 35, 25))
+        console.print(sidebar_x + 2, instructions_y + 2, "Shift+↑↓: Scroll text", fg=color.grey, bg=(45, 35, 25))
+        console.print(sidebar_x + 2, instructions_y + 3, "Enter: Exit details", fg=color.grey, bg=(45, 35, 25))
 
     def render_visual_preview(self, console: tcod.Console, current_item: dict, look_x: int, look_y: int, preview_x: int, preview_y: int) -> None:
         """Render a visual preview of the object being inspected."""
-        # Create a small framed preview area (3x3 for now, can adjust)
-        preview_size = 3
+        # Create a 5x5 preview area
+        preview_size = 5
         # Position the frame at the specified location
         frame_x = preview_x
         frame_y = preview_y
@@ -2683,9 +2729,20 @@ class LookHandler(SelectIndexHandler):
             console.print(center_x - 1, center_y + 1, "└", fg=color.cyan)
             console.print(center_x + 1, center_y + 1, "┘", fg=color.cyan)
 
-    def build_item_description(self, current_item: dict, max_width: int) -> list:
-        """Build complete description text as list of lines for scrolling."""
+    def build_tabbed_content(self, current_item: dict, max_width: int) -> list:
+        """Build content for the current tab."""
+        if self.current_tab == 0:  # Overview
+            return self.build_overview_content(current_item, max_width)
+        elif self.current_tab == 1:  # Damage
+            return self.build_damage_content(current_item, max_width)
+        elif self.current_tab == 2:  # Coatings
+            return self.build_coatings_content(current_item, max_width)
+        return []
+    
+    def build_overview_content(self, current_item: dict, max_width: int) -> list:
+        """Build overview content - general information."""
         lines = []
+        
         # Entity handling
         if current_item['type'] == 'entity':
             entity = current_item['object']
@@ -2701,7 +2758,6 @@ class LookHandler(SelectIndexHandler):
                     if hasattr(entity, 'is_known') and not entity.is_known:
                         # Only print knowledge for entities that have it (NPCs, not chests)
                         if hasattr(entity, 'knowledge'):
-                            print(entity.knowledge)
                             objective_pronoun = entity.knowledge["pronouns"]["object"].lower()
                             name_text = f"You do not know {objective_pronoun}."
                         else:
@@ -2740,94 +2796,61 @@ class LookHandler(SelectIndexHandler):
                 if current_line:
                     lines.append([(' '.join(current_line), color.white)])
 
-            
-            # Add body part information for entities with body parts
-            if hasattr(entity, 'body_parts') and entity.body_parts:
-                body_parts = entity.body_parts                
+            # Build comprehensive equipment description
+            if hasattr(entity, 'equipment') and entity.equipment:
+                equipment = entity.equipment
+                equipment_parts = []
 
-                # Build comprehensive equipment description
-                if hasattr(entity, 'equipment') and entity.equipment:
-                    equipment = entity.equipment
-                    equipment_parts = []
-
-                    # Use body_part_coverage to get actual body part names instead of equipment slot names
-                    for body_part_name, item in equipment.body_part_coverage.items():
-                        if item:
-                            if hasattr(item, 'name'):
-                                # Format body part name to be more readable
-                                formatted_body_part = body_part_name.replace('_', ' ').lower()
-                                if equipment_parts:  # Add separator if there's already equipment
-                                    equipment_parts.append((", ", color.white))
-                                equipment_parts.extend([
-                                    ("wears ", color.white),
-                                    (item.name, item.rarity_color),
-                                    (" on its ", color.white),
-                                    (formatted_body_part, color.white)
-                                ])
-                    
-                    # Also check grasped items (weapons and shields)
-                    for body_part_name, item in equipment.grasped_items.items():
-                        if item:
-                            if hasattr(item, 'name'):
-                                # Format body part name to be more readable
-                                formatted_body_part = body_part_name.replace('_', ' ').lower()
-                                if equipment_parts:  # Add separator if there's already equipment
-                                    equipment_parts.append((", ", color.white))
-                                equipment_parts.extend([
-                                    ("grasps ", color.white),
-                                    (item.name, item.rarity_color),
-                                    (" with its ", color.white),
-                                    (formatted_body_part, color.light_gray)
-                                ])
-                    
-                    # Combine all equipment into one line
-                    if equipment_parts:
-                        full_equipment_line = [("It ", color.white)] + equipment_parts + [(".", color.white)]
-                        lines.append(full_equipment_line)
+                # Use body_part_coverage to get actual body part names instead of equipment slot names
+                for body_part_name, item in equipment.body_part_coverage.items():
+                    if item:
+                        if hasattr(item, 'name'):
+                            # Format body part name to be more readable
+                            formatted_body_part = body_part_name.replace('_', ' ').lower()
+                            if equipment_parts:  # Add separator if there's already equipment
+                                equipment_parts.append((", ", color.white))
+                            equipment_parts.extend([
+                                ("wears ", color.white),
+                                (item.name, item.rarity_color),
+                                (" on its ", color.white),
+                                (formatted_body_part, color.white)
+                            ])
                 
-                # Show container contents if available (e.g., corpse loot) - simple list format
-                if hasattr(entity, 'container') and entity.container and entity.container.items:
-                    container_items = entity.container.items
-                    if container_items:
-                        container_parts = []
-                        for i, item in enumerate(container_items):
-                            if i > 0:  # Add comma separator between items
-                                container_parts.append((", ", color.white))
-                            container_parts.append((item.name, item.rarity_color))
+                # Also check grasped items (weapons and shields)
+                for body_part_name, item in equipment.grasped_items.items():
+                    if item:
+                        if hasattr(item, 'name'):
+                            # Format body part name to be more readable
+                            formatted_body_part = body_part_name.replace('_', ' ').lower()
+                            if equipment_parts:  # Add separator if there's already equipment
+                                equipment_parts.append((", ", color.white))
+                            equipment_parts.extend([
+                                ("grasps ", color.white),
+                                (item.name, item.rarity_color),
+                                (" with its ", color.white),
+                                (formatted_body_part, color.light_gray)
+                            ])
+                
+                # Combine all equipment into one line
+                if equipment_parts:
+                    full_equipment_line = [("It ", color.white)] + equipment_parts + [(".", color.white)]
+                    lines.append(full_equipment_line)
+            
+            # Show container contents if available (e.g., corpse loot) - simple list format
+            if hasattr(entity, 'container') and entity.container and entity.container.items:
+                container_items = entity.container.items
+                if container_items:
+                    container_parts = []
+                    for i, item in enumerate(container_items):
+                        if i > 0:  # Add comma separator between items
+                            container_parts.append((", ", color.white))
+                        container_parts.append((item.name, item.rarity_color))
+                    
+                    # Combine into one line with appropriate colors
+                    if container_parts:
+                        lines.append(container_parts)
+                        lines.append([("", color.white)])
                         
-                        # Combine into one line with appropriate colors
-                        if container_parts:
-                            lines.append(container_parts)
-                            lines.append([("", color.white)])
-    
-
-                damaged_parts = body_parts.get_damaged_parts()
-
-                for part in damaged_parts:
-                    injury_parts = []
-                    if part.damage_level_text == "damaged":
-                        injury_parts = [("Its ", color.light_red), (part.name, color.light_red), (" is damaged.", color.light_red)]
-                    elif part.damage_level_text == "wounded":
-                        injury_parts = [("Its ", color.yellow), (part.name, color.yellow), (" is wounded.", color.yellow)]
-                    elif part.damage_level_text == "badly wounded":
-                        injury_parts = [("Its ", color.orange), (part.name, color.orange), (" is badly wounded.", color.orange)]
-                    elif part.damage_level_text == "severely wounded":
-                        injury_parts = [("Its ", color.orange), (part.name, color.orange), (" is severely wounded.", color.orange)]
-                    elif part.damage_level_text == "destroyed":
-                        injury_parts = [("Its ", color.red), (part.name, color.red), (" is maimed.", color.red)]
-
-                    if injury_parts:
-                        lines.append(injury_parts)
-                
-                # Movement impairment
-                movement_penalty = body_parts.get_movement_penalty()
-                if movement_penalty > 0.7:
-                    lines.append([("It can barely move due to its injuries.", color.red)])
-                    lines.append([("", color.white)])
-                elif movement_penalty > 0.3:
-                    lines.append([("Its movement appears impaired.", color.yellow)])
-                    lines.append([("", color.white)])
-            
             # Add lock status if applicable
             if hasattr(entity, "container") and entity.container.locked:
                 lines.append([("It has a lock.", color.red)])
@@ -2849,7 +2872,8 @@ class LookHandler(SelectIndexHandler):
             if hasattr(entity, 'value'):
                 if entity.value > 0:
                     value_parts = [("Estimated value: ", color.white), (f"{entity.value} gold.", color.yellow)]
-                    lines.append(value_parts)      
+                    lines.append(value_parts)
+                    
         # Tile handling
         elif current_item['type'] == 'tile':
             tile_info = current_item['object']
@@ -2866,7 +2890,275 @@ class LookHandler(SelectIndexHandler):
             if tile_info.get('interactable', False):
                 interact_text = f"You can interact with this {(tile_info['name']).lower()}."
                 lines.append([(interact_text, color.cyan)])
+        
+        return lines
+    
+    def build_damage_content(self, current_item: dict, max_width: int) -> list:
+        """Build damage-specific content."""
+        lines = []
+        
+        if current_item['type'] == 'entity':
+            entity = current_item['object']
             
+            # Show body part damage information
+            if hasattr(entity, 'body_parts') and entity.body_parts:
+                body_parts = entity.body_parts
+                damaged_parts = body_parts.get_damaged_parts()
+                
+                if not damaged_parts:
+                    # Wrap "No visible damage" message
+                    message = "No visible damage."
+                    words = message.split()
+                    current_line = []
+                    current_length = 0
+                    
+                    for word in words:
+                        word_length = len(word)
+                        space_length = 1 if current_line else 0
+                        
+                        if current_length + space_length + word_length <= max_width:
+                            current_line.append(word)
+                            current_length += space_length + word_length
+                        else:
+                            if current_line:
+                                lines.append([(' '.join(current_line), color.green)])
+                            current_line = [word]
+                            current_length = word_length
+                    
+                    if current_line:
+                        lines.append([(' '.join(current_line), color.green)])
+                else:
+                    lines.append([("Damage Assessment:", color.white)])
+                    lines.append([("", color.white)])  # Empty line
+                    
+                    for part in damaged_parts:
+                        injury_text = ""
+                        injury_color = color.white
+                        
+                        if part.damage_level_text == "damaged":
+                            injury_text = f"Its {part.name} is damaged."
+                            injury_color = color.light_red
+                        elif part.damage_level_text == "wounded":
+                            injury_text = f"Its {part.name} is wounded."
+                            injury_color = color.yellow
+                        elif part.damage_level_text == "badly wounded":
+                            injury_text = f"Its {part.name} is badly wounded."
+                            injury_color = color.orange
+                        elif part.damage_level_text == "severely wounded":
+                            injury_text = f"Its {part.name} is severely wounded."
+                            injury_color = color.orange
+                        elif part.damage_level_text == "destroyed":
+                            injury_text = f"Its {part.name} is maimed."
+                            injury_color = color.red
+
+                        if injury_text:
+                            # Wrap the injury text properly
+                            words = injury_text.split()
+                            current_line = []
+                            current_length = 0
+                            
+                            for word in words:
+                                word_length = len(word)
+                                space_length = 1 if current_line else 0
+                                
+                                if current_length + space_length + word_length <= max_width:
+                                    current_line.append(word)
+                                    current_length += space_length + word_length
+                                else:
+                                    # Add completed line and start new line
+                                    if current_line:
+                                        lines.append([(' '.join(current_line), injury_color)])
+                                    current_line = [word]
+                                    current_length = word_length
+                            
+                            # Add the last line if it has content
+                            if current_line:
+                                lines.append([(' '.join(current_line), injury_color)])
+                    
+                    # Movement impairment with proper wrapping
+                    movement_penalty = body_parts.get_movement_penalty()
+                    if movement_penalty > 0.7:
+                        lines.append([("", color.white)])
+                        impairment_text = "It can barely move due to its injuries."
+                        # Wrap movement text if needed
+                        words = impairment_text.split()
+                        current_line = []
+                        current_length = 0
+                        
+                        for word in words:
+                            word_length = len(word)
+                            space_length = 1 if current_line else 0
+                            
+                            if current_length + space_length + word_length <= max_width:
+                                current_line.append(word)
+                                current_length += space_length + word_length
+                            else:
+                                if current_line:
+                                    lines.append([(' '.join(current_line), color.red)])
+                                current_line = [word]
+                                current_length = word_length
+                        
+                        if current_line:
+                            lines.append([(' '.join(current_line), color.red)])
+                    elif movement_penalty > 0.3:
+                        lines.append([("", color.white)])
+                        impairment_text = "Its movement appears impaired."
+                        # Wrap movement text if needed
+                        words = impairment_text.split()
+                        current_line = []
+                        current_length = 0
+                        
+                        for word in words:
+                            word_length = len(word)
+                            space_length = 1 if current_line else 0
+                            
+                            if current_length + space_length + word_length <= max_width:
+                                current_line.append(word)
+                                current_length += space_length + word_length
+                            else:
+                                if current_line:
+                                    lines.append([(' '.join(current_line), color.yellow)])
+                                current_line = [word]
+                                current_length = word_length
+                        
+                        if current_line:
+                            lines.append([(' '.join(current_line), color.yellow)])
+            else:
+                # Wrap "No body part information available" message
+                message = "No body part information available."
+                words = message.split()
+                current_line = []
+                current_length = 0
+                
+                for word in words:
+                    word_length = len(word)
+                    space_length = 1 if current_line else 0
+                    
+                    if current_length + space_length + word_length <= max_width:
+                        current_line.append(word)
+                        current_length += space_length + word_length
+                    else:
+                        if current_line:
+                            lines.append([(' '.join(current_line), color.gray)])
+                        current_line = [word]
+                        current_length = word_length
+                
+                if current_line:
+                    lines.append([(' '.join(current_line), color.gray)])
+        else:
+            # Wrap "Damage information not applicable" message
+            message = "Damage information not applicable."
+            words = message.split()
+            current_line = []
+            current_length = 0
+            
+            for word in words:
+                word_length = len(word)
+                space_length = 1 if current_line else 0
+                
+                if current_length + space_length + word_length <= max_width:
+                    current_line.append(word)
+                    current_length += space_length + word_length
+                else:
+                    if current_line:
+                        lines.append([(' '.join(current_line), color.gray)])
+                    current_line = [word]
+                    current_length = word_length
+            
+            if current_line:
+                lines.append([(' '.join(current_line), color.gray)])
+            
+        return lines
+    
+    def build_coatings_content(self, current_item: dict, max_width: int) -> list:
+        """Build coating-specific content."""
+        lines = []
+        
+        if current_item['type'] == 'entity':
+            entity = current_item['object']
+            
+            # Show coating information for all body parts
+            if hasattr(entity, 'body_parts') and entity.body_parts:
+                from liquid_system import LiquidType
+                coated_parts = [part for part in entity.body_parts.body_parts.values() if part.coating != LiquidType.NONE]
+                
+                if not coated_parts:
+                    # Wrap "No coatings detected" message
+                    message = "No coatings detected."
+                    words = message.split()
+                    current_line = []
+                    current_length = 0
+                    
+                    for word in words:
+                        word_length = len(word)
+                        space_length = 1 if current_line else 0
+                        
+                        if current_length + space_length + word_length <= max_width:
+                            current_line.append(word)
+                            current_length += space_length + word_length
+                        else:
+                            if current_line:
+                                lines.append([(' '.join(current_line), color.white)])
+                            current_line = [word]
+                            current_length = word_length
+                    
+                    if current_line:
+                        lines.append([(' '.join(current_line), color.white)])
+                else:
+                    lines.append([("Coating Analysis:", color.white)])
+                    lines.append([("", color.white)])  # Empty line
+                    
+                    for part in coated_parts:
+                        coating_color = part.coating.get_display_color()
+                        coating_name = part.coating.get_display_name()
+                        
+                        # Build the coating text with proper wrapping
+                        coating_text = f"Its {part.name} is coated in {coating_name}."
+                        words = coating_text.split()
+                        current_line = []
+                        current_length = 0
+                        
+                        for word in words:
+                            word_length = len(word)
+                            space_length = 1 if current_line else 0
+                            
+                            if current_length + space_length + word_length <= max_width:
+                                current_line.append(word)
+                                current_length += space_length + word_length
+                            else:
+                                # Add completed line and start new line
+                                if current_line:
+                                    lines.append([(' '.join(current_line), coating_color)])
+                                current_line = [word]
+                                current_length = word_length
+                        
+                        # Add the last line if it has content
+                        if current_line:
+                            lines.append([(' '.join(current_line), coating_color)])
+            else:
+                # Wrap "No body part information available" message
+                message = "No body part information available."
+                words = message.split()
+                current_line = []
+                current_length = 0
+                
+                for word in words:
+                    word_length = len(word)
+                    space_length = 1 if current_line else 0
+                    
+                    if current_length + space_length + word_length <= max_width:
+                        current_line.append(word)
+                        current_length += space_length + word_length
+                    else:
+                        if current_line:
+                            lines.append([(' '.join(current_line), color.gray)])
+                        current_line = [word]
+                        current_length = word_length
+                
+                if current_line:
+                    lines.append([(' '.join(current_line), color.gray)])
+                
+        elif current_item['type'] == 'tile':
             # Add liquid coating information if present
             if hasattr(self.engine.game_map, 'liquid_system'):
                 # Get the tile coordinates from the mouse location
@@ -2876,13 +3168,74 @@ class LookHandler(SelectIndexHandler):
                     liquid_name = coating.liquid_type.get_display_name()
                     liquid_color = coating.liquid_type.get_display_color()
                     
-                    lines.append([
-                        ("It is coated in ", liquid_color),
-                        (f"{liquid_name}.", liquid_color)
-                    ])
+                    # Build and wrap ground coating text properly
+                    coating_text = f"Ground coating: {liquid_name}."
+                    words = coating_text.split()
+                    current_line = []
+                    current_length = 0
+                    
+                    for word in words:
+                        word_length = len(word)
+                        space_length = 1 if current_line else 0
+                        
+                        if current_length + space_length + word_length <= max_width:
+                            current_line.append(word)
+                            current_length += space_length + word_length
+                        else:
+                            if current_line:
+                                lines.append([(' '.join(current_line), liquid_color)])
+                            current_line = [word]
+                            current_length = word_length
+                    
+                    if current_line:
+                        lines.append([(' '.join(current_line), liquid_color)])
+                else:
+                    # Wrap "No ground coating present" message
+                    message = "No ground coating present."
+                    words = message.split()
+                    current_line = []
+                    current_length = 0
+                    
+                    for word in words:
+                        word_length = len(word)
+                        space_length = 1 if current_line else 0
+                        
+                        if current_length + space_length + word_length <= max_width:
+                            current_line.append(word)
+                            current_length += space_length + word_length
+                        else:
+                            if current_line:
+                                lines.append([(' '.join(current_line), color.white)])
+                            current_line = [word]
+                            current_length = word_length
+                    
+                    if current_line:
+                        lines.append([(' '.join(current_line), color.white)])
+            else:
+                # Wrap "No coating system available" message
+                message = "No coating system available."
+                words = message.split()
+                current_line = []
+                current_length = 0
+                
+                for word in words:
+                    word_length = len(word)
+                    space_length = 1 if current_line else 0
+                    
+                    if current_length + space_length + word_length <= max_width:
+                        current_line.append(word)
+                        current_length += space_length + word_length
+                    else:
+                        if current_line:
+                            lines.append([(' '.join(current_line), color.gray)])
+                        current_line = [word]
+                        current_length = word_length
+                
+                if current_line:
+                    lines.append([(' '.join(current_line), color.gray)])
         
         return lines
-
+    
     def render_scrollable_text(self, console: tcod.Console, text_lines: list, x: int, y: int, width: int, height: int) -> None:
         """Render text with scrolling support."""
         if not text_lines:
@@ -2973,8 +3326,23 @@ class LookHandler(SelectIndexHandler):
         key = event.sym
         modifier = event.mod
         
-        # Handle item cycling with Alt + left/right FIRST (before parent class intercepts)
-        if key == tcod.event.KeySym.LEFT and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+        # Handle tab switching with Alt + up/down first
+        if key == tcod.event.KeySym.UP and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            # Switch to previous tab and reset scroll
+            self.current_tab = (self.current_tab - 1) % len(self.tab_names)
+            LookHandler.last_selected_tab = self.current_tab  # Remember for next time
+            self.scroll_offset = 0
+            sounds.play_ui_move_sound()  # Play menu navigation sound
+            return None
+        elif key == tcod.event.KeySym.DOWN and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            # Switch to next tab and reset scroll
+            self.current_tab = (self.current_tab + 1) % len(self.tab_names)
+            LookHandler.last_selected_tab = self.current_tab  # Remember for next time
+            self.scroll_offset = 0
+            sounds.play_ui_move_sound()  # Play menu navigation sound
+            return None
+        # Handle item cycling with Alt + left/right
+        elif key == tcod.event.KeySym.LEFT and modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
             # Cycle to previous item and reset scroll
             x, y = self.engine.mouse_location
             items_and_entities = self.get_items_and_entities_at(x, y)
@@ -3008,6 +3376,27 @@ class LookHandler(SelectIndexHandler):
         
         # Use parent handler for normal movement (arrow keys without modifiers)
         return super().ev_keydown(event)
+
+    def ev_mousewheel(self, event: tcod.event.MouseWheel) -> Optional[ActionOrHandler]:
+        """Handle mouse wheel for tab switching with Ctrl."""
+        modifier = event.mod
+        
+        # Handle tab switching with Alt + scroll wheel
+        if modifier & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
+            if event.y > 0:  # Scroll up
+                self.current_tab = (self.current_tab - 1) % len(self.tab_names)
+                LookHandler.last_selected_tab = self.current_tab  # Remember for next time
+                self.scroll_offset = 0
+                sounds.play_ui_move_sound()  # Play menu navigation sound
+            elif event.y < 0:  # Scroll down
+                self.current_tab = (self.current_tab + 1) % len(self.tab_names)
+                LookHandler.last_selected_tab = self.current_tab  # Remember for next time
+                self.scroll_offset = 0
+                sounds.play_ui_move_sound()  # Play menu navigation sound
+            return None
+        
+        # Pass to parent for normal wheel handling
+        return super().ev_mousewheel(event)
 
 class SingleRangedAttackHandler(SelectIndexHandler):
     # Handles targeting single enemy
@@ -3090,24 +3479,51 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.K_F3:
             return EntityDebugHandler(self.engine)
         
-        # Targeted attack (Shift + movement key)
+        # Directional attack (Shift + movement key, including diagonals)
         elif key in MOVE_KEYS and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT):
             dx, dy = MOVE_KEYS[key]
-            target_x = player.x + dx
-            target_y = player.y + dy
-            
-            # Check if there's an enemy to target at that location
-            target_actor = self.engine.game_map.get_actor_at_location(target_x, target_y)
-            
-            if target_actor and target_actor != player:
-                # Open limb targeting UI if target has body parts
-                if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
-                    return LimbTargetingHandler(self.engine, player, target_actor)
-                else:
-                    # Otherwise do normal attack
-                    action = actions.BumpAction(player, dx, dy)
+            preferred_target = getattr(player, 'current_attack_type', None)
+
+            # Convert preferred target string to enum once for either melee or ranged.
+            target_part = None
+            if preferred_target:
+                from components.body_parts import BodyPartType
+                for part_type in BodyPartType:
+                    if part_type.name == preferred_target:
+                        target_part = part_type
+                        break
+
+            equipment = getattr(player, 'equipment', None)
+            held_items = []
+            if equipment:
+                held_items = list(equipment.grasped_items.values()) + list(equipment.equipped_items.values())
+
+            has_bow = False
+            has_arrow = False
+            has_melee_weapon = False
+
+            for item in held_items:
+                if not item or not hasattr(item, 'equippable') or not item.equippable:
+                    continue
+
+                eq_type_name = item.equippable.equipment_type.name
+                item_tags = {tag.lower() for tag in getattr(item, 'tags', [])}
+
+                if eq_type_name == 'RANGED' or 'bow' in item_tags:
+                    has_bow = True
+                if eq_type_name == 'PROJECTILE' or 'arrow' in item_tags or 'ammunition' in item_tags:
+                    has_arrow = True
+                if eq_type_name == 'WEAPON':
+                    has_melee_weapon = True
+
+            if has_bow and has_arrow:
+                action = actions.RangedAction(player, dx, dy, target_part)
+            elif has_melee_weapon:
+                action = actions.MeleeAction(player, dx, dy, target_part)
             else:
-                self.engine.message_log.add_message("No target in that direction.", color.impossible)
+                self.engine.message_log.add_message(
+                    "No suitable weapon readied for directional attack.", color.impossible
+                )
 
         # Dodge change direction (Ctrl + arrow key direction OR numpad direction)
         elif key == tcod.event.K_LEFT and modifier & (tcod.event.KMOD_LCTRL | tcod.event.KMOD_RCTRL):
@@ -3222,7 +3638,7 @@ class MainGameEventHandler(EventHandler):
         # t key for targeting mode
         elif key == tcod.event.KeySym.A:
             return AttackModeHandler(self.engine)
-        elif key == tcod.event.K_SLASH:
+        elif key == tcod.event.KeySym.S:
             return LookHandler(self.engine)
 
 
@@ -3560,7 +3976,7 @@ class HelpMenuHandler(AskUserEventHandler):
 
         y = 0
 
-        text = f"\nESC: Escape / Save and Quit \n?: Control Menu \nV: Message Log \nG: Pick Up Object \nI: Use/Equip Items \nE: Equipment UI \nD: Drop Items \nC: Character Menu \n/: Look Around \nB: Inspect Body Parts \nT: Set Attack Mode \nShift+Move: Target Limbs"
+        text = f"\nESC: Escape / Save and Quit \n?: Control Menu \nV: Message Log \nG: Pick Up Object \nI: Use/Equip Items \nE: Equipment UI \nD: Drop Items \nC: Character Menu \n/: Look Around \nB: Inspect Body Parts \nT: Set Attack Mode \nShift+Move: Attack (Bow+Arrow = Ranged, else Melee)"
         width = max(
             max(len(line) for line in self.TITLE.splitlines()),
             max(len(line) for line in text.splitlines())

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 import color
 from components.effect import Effect
+from liquid_system import LiquidType
 from text_utils import orange, red
 import sounds
 
@@ -147,8 +148,69 @@ class TurnManager:
         # 7. Process liquid system aging and evaporation
         if hasattr(self.engine.game_map, 'liquid_system'):
             self.engine.game_map.liquid_system.process_aging()
+
+        # 8. Process liquid coating entities
+        self._process_body_part_liquid_coating()
+        self._process_body_part_coating_evaporation()
+
         
         return None
+    
+    def _process_body_part_liquid_coating(self) -> None:
+        """Apply or remove liquid coatings on body parts based on current tile."""
+        try:
+            for entity in list(self.engine.game_map.entities):
+                # Check if entity has body parts and is in a liquid tile
+                if hasattr(entity, 'body_parts') and entity.body_parts and hasattr(self.engine.game_map, 'liquid_system'):
+                    # Get the liquid at the entity's position
+                    liquid_coating = self.engine.game_map.liquid_system.get_coating(entity.x, entity.y)
+                    
+                    # Find all limbs tagged with "foot"
+                    for body_part in entity.body_parts.body_parts.values():
+                        if "foot" in body_part.tags:
+                            if liquid_coating and liquid_coating.depth >= 1:
+                                # Only coat feet if liquid is deep enough (depth >= 1)
+                                if body_part.coating != liquid_coating.liquid_type:
+                                    body_part.coating = liquid_coating.liquid_type
+                                    body_part.coating_age = 0  # Reset age when newly coated
+                                    # Debug: Print coating info if this is the player
+                                    if entity == self.engine.player:
+                                        print(f"COATED: {body_part.name} with {liquid_coating.liquid_type.get_display_name()}")
+                            else:
+                                # Clear coating if not in deep liquid (but only occasionally to simulate gradual removal)
+                                if body_part.coating != LiquidType.NONE:
+                                    # Only clear coating with some delay (not instantly when stepping out)
+                                    if body_part.coating_age > 5:  # Wait at least 5 turns before clearing
+                                        body_part.coating = LiquidType.NONE
+                                        body_part.coating_age = 0
+                                        # Debug: Print clearing info if this is the player
+                                        if entity == self.engine.player:
+                                            print(f"CLEARED: {body_part.name} coating cleared after being away from liquid")
+        except Exception:
+            import traceback
+            traceback.print_exc()
+    
+    def _process_body_part_coating_evaporation(self) -> None:
+        """Process evaporation of liquid coatings on body parts."""
+        try:
+            for entity in list(self.engine.game_map.entities):
+                if hasattr(entity, 'body_parts') and entity.body_parts:
+                    for body_part in entity.body_parts.body_parts.values():
+                        if body_part.coating != LiquidType.NONE:
+                            body_part.coating_age += 1
+                            
+                            # Check for evaporation using liquid type's built-in chance
+                            evap_chance = body_part.coating.get_evaporation_chance()
+                            if random.random() < evap_chance:
+                                coating_name = body_part.coating.get_display_name()
+                                # Debug: Print evaporation if this is the player
+                                if entity == self.engine.player:
+                                    print(f"EVAPORATED: {body_part.name} coating ({coating_name}) evaporated after {body_part.coating_age} turns (chance: {evap_chance})")
+                                body_part.coating = LiquidType.NONE
+                                body_part.coating_age = 0
+        except Exception:
+            import traceback
+            traceback.print_exc()
     
     def _update_player_state(self) -> None:
         """Update player state"""

@@ -864,8 +864,13 @@ def generate_dungeon(
                     _copy.deepcopy(entity_factories.dagger),
                     _copy.deepcopy(entity_factories.generate_leather_armor()),
                     _copy.deepcopy(entity_factories.leather_cap),
+                    _copy.deepcopy(entity_factories.bow),
+                    _copy.deepcopy(entity_factories.arrow),
+                    _copy.deepcopy(entity_factories.arrow),
+                    _copy.deepcopy(entity_factories.arrow),
+                    _copy.deepcopy(entity_factories.arrow)
                 ]
-                test_chest = entity_factories.make_chest_with_loot(loot, capacity=6)
+                test_chest = entity_factories.make_chest_with_loot(loot, capacity=10)
                 cx, cy = new_room.center
                 chest_x, chest_y = min(dungeon.width - 1, cx + 1), cy
                 # Only place if empty

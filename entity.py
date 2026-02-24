@@ -662,7 +662,6 @@ class Item(Entity):
             equippable: Optional[Equippable] = None,
             burn_duration: Optional[int] = None,
             value: int = 0,
-            weight: float = 0.0,
             pickup_sound = None,
             drop_sound = None,
             equip_sound = None,
@@ -675,6 +674,7 @@ class Item(Entity):
             tags: Optional[list] = None,
             liquid_type: Optional[liquid_system.LiquidType] = None,
             liquid_amount: Optional[int] = None,
+            weight: Optional[float] = None,
 
 
 
@@ -717,6 +717,7 @@ class Item(Entity):
         self.tags = tags if tags else []
         self.liquid_type = liquid_type
         self.liquid_amount = liquid_amount
+        self.weight = weight
 
     def roll_for_enchantment(self, enchantment_chance: float ) -> Item:
         """Rolls given chance to apply enchantment"""

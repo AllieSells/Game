@@ -10,6 +10,7 @@ from enum import Enum, auto
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 from components.base_component import BaseComponent
+from liquid_system import LiquidType
 import random
 
 if TYPE_CHECKING:
@@ -73,6 +74,8 @@ class BodyPart:
     protection: int = 0     # Natural armor
     tags: Set[str] = field(default_factory=set)  # Equipment tags this part can accommodate (e.g., "hand", "grasp", "manipulate")
     status_effects: Set[str] = field(default_factory=set)
+    coating = LiquidType.NONE  # Type of liquid coating this part has (e.g., blood, slime, oil)
+    coating_age: int = 0  # Age of the coating for evaporation tracking
     
     def __post_init__(self):
         if self.current_hp is None:
@@ -381,10 +384,25 @@ class BodyParts(BaseComponent):
         descriptions = []
         
         for part in self.body_parts.values():
+            status_parts = []
+            
+            # Add damage status
             if part.is_destroyed:
-                descriptions.append(f"{part.name}: destroyed")
+                status_parts.append("destroyed")
             elif part.is_damaged:
-                descriptions.append(f"{part.name}: {part.damage_level_text}")
+                status_parts.append(part.damage_level_text)
+                
+            # Add coating status
+            if part.coating != LiquidType.NONE:
+                coating_name = part.coating.get_display_name()
+                status_parts.append(f"coated in {coating_name}")
+            
+            # Build description
+            if status_parts:
+                descriptions.append(f"{part.name}: {', '.join(status_parts)}")
+            elif part.coating == LiquidType.NONE and not part.is_damaged:
+                # Only show healthy parts if they're not coated and not damaged
+                continue
         
         if not descriptions:
             descriptions.append("All body parts are healthy.")

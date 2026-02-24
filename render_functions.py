@@ -223,10 +223,50 @@ def render_gold(
 
 # Render dodge direction
 def render_combat_stats(
-        console: 'Console', dodge_direction: str = "North", attack_type: str = "Random", 
+        console: 'Console', dodge_direction: str = "North", attack_type: str = "Random", player=None,
 ) -> None:
     text = f"Dodging: {dodge_direction.title() if dodge_direction else 'Random'} Targeting: {attack_type.title() if attack_type else 'Random'}"
     text_utils.print_colored_markup(console=console, x=1, y=40, text=text)
+
+    if player is None:
+        return
+
+    equipment = getattr(player, "equipment", None)
+    inventory = getattr(player, "inventory", None)
+    if not equipment:
+        return
+
+    # Show ammo only when a bow is currently equipped/readied.
+    has_bow = False
+    arrow_count = 0
+
+    equipped_items = list(equipment.grasped_items.values()) + list(equipment.equipped_items.values())
+
+    for item in equipped_items:
+        if not item or not hasattr(item, "equippable") or not item.equippable:
+            continue
+        eq_type_name = item.equippable.equipment_type.name
+        tags = {tag.lower() for tag in getattr(item, "tags", [])}
+        if eq_type_name == "RANGED" or "bow" in tags:
+            has_bow = True
+        if eq_type_name == "PROJECTILE" or "arrow" in tags or "ammunition" in tags:
+            arrow_count += 1
+
+    if inventory:
+        for item in inventory.items:
+            if not item or not hasattr(item, "equippable") or not item.equippable:
+                continue
+            eq_type_name = item.equippable.equipment_type.name
+            tags = {tag.lower() for tag in getattr(item, "tags", [])}
+            if eq_type_name == "PROJECTILE" or "arrow" in tags or "ammunition" in tags:
+                arrow_count += 1
+
+    if not has_bow:
+        return
+
+    ammo_text = f"Arrows: {arrow_count}"
+    ammo_x = max(1, console.width - len(ammo_text) - 2)
+    console.print(x=ammo_x, y=40, string=ammo_text, fg=color.bronze_text)
 
 # Status effect render
 def render_effects(console: 'Console', effects: list) -> None:

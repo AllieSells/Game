@@ -32,7 +32,8 @@ lesser_health_potion = Item(
     rarity_color=color.common,
     tags = ["potion", "healing", "glass", "container", "fragile"],
     liquid_type=liquid_system.LiquidType.HEALTHPOTION,
-    liquid_amount=8
+    liquid_amount=8,
+    weight=0.5
 )
 health_potion = Item(
     char="!",
@@ -47,7 +48,8 @@ health_potion = Item(
     rarity_color=color.uncommon,
     tags = ["potion", "healing", "glass", "container", "fragile"],
     liquid_type=liquid_system.LiquidType.HEALTHPOTION,
-    liquid_amount=15
+    liquid_amount=15,
+    weight=0.75
 )
 lightning_scroll = Item(
     char="~",
@@ -60,7 +62,8 @@ lightning_scroll = Item(
     pickup_sound=sounds.pick_up_paper_sound,
     drop_sound=sounds.drop_paper_sound,
     rarity_color=color.common,
-    tags = ["scroll", "damage", "lightning", "paper"]
+    tags = ["scroll", "damage", "lightning", "paper"],
+    weight=0.1
 )
 
 confusion_scroll = Item(
@@ -74,7 +77,8 @@ confusion_scroll = Item(
     pickup_sound=sounds.pick_up_paper_sound,
     drop_sound=sounds.drop_paper_sound,
     rarity_color=color.common,
-    tags = ["scroll", "effect", "confusion", "paper"]
+    tags = ["scroll", "effect", "confusion", "paper"],
+    weight=0.1
 )
 
 fireball_scroll = Item(
@@ -88,7 +92,8 @@ fireball_scroll = Item(
     pickup_sound=sounds.pick_up_paper_sound,
     drop_sound=sounds.drop_paper_sound,
     rarity_color=color.common,
-    tags = ["scroll", "damage", "fireball", "paper"]
+    tags = ["scroll", "damage", "fireball", "paper"],
+    weight =0.1
 )
 
 campfire = Item(
@@ -123,7 +128,8 @@ torch = Item(
     verb_past="smashed",
     verb_participial="smashing",
     rarity_color=color.common,
-    tags = ["torch", "light", "wood", "fire"]
+    tags = ["torch", "light", "wood", "fire"],
+    weight = 1.0
 )
 
 dagger = Item(
@@ -138,7 +144,8 @@ dagger = Item(
     verb_past="stabbed",
     verb_participial="stabbing",
     rarity_color=color.common,
-    tags = ["dagger", "weapon", "blade", "metal"]
+    tags = ["dagger", "weapon", "blade", "metal"],
+    weight=1.0
 )
 
 sword = Item(
@@ -153,7 +160,8 @@ sword = Item(
     verb_past="slashed",
     verb_participial="slashing",
     rarity_color=color.common,
-    tags = ["sword", "weapon", "blade", "metal"]
+    tags = ["sword", "weapon", "blade", "metal"],
+    weight=3.0
 )
 
 leather_cap = Item(
@@ -166,7 +174,44 @@ leather_cap = Item(
     pickup_sound=sounds.pick_up_leather_sound,
     drop_sound=sounds.drop_leather_sound,
     rarity_color=color.common,
-    tags = ["leather", "armor", "headgear"]
+    tags = ["leather", "armor", "headgear"],
+    weight=0.5
+)
+
+bow = Item(
+    char="}",
+    color=(160, 82, 45),
+    name="Bow",
+    equippable=equippable.Bow(),
+    pickup_sound=sounds.pick_up_wood_sound,
+    drop_sound=sounds.drop_wood_sound,
+    equip_sound=sounds.pick_up_wood_sound, # Place holder
+    unequip_sound=sounds.drop_wood_sound, # Place holder
+    verb_base="shoot",
+    verb_present="shoots",
+    verb_past="shot",
+    verb_participial="shooting",
+    rarity_color=color.common,
+    tags = ["bow", "weapon", "ranged", "wood"],
+    weight=2.0
+)
+
+arrow = Item(
+    char="|",
+    color=(160, 82, 45),
+    name="Arrow",
+    equippable=equippable.Arrow(),
+    pickup_sound=sounds.pick_up_wood_sound,
+    drop_sound=sounds.drop_wood_sound,
+    equip_sound=sounds.pick_up_wood_sound, # Place holder
+    unequip_sound=sounds.drop_wood_sound, # Place holder
+    verb_base="shoot",
+    verb_present="shoots",
+    verb_past="shot",
+    verb_participial="shooting",
+    rarity_color=color.common,
+    tags = ["arrow", "ammunition", "ranged", "wood"],
+    weight=0.1
 )
 
 leather_armor = Item(
@@ -179,7 +224,8 @@ leather_armor = Item(
     pickup_sound=sounds.pick_up_leather_sound,
     drop_sound=sounds.drop_leather_sound,
     rarity_color=color.common,
-    tags = ["leather", "armor", "body armor"]
+    tags = ["leather", "armor", "body armor"],
+    weight=5.0
 )
 
 chain_mail = Item(
