@@ -22,6 +22,7 @@ else:
 
 
 import sounds
+import animations
 # Body part targeting modifiers (damage_modifier, hit_difficulty_modifier)
 # hit_difficulty_modifier: Positive = easier to hit, negative = harder to hit
 
@@ -303,6 +304,11 @@ class ActionWithDirection(Action):
     def blocking_entity(self) -> Optional[Entity]:
         """Return the blocking entity at this action's destination."""
         return self.engine.game_map.get_blocking_entity_at_location(*self.dest_xy)
+    
+    @property
+    def target_location(self) -> Tuple[int, int]:
+        """Return the target location coordinates for this action."""
+        return self.dest_xy
 
     @property
     def target_actor(self) -> Optional[Actor]:
@@ -600,7 +606,7 @@ class RangedAction(ActionWithDirection):
         final_damage = max(0, int(base_damage * damage_modifier))
 
         # Hit chance calculation
-        hit_chance = 85 + hit_difficulty_modifier
+        hit_chance = 50 + hit_difficulty_modifier
         hit_roll = random.randint(1, 100)
         hit_success = hit_roll <= hit_chance
 
@@ -726,6 +732,10 @@ class MeleeAction(ActionWithDirection):
 
         # Check for target
         if not target:
+            x = self.target_location[0]
+            y = self.target_location[1]
+            self.engine.animation_queue.append(animations.SlashAnimation(x, y))
+            sounds.play_miss_sound()
             raise exceptions.Impossible("Nothing to attack.")
         
         # Manipulation check
@@ -899,9 +909,8 @@ class MeleeAction(ActionWithDirection):
 
         
         # Add animation
-        from animations import SlashAnimation
         if hit_success:
-            self.engine.animation_queue.append(SlashAnimation(target.x, target.y))
+            self.engine.animation_queue.append(animations.SlashAnimation(target.x, target.y))
 
         if self.entity is self.engine.player:
             attack_color = color.player_atk

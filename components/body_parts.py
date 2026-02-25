@@ -10,6 +10,7 @@ from enum import Enum, auto
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 from components.base_component import BaseComponent
+from entity import T
 from liquid_system import LiquidType
 import random
 
@@ -41,12 +42,24 @@ class BodyPartType(Enum):
     RIGHT_LEG = auto()
     LEFT_FOOT = auto()
     RIGHT_FOOT = auto()
+
+    # Other legs
+    FRONT_LEFT_LEG = auto()
+    FRONT_RIGHT_LEG = auto()
+    SECOND_LEFT_LEG = auto()
+    SECOND_RIGHT_LEG = auto()
+    THIRD_LEFT_LEG = auto()
+    THIRD_RIGHT_LEG = auto()
+    BACK_LEFT_LEG = auto()
+    BACK_RIGHT_LEG = auto()
     
     # Animal-specific
     TAIL = auto()
     WINGS = auto()
     
     # Insect-specific
+    THORAX = auto()
+    ABDOMEN = auto()
     ANTENNA = auto()
     MANDIBLES = auto()
 
@@ -56,6 +69,7 @@ class AnatomyType(Enum):
     HUMANOID = auto()
     QUADRUPED = auto()
     INSECT = auto()
+    ARACHNID = auto()
     BIRD = auto()
     SIMPLE = auto()  # Basic creatures
 
@@ -145,8 +159,58 @@ class BodyParts(BaseComponent):
         """Initialize body parts based on anatomy type."""
         if anatomy_type == AnatomyType.HUMANOID:
             self._create_humanoid_anatomy()
+        elif anatomy_type == AnatomyType.ARACHNID:
+            self._create_arachnid_anatomy()
         else:  # SIMPLE
             self._create_simple_anatomy()
+
+    def _create_arachnid_anatomy(self) -> None:
+        """Create arachnid body parts (spiders, scorpions, etc.)."""
+        parent_max_hp = self.max_hp
+        
+        self.body_parts = {
+            BodyPartType.THORAX: BodyPart(
+                BodyPartType.THORAX, "thorax", 1.0, max_hp=parent_max_hp, is_vital=True,
+                tags={"thorax", "armor"}
+            ),
+            BodyPartType.FRONT_LEFT_LEG: BodyPart(
+                BodyPartType.FRONT_LEFT_LEG, "front left leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "front_left_leg"}
+            ),
+            BodyPartType.FRONT_RIGHT_LEG: BodyPart(
+                BodyPartType.FRONT_RIGHT_LEG, "front right leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "front_right_leg"}
+            ),
+            BodyPartType.SECOND_LEFT_LEG: BodyPart(
+                BodyPartType.SECOND_LEFT_LEG, "second left leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "second_left_leg"}
+            ),
+            BodyPartType.SECOND_RIGHT_LEG: BodyPart(
+                BodyPartType.SECOND_RIGHT_LEG, "second right leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "second_right_leg"}
+            ),
+            BodyPartType.THIRD_LEFT_LEG: BodyPart(
+                BodyPartType.THIRD_LEFT_LEG, "third left leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "third_left_leg"}
+            ),
+            BodyPartType.THIRD_RIGHT_LEG: BodyPart(
+                BodyPartType.THIRD_RIGHT_LEG, "third right leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "third_right_leg"}
+            ),
+            BodyPartType.BACK_LEFT_LEG: BodyPart(
+                BodyPartType.BACK_LEFT_LEG, "back left leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "back_left_leg"}
+            ),
+            BodyPartType.BACK_RIGHT_LEG: BodyPart(
+                BodyPartType.BACK_RIGHT_LEG, "back right leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "back_right_leg"}
+            ),
+            BodyPartType.ABDOMEN: BodyPart(
+                BodyPartType.ABDOMEN, "abdomen", .5, max_hp=int(0.5 * parent_max_hp), is_vital=True,
+                tags={"abdomen", "armor"}
+            )
+        }
+    
     
     def _create_humanoid_anatomy(self) -> None:
         """Create humanoid body parts (humans, elves, orcs, etc.)."""
@@ -305,7 +369,11 @@ class BodyParts(BaseComponent):
         # Check if at least one leg is functional
         legs = [part for part_type, part in self.body_parts.items() 
                 if part_type in [BodyPartType.LEFT_LEG, BodyPartType.RIGHT_LEG, 
-                               BodyPartType.LEFT_FOOT, BodyPartType.RIGHT_FOOT]
+                               BodyPartType.LEFT_FOOT, BodyPartType.RIGHT_FOOT,
+                               BodyPartType.FRONT_LEFT_LEG, BodyPartType.FRONT_RIGHT_LEG,
+                               BodyPartType.SECOND_LEFT_LEG, BodyPartType.SECOND_RIGHT_LEG,
+                               BodyPartType.THIRD_LEFT_LEG, BodyPartType.THIRD_RIGHT_LEG,
+                               BodyPartType.BACK_LEFT_LEG, BodyPartType.BACK_RIGHT_LEG]
                 and not part.is_destroyed]
         
         return len(legs) > 0
@@ -327,7 +395,11 @@ class BodyParts(BaseComponent):
         
         leg_parts = [
             BodyPartType.LEFT_LEG, BodyPartType.RIGHT_LEG,
-            BodyPartType.LEFT_FOOT, BodyPartType.RIGHT_FOOT
+            BodyPartType.LEFT_FOOT, BodyPartType.RIGHT_FOOT,
+            BodyPartType.FRONT_LEFT_LEG, BodyPartType.FRONT_RIGHT_LEG,
+            BodyPartType.SECOND_LEFT_LEG, BodyPartType.SECOND_RIGHT_LEG,
+            BodyPartType.THIRD_LEFT_LEG, BodyPartType.THIRD_RIGHT_LEG,
+            BodyPartType.BACK_LEFT_LEG, BodyPartType.BACK_RIGHT_LEG
         ]
         
         total_legs = 0

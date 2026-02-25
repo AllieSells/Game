@@ -10,55 +10,25 @@ import engine
 import entity_factories
 from game_map import GameMap
 import tile_types
+from spawn_definitions import (
+    max_items_by_floor,
+    max_chests_by_floor,
+    max_monsters_by_floor,
+    max_flora_by_floor,
+    item_chances,
+    enemy_chances,
+)
 
 if TYPE_CHECKING:
     from engine import Engine
     from entity import Entity
 
-
-max_items_by_floor = [
-    (1, 2),
-    (4, 2),
-]
-
-max_chests_by_floor = [
-    (1, 1),
-    (3, 2),
-]
-
-max_monsters_by_floor =[
-    (1, 2),
-    (4, 3),
-    (6, 5),
-]
-
-max_flora_by_floor = [
-    (1, 3),
-    (4, 5),
-]
-
-item_chances: Dict[int, List[Tuple[Entity, int]]] = {
-    # Item weights, floor: [(entity, weight), ...]
-
-    0: [(entity_factories.lesser_health_potion, 35), (entity_factories.lightning_scroll, 25)],
-    2: [(entity_factories.confusion_scroll, 10)],
-    4: [(entity_factories.lightning_scroll, 25), (entity_factories.sword, 5)],
-    6: [(entity_factories.fireball_scroll, 25), (entity_factories.chain_mail, 15)],
-}
-
-enemy_chances: Dict[int, List[Tuple[Entity, int]]] = {
-    # Entity weights, floor: [(entity, weight), ...]
-    0: [(entity_factories.goblin, 80)],
-    3: [(entity_factories.troll, 15)],
-    5: [(entity_factories.troll, 30)],
-    7: [(entity_factories.troll, 60)],
-}
 def get_max_value_for_floor(
-        max_value_by_floor: List[Tuple[int, int]], floor: int
+        max_value_by_floor: Dict[int, int], floor: int
 ) -> int:
     current_value = 0
 
-    for floor_minimum, value in max_value_by_floor:
+    for floor_minimum, value in sorted(max_value_by_floor.items()):
         if floor_minimum > floor:
             break
         else:
@@ -67,20 +37,17 @@ def get_max_value_for_floor(
     return current_value
 
 def get_entities_at_random(
-        weighted_chances_by_floor: Dict[int, List[Tuple[Entity, int]]],
+        weighted_chances_by_floor: Dict[int, Dict[Entity, int]],
         number_of_entities: int,
         floor: int,
 ) -> List[Entity]:
     entity_weighted_chances = {}
 
-    for key, values in weighted_chances_by_floor.items():
+    for key, values in sorted(weighted_chances_by_floor.items()):
         if key > floor:
             break
         else:
-            for value in values:
-                entity = value[0]
-                weighted_chance = value[1]
-
+            for entity, weighted_chance in values.items():
                 entity_weighted_chances[entity] = weighted_chance
     
     entities = list(entity_weighted_chances.keys())
@@ -91,6 +58,10 @@ def get_entities_at_random(
     )
 
     return chosen_entities
+
+
+
+
 
 class RectangularRoom:
     def __init__(self, x: int, y: int, width: int, height: int):

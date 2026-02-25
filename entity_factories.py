@@ -19,6 +19,7 @@ import liquid_system
 
 
 
+
 lesser_health_potion = Item(
     char="o",
     color=(247, 143, 143),
@@ -442,6 +443,18 @@ spider = Actor(
     color=(161, 156, 146),
     name = "Giant Spider",
     description="A large arachnid",
+    ai_cls=HostileEnemy,
+    equipment=Equipment(),
+    fighter=Fighter(hp=8, base_defense=0, base_power=2),
+    inventory=Inventory(capacity=0),
+    level=Level(xp_given=20),
+    speed=120,  # Faster than player to make them more threatening
+    body_parts=BodyParts(AnatomyType.ARACHNID, max_hp=8),
+    verb_base="bite",
+    verb_present="bites",
+    verb_past="bit",
+    verb_participial="biting",
+    dodge_chance=0.10,  # 10% chance to dodge attacks
 )
 
 shade = Actor(
