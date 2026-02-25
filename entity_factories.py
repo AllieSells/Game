@@ -16,8 +16,26 @@ from text_utils import *
 from random import random
 import copy
 import liquid_system
+import color
 
 
+
+poison_potion = Item(
+    char="o",
+    color=color.dark_green,
+    name="Poison Potion",
+    consumable=consumable.PoisonConsumables(amount=5, duration=5),
+    description="A small vial filled with a pale green liquid.",
+    equip_sound=sounds.play_equip_glass_sound,
+    unequip_sound=sounds.play_unequip_glass_sound,
+    pickup_sound=sounds.pick_up_glass_sound,
+    drop_sound=sounds.drop_glass_sound,
+    rarity_color=color.common,
+    tags = ["potion", "poison", "glass", "container", "fragile"],
+    liquid_type=liquid_system.LiquidType.POISON,
+    liquid_amount=5,
+    weight=0.5
+)
 
 
 lesser_health_potion = Item(
@@ -438,7 +456,7 @@ player = Actor(
 )
 
 spider = Actor(
-    char="M",
+    char="m",
     sight_radius=6,
     color=(161, 156, 146),
     name = "Giant Spider",

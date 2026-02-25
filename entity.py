@@ -234,7 +234,7 @@ class Actor(Entity):
         self.preferred_dodge_direction = preferred_dodge_direction
         self.equipment_table = equipment_table  # Store equipment table for spawning
     
-    def add_effect(self, effect: 'Effect') -> None:
+    def add_effect(self, effect: Effect) -> None:
         """Attach an Effect to this actor."""
         if not hasattr(self, "effects"):
             self.effects = []

@@ -9,6 +9,9 @@ from animations import LightningAnimation
 import tcod
 from tcod import libtcodpy
 
+
+from components import effect
+from components import effect
 import components.inventory
 from components.base_component import BaseComponent
 from exceptions import Impossible
@@ -78,6 +81,18 @@ class ConfusionConsumable(Consumable):
         )
         self.consume()
         sounds.confusion_sound.play()
+class PoisonConsumables(Consumable):
+    def __init__(self, amount: int, duration: int):
+        self.amount = amount
+        self.duration = duration
+
+    def activate(self, action: actions.ItemAction) -> None:
+        consumer = action.entity
+        
+        poison = effect.PoisonEffect(amount=self.amount, duration=self.duration)
+        consumer.add_effect(poison)
+        self.consume()
+
 class HealingConsumables(Consumable):
     def __init__(self, amount: int):
         self.amount = amount

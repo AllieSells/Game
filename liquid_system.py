@@ -24,6 +24,7 @@ class LiquidType(Enum):
     OIL = auto()
     SLIME = auto()
     HEALTHPOTION = auto()
+    POISON = auto()
     
     def get_display_name(self) -> str:
         """Get the display name for this liquid type."""
@@ -33,7 +34,8 @@ class LiquidType(Enum):
             LiquidType.BLOOD: "blood", 
             LiquidType.OIL: "oil",
             LiquidType.SLIME: "slime",
-            LiquidType.HEALTHPOTION: "a light red liquid"
+            LiquidType.HEALTHPOTION: "a light red liquid",
+            LiquidType.POISON: "a pale green liquid"
         }
         return names.get(self, "unknown liquid")
     
@@ -46,7 +48,8 @@ class LiquidType(Enum):
             LiquidType.BLOOD: color.red,
             LiquidType.OIL: color.yellow,
             LiquidType.SLIME: color.green,
-            LiquidType.HEALTHPOTION: color.light_red
+            LiquidType.HEALTHPOTION: color.light_red,
+            LiquidType.POISON: color.light_green
         }
         return colors.get(self, color.white)
     
@@ -58,7 +61,8 @@ class LiquidType(Enum):
             LiquidType.BLOOD: 0.01,    # 1% per turn (lasts ~100 turns)  
             LiquidType.OIL: 0.0005,     # 0.05% per turn (lasts ~2000 turns)
             LiquidType.SLIME: 0.0003,   # 0.03% per turn (lasts ~3333 turns)
-            LiquidType.HEALTHPOTION: 0.1  # 10% per turn (lasts ~10 turns)
+            LiquidType.HEALTHPOTION: 0.1,  # 10% per turn (lasts ~10 turns)
+            LiquidType.POISON: 0.1  # 10% per turn (lasts ~10 turns)
         }
         return chances.get(self, 0.001)
 
@@ -78,7 +82,8 @@ class LiquidCoating:
             LiquidType.BLOOD: [ord("˙"), ord("·"), ord("~")],
             LiquidType.OIL: [ord("˙"), ord("·"), ord("~")], 
             LiquidType.SLIME: [ord("˙"), ord("·"), ord("∿")],
-            LiquidType.HEALTHPOTION: [ord("`"), ord("·"), ord("~")]
+            LiquidType.HEALTHPOTION: [ord("`"), ord("·"), ord("~")],
+            LiquidType.POISON: [ord("`"), ord("·"), ord("~")]
         }
         
         char_list = chars[self.liquid_type]
@@ -107,6 +112,10 @@ class LiquidCoating:
             LiquidType.HEALTHPOTION: {
                 'dark': (110, 57, 57),
                 'light': (242, 135, 135)
+            },
+            LiquidType.POISON: {
+                'dark': (57, 110, 57),
+                'light': (135, 242, 135)
             }
         }
         
@@ -285,8 +294,18 @@ class LiquidSystem:
             if e2 < dx:
                 err += dx
                 y += sy
+    def tick_liquid_effects(self, target, coating: LiquidCoating) -> None:
+        """Apply any effects from the liquid coating to the target (e.g., poison damage)."""
+        if coating.liquid_type == LiquidType.POISON:
+            # Apply poison damage each turn
+            poison_damage = 1 * coating.depth  # More depth = more damage
+            target.fighter.take_damage(poison_damage)
+            self.game_map.engine.message_log.add_message(
+                f"You take {poison_damage} poison damage from the {coating.liquid_type.get_display_name()}!",
+                color=target.game_map.engine.color.status_effect_applied
+            )
     
-    def process_aging(self) -> None:
+    def tick_liquid(self) -> None:
         """Process liquid aging and evaporation."""
         to_remove = []
         

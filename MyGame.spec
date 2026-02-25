@@ -54,6 +54,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,  # change to True if you want a console window
+    icon="RP/icon.png"
 )
 
 coll = COLLECT(

@@ -17,3 +17,21 @@ class Effect:
             return False
         self.duration -= 1
         return self.duration <= 0
+
+class PoisonEffect(Effect):
+    def __init__(self, amount: int, duration: int):
+        super().__init__(
+            name="Poisoned",
+            duration=duration,
+            description=f"Take {amount} damage each turn.",
+            type="debuff"
+        )
+        self.amount = amount  # Store the damage amount
+
+    def tick(self, target):
+        if self.duration is None:
+            return False
+        self.duration -=1
+        target.fighter.take_damage(self.amount)
+        return self.duration <= 0
+        

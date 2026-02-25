@@ -96,6 +96,23 @@ class TurnManager:
         Returns:
             BaseEventHandler if we need to switch handlers (like GameOver), None otherwise.
         """
+        # Handle all effects on entities
+        for actor in list(self.engine.game_map.actors):
+            if not hasattr(actor, "effects") or not actor.effects:
+                continue
+            for effect in list(actor.effects):
+                try:
+                    expired = effect.tick(actor)
+                    if expired:
+                        try:
+                            actor.effects.remove(effect)
+                        except ValueError:
+                            pass
+                except Exception:
+                    # Don't let a broken effect crash the engine tick
+                    pass
+
+
         # 1. Handle equipment durability (torches burning out, etc.)
         handler_change = self._handle_equipment_durability()
         if handler_change:
@@ -147,7 +164,7 @@ class TurnManager:
         
         # 7. Process liquid system aging and evaporation
         if hasattr(self.engine.game_map, 'liquid_system'):
-            self.engine.game_map.liquid_system.process_aging()
+            self.engine.game_map.liquid_system.tick_liquid()
 
         # 8. Process liquid coating entities
         self._process_body_part_liquid_coating()
@@ -164,6 +181,8 @@ class TurnManager:
                 if hasattr(entity, 'body_parts') and entity.body_parts and hasattr(self.engine.game_map, 'liquid_system'):
                     # Get the liquid at the entity's position
                     liquid_coating = self.engine.game_map.liquid_system.get_coating(entity.x, entity.y)
+
+
                     
                     # Find all limbs tagged with "foot"
                     for body_part in entity.body_parts.body_parts.values():
@@ -212,6 +231,11 @@ class TurnManager:
             import traceback
             traceback.print_exc()
     
+    def _process_body_part_liquid_effects(self) -> None:
+        """Apply effects from liquid coatings on body parts (e.g., poison damage)."""
+        try:
+            for entity in list(self.engine.
+
     def _update_player_state(self) -> None:
         """Update player state"""
         if self.engine.player.hunger <= 25.0:

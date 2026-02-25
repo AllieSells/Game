@@ -839,9 +839,10 @@ def generate_dungeon(
                     _copy.deepcopy(entity_factories.arrow),
                     _copy.deepcopy(entity_factories.arrow),
                     _copy.deepcopy(entity_factories.arrow),
-                    _copy.deepcopy(entity_factories.arrow)
+                    _copy.deepcopy(entity_factories.arrow),
+                    _copy.deepcopy(entity_factories.poison_potion),
                 ]
-                test_chest = entity_factories.make_chest_with_loot(loot, capacity=10)
+                test_chest = entity_factories.make_chest_with_loot(loot, capacity=15)
                 cx, cy = new_room.center
                 chest_x, chest_y = min(dungeon.width - 1, cx + 1), cy
                 # Only place if empty

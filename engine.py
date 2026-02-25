@@ -188,25 +188,7 @@ class Engine:
             traceback.print_exc()
             pass
 
-        # Tick status effects on all actors (so effects update and expire)
-        try:
-            # game_map may not be set yet during early init
-            for actor in list(getattr(self, "game_map", []).actors if hasattr(self, "game_map") else []):
-                if not hasattr(actor, "effects") or not actor.effects:
-                    continue
-                for effect in list(actor.effects):
-                    try:
-                        expired = effect.tick(actor)
-                        if expired:
-                            try:
-                                actor.effects.remove(effect)
-                            except ValueError:
-                                pass
-                    except Exception:
-                        # Don't let a broken effect crash the engine tick
-                        pass
-        except Exception:
-            pass
+
 
 
     def process_animations(self):
