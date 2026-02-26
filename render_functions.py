@@ -19,6 +19,15 @@ if TYPE_CHECKING:
     from engine import Engine
     from game_map import GameMap
 
+# Body part abbreviations for combat display (regional tag-based)
+BODY_PART_ABBREV = {
+    None: "Rnd",            # Random targeting
+    "cranium": "Hd",        # Head/Neck region
+    "core": "Trs",          # Torso/Chest region  
+    "upper_limbs": "Arm",   # Arms/Hands region
+    "lower_limbs": "Leg",   # Legs/Feet region
+}
+
 
 class MenuRenderer:
     """Provides reusable rendering utilities for menus and UIs."""
@@ -148,10 +157,15 @@ def status_effect_overlay(console: 'Console', effects: list) -> None:
 
 
 
-# HP bar render
+# HP bar render with adjustable coordinates
 def render_bar(
         console: 'Console', current_value: int, maximum_value: int, total_width: int
 ) -> None:
+    # === ADJUSTABLE COORDINATES ===
+    HP_BAR_X = 1
+    HP_BAR_Y = 43
+    # ==============================
+    
     bar_width = int(float(current_value) / maximum_value * (total_width - 2))  # Account for border
     
     # Health bar with red/green gradient
@@ -165,40 +179,50 @@ def render_bar(
         
     if bar_width > 0:
         console.draw_rect(
-            x=1, y=44, width=bar_width, height=1, ch=1, bg=bar_color
+            x=HP_BAR_X, y=HP_BAR_Y, width=bar_width, height=1, ch=1, bg=bar_color
         )
 
     console.print(
-        x=2, y=44, string=f"HP: {current_value}/{maximum_value}", fg=color.fantasy_text
+        x=HP_BAR_X, y=HP_BAR_Y, string=f"HP: {current_value}/{maximum_value}", fg=color.fantasy_text
     )
 
-# Lucidity bar render
+# Lucidity bar render with adjustable coordinates
 def render_lucidity_bar(
         console: 'Console', current_value: int, maximum_value: int, total_width: int
 ) -> None:
+    # === ADJUSTABLE COORDINATES ===
+    LUCIDITY_BAR_X = 1
+    LUCIDITY_BAR_Y = 44
+    # ==============================
+    
     bar_width = int(float(current_value) / maximum_value * (total_width - 2))  # Account for border
 
     if bar_width > 0:
         console.draw_rect(
-            x=1, y=45, width=bar_width, height=1, ch=1, bg=(80, 80, 140)
+            x=LUCIDITY_BAR_X, y=LUCIDITY_BAR_Y, width=bar_width, height=1, ch=1, bg=(80, 80, 140)
         )
 
     console.print(
-        x=2, y=45, string=f"Lucidity: {current_value}/{maximum_value}", fg=color.fantasy_text
+        x=LUCIDITY_BAR_X, y=LUCIDITY_BAR_Y, string=f"Lucidity: {current_value}/{maximum_value}", fg=color.fantasy_text
     )
 
 def render_player_level(
         console: 'Console', current_value: int, maximum_value: int, total_value: int, total_width: int
 ) -> None:
+    # === ADJUSTABLE COORDINATES ===
+    LEVEL_BAR_X = 1
+    LEVEL_BAR_Y = 45
+    # ==============================
+    
     bar_width = int(float(current_value) / maximum_value * (total_width - 2))  # Account for border
     
     if bar_width > 0:
         console.draw_rect(
-            x=1, y=46, width=bar_width, height=1, ch=1, bg=(120, 60, 200)
+            x=LEVEL_BAR_X, y=LEVEL_BAR_Y, width=bar_width, height=1, ch=1, bg=(120, 60, 200)
         )
 
     console.print(
-        x=2, y=46, string=f"Level: {current_value}/{maximum_value} ({total_value})", fg=color.fantasy_text
+        x=LEVEL_BAR_X, y=LEVEL_BAR_Y, string=f"Level: {current_value}/{maximum_value} ({total_value})", fg=color.fantasy_text
     )
 
 
@@ -206,28 +230,128 @@ def render_player_level(
 def render_dungeon_level(
         console: 'Console', dungeon_level: int, map: GameMap = None,
 ) -> None:
-    # Render the level the player is on, at the given location
-    x = 0
-    y = 48
-
-    console.print(x=x+2, y=y, string=f"Dungeon: {dungeon_level}", fg=color.bronze_text)
+    # === ADJUSTABLE COORDINATES ===
+    DUNGEON_LEVEL_X = 1
+    DUNGEON_LEVEL_Y = 47
+    # ==============================
+    
+    console.print(x=DUNGEON_LEVEL_X, y=DUNGEON_LEVEL_Y, string=f"Dungeon: {dungeon_level}", fg=color.bronze_text)
 
 def render_gold(
         console: 'Console', gold_amount: int,
 ) -> None:
-    # Render the player's gold amount at the given location
-    x = 0
-    y = 47
+    # === ADJUSTABLE COORDINATES ===
+    GOLD_X = 1
+    GOLD_Y = 46
+    # ==============================
+    
+    console.print(x=GOLD_X, y=GOLD_Y, string=f"Gold: {gold_amount}", fg=color.gold_accent)
 
-    console.print(x=x+2, y=y, string=f"Gold: {gold_amount}", fg=color.gold_accent)
-
-# Render dodge direction
+# Combat status panel with adjustable coordinates
 def render_combat_stats(
         console: 'Console', dodge_direction: str = "North", attack_type: str = "Random", player=None,
 ) -> None:
-    text = f"Dodging: {dodge_direction.title() if dodge_direction else 'Random'} Targeting: {attack_type.title() if attack_type else 'Random'}"
-    text_utils.print_colored_markup(console=console, x=1, y=40, text=text)
+    # === ADJUSTABLE COORDINATES ===
+    PANEL_X = 0
+    PANEL_Y = 39
+    PANEL_WIDTH = console.width
+    PANEL_HEIGHT = 4
+    COMBAT_TEXT_X = 1
+    EFFECTS_TEXT_X = 10
+    COATING_TEXT_X = 10
+    COATING_TEXT_Y = PANEL_Y + 2
+    WEAPON_TEXT_OFFSET_FROM_RIGHT = 2
+    # ==============================
+    
+    # Draw black background around edges
+    #console.draw_rect(x=PANEL_X, y=PANEL_Y, width=PANEL_WIDTH, height=PANEL_HEIGHT, ch=ord(' '), bg=(0, 0, 0))
+    # Draw parchment background for panel interior
+    #console.draw_rect(x=PANEL_X+1, y=PANEL_Y+1, width=PANEL_WIDTH-2, height=PANEL_HEIGHT-2, ch=ord(' '), bg=color.parchment_bg)
+    # Draw horizontal divider line, but skip both vertical divider positions
+    
+    # Left part of horizontal line (before first divider at x=12)
+    console.draw_rect(x=PANEL_X+1, y=PANEL_Y+3, width=8, height=1, ch=ord('─'), bg=color.parchment_dark, fg=color.bronze_border)
+    # Middle part of horizontal line (between dividers at x=12 and x=20)  
+    console.draw_rect(x=10, y=PANEL_Y+3, width=10, height=1, ch=ord('─'), bg=color.parchment_dark, fg=color.bronze_border)
+    # Right part of horizontal line (after second divider at x=20)
+    console.draw_rect(x=21, y=PANEL_Y+3, width=PANEL_WIDTH-22, height=1, ch=ord('─'), bg=color.parchment_dark, fg=color.bronze_border)
+    # Combat stats on first content line
+    dodge_text = f"DDG: {dodge_direction[0].upper() if dodge_direction else 'R'}"
+    console.print(x=COMBAT_TEXT_X, y=PANEL_Y + 1, string=dodge_text, fg=color.bronze_text)
+    
+    # Get attack abbreviation from lookup table
+    attack_abbrev = BODY_PART_ABBREV.get(attack_type, attack_type[:3].upper() if attack_type else "Rnd")
+    console.print(x=COMBAT_TEXT_X, y=PANEL_Y + 2, string=f"ATK: {attack_abbrev}", fg=color.bronze_text)
+    
+    # Status conditions and effects on second content line
+    status_conditions = []
+    
+    # Add liquid coating status if player has it
+    if player and hasattr(player, 'liquid_coating') and player.liquid_coating:
+        for coating in player.liquid_coating:
+            try:
+                liquid_name = coating.liquid_type.get_display_name()
+                status_conditions.append(f"{liquid_name.title()}")
+            except Exception:
+                pass
+    
+    # Add other effects
+    if player and hasattr(player, 'effects'):
+        for effect in player.effects:
+            try:
+                status_conditions.append(effect.name)
+            except Exception:
+                pass
+    
+    # Display status conditions
+    if status_conditions:
+        status_text = "Effects: " + ", ".join(status_conditions[:6])  # Limit to 6 conditions
+        console.print(x=EFFECTS_TEXT_X, y=PANEL_Y + 1, string=status_text[:76], fg=color.fantasy_text)  # Truncate if too long
+    else:
+        console.print(x=EFFECTS_TEXT_X, y=PANEL_Y + 1, string="Effects: None", fg=color.bronze_text)
 
+    # Display liquid coating status
+    coating_text = "Coating: "
+    
+    if player and hasattr(player, 'body_parts') and player.body_parts:
+        # Collect unique coatings from all body parts
+        unique_coatings = set()
+        for part_type, body_part in player.body_parts.body_parts.items():
+            if hasattr(body_part, 'coating') and body_part.coating:
+                from liquid_system import LiquidType
+                if body_part.coating != LiquidType.NONE:
+                    unique_coatings.add(body_part.coating)
+        
+        if unique_coatings:
+            # Display each unique coating with its color and description
+            coating_parts = []
+            for coating in unique_coatings:
+                coat_description = coating.get_coat_string()
+                if coat_description:  # Only show coatings with descriptions
+                    coating_parts.append((coat_description, coating.get_display_color()))
+            
+            if coating_parts:
+                # Display "Status: " label
+                console.print(x=COATING_TEXT_X, y=COATING_TEXT_Y, string=coating_text, fg=color.bronze_text)
+                
+                # Display coating descriptions with colors
+                x_offset = COATING_TEXT_X + len(coating_text)
+                for i, (description, coating_color) in enumerate(coating_parts):
+                    if i > 0:
+                        console.print(x=x_offset, y=COATING_TEXT_Y, string=", ", fg=color.bronze_text)
+                        x_offset += 2
+                    # Capitalize the first coating description
+                    display_desc = description.capitalize() if i == 0 else description
+                    console.print(x=x_offset, y=COATING_TEXT_Y, string=display_desc, fg=coating_color)
+                    x_offset += len(display_desc)
+            else:
+                console.print(x=COATING_TEXT_X, y=COATING_TEXT_Y, string=coating_text + "None", fg=color.bronze_text)
+        else:
+            console.print(x=COATING_TEXT_X, y=COATING_TEXT_Y, string=coating_text + "None", fg=color.bronze_text)
+    else:
+        console.print(x=COATING_TEXT_X, y=COATING_TEXT_Y, string=coating_text + "None", fg=color.bronze_text)
+
+    # Show weapon and ammo info on the right side
     if player is None:
         return
 
@@ -235,6 +359,19 @@ def render_combat_stats(
     inventory = getattr(player, "inventory", None)
     if not equipment:
         return
+
+    # Show equipped weapon
+    equipped_items = list(equipment.grasped_items.values())
+    weapon_name = "None"
+    
+    for item in equipped_items:
+        if item and hasattr(item, "equippable") and item.equippable:
+            weapon_name = item.name
+            break
+    
+    weapon_text = f"Weapon: {weapon_name[:15]}"  # Truncate long names
+    weapon_x = max(1, console.width - len(weapon_text) - WEAPON_TEXT_OFFSET_FROM_RIGHT)
+    console.print(x=weapon_x, y=PANEL_Y + 1, string=weapon_text, fg=color.bronze_text)
 
     # Show ammo only when a bow is currently equipped/readied.
     has_bow = False
@@ -261,23 +398,16 @@ def render_combat_stats(
             if eq_type_name == "PROJECTILE" or "arrow" in tags or "ammunition" in tags:
                 arrow_count += 1
 
-    if not has_bow:
-        return
+    if has_bow:
+        ammo_text = f"Arrows: {arrow_count}"
+        ammo_x = max(1, console.width - len(ammo_text) - WEAPON_TEXT_OFFSET_FROM_RIGHT)
+        console.print(x=ammo_x, y=PANEL_Y + 2, string=ammo_text, fg=color.bronze_text)
 
-    ammo_text = f"Arrows: {arrow_count}"
-    ammo_x = max(1, console.width - len(ammo_text) - 2)
-    console.print(x=ammo_x, y=40, string=ammo_text, fg=color.bronze_text)
-
-# Status effect render
+# Status effect render - now handled in render_combat_stats
 def render_effects(console: 'Console', effects: list) -> None:
-    # Display a single lighting status word on the right-hand panel.
-    effect_display = "Effects: "
-    for effect in effects:
-        try:
-            effect_display += effect.name + " "
-        except Exception:
-            pass
-    text_utils.print_colored_markup(console=console, x=1, y=41, text=effect_display, default_color=color.bronze_text)
+    # This function is now integrated into render_combat_stats for better organization
+    # Keeping this stub for compatibility
+    pass
 
 
 
@@ -285,36 +415,49 @@ def render_bottom_ui_border(console: tcod.Console):
     """
     Draw a simple border around the entire bottom UI area with a vertical divider.
     """
-    # Bottom UI starts at y=42 and goes to bottom of screen
-    ui_top = 42
-    ui_bottom = console.height - 1
-    ui_left = 0
-    ui_right = console.width - 1
-    divider_x = 20  # Vertical divider between stats and message log
+    # === ADJUSTABLE COORDINATES ===
+    UI_TOP = 39
+    UI_BOTTOM = console.height - 1
+    UI_LEFT = 0
+    UI_RIGHT = console.width - 1
+    DIVIDER_X = 20  # Vertical divider between stats and message log
+    DIVIDER_X2 = 9
+    # ==============================
     
     # Fill entire interior with parchment background
-    console.draw_rect(x=ui_left+1, y=ui_top+1, width=ui_right-ui_left-1, height=ui_bottom-ui_top-1, ch=ord(' '), bg=color.parchment_dark)
+    console.draw_rect(x=UI_LEFT+1, y=UI_TOP+1, width=UI_RIGHT-UI_LEFT-1, height=UI_BOTTOM-UI_TOP-1, ch=ord(' '), bg=color.parchment_dark)
     
     # Draw horizontal borders
-    for x in range(ui_left, ui_right + 1):
-        console.print(x, ui_top, "─", fg=color.bronze_border)  # Top border
-        console.print(x, ui_bottom, "─", fg=color.bronze_border)  # Bottom border
+    for x in range(UI_LEFT, UI_RIGHT + 1):
+        console.print(x, UI_TOP, "─", fg=color.bronze_border)  # Top border
+        console.print(x, UI_BOTTOM, "─", fg=color.bronze_border)  # Bottom border
+
+    
     
     # Draw vertical borders
-    for y in range(ui_top + 1, ui_bottom):
-        console.print(ui_left, y, "│", fg=color.bronze_border)  # Left border
-        console.print(ui_right, y, "│", fg=color.bronze_border)  # Right border
-        console.print(divider_x, y, "│", fg=color.bronze_border)  # Center divider
+    for y in range(UI_TOP + 1, UI_BOTTOM):
+        console.print(UI_LEFT, y, "│", fg=color.bronze_border)  # Left border
+        console.print(UI_RIGHT, y, "│", fg=color.bronze_border)  # Right border
+        if y >= UI_TOP + 4:  # Only draw center divider from the horizontal line down
+            console.print(DIVIDER_X, y, "│", fg=color.bronze_border)  # Center divider
+        if y <= UI_TOP + 3:  # Draw secondary divider on the left side for the top stats area
+            console.print(DIVIDER_X2, y, "│", fg=color.bronze_border)  # Divider between message log and player info
     
     # Draw corners
-    console.print(ui_left, ui_top, "┌", fg=color.bronze_border)  # Top-left
-    console.print(ui_right, ui_top, "┐", fg=color.bronze_border)  # Top-right  
-    console.print(ui_left, ui_bottom, "└", fg=color.bronze_border)  # Bottom-left
-    console.print(ui_right, ui_bottom, "┘", fg=color.bronze_border)  # Bottom-right
+    console.print(UI_LEFT, UI_TOP, "┌", fg=color.bronze_border)  # Top-left
+    console.print(UI_RIGHT, UI_TOP, "┐", fg=color.bronze_border)  # Top-right  
+    console.print(UI_LEFT, UI_BOTTOM, "└", fg=color.bronze_border)  # Bottom-left
+    console.print(UI_RIGHT, UI_BOTTOM, "┘", fg=color.bronze_border)  # Bottom-right
     
     # Draw T-junctions where divider meets top/bottom borders
-    console.print(divider_x, ui_top, "┬", fg=color.bronze_border)  # Top T-junction
-    console.print(divider_x, ui_bottom, "┴", fg=color.bronze_border)  # Bottom T-junction
+    console.print(DIVIDER_X, UI_TOP + 3, "┬", fg=color.bronze_border)  # Top T-junction at horizontal divider
+    console.print(DIVIDER_X, UI_BOTTOM, "┴", fg=color.bronze_border)  # Bottom T-junction
+    console.print(DIVIDER_X2, UI_TOP, "┬", fg=color.bronze_border)  # Top T-junction for second divider  
+    console.print(DIVIDER_X2, UI_TOP + 3, "┴", fg=color.bronze_border)  # Bottom T-junction for second divider
+    
+    # Add left and right T-junctions on the horizontal divider line
+    console.print(UI_LEFT, UI_TOP + 3, "├", fg=color.bronze_border, bg=(0, 0, 0))  # Left T-junction
+    console.print(UI_RIGHT, UI_TOP + 3, "┤", fg=color.bronze_border, bg=(0, 0, 0))  # Right T-junction
 
 
 

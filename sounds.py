@@ -605,6 +605,30 @@ def _delayed_grass_walk_sound():
     sound = random.choice(walk_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.5), volume=0.5)
 
+def play_liquid_walk_sound(entity_x=0, entity_y=0):
+    if random.random() < 0.3:
+        return  # 30% chance to not play a sound for variety
+    
+    # Add unique stagger delay per entity using position as seed
+    entity_seed = (entity_x * 31 + entity_y * 17) % 1000
+    delay = (entity_seed / 1000.0) * 0.08  # Convert to 0-80ms delay
+    
+    if delay > 0:
+        threading.Timer(delay, _delayed_liquid_walk_sound).start()
+    else:
+        _delayed_liquid_walk_sound()
+
+def _delayed_liquid_walk_sound():
+    """Internal function for delayed liquid walk sound playback."""
+    liquid_sounds = [
+        Sound("RP/sfx/walk/liquid/walk1.wav"),
+        Sound("RP/sfx/walk/liquid/walk2.wav"),
+        Sound("RP/sfx/walk/liquid/walk3.wav"),
+        Sound("RP/sfx/walk/liquid/walk4.wav"),
+    ]
+    sound = random.choice(liquid_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.2)
+
 def play_walk_sound(entity_x=0, entity_y=0):
     if random.random() < 0.3:
         return  # 30% chance to not play a sound for variety
@@ -744,7 +768,13 @@ def drop_leather_sound():
     ]
     sound = random.choice(drop_leather_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=0.25)
-
+# Acid sounds
+def play_poison_burn_sound():
+    acid_sounds = [
+        Sound("RP/sfx/materials/acid/burn1.mp3"),
+    ]
+    sound = random.choice(acid_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=0.5)
 
 # Glass equip
 def play_equip_glass_sound():
@@ -1439,6 +1469,17 @@ def play_muffled_sound(sound_func, cutoff=800):
         sound = random.choice(grass_walk_sounds)
         sound.set_volume(0.5)  # Match original volume
         
+    elif sound_func.__name__ == 'play_liquid_walk_sound':
+        # 30% chance to not play a sound for variety
+        if random.random() < 0.3:
+            return
+        liquid_walk_sounds = [
+            Sound("RP/sfx/quaff.wav"),
+            Sound("RP/sfx/quaff.wav"),
+        ]
+        sound = random.choice(liquid_walk_sounds)
+        sound.set_volume(0.4)  # Match original volume
+        
     elif sound_func.__name__ == 'play_walk_sound':
         # 30% chance to not play a sound for variety (same as original)
         if random.random() < 0.3:
@@ -1554,7 +1595,7 @@ def play_combat_sound_at(sound_func, x, y, player, game_map):
 def play_movement_sound_at(sound_func, x, y, player, game_map):
     """Play movement sound with positional muffling and entity-specific timing."""
     # Pass coordinates to sound function for unique entity timing
-    if sound_func.__name__ in ['play_walk_sound', 'play_grass_walk_sound']:
+    if sound_func.__name__ in ['play_walk_sound', 'play_grass_walk_sound', 'play_liquid_walk_sound']:
         # First check if sound should be played at all (distance check)
         if not should_play_sound(x, y, player, game_map):
             return  # Don't play sounds beyond 10 tiles
@@ -1585,6 +1626,17 @@ def play_muffled_sound_with_coords(sound_func, cutoff=800, entity_x=0, entity_y=
         ]
         sound = random.choice(grass_walk_sounds)
         sound.set_volume(0.5)  # Match original volume
+        
+    elif sound_func.__name__ == 'play_liquid_walk_sound':
+        # 30% chance to not play a sound for variety
+        if random.random() < 0.3:
+            return
+        liquid_walk_sounds = [
+            Sound("RP/sfx/quaff.wav"),
+            Sound("RP/sfx/quaff.wav"),
+        ]
+        sound = random.choice(liquid_walk_sounds)
+        sound.set_volume(0.4)  # Match original volume
         
     elif sound_func.__name__ == 'play_walk_sound':
         # 30% chance to not play a sound for variety (same as original)

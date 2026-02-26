@@ -1149,7 +1149,7 @@ class InventoryEventHandler(AskUserEventHandler):
 
                 # Create elegant item string 
                 item_type_char = self._get_item_type_char(item)
-                item_string = f"{item_key}] {item_type_char} {display_name}"
+                item_string = f"{item_key}]{item_type_char}{display_name}"
                 
                 if is_equipped:
                     item_string = f"{item_string} (e)"  # (e) for equipped
@@ -1159,10 +1159,9 @@ class InventoryEventHandler(AskUserEventHandler):
                     # Elegant selection background with gradient effect
                     self._draw_selection_highlight(console, items_x, current_y, items_width - 2)
                     console.print(items_x + 1, current_y, "✦", fg=(255, 223, 127), bg=(80, 60, 30))  # Beautiful star
-                    console.print(items_x + 3, current_y, item_string, fg=item.rarity_color, bg=(80, 60, 30))
+                    console.print(items_x + 2, current_y, item_string, fg=item.rarity_color, bg=(80, 60, 30))
                 else:
-                    console.print(items_x + 1, current_y, " ")
-                    console.print(items_x + 3, current_y, item_string, fg=item.rarity_color)
+                    console.print(items_x + 1, current_y, item_string, fg=item.rarity_color)
                 
                 current_y += 1
 
@@ -1985,23 +1984,19 @@ class AttackModeHandler(AskUserEventHandler):
         # Available targeting modes
         self.attack_modes = [
             (None, "Random Target", "Hit any available body part (default)"),
-            ('HEAD', "Target Head", "Always aim for head - Very Hard, 2x Damage"),
-            ('TORSO', "Target Torso", "Always aim for torso - Easy Target, Normal Damage"),
-            ('LEFT_ARM', "Target Left Arm", "Always aim for left arm - Hard, Reduced Damage"),
-            ('RIGHT_ARM', "Target Right Arm", "Always aim for right arm - Hard, Reduced Damage"),
-            ('LEFT_LEG', "Target Left Leg", "Always aim for left leg - Medium, Reduced Damage"),
-            ('RIGHT_LEG', "Target Right Leg", "Always aim for right leg - Medium, Reduced Damage"),
+            ('cranium', "Target Head", "Always aim for head/neck - Very Hard, 2x Damage"),
+            ('core', "Target Torso", "Always aim for torso/chest - Easy Target, Normal Damage"),
+            ('upper_limbs', "Target Arms", "Always aim for arms/hands - Hard, Reduced Damage"),
+            ('lower_limbs', "Target Legs", "Always aim for legs/feet - Medium, Reduced Damage"),
         ]
         
         # Quick selection keys
         self.quick_keys = {
             tcod.event.KeySym.N0: None,  # Random
-            tcod.event.KeySym.N1: 'HEAD',
-            tcod.event.KeySym.N2: 'TORSO', 
-            tcod.event.KeySym.N3: 'LEFT_ARM',
-            tcod.event.KeySym.N4: 'RIGHT_ARM',
-            tcod.event.KeySym.N5: 'LEFT_LEG',
-            tcod.event.KeySym.N6: 'RIGHT_LEG',
+            tcod.event.KeySym.N1: 'cranium',
+            tcod.event.KeySym.N2: 'core', 
+            tcod.event.KeySym.N3: 'upper_limbs',
+            tcod.event.KeySym.N4: 'lower_limbs',
         }
     
     def _get_current_mode_index(self) -> int:
@@ -2604,20 +2599,21 @@ class LookHandler(SelectIndexHandler):
         # Build scrollable text content below the preview
         text_details_y = preview_y + preview_size + 2  # Leave some space after preview
         text_area_width = sidebar_width - 4  # Use full width minus margins
-        text_area_height = sidebar_height - (text_details_y - sidebar_y) - 3  # Leave space for instructions
+        
+        # Reserve space for compact controls (only 2 lines needed now)
+        controls_height = 2
+        text_area_height = sidebar_height - (text_details_y - sidebar_y) - controls_height - 1  # Leave space for instructions + margin
         
         # Build complete text content based on current tab
         full_text = self.build_tabbed_content(current_item, text_area_width)
         
-        # Render scrollable text
+        # Render scrollable text with strict height limit
         self.render_scrollable_text(console, full_text, sidebar_x, text_details_y, text_area_width, text_area_height)
             
-        # Show navigation instructions
-        instructions_y = sidebar_y + sidebar_height - 5
-        console.print(sidebar_x + 2, instructions_y, "Alt+↑↓/Scroll: Switch tabs", fg=color.grey, bg=(45, 35, 25))
-        console.print(sidebar_x + 2, instructions_y + 1, "Alt+←→: Cycle items", fg=color.grey, bg=(45, 35, 25))
-        console.print(sidebar_x + 2, instructions_y + 2, "Shift+↑↓: Scroll text", fg=color.grey, bg=(45, 35, 25))
-        console.print(sidebar_x + 2, instructions_y + 3, "Enter: Exit details", fg=color.grey, bg=(45, 35, 25))
+        # Show compact navigation instructions
+        instructions_y = sidebar_y + sidebar_height - controls_height - 1
+        console.print(sidebar_x + 2, instructions_y, "Alt+↑↓: Tabs  Alt+←→: Items", fg=color.grey, bg=(45, 35, 25))
+        console.print(sidebar_x + 2, instructions_y + 1, "Shift+↑↓: Scroll  Enter: Exit", fg=color.grey, bg=(45, 35, 25))
 
     def render_visual_preview(self, console: tcod.Console, current_item: dict, look_x: int, look_y: int, preview_x: int, preview_y: int) -> None:
         """Render a visual preview of the object being inspected."""
@@ -3169,7 +3165,7 @@ class LookHandler(SelectIndexHandler):
                     liquid_color = coating.liquid_type.get_display_color()
                     
                     # Build and wrap ground coating text properly
-                    coating_text = f"Ground coating: {liquid_name}."
+                    coating_text = f"Coated with {liquid_name}."
                     words = coating_text.split()
                     current_line = []
                     current_length = 0
@@ -3237,8 +3233,8 @@ class LookHandler(SelectIndexHandler):
         return lines
     
     def render_scrollable_text(self, console: tcod.Console, text_lines: list, x: int, y: int, width: int, height: int) -> None:
-        """Render text with scrolling support."""
-        if not text_lines:
+        """Render text with scrolling support and strict height capping."""
+        if not text_lines or height <= 0:
             return
             
         # Limit scroll offset to valid range
@@ -3249,22 +3245,36 @@ class LookHandler(SelectIndexHandler):
         start_line = self.scroll_offset
         end_line = min(len(text_lines), start_line + height)
         
-        # Display the visible lines with proper y positioning
+        # Display the visible lines with strict height bounds checking
         current_y = y
+        max_y = y + height  # Absolute maximum Y coordinate
+        
         for i, line_idx in enumerate(range(start_line, end_line)):
-            if line_idx < len(text_lines):
+            if line_idx < len(text_lines) and current_y < max_y:
                 lines_to_wrap = text_lines[line_idx]
+                # Calculate remaining height for this line
+                remaining_height = max_y - current_y
+                if remaining_height <= 0:
+                    break
+                    
                 # Update current_y with the returned y position from print_wrapped_colored_text
-                current_y = print_wrapped_colored_text(console=console, x=x+1, y=current_y, text=lines_to_wrap, max_width=width)
-                current_y += 1  # Add spacing between logical lines
+                new_y = print_wrapped_colored_text(console=console, x=x+1, y=current_y, text=lines_to_wrap, max_width=width)
                 
-                # Stop if we've filled the available height
-                if current_y >= y + height:
+                # Ensure we don't exceed the height boundary
+                if new_y >= max_y:
+                    break
+                    
+                current_y = new_y + 1  # Add spacing between logical lines
+                
+                # Double-check height boundary
+                if current_y >= max_y:
                     break
         
         # Show scroll indicators if there's more content
         if start_line > 0:
             console.print(x + width - 3, y, "↑", fg=color.yellow)
+        if end_line < len(text_lines):
+            console.print(x + width - 3, y + height - 1, "↓", fg=color.yellow)
         if end_line < len(text_lines):
             console.print(x + width - 3, y + height - 1, "↓", fg=color.yellow)
 
@@ -3484,14 +3494,19 @@ class MainGameEventHandler(EventHandler):
             dx, dy = MOVE_KEYS[key]
             preferred_target = getattr(player, 'current_attack_type', None)
 
-            # Convert preferred target string to enum once for either melee or ranged.
-            target_part = None
+            # Convert preferred target tag to specific body part for ranged attacks
             if preferred_target:
-                from components.body_parts import BodyPartType
-                for part_type in BodyPartType:
-                    if part_type.name == preferred_target:
-                        target_part = part_type
-                        break
+                # Find all body parts with the preferred target tag  
+                import random
+                matching_parts = []
+                if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
+                    for part_type, body_part in target_actor.body_parts.body_parts.items():
+                        if preferred_target in body_part.tags:
+                            matching_parts.append(part_type)
+                
+                # Randomly select one matching part if any found
+                if matching_parts:
+                    target_part = random.choice(matching_parts)
 
             equipment = getattr(player, 'equipment', None)
             held_items = []
@@ -3584,13 +3599,19 @@ class MainGameEventHandler(EventHandler):
             if preferred_target and target_actor and target_actor != player:
                 # Use targeted attack if we have a preference and there's an enemy
                 if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
-                    # Convert preference string to BodyPartType enum
-                    from components.body_parts import BodyPartType
+                    # Convert preferred target tag to specific body part
                     target_part = None
-                    for part_type in BodyPartType:
-                        if part_type.name == preferred_target:
-                            target_part = part_type
-                            break
+                    if preferred_target:
+                        # Find all body parts with the preferred target tag
+                        import random
+                        matching_parts = []
+                        for part_type, body_part in target_actor.body_parts.body_parts.items():
+                            if preferred_target in body_part.tags:
+                                matching_parts.append(part_type)
+                        
+                        # Randomly select one matching part if any found
+                        if matching_parts:
+                            target_part = random.choice(matching_parts)
                     
                     if target_part:
                         from actions import MeleeAction

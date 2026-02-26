@@ -577,19 +577,19 @@ class Engine:
             console=console
         )
 
-        self.message_log.render(console=console, x=21, y=43, width=58, height=3)
+        self.message_log.render(console=console, x=21, y=43, width=58, height=3)  # MESSAGE_LOG coordinates
 
         render_functions.render_bar(
             console=console,
             current_value=self.player.fighter.hp,
             maximum_value=self.player.fighter.max_hp,
-            total_width=20
+            total_width=21
         )
         render_functions.render_lucidity_bar(
             console=console,
             current_value=self.player.lucidity,
             maximum_value=self.player.max_lucidity,
-            total_width=20
+            total_width=21
         )
         render_functions.render_gold(
             console=console,
@@ -620,12 +620,12 @@ class Engine:
             current_value=self.player.level.current_xp,
             maximum_value=self.player.level.experience_to_next_level,
             total_value=self.player.level.current_level,
-            total_width=20,
+            total_width=21,
 
         )
 
         render_functions.render_names_at_mouse_location(
-            console=console, x=1, y=42, engine=self
+            console=console, x=1, y=42, engine=self  # MOUSE_LOCATION coordinates
             )
         
         if self.debug:

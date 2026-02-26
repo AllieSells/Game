@@ -250,7 +250,7 @@ class EquipmentUI(AskUserEventHandler):
             # Build text parts for colored printing
             slot_char = slot.equipped_char if equipped_item else slot.char
             text_parts = [
-                (f"{marker}{slot_char}{slot.name:6} [", fg_color),
+                (f"{marker}{slot_char}{slot.name:<7}[", fg_color),
                 (f"{slot_hp:>3}%", part_color),
                 ("]", fg_color)
             ]

@@ -220,47 +220,47 @@ class BodyParts(BaseComponent):
         self.body_parts = {
             BodyPartType.HEAD: BodyPart(
                 BodyPartType.HEAD, "head", .5, max_hp=int(0.5 * parent_max_hp), is_vital=True,
-                tags={"head", "armor"}
+                tags={"head", "armor", "cranium"}
             ),
             BodyPartType.NECK: BodyPart(
                 BodyPartType.NECK, "neck", .267, max_hp=int(0.267 * parent_max_hp), is_vital=True,
-                tags={"neck", "armor"}
+                tags={"neck", "armor", "cranium"}
             ),
             BodyPartType.TORSO: BodyPart(
                 BodyPartType.TORSO, "torso", 1.0, max_hp=int(1.0 * parent_max_hp), is_vital=True,
-                tags={"torso", "armor"}
+                tags={"torso", "armor", "core"}
             ),
             BodyPartType.LEFT_ARM: BodyPart(
                 BodyPartType.LEFT_ARM, "left arm", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
-                tags={"arm", "armor", "left", "left_arm"}
+                tags={"arm", "armor", "left", "left_arm", "upper_limbs"}
             ),
             BodyPartType.RIGHT_ARM: BodyPart(
                 BodyPartType.RIGHT_ARM, "right arm", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
-                tags={"arm", "armor", "right", "right_arm"}
+                tags={"arm", "armor", "right", "right_arm", "upper_limbs"}
             ),
             BodyPartType.LEFT_HAND: BodyPart(
                 BodyPartType.LEFT_HAND, "left hand", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True, can_grasp=True,
-                tags={"hand", "grasp", "manipulate", "hold", "use", "left", "left_hand"}
+                tags={"hand", "grasp", "manipulate", "hold", "use", "left", "left_hand", "upper_limbs"}
             ),
             BodyPartType.RIGHT_HAND: BodyPart(
                 BodyPartType.RIGHT_HAND, "right hand", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True, can_grasp=True,
-                tags={"hand", "grasp", "manipulate", "hold", "use", "right", "right_hand"}
+                tags={"hand", "grasp", "manipulate", "hold", "use", "right", "right_hand", "upper_limbs"}
             ),
             BodyPartType.LEFT_LEG: BodyPart(
                 BodyPartType.LEFT_LEG, "left leg", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
-                tags={"leg", "locomotion", "left", "left_leg"}
+                tags={"leg", "locomotion", "left", "left_leg", "lower_limbs"}
             ),
             BodyPartType.RIGHT_LEG: BodyPart(
                 BodyPartType.RIGHT_LEG, "right leg", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
-                tags={"leg", "locomotion", "right", "right_leg"}
+                tags={"leg", "locomotion", "right", "right_leg", "lower_limbs"}
             ),
             BodyPartType.LEFT_FOOT: BodyPart(
                 BodyPartType.LEFT_FOOT, "left foot", .2, max_hp=int(0.2 * parent_max_hp), is_limb=True,
-                tags={"foot", "locomotion", "armor", "left", "left_foot"}
+                tags={"foot", "locomotion", "armor", "left", "left_foot", "lower_limbs"}
             ),
             BodyPartType.RIGHT_FOOT: BodyPart(
                 BodyPartType.RIGHT_FOOT, "right foot", .2, max_hp=int(0.2 * parent_max_hp), is_limb=True,
-                tags={"foot", "locomotion", "armor", "right", "right_foot"}
+                tags={"foot", "locomotion", "armor", "right", "right_foot", "lower_limbs"}
             ),
         }
     

@@ -2,7 +2,16 @@
 Simple Liquid Coating System
 
 A lightweight system for liquid coatings that modify existing tile graphics.
-Focuses on visual appeal and modular design.
+Focuses on visual appeal, modular design, and unified damage mechanics.
+
+## Damage System:
+- **Centralized Calculation**: All liquid damage (stepping, splashing) uses the same 
+  `_calculate_liquid_damage()` method for consistency
+- **Depth-Based Effects**: Deeper liquids cause more damage/healing
+- **Immediate + Periodic**: Stepping/splashing causes immediate effect, then periodic 
+  damage per turn while coated
+- **Modular Effects**: Easy to add new liquid types with different damage multipliers
+- **Healing Support**: Health potions use negative damage values for healing effects
 """
 
 from __future__ import annotations
@@ -11,6 +20,7 @@ from dataclasses import dataclass
 from typing import Dict, Tuple, Optional, TYPE_CHECKING
 import random
 import numpy as np
+import sounds
 
 if TYPE_CHECKING:
     from game_map import GameMap
@@ -25,6 +35,19 @@ class LiquidType(Enum):
     SLIME = auto()
     HEALTHPOTION = auto()
     POISON = auto()
+
+    def get_coat_string(self) -> str:
+        """Get a string representation of coating description."""
+        descriptions = {
+            LiquidType.NONE: "",
+            LiquidType.WATER: "wet",
+            LiquidType.BLOOD: "bloody",
+            LiquidType.OIL: "oily",
+            LiquidType.SLIME: "slimy",
+            LiquidType.HEALTHPOTION: "",
+            LiquidType.POISON: "poisoned"
+        }
+        return descriptions.get(self, "")
     
     def get_display_name(self) -> str:
         """Get the display name for this liquid type."""
@@ -57,12 +80,12 @@ class LiquidType(Enum):
         """Get the evaporation chance per turn for this liquid type."""
         chances = {
             LiquidType.NONE: 0.0,  # No evaporation for no coating
-            LiquidType.WATER: 0.002,    # 0.2% per turn (lasts ~500 turns)
-            LiquidType.BLOOD: 0.01,    # 1% per turn (lasts ~100 turns)  
-            LiquidType.OIL: 0.0005,     # 0.05% per turn (lasts ~2000 turns)
-            LiquidType.SLIME: 0.0003,   # 0.03% per turn (lasts ~3333 turns)
+            LiquidType.WATER: 0.05,    # 5% per turn (lasts ~20 turns)
+            LiquidType.BLOOD: 0.06,    # 6% per turn (lasts ~17 turns)  
+            LiquidType.OIL: 0.02,     # 2% per turn (lasts ~50 turns)
+            LiquidType.SLIME: 0.01,   # 1% per turn (lasts ~100 turns)
             LiquidType.HEALTHPOTION: 0.1,  # 10% per turn (lasts ~10 turns)
-            LiquidType.POISON: 0.1  # 10% per turn (lasts ~10 turns)
+            LiquidType.POISON: 0.33  # 33% per turn (lasts ~3 turns)
         }
         return chances.get(self, 0.001)
 
@@ -263,6 +286,55 @@ class LiquidSystem:
                     depth = max(1, max_depth - int(distance))
                     if random.random() < 0.8:  # Some randomness
                         self.add_liquid(x, y, liquid_type, depth)
+                    
+                    # Coat random body parts on entities in splash area
+                    self._coat_entities_in_splash(x, y, liquid_type, distance, radius)
+
+    def _coat_entities_in_splash(self, x: int, y: int, liquid_type: LiquidType, 
+                                distance: float, radius: int) -> None:
+        """Coat random body parts on entities caught in liquid splash."""
+        # Find entities at this position
+        entities_here = [e for e in self.game_map.entities if e.x == x and e.y == y]
+        
+        for entity in entities_here:
+            if not (hasattr(entity, 'body_parts') and entity.body_parts):
+                continue
+                
+            # Calculate coating chance based on distance from center (closer = higher chance)
+            base_chance = 0.8 - (distance / radius) * 0.4  # 80% at center, 40% at edge
+            
+            # Get all body parts that can be coated
+            all_parts = list(entity.body_parts.body_parts.values())
+            
+            # Determine how many parts to potentially coat (more for closer entities)
+            max_parts_to_coat = max(1, int(len(all_parts) * (0.5 - distance / radius * 0.3)))
+            
+            # Randomly select parts to coat
+            parts_to_check = random.sample(all_parts, min(max_parts_to_coat, len(all_parts)))
+            
+            coated_parts = []
+            for part in parts_to_check:
+                if random.random() < base_chance:
+                    # Don't overwrite existing coatings unless it's the same type
+                    if part.coating == LiquidType.NONE or part.coating == liquid_type:
+                        part.coating = liquid_type
+                        part.coating_age = 0
+                        coated_parts.append(part.name)
+                        
+                        # Apply immediate liquid effect for splash damage
+                        splash_depth = max(1, int(3 * (1 - distance / radius)))  # More depth closer to center
+                        self._apply_liquid_effect(entity, liquid_type, splash_depth, part)
+            
+            # Show message if any parts were coated and this is the player
+            if coated_parts and entity == self.game_map.engine.player:
+                if len(coated_parts) == 1:
+                    message = f"The {liquid_type.get_display_name()} splashes onto your {coated_parts[0]}!"
+                else:
+                    parts_text = ", ".join(coated_parts[:-1]) + f" and {coated_parts[-1]}"
+                    message = f"The {liquid_type.get_display_name()} splashes onto your {parts_text}!"
+                
+                import color
+                self.game_map.engine.message_log.add_message(message, color.cyan)
     
     def create_trail(self, start_x: int, start_y: int, end_x: int, end_y: int, 
                     liquid_type: LiquidType, width: int = 1) -> None:
@@ -294,16 +366,80 @@ class LiquidSystem:
             if e2 < dx:
                 err += dx
                 y += sy
-    def tick_liquid_effects(self, target, coating: LiquidCoating) -> None:
+    def _calculate_liquid_damage(self, liquid_type: LiquidType, depth: int, base_multiplier: int = 1) -> int:
+        """Calculate damage amount based on liquid type and depth."""
+        damage_multipliers = {
+            LiquidType.POISON: 1,
+            LiquidType.NONE: 0,
+            LiquidType.WATER: 0,
+            LiquidType.BLOOD: 0,
+            LiquidType.OIL: 0,
+            LiquidType.SLIME: 0,
+            LiquidType.HEALTHPOTION: -1,  # Negative for healing
+        }
+        
+        multiplier = damage_multipliers.get(liquid_type, 0)
+        return base_multiplier * multiplier * depth
+    
+    def _apply_liquid_effect(self, target, liquid_type: LiquidType, depth: int, 
+                           affected_body_part=None) -> None:
+        """Apply liquid effect (damage/healing) to target."""
+        if not hasattr(target, 'fighter') or not target.fighter:
+            return
+            
+        damage = self._calculate_liquid_damage(liquid_type, depth)
+        
+        if damage == 0:
+            return
+            
+        is_healing = damage < 0
+        actual_damage = abs(damage)
+        
+        # Apply damage/healing
+        if is_healing:
+            target.fighter.heal(actual_damage)
+            effect_verb = "heals"
+            effect_type = "healing"
+        else:
+            # Damage the specific body part if provided
+            if affected_body_part:
+                target.fighter.take_damage(actual_damage, targeted_part=affected_body_part.part_type, causes_bleeding=False)
+            else:
+                target.fighter.take_damage(actual_damage, causes_bleeding=False)
+            effect_verb = "burns" if liquid_type == LiquidType.POISON else "affects"
+            effect_type = "damage"
+        
+        # Generate appropriate message
+        liquid_name = liquid_type.get_display_name().capitalize()
+        if affected_body_part:
+            message = f"{liquid_name} on your {affected_body_part.name} {effect_verb} you for {actual_damage} {effect_type}!"
+        else:
+            message = f"You take {actual_damage} {liquid_name} {effect_type}!"
+        
+        # Play appropriate sound
+        if liquid_type == LiquidType.POISON and not is_healing:
+            sounds.play_poison_burn_sound()
+        
+        # Show message for player
+        if target == self.game_map.engine.player:
+            import color
+            message_color = color.health_recovered if is_healing else color.status_effect_applied
+            self.game_map.engine.message_log.add_message(message, message_color)
+    
+    def tick_liquid_effects(self, target, coating, affected_body_part=None) -> None:
         """Apply any effects from the liquid coating to the target (e.g., poison damage)."""
-        if coating.liquid_type == LiquidType.POISON:
-            # Apply poison damage each turn
-            poison_damage = 1 * coating.depth  # More depth = more damage
-            target.fighter.take_damage(poison_damage)
-            self.game_map.engine.message_log.add_message(
-                f"You take {poison_damage} poison damage from the {coating.liquid_type.get_display_name()}!",
-                color=target.game_map.engine.color.status_effect_applied
-            )
+        # Handle both LiquidCoating objects and LiquidType enums
+        if isinstance(coating, LiquidCoating):
+            liquid_type = coating.liquid_type
+            depth = coating.depth
+        else:
+            # Assume it's a LiquidType enum (from body part coatings)
+            liquid_type = coating
+            # Get depth from ground liquid at target's position or default to 1
+            ground_coating = self.get_coating(target.x, target.y)
+            depth = ground_coating.depth if ground_coating and ground_coating.liquid_type == liquid_type else 1
+        
+        self._apply_liquid_effect(target, liquid_type, depth, affected_body_part)
     
     def tick_liquid(self) -> None:
         """Process liquid aging and evaporation."""

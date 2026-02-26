@@ -997,12 +997,20 @@ class MovementAction(ActionWithDirection):
             distance = (dx * dx + dy * dy) ** 0.5
             
             if distance <= 10:  # Within hearing range
-                # Check tile type for sound variation
-                tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
-                if tile_name == "Grass":
-                    sounds.play_movement_sound_at(sounds.play_grass_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
+                # Check for liquid coating first, then tile type
+                liquid_coating = None
+                if hasattr(self.engine.game_map, 'liquid_system'):
+                    liquid_coating = self.engine.game_map.liquid_system.get_coating(dest_x, dest_y)
+                
+                if liquid_coating and liquid_coating.depth >= 1:
+                    sounds.play_movement_sound_at(sounds.play_liquid_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
                 else:
-                    sounds.play_movement_sound_at(sounds.play_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
+                    # Check tile type for sound variation
+                    tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
+                    if tile_name == "Grass":
+                        sounds.play_movement_sound_at(sounds.play_grass_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
+                    else:
+                        sounds.play_movement_sound_at(sounds.play_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
 
         # If not in view, display sound tile animation (for all entities)
         from animations import HeardSoundAnimation
@@ -1022,12 +1030,20 @@ class MovementAction(ActionWithDirection):
             distance = (dx * dx + dy * dy) ** 0.5
 
             if distance <= 8:
-                # Check tile type for sound variation
-                tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
-                if tile_name == "Grass":
-                    sounds.play_grass_walk_sound()
-                if tile_name == "Floor":
-                    sounds.play_walk_sound()
+                # Check for liquid coating first, then tile type
+                liquid_coating = None
+                if hasattr(self.engine.game_map, 'liquid_system'):
+                    liquid_coating = self.engine.game_map.liquid_system.get_coating(dest_x, dest_y)
+                
+                if liquid_coating and liquid_coating.depth >= 1:
+                    sounds.play_liquid_walk_sound(dest_x, dest_y)
+                else:
+                    # Check tile type for sound variation
+                    tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
+                    if tile_name == "Grass":
+                        sounds.play_grass_walk_sound()
+                    elif tile_name == "Floor":
+                        sounds.play_walk_sound()
 
 class ThrowItem(ItemAction):
     def __init__(self, entity: Actor, item: Item, target_x: int, target_y: int):

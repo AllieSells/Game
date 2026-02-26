@@ -43,7 +43,7 @@ class MessageLog:
         from render_functions import MenuRenderer
         
         # Draw parchment background for message log area
-        MenuRenderer.draw_parchment_background(console, x, y, width, height + 3)
+        MenuRenderer.draw_parchment_background(console, x, y, width, height + 3, color.parchment_dark)
 
         # Render messages 
         self.render_messages(console, x, y, width, height, self.messages)

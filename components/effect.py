@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+import sounds
+
 
 @dataclass
 class Effect:
@@ -32,6 +34,7 @@ class PoisonEffect(Effect):
         if self.duration is None:
             return False
         self.duration -=1
-        target.fighter.take_damage(self.amount)
+        sounds.play_poison_burn_sound()
+        target.fighter.take_damage(self.amount, causes_bleeding=False)
         return self.duration <= 0
         

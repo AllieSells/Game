@@ -236,7 +236,7 @@ class Fighter(BaseComponent):
 
         return amount_recovered
     
-    def take_damage(self, amount: int, targeted_part=None) -> None:
+    def take_damage(self, amount: int, targeted_part=None, causes_bleeding: bool = True) -> None:
         # Capture the entity name before it potentially dies/changes
         entity_name = self.parent.name
         
@@ -270,8 +270,9 @@ class Fighter(BaseComponent):
                 # Check if damaged limb should cause weapon dropping
                 self._check_weapon_drop(damaged_part)
         
-        # Add blood spilling when taking damage
-        if hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'liquid_system'):
+        # Add blood spilling when taking damage (only if causes_bleeding is True)
+        if (causes_bleeding and hasattr(self.parent, 'gamemap') and 
+            hasattr(self.parent.gamemap, 'liquid_system')):
             from liquid_system import LiquidType
             # Create small blood splash for damage
             blood_amount = min(2, max(1, amount // 4))  # Less blood than melee

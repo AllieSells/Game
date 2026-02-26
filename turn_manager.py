@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import color
 from components.effect import Effect
-from liquid_system import LiquidType
+from liquid_system import LiquidSystem, LiquidType
 from text_utils import orange, red
 import sounds
 
@@ -167,6 +167,7 @@ class TurnManager:
             self.engine.game_map.liquid_system.tick_liquid()
 
         # 8. Process liquid coating entities
+        self._process_body_part_liquid_effects()
         self._process_body_part_liquid_coating()
         self._process_body_part_coating_evaporation()
 
@@ -182,16 +183,25 @@ class TurnManager:
                     # Get the liquid at the entity's position
                     liquid_coating = self.engine.game_map.liquid_system.get_coating(entity.x, entity.y)
 
-
                     
                     # Find all limbs tagged with "foot"
                     for body_part in entity.body_parts.body_parts.values():
                         if "foot" in body_part.tags:
                             if liquid_coating and liquid_coating.depth >= 1:
                                 # Only coat feet if liquid is deep enough (depth >= 1)
+                                was_coated_before = body_part.coating != LiquidType.NONE
                                 if body_part.coating != liquid_coating.liquid_type:
                                     body_part.coating = liquid_coating.liquid_type
                                     body_part.coating_age = 0  # Reset age when newly coated
+                                    
+                                    # Apply immediate stepping effect for harmful liquids
+                                    if not was_coated_before and liquid_coating.liquid_type == LiquidType.POISON:
+                                        self.engine.game_map.liquid_system._apply_liquid_effect(
+                                            entity, liquid_coating.liquid_type, 
+                                            max(1, liquid_coating.depth - 1),  # Reduced effect for stepping vs splashing
+                                            body_part
+                                        )
+                                    
                                     # Debug: Print coating info if this is the player
                                     if entity == self.engine.player:
                                         print(f"COATED: {body_part.name} with {liquid_coating.liquid_type.get_display_name()}")
@@ -234,8 +244,14 @@ class TurnManager:
     def _process_body_part_liquid_effects(self) -> None:
         """Apply effects from liquid coatings on body parts (e.g., poison damage)."""
         try:
-            for entity in list(self.engine.
-
+            for entity in list(self.engine.game_map.entities):
+                if hasattr(entity, 'body_parts') and entity.body_parts:
+                    for body_part in entity.body_parts.body_parts.values():
+                        if body_part.coating != LiquidType.NONE:
+                            self.engine.game_map.liquid_system.tick_liquid_effects(target = entity, coating = body_part.coating, affected_body_part = body_part)
+        except Exception:
+            import traceback
+            traceback.print_exc()
     def _update_player_state(self) -> None:
         """Update player state"""
         if self.engine.player.hunger <= 25.0:
