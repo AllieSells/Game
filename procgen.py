@@ -120,7 +120,6 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) 
             y = random.randint(room.y1+1, room.y2-1)
         if not any(e.x == x and e.y == y for e in dungeon.entities):
             # Choose chest loot based on item weights from item dictionary
-            print(get_max_value_for_floor(max_items_by_floor, floor_number))
             loot = get_entities_at_random(item_chances, random.randint(0, get_max_value_for_floor(max_items_by_floor, floor_number)), floor_number)
             chest = entity_factories.make_chest_with_loot(loot, capacity=6)
             chest.spawn(dungeon, x, y)
@@ -830,7 +829,6 @@ def generate_dungeon(
                 # Build a small loot list: health potion + torch (deepcopy to avoid shared parents)
                 import copy as _copy
                 loot = [
-                    _copy.deepcopy(entity_factories.health_potion),
                     _copy.deepcopy(entity_factories.torch),
                     _copy.deepcopy(entity_factories.dagger),
                     _copy.deepcopy(entity_factories.generate_leather_armor()),
@@ -840,8 +838,10 @@ def generate_dungeon(
                     _copy.deepcopy(entity_factories.arrow),
                     _copy.deepcopy(entity_factories.arrow),
                     _copy.deepcopy(entity_factories.arrow),
-                    _copy.deepcopy(entity_factories.poison_potion),
+                    _copy.deepcopy(entity_factories.get_random_potion()),
+                    _copy.deepcopy(entity_factories.get_random_scroll())
                 ]
+
                 test_chest = entity_factories.make_chest_with_loot(loot, capacity=15)
                 cx, cy = new_room.center
                 chest_x, chest_y = min(dungeon.width - 1, cx + 1), cy

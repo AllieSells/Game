@@ -9,6 +9,17 @@ import input_handlers
 import setup_game
 
 
+"""
+GAME RULES:
+- Each tile is 
+
+
+
+"""
+
+
+
+
 # By default suppress noisy FutureWarning/DeprecationWarning messages from
 # third-party libraries (numpy, tcod, etc). Set the environment variable
 # GAME_SHOW_WARNINGS=1 to opt into seeing warnings during development.

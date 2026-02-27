@@ -97,12 +97,18 @@ class TurnManager:
             BaseEventHandler if we need to switch handlers (like GameOver), None otherwise.
         """
         # Handle all effects on entities
+
         for actor in list(self.engine.game_map.actors):
             if not hasattr(actor, "effects") or not actor.effects:
                 continue
             for effect in list(actor.effects):
                 try:
                     expired = effect.tick(actor)
+                    message = effect.get_message()
+                    if message:
+                        message_text = message[0]
+                        message_color = message[1]
+                        self.engine.message_log.add_message(message_text, message_color)
                     if expired:
                         try:
                             actor.effects.remove(effect)
@@ -143,7 +149,7 @@ class TurnManager:
         self.total_player_moves += 1
 
 
-        #print(f"Hunger: {player.hunger:.2f}, Saturation: {player.saturation:.2f}, Mult: {hunger_mult:.2f}, TotalMoves: {self.total_player_moves}")
+        print(f"TotalMoves: {self.total_player_moves}")
         
         # Process any remaining actor turns after player acted
         self._process_remaining_turns()
@@ -233,8 +239,8 @@ class TurnManager:
                             if random.random() < evap_chance:
                                 coating_name = body_part.coating.get_display_name()
                                 # Debug: Print evaporation if this is the player
-                                if entity == self.engine.player:
-                                    print(f"EVAPORATED: {body_part.name} coating ({coating_name}) evaporated after {body_part.coating_age} turns (chance: {evap_chance})")
+                                #if entity == self.engine.player:
+                                    #print(f"EVAPORATED: {body_part.name} coating ({coating_name}) evaporated after {body_part.coating_age} turns (chance: {evap_chance})")
                                 body_part.coating = LiquidType.NONE
                                 body_part.coating_age = 0
         except Exception:

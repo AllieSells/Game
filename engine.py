@@ -513,6 +513,8 @@ class Engine:
 
         # Torch increases FOV radius; campfires only affect Darkness (lighting), not FOV
         radius = 6 if has_torch else 3
+        if any(getattr(effect, "name", "") == "Darkvision" for effect in self.player.effects):
+            radius = 10
 
         if self.game_map.sunlit:
             radius = max(radius, 1000)  # Sunlit areas have large FOV regardless of torch
@@ -543,7 +545,7 @@ class Engine:
             
             # Consider tiles with only ambient light (≤ 0.1) as "dark" for darkness effects
             # This accounts for the dim view system that provides minimal visibility
-            if current_light_level <= 0.1:
+            if current_light_level <= 0.2:
                 # Player is in darkness (no real light sources): ensure they have the Darkness effect
                 if not has_darkness:
                     try:

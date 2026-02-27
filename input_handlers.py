@@ -181,252 +181,15 @@ class AskUserEventHandler(EventHandler):
         return MainGameEventHandler(self.engine)
 
 
-class CharacterScreenEventHandler(AskUserEventHandler):
+class CharacterScreenEventHandler(EventHandler):
     TITLE = "Character Sheet"
 
     def __init__(self, engine):
         super().__init__(engine)
         # Collapsible sections state (kept for future use). Sections removed per request.
         self.collapsed_sections = set()
+        
 
-        # NOTE: left/right section lists were removed to make the menu narrow and
-        # minimal. If you want to re-add sections later, populate
-        # `self.left_sections` and `self.right_sections` with the same structure
-        # as before (id/title/color/items).
-
-    def ev_keydown(self, event):
-        key = event.sym
-        # Keep behavior minimal: number-key toggles were removed with sections.
-        # Defer to base handler for navigation and closing.
-        if key == tcod.event.K_ESCAPE:
-            return MainGameEventHandler(self.engine)
-        return super().ev_keydown(event)
-
-    def _render_colored_text(self, console, x, y, text):
-        """Helper to render colored text and return the width used."""
-        from text_utils import parse_colored_text
-        segments = parse_colored_text(text)
-        x_offset = 0
-        for text_part, color in segments:
-            console.print(x=x + x_offset, y=y, string=text_part, fg=color)
-            x_offset += len(text_part)
-        return x_offset
-
-    def _render_section(self, console, section, x, y, width, section_num):
-        """Render a collapsible section and return the height used."""
-        is_collapsed = section["id"] in self.collapsed_sections
-        
-        # Section header with collapse indicator
-        collapse_icon = "▼" if not is_collapsed else "▶"
-        header_text = f"<gray>{collapse_icon}</gray> <{section['color']}>[{section_num}] {section['title']}</{section['color']}>"
-        self._render_colored_text(console, x, y, header_text)
-        
-        height_used = 1
-        
-        if not is_collapsed:
-            # Render section items
-            items = section["items"]()
-            for i, item in enumerate(items):
-                if y + height_used + 1 < console.height - 1:  # Bounds check
-                    self._render_colored_text(console, x + 2, y + height_used + 1, item)
-                    height_used += 1
-            height_used += 1  # Extra spacing after section
-        
-        return height_used
-
-    def _get_basic_info_items(self):
-        player = self.engine.player
-        return [
-            f"<white>Name:</white> <yellow>{player.name}</yellow>",
-            f"<white>Race:</white> <white>Human</white>",  # Placeholder
-            f"<white>Class:</white> <white>Adventurer</white>"  # Placeholder
-        ]
-
-    def _get_experience_items(self):
-        player = self.engine.player
-        if player.level.current_level < 30:
-            next_xp = player.level.experience_to_next_level
-            next_text = f"{next_xp}"
-        else:
-            next_text = "MAX LEVEL"
-        
-        return [
-            f"<cyan>Level:</cyan> <white>{player.level.current_level}</white>",
-            f"<cyan>Current XP:</cyan> <white>{player.level.current_xp}</white>",
-            f"<cyan>XP to Next:</cyan> <white>{next_text}</white>"
-        ]
-
-    def _get_attributes_items(self):
-        # Placeholder for future attribute system
-        return [
-            f"<green>Strength:</green> <white>10</white>",
-            f"<green>Dexterity:</green> <white>10</white>",
-            f"<green>Intelligence:</green> <white>10</white>",
-            f"<green>Constitution:</green> <white>10</white>"
-        ]
-
-    def _get_combat_items(self):
-        player = self.engine.player
-        return [
-            f"<red>Health:</red> <white>{player.fighter.hp}/{player.fighter.max_hp}</white>",
-            f"<orange>Attack:</orange> <white>{player.fighter.power}</white>",
-            f"<lightblue>Defense:</lightblue> <white>{player.fighter.defense}</white>"
-        ]
-
-    def _get_equipment_items(self):
-        # Placeholder for equipment system
-        return [
-            f"<orange>Weapon:</orange> <gray>None</gray>",
-            f"<orange>Armor:</orange> <gray>None</gray>",
-            f"<orange>Accessory:</orange> <gray>None</gray>"
-        ]
-
-    def _get_skills_items(self):
-        # Placeholder for skills system  
-        return [
-            f"<lightblue>Swordsmanship:</lightblue> <white>1</white>",
-            f"<lightblue>Archery:</lightblue> <white>1</white>",
-            f"<lightblue>Magic:</lightblue> <white>1</white>"
-        ]
-
-    def on_render(self, console: tcod.Console) -> None:
-        super().on_render(console)
-
-        # Enhanced window sizing for beautiful layout
-        total_width = 60
-        height = 20
-        
-        # Position based on player location
-        if self.engine.player.x <= 30:
-            x = 3
-        else:
-            x = max(0, console.width - total_width - 3)
-        y = 1
-
-        # Draw main fantasy parchment background
-        MenuRenderer.draw_parchment_background(console, x, y, total_width, height)
-        
-        # Draw ornate main border
-        MenuRenderer.draw_ornate_border(console, x, y, total_width, height, self.TITLE)
-
-        player = self.engine.player
-
-        # Character portrait section
-        portrait_x = x + 5
-        portrait_y = y + 3
-        portrait_width = 12
-        portrait_height = 8
-        
-        # Draw portrait frame
-        self._draw_fantasy_frame(console, portrait_x, portrait_y, portrait_width, portrait_height, "Portrait")
-        
-        # Player character centered in portrait
-        char_x = portrait_x + portrait_width // 2
-        char_y = portrait_y + portrait_height // 2
-        console.print(char_x, char_y, player.char, fg=player.color, bg=(60, 40, 25))
-        
-        # Player name above portrait
-        name_text = player.name
-        name_x = portrait_x + (portrait_width - len(name_text)) // 2
-        console.print(name_x, portrait_y - 1, name_text, fg=(255, 223, 127))
-
-        # Main stats section (right side)
-        stats_x = x + 20
-        stats_y = y + 3
-        stats_width = 35
-        stats_height = height - 6
-        
-        # Stats background
-        for sy in range(stats_height):
-            for sx in range(stats_width):
-                console.print(stats_x + sx, stats_y + sy, " ", bg=(40, 30, 22))
-
-        # Draw decorative divider
-        self._draw_decorative_divider(console, stats_x - 1, stats_y, stats_height)
-        
-        current_y = stats_y + 1
-        
-        # Basic Info Section
-        console.print(stats_x + 2, current_y, "✦ Basic Information ✦", fg=(255, 215, 0), bg=(40, 30, 22))
-        current_y += 2
-        basic_info = [
-            f"Level: {player.level.current_level}",
-            f"XP: {player.level.current_xp}",
-            f"Race: Human",
-            f"Class: Adventurer"
-        ]
-        for info in basic_info:
-            console.print(stats_x + 4, current_y, info, fg=(200, 170, 120), bg=(40, 30, 22))
-            current_y += 1
-        
-        current_y += 1
-        
-        # Combat Stats Section
-        console.print(stats_x + 2, current_y, "✦ Combat Stats ✦", fg=(255, 215, 0), bg=(40, 30, 22))
-        current_y += 2
-        combat_stats = [
-            f"Health: {player.fighter.hp}/{player.fighter.max_hp}",
-            f"Attack: {player.fighter.power}",
-            f"Defense: {player.fighter.defense}"
-        ]
-        for stat in combat_stats:
-            console.print(stats_x + 4, current_y, stat, fg=(200, 170, 120), bg=(40, 30, 22))
-            current_y += 1
-        
-        # Instructions footer
-        footer_text = "✦ [Esc] Close ✦"
-        footer_x = x + (total_width - len(footer_text)) // 2
-        console.print(footer_x, y + height - 2, footer_text, fg=(180, 140, 100))
-
-    def _draw_decorative_divider(self, console, x: int, y: int, height: int):
-        """Draw a smooth decorative vertical divider."""
-        divider_fg = (139, 105, 60)  # Bronze
-        accent_fg = (205, 164, 87)   # Gold accent
-        bg = (40, 30, 22)            # Slightly lighter than parchment
-        
-        for dy in range(height):
-            console.print(x, y + dy, " ", bg=bg)
-            
-            if dy == 0:
-                console.print(x, y + dy, "╤", fg=accent_fg, bg=bg)
-            elif dy == height - 1:
-                console.print(x, y + dy, "╧", fg=accent_fg, bg=bg)
-            else:
-                console.print(x, y + dy, "│", fg=divider_fg, bg=bg)
-
-    def _draw_fantasy_frame(self, console, x: int, y: int, width: int, height: int, title: str):
-        """Draw a fantasy-themed frame with decorative corners."""
-        frame_bg = (60, 40, 25)
-        border_fg = (205, 164, 87)  # Gold
-        title_fg = (255, 215, 0)    # Bright gold
-        
-        # Fill frame background
-        for fy in range(height):
-            for fx in range(width):
-                console.print(x + fx, y + fy, " ", bg=frame_bg)
-        
-        # Draw simple border
-        # Top and bottom
-        for i in range(width):
-            console.print(x + i, y, "─", fg=border_fg, bg=frame_bg)
-            console.print(x + i, y + height - 1, "─", fg=border_fg, bg=frame_bg)
-        
-        # Left and right
-        for i in range(height):
-            console.print(x, y + i, "│", fg=border_fg, bg=frame_bg)
-            console.print(x + width - 1, y + i, "│", fg=border_fg, bg=frame_bg)
-        
-        # Corners
-        console.print(x, y, "┌", fg=border_fg, bg=frame_bg)
-        console.print(x + width - 1, y, "┐", fg=border_fg, bg=frame_bg)
-        console.print(x, y + height - 1, "└", fg=border_fg, bg=frame_bg)
-        console.print(x + width - 1, y + height - 1, "┘", fg=border_fg, bg=frame_bg)
-        
-        # Title
-        if title:
-            title_text = f" {title} "
-            title_x = x + (width - len(title_text)) // 2
-            console.print(title_x, y, title_text, fg=title_fg, bg=frame_bg)
 
 
 class DialogueEventHandler(AskUserEventHandler):
@@ -3507,6 +3270,10 @@ class MainGameEventHandler(EventHandler):
                 # Randomly select one matching part if any found
                 if matching_parts:
                     target_part = random.choice(matching_parts)
+            else:
+                if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
+                    # Target random part
+                    target_part = random.choice(list(target_actor.body_parts.body_parts.keys()))
 
             equipment = getattr(player, 'equipment', None)
             held_items = []
@@ -3651,11 +3418,8 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.KeySym.D:
             return InventoryDropHandler(self.engine)
         elif key == tcod.event.KeySym.C:
-            return CharacterScreenEventHandler(self.engine)
-        elif key == tcod.event.KeySym.B:
-            # Inspect body parts
-            from body_part_actions import InspectBodyAction
-            action = InspectBodyAction(player)
+            from character_sheet_ui import CharacterScreen
+            return CharacterScreen(self.engine)
         # t key for targeting mode
         elif key == tcod.event.KeySym.A:
             return AttackModeHandler(self.engine)

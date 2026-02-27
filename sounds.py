@@ -475,6 +475,11 @@ def play_quaff_sound():
 def play_stairs_sound():
     play_sound_with_pitch_variation(stairs_sound, pitch_range=(0.95, 1.05), fade_ms=1000)
 
+def play_darkvision_sound():
+    sound = Sound("RP/sfx/darkvision.mp3")
+    play_sound_with_pitch_variation(sound, pitch_range=(0.75, 0.9), volume=0.75)
+
+
 # Fade out lightning sound over 0.5 second with pitch variation
 def play_lightning_sound():
     play_sound_with_pitch_variation(lightning_sound, pitch_range=(0.5, 1.5), volume=0.5, fade_ms=6000)

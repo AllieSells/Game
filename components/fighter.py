@@ -26,6 +26,10 @@ class Fighter(BaseComponent):
         # Whether this entity should leave a corpse when it dies.
         # Set to False for ephemeral creatures like Shades.
         self.leave_corpse = leave_corpse
+        self.strength = 1
+        self.dexterity = 1
+        self.constitution = 1
+
 
     @property
     def hp(self) -> int:
@@ -111,10 +115,11 @@ class Fighter(BaseComponent):
             except Exception:
                 pass
 
-            try:
-                self.engine.player.level.add_xp(self.parent.level.xp_given)
-            except Exception:
-                pass
+            # Overall XP system phased out - traits provide progression now
+            # try:
+            #     self.engine.player.level.add_xp(self.parent.level.xp_given)
+            # except Exception:
+            #     pass
 
             return
 
@@ -203,10 +208,11 @@ class Fighter(BaseComponent):
         except Exception:
             pass
 
-        try:
-            self.engine.player.level.add_xp(self.parent.level.xp_given)
-        except Exception:
-            pass
+        # Overall XP system phased out - traits provide progression now
+        # try:
+        #     self.engine.player.level.add_xp(self.parent.level.xp_given)
+        # except Exception:
+        #     pass
 
     def heal(self, amount: int) -> int:
         if self.hp == self.max_hp:
@@ -288,6 +294,10 @@ class Fighter(BaseComponent):
             hasattr(self.parent.gamemap, 'engine') and
             self.parent is self.parent.gamemap.engine.player):
             self.parent.gamemap.engine.trigger_damage_indicator()
+        
+        # Grant constitution XP for taking damage
+        import trait_xp_system
+        trait_xp_system.grant_damage_taken_xp(self.parent, amount)
     
     def _check_weapon_drop(self, damaged_part) -> None:
         """Drop weapons if grasping limbs are severely wounded."""

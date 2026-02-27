@@ -199,17 +199,22 @@ class GameMap:
         
         # Visible areas get gradient lighting
         if np.any(visible_mask):
-            # Add small ambient light around player (3x3 area)
-            try:
-                px, py = self.engine.player.x, self.engine.player.y
-                for dx in [-1, 0, 1]:
-                    for dy in [-1, 0, 1]:
-                        tx, ty = px + dx, py + dy
-                        if (0 <= tx < self.width and 0 <= ty < self.height 
-                            and self.tiles[tx, ty]["transparent"]):
-                            light_levels[tx, ty] = max(light_levels[tx, ty], 0.1)
-            except Exception:
-                pass
+            # Add configurable ambient light around player
+            px, py = self.engine.player.x, self.engine.player.y
+            if any(getattr(effect, "name", "") == "Darkvision" for effect in self.engine.player.effects):
+                ambient_radius = 9
+                ambient_intensity = 0.2
+            else:
+                ambient_radius = 1  # Default 1 for 3x3
+                ambient_intensity = 0.1  # Default 0.1
+            
+            for dx in range(-ambient_radius, ambient_radius + 1):
+                for dy in range(-ambient_radius, ambient_radius + 1):
+                    tx, ty = px + dx, py + dy
+                    if (0 <= tx < self.width and 0 <= ty < self.height 
+                        and self.tiles[tx, ty]["transparent"]):
+                        light_levels[tx, ty] = max(light_levels[tx, ty], ambient_intensity)
+
             
             # Interpolate between dark and light tiles based on light level
             vis_light_levels = light_levels[visible_mask].clip(0, 1)

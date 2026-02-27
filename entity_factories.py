@@ -13,12 +13,10 @@ from render_order import RenderOrder
 import components.names as names
 import sounds
 from text_utils import *
-from random import random
 import copy
 import liquid_system
 import color
-
-
+import random
 
 poison_potion = Item(
     char="o",
@@ -70,6 +68,22 @@ health_potion = Item(
     liquid_amount=15,
     weight=0.75
 )
+
+darkvision_scroll = Item(
+    char="~",
+    color=color.dark_purple,
+    name="Darkvision Scroll",
+    consumable=consumable.DarkvisionConsumable(duration=150),
+    description="A tattered scroll that seems to absorb light.",
+    equip_sound=sounds.play_equip_paper_sound,
+    unequip_sound=sounds.play_unequip_paper_sound,
+    pickup_sound=sounds.pick_up_paper_sound,
+    drop_sound=sounds.drop_paper_sound,
+    rarity_color=color.common,
+    tags = ["scroll", "effect", "darkvision", "paper"],
+    weight=0.1
+)
+
 lightning_scroll = Item(
     char="~",
     color=(255,255,0),
@@ -290,6 +304,14 @@ fungus = Item(
 # FUNCTIONS
 # =====================================================
 
+def get_random_potion() -> Item:
+    potion_types = [poison_potion, lesser_health_potion, health_potion]
+    return random.choice(potion_types)
+
+def get_random_scroll() -> Item:
+    scroll_types = [darkvision_scroll, confusion_scroll, fireball_scroll, lightning_scroll]
+    return random.choice(scroll_types)
+
 def get_random_fungus() -> Item:
     import random
     fungus_types = {
@@ -378,7 +400,7 @@ def generate_leather_armor() -> Item:
     # Deep copy the base leather armor and modify its properties
     new_armor = copy.deepcopy(leather_armor)
     # Roll for enchantment
-    if random() < 0.2:  # 20% chance for an enchantment
+    if random.random() < 0.2:  # 20% chance for an enchantment
         new_armor.equippable.defense_bonus += 1  # Add a small bonus to defense
         new_armor.name = new_armor.name + " +I"
         new_armor.rarity_color = color.uncommon
@@ -443,7 +465,16 @@ player = Actor(
     equipment=Equipment(),
     fighter=Fighter(hp=30, base_defense=2, base_power=5),
     inventory=Inventory(capacity=26),
-    level=Level(level_up_base=200),
+    level=Level(
+        level_up_base=0,  # Disabled overall XP - using trait system
+        # Enable trait progression with proper base values
+        strength_level_up_base=200,
+        strength_level_up_factor=100,
+        dexterity_level_up_base=200, 
+        dexterity_level_up_factor=100,
+        constitution_level_up_base=200,
+        constitution_level_up_factor=100
+    ),
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=30),
     # Temporary demo effect so the status-effects panel shows during testing
     effects = [],
@@ -465,7 +496,16 @@ spider = Actor(
     equipment=Equipment(),
     fighter=Fighter(hp=8, base_defense=0, base_power=2),
     inventory=Inventory(capacity=0),
-    level=Level(xp_given=20),
+    level=Level(
+    level_up_base=0,  # Disabled overall XP - using trait system
+    # Enable trait progression with proper base values
+    strength_level_up_base=200,
+    strength_level_up_factor=100,
+    dexterity_level_up_base=200, 
+    dexterity_level_up_factor=100,
+    constitution_level_up_base=200,
+    constitution_level_up_factor=100
+    ),
     speed=120,  # Faster than player to make them more threatening
     body_parts=BodyParts(AnatomyType.ARACHNID, max_hp=8),
     verb_base="bite",
@@ -473,6 +513,7 @@ spider = Actor(
     verb_past="bit",
     verb_participial="biting",
     dodge_chance=0.10,  # 10% chance to dodge attacks
+
 )
 
 shade = Actor(
@@ -485,20 +526,38 @@ shade = Actor(
     equipment=Equipment(),
     fighter=Fighter(hp=10, base_defense=2, base_power=5, leave_corpse=False),
     inventory=Inventory(capacity=5),
-    level=Level(xp_given=0),
+    level=Level(
+    level_up_base=0,  # Disabled overall XP - using trait system
+    # Enable trait progression with proper base values
+    strength_level_up_base=200,
+    strength_level_up_factor=100,
+    dexterity_level_up_base=200, 
+    dexterity_level_up_factor=100,
+    constitution_level_up_base=200,
+    constitution_level_up_factor=100
+    ),
     speed=130,  # Very fast - supernatural creature
     opinion=0,
 )
 
 goblin = Actor(
     char="g",
-    color=(63, 127, 90),
+    color=(112, 235, 133),
     name = "Goblin",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
     fighter=Fighter(hp=10, base_defense=0, base_power=3),
     inventory=Inventory(capacity=0),
-    level=Level(xp_given=35),
+    level=Level(
+        level_up_base=0,  # Disabled overall XP - using trait system
+        # Enable trait progression with proper base values
+        strength_level_up_base=200,
+        strength_level_up_factor=100,
+        dexterity_level_up_base=200, 
+        dexterity_level_up_factor=100,
+        constitution_level_up_base=200,
+        constitution_level_up_factor=100
+    ),
     speed=110,  # Fast enough to sometimes act before player
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
     description="",
@@ -540,7 +599,16 @@ troll = Actor(
     equipment=Equipment(),
     fighter=Fighter(hp=16, base_defense=1, base_power=4),
     inventory=Inventory(capacity=0),
-    level=Level(xp_given=100),
+    level=Level(
+        level_up_base=0,  # Disabled overall XP - using trait system
+        # Enable trait progression with proper base values
+        strength_level_up_base=200,
+        strength_level_up_factor=100,
+        dexterity_level_up_base=200, 
+        dexterity_level_up_factor=100,
+        constitution_level_up_base=200,
+        constitution_level_up_factor=100
+    ),
     speed=80,
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=16),
     verb_base="smash",

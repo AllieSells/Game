@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import sounds
-
+import color
 
 @dataclass
 class Effect:
@@ -38,3 +38,21 @@ class PoisonEffect(Effect):
         target.fighter.take_damage(self.amount, causes_bleeding=False)
         return self.duration <= 0
         
+class DarkvisionEffect(Effect):
+    def __init__(self, duration: int):
+        super().__init__(
+            name="Darkvision",
+            duration=duration,
+            description="See in the dark.",
+            type="buff"
+        )
+
+    def tick(self, target):
+        if self.duration is None:
+            return False
+        self.duration -= 1
+        return self.duration <= 0
+    
+    def get_message(self):
+        if self.duration == 0:
+            return ("Darkness once again engulfs you...", color.purple)

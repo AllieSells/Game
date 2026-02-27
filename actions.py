@@ -23,6 +23,7 @@ else:
 
 import sounds
 import animations
+import trait_xp_system
 # Body part targeting modifiers (damage_modifier, hit_difficulty_modifier)
 # hit_difficulty_modifier: Positive = easier to hit, negative = harder to hit
 
@@ -185,6 +186,8 @@ class PickupAction(Action):
                         print(f"DEBUG: Error calling pickup sound: {e}")
 
                 self.engine.message_log.add_message(f"You picked up the {item.name}!")
+                
+                # Grant trait XP for picking up items (strength training)
                 return
         raise exceptions.Impossible("There is nothing here to pick up.")
 
@@ -718,6 +721,9 @@ class RangedAction(ActionWithDirection):
             # Arrow bounced off armor/blocked - drops to ground
             self._drop_projectile_at((target.x, target.y), None)
 
+        # Grant trait XP for ranged combat
+        trait_xp_system.grant_action_xp(self.entity, self)
+
                       
 
 class MeleeAction(ActionWithDirection):
@@ -958,6 +964,9 @@ class MeleeAction(ActionWithDirection):
                 f"{attack_desc}, but does no damage.", attack_color
             )
 
+        # Grant trait XP for melee combat
+        trait_xp_system.grant_action_xp(self.entity, self)
+
 class MovementAction(ActionWithDirection):
 
     def perform(self) -> None:
@@ -1044,6 +1053,9 @@ class MovementAction(ActionWithDirection):
                         sounds.play_grass_walk_sound()
                     elif tile_name == "Floor":
                         sounds.play_walk_sound()
+
+        # Grant trait XP for movement
+        trait_xp_system.grant_action_xp(self.entity, self)
 
 class ThrowItem(ItemAction):
     def __init__(self, entity: Actor, item: Item, target_x: int, target_y: int):

@@ -24,6 +24,7 @@ dark_gray = (0x40, 0x40, 0x40)
 dark_grey = dark_gray
 light_red = (0xFF, 0x80, 0x80)
 light_green = (0x80, 0xFF, 0x80)
+dark_purple = (0x80, 0x0, 0x80)
 
 
 # rarity colors
@@ -67,6 +68,7 @@ xp_bar_filled = (6, 100, 255)
 parchment_bg = (45, 35, 25)
 parchment_light = (50, 40, 30) 
 parchment_dark = (40, 30, 22)
+parchment_very_dark = (30, 20, 15)
 bronze_border = (139, 105, 60)
 bronze_text = (160, 120, 70)
 gold_accent = (220, 180, 50)

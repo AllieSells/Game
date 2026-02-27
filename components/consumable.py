@@ -110,6 +110,21 @@ class HealingConsumables(Consumable):
         else:
             raise Impossible(f"Your health is already full.")
         
+class DarkvisionConsumable(Consumable):
+    def __init__(self, duration: int):
+        self.duration = duration
+
+    def activate(self, action: actions.ItemAction) -> None:
+        consumer = action.entity
+        
+        darkvision = effect.DarkvisionEffect(duration=self.duration)
+        sounds.play_darkvision_sound()
+        self.engine.message_log.add_message(
+            f"Your vision sharpens as darkness recedes!", color.dark_purple
+        )
+        consumer.add_effect(darkvision)
+        self.consume()
+        
 class LightningDamageConsumable(Consumable):
     def __init__(self, damage: int, maximum_range: int):
         self.damage = damage
