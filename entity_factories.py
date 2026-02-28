@@ -452,6 +452,9 @@ def make_chest_with_loot(items: list, capacity: int = 10) -> Actor:
     new_chest.container = cont
     return new_chest
 
+basic_entity_levelling = Level(
+    level_up_base=0
+)
 
 # =====================================================
 # ACTORS - All actor definitions grouped together
@@ -465,16 +468,7 @@ player = Actor(
     equipment=Equipment(),
     fighter=Fighter(hp=30, base_defense=2, base_power=5),
     inventory=Inventory(capacity=26),
-    level=Level(
-        level_up_base=0,  # Disabled overall XP - using trait system
-        # Enable trait progression with proper base values
-        strength_level_up_base=200,
-        strength_level_up_factor=100,
-        dexterity_level_up_base=200, 
-        dexterity_level_up_factor=100,
-        constitution_level_up_base=200,
-        constitution_level_up_factor=100
-    ),
+    level=copy.deepcopy(basic_entity_levelling),
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=30),
     # Temporary demo effect so the status-effects panel shows during testing
     effects = [],
@@ -496,16 +490,7 @@ spider = Actor(
     equipment=Equipment(),
     fighter=Fighter(hp=8, base_defense=0, base_power=2),
     inventory=Inventory(capacity=0),
-    level=Level(
-    level_up_base=0,  # Disabled overall XP - using trait system
-    # Enable trait progression with proper base values
-    strength_level_up_base=200,
-    strength_level_up_factor=100,
-    dexterity_level_up_base=200, 
-    dexterity_level_up_factor=100,
-    constitution_level_up_base=200,
-    constitution_level_up_factor=100
-    ),
+    level=copy.deepcopy(basic_entity_levelling),
     speed=120,  # Faster than player to make them more threatening
     body_parts=BodyParts(AnatomyType.ARACHNID, max_hp=8),
     verb_base="bite",
@@ -513,7 +498,6 @@ spider = Actor(
     verb_past="bit",
     verb_participial="biting",
     dodge_chance=0.10,  # 10% chance to dodge attacks
-
 )
 
 shade = Actor(
@@ -526,16 +510,7 @@ shade = Actor(
     equipment=Equipment(),
     fighter=Fighter(hp=10, base_defense=2, base_power=5, leave_corpse=False),
     inventory=Inventory(capacity=5),
-    level=Level(
-    level_up_base=0,  # Disabled overall XP - using trait system
-    # Enable trait progression with proper base values
-    strength_level_up_base=200,
-    strength_level_up_factor=100,
-    dexterity_level_up_base=200, 
-    dexterity_level_up_factor=100,
-    constitution_level_up_base=200,
-    constitution_level_up_factor=100
-    ),
+    level=copy.deepcopy(basic_entity_levelling),
     speed=130,  # Very fast - supernatural creature
     opinion=0,
 )
@@ -548,16 +523,7 @@ goblin = Actor(
     equipment=Equipment(),
     fighter=Fighter(hp=10, base_defense=0, base_power=3),
     inventory=Inventory(capacity=0),
-    level=Level(
-        level_up_base=0,  # Disabled overall XP - using trait system
-        # Enable trait progression with proper base values
-        strength_level_up_base=200,
-        strength_level_up_factor=100,
-        dexterity_level_up_base=200, 
-        dexterity_level_up_factor=100,
-        constitution_level_up_base=200,
-        constitution_level_up_factor=100
-    ),
+    level=copy.deepcopy(basic_entity_levelling),
     speed=110,  # Fast enough to sometimes act before player
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
     description="",
@@ -599,16 +565,7 @@ troll = Actor(
     equipment=Equipment(),
     fighter=Fighter(hp=16, base_defense=1, base_power=4),
     inventory=Inventory(capacity=0),
-    level=Level(
-        level_up_base=0,  # Disabled overall XP - using trait system
-        # Enable trait progression with proper base values
-        strength_level_up_base=200,
-        strength_level_up_factor=100,
-        dexterity_level_up_base=200, 
-        dexterity_level_up_factor=100,
-        constitution_level_up_base=200,
-        constitution_level_up_factor=100
-    ),
+    level=copy.deepcopy(basic_entity_levelling),
     speed=80,
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=16),
     verb_base="smash",

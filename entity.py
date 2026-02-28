@@ -52,8 +52,8 @@ class Entity:
         self.blocks_movement = blocks_movement
         self.render_order = render_order
         self.grammar_countable = False
+        self.parent = parent
         if parent:
-            self.parent = parent
             parent.entities.add(self)
 
     @property
@@ -65,9 +65,8 @@ class Entity:
         self.x = x
         self.y = y
         if gamemap:
-            if hasattr(self, "parent"):
-                if self.parent is self.gamemap:
-                    self.gamemap.entities.remove(self)
+            if hasattr(self, "parent") and self.parent and hasattr(self.parent, 'entities'):
+                self.parent.entities.remove(self)
             self.parent = gamemap
             gamemap.entities.add(self)
     

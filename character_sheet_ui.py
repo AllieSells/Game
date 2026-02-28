@@ -26,12 +26,12 @@ class CharacterScreen(AskUserEventHandler):
         # Define stat categories
         self.categories = [
             {
-                'name': 'Physical Traits────',
+                'name': 'Physical Traits',
                 'stats': ['strength', 'dexterity', 'constitution'],
                 'display': ['STR', 'DEX', 'CON']
             },
             {
-                'name': 'Combat Stats', 
+                'name': 'Blades', 
                 'stats': ['base_power', 'base_defense', 'hp'],
                 'display': ['Power', 'Defense', 'HP']
             },

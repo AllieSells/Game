@@ -694,6 +694,7 @@ class RangedAction(ActionWithDirection):
                     f"{attack_desc} for {final_damage} hit points.", attack_color
                 )
                 target.fighter.take_damage(final_damage)
+            trait_xp_system.grant_action_xp(self.entity, self)
 
             # 50/50 chance to add arrow to target's inventory when hit
             if hasattr(target, 'inventory') and target.inventory and random.random() < 0.5:
@@ -722,7 +723,7 @@ class RangedAction(ActionWithDirection):
             self._drop_projectile_at((target.x, target.y), None)
 
         # Grant trait XP for ranged combat
-        trait_xp_system.grant_action_xp(self.entity, self)
+        
 
                       
 
@@ -1054,8 +1055,6 @@ class MovementAction(ActionWithDirection):
                     elif tile_name == "Floor":
                         sounds.play_walk_sound()
 
-        # Grant trait XP for movement
-        trait_xp_system.grant_action_xp(self.entity, self)
 
 class ThrowItem(ItemAction):
     def __init__(self, entity: Actor, item: Item, target_x: int, target_y: int):

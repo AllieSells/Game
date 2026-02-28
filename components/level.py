@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, Callable
 
 from components.base_component import BaseComponent
 
@@ -9,24 +9,24 @@ if TYPE_CHECKING:
     from trait_xp_system import TraitType
 
 import sounds
-
+"""
+Add trait name to TRAITS = ['strength', 'dexterity', 'constitution', 'blades', 'NEW_TRAIT']
+Add NEW_TRAIT = "new_trait" to TraitType enum
+Create _level_up_new_trait() method
+Update trait mappings in the 3 methods
+"""
 class Level(BaseComponent):
     parent: Actor
 
+    # Add new traits here - just add the trait name to this list
+    TRAITS = ['strength', 'dexterity', 'constitution', 'blades', 'daggers', 'swords']
+    
+    # Default values for all traits
+    DEFAULT_LEVEL_UP_BASE = 0
+    DEFAULT_LEVEL_UP_FACTOR = 150
+
     def __init__(
         self,
-        current_strength_level: int = 1,
-        current_strength_xp: int = 0,
-        strength_level_up_base: int = 0,
-        strength_level_up_factor: int = 150,
-        current_dexterity_level: int = 1,
-        current_dexterity_xp: int = 0,
-        dexterity_level_up_base: int = 0,
-        dexterity_level_up_factor: int = 150,
-        current_constitution_level: int = 1,
-        current_constitution_xp: int = 0,
-        constitution_level_up_base: int = 0,
-        constitution_level_up_factor: int = 150,
         current_level: int = 1,
         current_xp: int = 0,
         level_up_base: int = 0,
@@ -34,18 +34,14 @@ class Level(BaseComponent):
         xp_given: int = 0,
         score: int = 0
     ):
-        self.current_strength_level = current_strength_level
-        self.current_strength_xp = current_strength_xp
-        self.strength_level_up_base = strength_level_up_base
-        self.strength_level_up_factor = strength_level_up_factor
-        self.current_dexterity_level = current_dexterity_level
-        self.current_dexterity_xp = current_dexterity_xp
-        self.dexterity_level_up_base = dexterity_level_up_base
-        self.dexterity_level_up_factor = dexterity_level_up_factor
-        self.current_constitution_level = current_constitution_level
-        self.current_constitution_xp = current_constitution_xp
-        self.constitution_level_up_base = constitution_level_up_base
-        self.constitution_level_up_factor = constitution_level_up_factor
+        # Initialize trait data dynamically
+        self.traits = {}
+        for trait_name in self.TRAITS:
+            self.traits[trait_name] = {
+                'level': 1,
+                'xp': 0
+            }
+            
         self.current_level = current_level
         self.current_xp = current_xp
         self.level_up_base = level_up_base
@@ -120,83 +116,60 @@ class Level(BaseComponent):
             
         from trait_xp_system import TraitType
         
-        # Map trait types to their corresponding attributes
-        trait_info = {
-            TraitType.STRENGTH: {
-                'current_xp': 'current_strength_xp',
-                'current_level': 'current_strength_level', 
-                'level_up_base': 'strength_level_up_base',
-                'level_up_factor': 'strength_level_up_factor',
-                'level_method': self._level_up_strength,
-                'name': 'strength'
-            },
-            TraitType.DEXTERITY: {
-                'current_xp': 'current_dexterity_xp',
-                'current_level': 'current_dexterity_level',
-                'level_up_base': 'dexterity_level_up_base', 
-                'level_up_factor': 'dexterity_level_up_factor',
-                'level_method': self._level_up_dexterity,
-                'name': 'dexterity'
-            },
-            TraitType.CONSTITUTION: {
-                'current_xp': 'current_constitution_xp',
-                'current_level': 'current_constitution_level',
-                'level_up_base': 'constitution_level_up_base',
-                'level_up_factor': 'constitution_level_up_factor', 
-                'level_method': self._level_up_constitution,
-                'name': 'constitution'
-            }
+        # Map TraitType enum to string names
+        trait_name_map = {
+            TraitType.STRENGTH: 'strength',
+            TraitType.DEXTERITY: 'dexterity',
+            TraitType.CONSTITUTION: 'constitution',
+            TraitType.BLADES: 'blades'
         }
         
-        if trait_type not in trait_info:
+        trait_name = trait_name_map.get(trait_type)
+        if not trait_name or trait_name not in self.traits:
             return
-            
-        info = trait_info[trait_type]
         
         # Add XP
-        old_xp = getattr(self, info['current_xp'])
+        old_xp = self.traits[trait_name]['xp']
         current_xp = old_xp + xp
-        setattr(self, info['current_xp'], current_xp)
+        self.traits[trait_name]['xp'] = current_xp
         
-        # Check for level up(s) - handle multiple levels and overflow XP
-        old_level = getattr(self, info['current_level'])
+        # Check for level up(s)
+        old_level = self.traits[trait_name]['level']
         current_level = old_level
-        level_up_base = getattr(self, info['level_up_base'])
-        level_up_factor = getattr(self, info['level_up_factor'])
         
         levels_gained = 0
         temp_xp = current_xp
         
         while temp_xp > 0:
-            xp_needed = level_up_base + current_level * level_up_factor
+            xp_needed = self.DEFAULT_LEVEL_UP_BASE + current_level * self.DEFAULT_LEVEL_UP_FACTOR
             
             if xp_needed <= 0 or temp_xp < xp_needed:
                 break
                 
-            # Level up the trait
             temp_xp -= xp_needed
             current_level += 1
             levels_gained += 1
         
         if levels_gained > 0:
             # Update the trait level and remaining XP
-            setattr(self, info['current_xp'], temp_xp)
-            setattr(self, info['current_level'], current_level)
+            self.traits[trait_name]['xp'] = temp_xp
+            self.traits[trait_name]['level'] = current_level
             
             # Apply trait-specific benefits for each level gained
             for i in range(levels_gained):
-                info['level_method']()
+                level_method = getattr(self, f'_level_up_{trait_name}', None)
+                if level_method:
+                    level_method()
             
             # Only show messages and play sounds for the player
             if self.parent == self.engine.player:
-                # Show level up message
                 if levels_gained == 1:
                     self.engine.message_log.add_message(
-                        f"Your {info['name']} increases to {current_level}!"
+                        f"Your {trait_name} increases to {current_level}!"
                     )
                 else:
                     self.engine.message_log.add_message(
-                        f"Your {info['name']} increases by {levels_gained} levels to {current_level}!"
+                        f"Your {trait_name} increases by {levels_gained} levels to {current_level}!"
                     )
                 sounds.play_level_up_sound()
 
@@ -232,26 +205,39 @@ class Level(BaseComponent):
                 part.max_hp = new_part_max
                 part.current_hp = min(part.max_hp, part.current_hp + part_increase)
 
+    def _level_up_blades(self) -> None:
+        """Handle blades level up benefits.""" 
+        # Increase weapon skill with bladed weapons
+        pass  # Add your blades-specific benefits here
+
     def get_trait_level(self, trait_type: 'TraitType') -> int:
         """Get the current level of a specific trait."""
         from trait_xp_system import TraitType
         
-        if trait_type == TraitType.STRENGTH:
-            return self.current_strength_level
-        elif trait_type == TraitType.DEXTERITY:
-            return self.current_dexterity_level
-        elif trait_type == TraitType.CONSTITUTION:
-            return self.current_constitution_level
+        trait_name_map = {
+            TraitType.STRENGTH: 'strength',
+            TraitType.DEXTERITY: 'dexterity', 
+            TraitType.CONSTITUTION: 'constitution',
+            TraitType.BLADES: 'blades'
+        }
+        
+        trait_name = trait_name_map.get(trait_type)
+        if trait_name and trait_name in self.traits:
+            return self.traits[trait_name]['level']
         return 1
 
     def get_trait_xp(self, trait_type: 'TraitType') -> int:
         """Get the current XP of a specific trait."""
         from trait_xp_system import TraitType
         
-        if trait_type == TraitType.STRENGTH:
-            return self.current_strength_xp
-        elif trait_type == TraitType.DEXTERITY:
-            return self.current_dexterity_xp
-        elif trait_type == TraitType.CONSTITUTION:
-            return self.current_constitution_xp
+        trait_name_map = {
+            TraitType.STRENGTH: 'strength',
+            TraitType.DEXTERITY: 'dexterity',
+            TraitType.CONSTITUTION: 'constitution',
+            TraitType.BLADES: 'blades'
+        }
+        
+        trait_name = trait_name_map.get(trait_type)
+        if trait_name and trait_name in self.traits:
+            return self.traits[trait_name]['xp']
         return 0

@@ -26,57 +26,29 @@ class TraitType(Enum):
     STRENGTH = "strength"
     DEXTERITY = "dexterity" 
     CONSTITUTION = "constitution"
+    BLADES = "blades"
 
 class ActionCategory(Enum):
     """Categories of actions that can grant trait XP."""
     MELEE_ATTACK = "melee_attack"
     RANGED_ATTACK = "ranged_attack"
-    MOVEMENT = "movement"
     TAKE_DAMAGE = "take_damage"
-    HEALING = "healing"
-    BLOCK_ATTACK = "block_attack"
-    DODGE = "dodge"
-    HEAVY_LIFTING = "heavy_lifting"
-    STEALTH = "stealth"
-    ENDURANCE = "endurance"
+
 
 # Mapping of action categories to traits and base XP amounts
 # Format: ActionCategory: [(TraitType, base_xp), ...]
 ACTION_TRAIT_MAPPING = {
     ActionCategory.MELEE_ATTACK: [
-        (TraitType.STRENGTH, 1),  # Primary trait gets more XP
+        (TraitType.STRENGTH, 5),  # Primary trait gets more XP
         (TraitType.CONSTITUTION, 1)  # Secondary traits get less XP
     ],
     ActionCategory.RANGED_ATTACK: [
-        (TraitType.DEXTERITY, 1),
+        (TraitType.DEXTERITY, 5),
         (TraitType.STRENGTH, 1)  # Drawing bow requires some strength
     ],
-    ActionCategory.MOVEMENT: [
-        (TraitType.DEXTERITY, 1),
-        (TraitType.CONSTITUTION, 1)
-    ],
     ActionCategory.TAKE_DAMAGE: [
-        (TraitType.CONSTITUTION, 1)
+        (TraitType.CONSTITUTION, 2)
     ],
-    ActionCategory.HEALING: [
-        (TraitType.CONSTITUTION, 1)
-    ],
-    ActionCategory.BLOCK_ATTACK: [
-        (TraitType.STRENGTH, 1),
-        (TraitType.CONSTITUTION, 1)
-    ],
-    ActionCategory.DODGE: [
-        (TraitType.DEXTERITY, 1)
-    ],
-    ActionCategory.HEAVY_LIFTING: [
-        (TraitType.STRENGTH, 1)  # High XP for strength-focused actions
-    ],
-    ActionCategory.STEALTH: [
-        (TraitType.DEXTERITY, 1)
-    ],
-    ActionCategory.ENDURANCE: [
-        (TraitType.CONSTITUTION, 1)
-    ]
 }
 
 class TraitXPModifier:
@@ -194,6 +166,7 @@ def grant_damage_taken_xp(actor: Actor, damage_amount: int):
     """Grant constitution XP when taking damage."""
     # More damage = more XP (up to a reasonable limit)
     multiplier = min(2.0, 1.0 + (damage_amount / 10.0))
+    print(multiplier)
     trait_xp_manager.grant_trait_xp(actor, ActionCategory.TAKE_DAMAGE, multiplier)
 
 def grant_dodge_xp(actor: Actor):
@@ -211,14 +184,7 @@ def get_trait_xp_to_next_level(actor: Actor, trait_type: TraitType) -> int:
         return 0
         
     current_level = actor.level.get_trait_level(trait_type)
-    
-    if trait_type == TraitType.STRENGTH:
-        return actor.level.strength_level_up_base + current_level * actor.level.strength_level_up_factor
-    elif trait_type == TraitType.DEXTERITY:
-        return actor.level.dexterity_level_up_base + current_level * actor.level.dexterity_level_up_factor
-    elif trait_type == TraitType.CONSTITUTION:
-        return actor.level.constitution_level_up_base + current_level * actor.level.constitution_level_up_factor
-    return 0
+    return actor.level.DEFAULT_LEVEL_UP_BASE + current_level * actor.level.DEFAULT_LEVEL_UP_FACTOR
 
 def get_trait_xp_remaining(actor: Actor, trait_type: TraitType) -> int:
     """Get XP remaining until next trait level."""
