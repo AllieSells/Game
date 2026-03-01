@@ -407,7 +407,5 @@ class TurnManager:
         
         if not self.engine.player.is_alive:
             return GameOverEventHandler(self.engine)
-        elif self.engine.player.level.requires_level_up:
-            return LevelUpEventHandler(self.engine)
         
         return None

@@ -617,14 +617,6 @@ class Engine:
             effects=self.player.effects
         )
 
-        render_functions.render_player_level(
-            console=console,
-            current_value=self.player.level.current_xp,
-            maximum_value=self.player.level.experience_to_next_level,
-            total_value=self.player.level.current_level,
-            total_width=21,
-
-        )
 
         render_functions.render_names_at_mouse_location(
             console=console, x=1, y=42, engine=self  # MOUSE_LOCATION coordinates

@@ -45,6 +45,14 @@ class LeatherCap(Equippable):
     def __init__(self) -> None:
         super().__init__(equipment_type=EquipmentType.HELMET, defense_bonus=1, required_tags={"head"})
 
+class LeatherLeggings(Equippable):
+    def __init__(self) -> None:
+        super().__init__(equipment_type=EquipmentType.LEGGINGS, defense_bonus=1, required_tags={"leg"})
+
+class LeatherBoot(Equippable):
+    def __init__(self) -> None:
+        super().__init__(equipment_type=EquipmentType.BOOTS, defense_bonus=1, required_tags={"foot"})
+
 class LeatherArmor(Equippable):
     def __init__(self) -> None:
         super().__init__(equipment_type=EquipmentType.ARMOR, defense_bonus=1, required_tags={"torso"})

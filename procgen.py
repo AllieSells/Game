@@ -831,8 +831,10 @@ def generate_dungeon(
                 loot = [
                     _copy.deepcopy(entity_factories.torch),
                     _copy.deepcopy(entity_factories.dagger),
-                    _copy.deepcopy(entity_factories.generate_leather_armor()),
-                    _copy.deepcopy(entity_factories.leather_cap),
+                    _copy.deepcopy(entity_factories.generate_armor('leather armor')),
+                    _copy.deepcopy(entity_factories.generate_armor('leather cap')),
+                    _copy.deepcopy(entity_factories.generate_armor('leather boots')),
+                    _copy.deepcopy(entity_factories.generate_armor('leather leggings')),
                     _copy.deepcopy(entity_factories.bow),
                     _copy.deepcopy(entity_factories.arrow),
                     _copy.deepcopy(entity_factories.arrow),

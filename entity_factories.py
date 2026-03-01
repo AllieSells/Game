@@ -28,7 +28,7 @@ poison_potion = Item(
     unequip_sound=sounds.play_unequip_glass_sound,
     pickup_sound=sounds.pick_up_glass_sound,
     drop_sound=sounds.drop_glass_sound,
-    rarity_color=color.common,
+    rarity_color=color.poison,
     tags = ["potion", "poison", "glass", "container", "fragile"],
     liquid_type=liquid_system.LiquidType.POISON,
     liquid_amount=5,
@@ -197,19 +197,7 @@ sword = Item(
     weight=3.0
 )
 
-leather_cap = Item(
-    char="n",
-    color=(139, 69, 19),
-    name="Leather Cap",
-    equippable=equippable.LeatherCap(),
-    equip_sound=sounds.play_equip_leather_sound,
-    unequip_sound=sounds.play_unequip_leather_sound,
-    pickup_sound=sounds.pick_up_leather_sound,
-    drop_sound=sounds.drop_leather_sound,
-    rarity_color=color.common,
-    tags = ["leather", "armor", "headgear"],
-    weight=0.5
-)
+
 
 bow = Item(
     char="}",
@@ -247,6 +235,20 @@ arrow = Item(
     weight=0.1
 )
 
+leather_cap = Item(
+    char="n",
+    color=(139, 69, 19),
+    name="Leather Cap",
+    equippable=equippable.LeatherCap(),
+    equip_sound=sounds.play_equip_leather_sound,
+    unequip_sound=sounds.play_unequip_leather_sound,
+    pickup_sound=sounds.pick_up_leather_sound,
+    drop_sound=sounds.drop_leather_sound,
+    rarity_color=color.common,
+    tags = ["leather", "armor", "headgear"],
+    weight=0.5
+)
+
 leather_armor = Item(
     char="[",
     color=(139, 69, 19),
@@ -257,9 +259,38 @@ leather_armor = Item(
     pickup_sound=sounds.pick_up_leather_sound,
     drop_sound=sounds.drop_leather_sound,
     rarity_color=color.common,
-    tags = ["leather", "armor", "body armor"],
+    tags = ["leather", "armor", "body armor", "light armor"],
     weight=5.0
 )
+
+leather_leggings = Item(
+    char="H",
+    color=(139, 69, 19),
+    name="Leather Leggings",
+    equippable=equippable.LeatherLeggings(),
+    equip_sound=sounds.play_equip_leather_sound,
+    unequip_sound=sounds.play_unequip_leather_sound,
+    pickup_sound=sounds.pick_up_leather_sound,
+    drop_sound=sounds.drop_leather_sound,
+    rarity_color=color.common,
+    tags = ["leather", "armor", "leggings", "light armor"],
+    weight=3.0
+)
+
+leather_boot = Item(
+    char="v",
+    color=(139, 69, 19),
+    name="Leather Boots",
+    equippable=equippable.LeatherBoot(),
+    equip_sound=sounds.play_equip_leather_sound,
+    unequip_sound=sounds.play_unequip_leather_sound,
+    pickup_sound=sounds.pick_up_leather_sound,
+    drop_sound=sounds.drop_leather_sound,
+    rarity_color=color.common,
+    tags = ["leather", "armor", "boots", "light armor"],
+    weight=1.0
+)
+
 
 chain_mail = Item(
     char="[", color=(139, 69, 19),
@@ -396,15 +427,28 @@ def get_random_coins(min_amount: int, max_amount: int) -> Item:
 # =====================================================
 # EQUIPMENT GENERATORS
 # =====================================================
-def generate_leather_armor() -> Item:
-    # Deep copy the base leather armor and modify its properties
-    new_armor = copy.deepcopy(leather_armor)
-    # Roll for enchantment
-    if random.random() < 0.2:  # 20% chance for an enchantment
-        new_armor.equippable.defense_bonus += 1  # Add a small bonus to defense
-        new_armor.name = new_armor.name + " +I"
-        new_armor.rarity_color = color.uncommon
-    return new_armor
+
+def generate_armor(specific: Optional[str] = None) -> Item:
+    armor_types = {
+        "leather cap": leather_cap,
+        "leather armor": leather_armor,
+        "leather leggings": leather_leggings,
+        "leather boots": leather_boot,
+        "chain mail": chain_mail
+    }
+    if specific and specific in armor_types:
+        if random.random() < 0.2:
+            armor = copy.deepcopy(armor_types[specific])
+            armor.equippable.defense_bonus += 1
+            armor.name = armor.name + " +I"
+            armor.rarity_color = color.uncommon
+            return armor
+        else:
+            armor = copy.deepcopy(armor_types[specific])
+            return armor
+    # Return None if specific armor type not found
+    return None
+
 
 def roll_enchantment(item: Item) -> Item:
     # Check if item is equippable first
@@ -521,7 +565,7 @@ goblin = Actor(
     name = "Goblin",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
-    fighter=Fighter(hp=10, base_defense=0, base_power=3),
+    fighter=Fighter(hp=10, base_defense=0, base_power=4),
     inventory=Inventory(capacity=0),
     level=copy.deepcopy(basic_entity_levelling),
     speed=110,  # Fast enough to sometimes act before player
@@ -546,12 +590,20 @@ goblin = Actor(
             dagger: 20,
             None: 80
         },
-        "armor": {
+        "head_armor": {
             leather_cap: 25,
             None: 75
         },
-        "armor": {
-            generate_leather_armor(): 25,
+        "chest_armor": {
+            leather_armor: 25,
+            None: 75
+        },
+        'leg_armor': {
+            leather_leggings: 25,
+            None: 75
+        },
+        'foot_armor': {
+            leather_boot: 25,
             None: 75
         }
     }

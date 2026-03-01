@@ -76,3 +76,6 @@ fantasy_text = (200, 170, 140)
 
 menu_title = (255, 255, 63)
 menu_text = white
+
+
+poison = (0x40, 0xFF, 0x40)

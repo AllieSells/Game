@@ -687,7 +687,8 @@ class ContainerEventHandler(AskUserEventHandler):
                 if self.engine.player.equipment.item_is_equipped(item):
                     # Get slot item is in
                     slot = self.engine.player.equipment.get_slot(item)
-                    self.engine.player.equipment.unequip_from_slot(slot, add_message=True)
+                    self.engine.player.equipment.unequip_item(item, add_message=True)
+                    
 
                 # Check container capacity
                 if len(self.container.items) >= self.container.capacity:
@@ -698,6 +699,7 @@ class ContainerEventHandler(AskUserEventHandler):
                 # Move item into the container and update its parent so
                 # later logic (consumption, transfers) sees the correct owner.
                 self.container.items.append(item)
+                print(f"DEBUG: Inventory = {[item.name for item in self.engine.player.inventory.items]}")
                 try:
                     item.parent = self.container
                 except Exception:

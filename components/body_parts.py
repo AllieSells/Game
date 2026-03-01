@@ -451,6 +451,20 @@ class BodyParts(BaseComponent):
             total_healing += part.heal(amount)
         return total_healing
     
+    def set_max_health(self, new_max_hp: int) -> None:
+        """Set new max health and redistribute to body parts based on existing health ratios."""
+        self.max_hp = new_max_hp
+        
+        for part in self.body_parts.values():
+            # Preserve current health percentage
+            health_ratio = part.current_hp / part.max_hp if part.max_hp > 0 else 1.0
+            
+            # Update max HP based on part's proportion of total health
+            part.max_hp = int(part.max_hp_ratio * new_max_hp)
+            
+            # Maintain same health percentage, but don't exceed new max
+            part.current_hp = min(int(part.max_hp * health_ratio), part.max_hp)
+    
     def get_status_description(self) -> List[str]:
         """Get detailed status of all body parts."""
         descriptions = []

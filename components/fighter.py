@@ -295,9 +295,6 @@ class Fighter(BaseComponent):
             self.parent is self.parent.gamemap.engine.player):
             self.parent.gamemap.engine.trigger_damage_indicator()
         
-        # Grant constitution XP for taking damage
-        import trait_xp_system
-        trait_xp_system.grant_damage_taken_xp(self.parent, amount)
     
     def _check_weapon_drop(self, damaged_part) -> None:
         """Drop weapons if grasping limbs are severely wounded."""

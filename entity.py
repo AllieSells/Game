@@ -102,7 +102,7 @@ class Entity:
                 # Deep copy to avoid shared references
                 item_copy = copy.deepcopy(chosen_item)
                 # Roll for enchantment
-                item_copy.roll_for_enchantment(enchantment_chance=1.0)
+                item_copy.roll_for_enchantment(enchantment_chance=0.2)
                 item_copy.parent = self.inventory
                 
                 # Try to equip if possible

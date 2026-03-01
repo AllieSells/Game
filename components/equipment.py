@@ -284,6 +284,14 @@ class Equipment(BaseComponent):
                 item in self.equipped_items.values() or
                 item in self.body_part_coverage.values())
 
+    def get_armor_tags_for_part(self, part_name: str) -> Set[str]:
+        # Get equipped item tags for a specific body part
+        if part_name in self.body_part_coverage:
+            item = self.body_part_coverage[part_name]
+            if item.equippable:
+                return item.tags
+        return None
+
     def get_defense_for_part(self, part_name: str) -> int:
         """Get defense bonus provided by equipment for a specific body part."""
         # Lazy init coverage if needed (handling load/init race conditions)

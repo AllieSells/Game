@@ -23,7 +23,7 @@ else:
 
 import sounds
 import animations
-import trait_xp_system
+import components.level
 # Body part targeting modifiers (damage_modifier, hit_difficulty_modifier)
 # hit_difficulty_modifier: Positive = easier to hit, negative = harder to hit
 
@@ -554,11 +554,12 @@ class RangedAction(ActionWithDirection):
                 if part.damage_level_float > 0.5:
                     if random.random() < 0.5:
                         self.entity.fighter._drop_grasped_items(part)
-                    print("DEBUG: Manipulation partially impaired by damage to part:", part.name)
+                    #print("DEBUG: Manipulation partially impaired by damage to part:", part.name)
                 elif part.damage_level_float >= 1.0:
                     self.entity.fighter._drop_grasped_items(part)
                 else:
-                    print("DEBUG: Manipulation possible with part:", part.name)
+                    #print("DEBUG: Manipulation possible with part:", part.name)
+                    pass
         
         hit_part = None
         damage_modifier = 1.0
@@ -597,15 +598,18 @@ class RangedAction(ActionWithDirection):
                                     break
 
         # Calculate defense and damage
-        defense = 0
+        base_defense = 0
+        armor_defense = 0
+        
         if hit_part:
-            defense = hit_part.protection + target.fighter.base_defense
+            base_defense = hit_part.protection + target.fighter.base_defense
             if hasattr(target, "equipment") and target.equipment:
-                defense += target.equipment.get_defense_for_part(hit_part.name)
+                armor_defense = target.equipment.get_defense_for_part(hit_part.name)
         else:
-            defense = target.fighter.defense
+            base_defense = target.fighter.defense
 
-        base_damage = self.entity.fighter.power - defense
+        total_defense = base_defense + armor_defense
+        base_damage = self.entity.fighter.power - total_defense
         final_damage = max(0, int(base_damage * damage_modifier))
 
         # Hit chance calculation
@@ -688,13 +692,15 @@ class RangedAction(ActionWithDirection):
                     self.engine.message_log.add_message(
                         f"{attack_desc} for {part_damage} damage.", attack_color
                     )
+                
+
                 target.fighter.take_damage(part_damage, targeted_part=self.target_part)
             else:
                 self.engine.message_log.add_message(
                     f"{attack_desc} for {final_damage} hit points.", attack_color
                 )
                 target.fighter.take_damage(final_damage)
-            trait_xp_system.grant_action_xp(self.entity, self)
+            item_for_attack = self._get_ready_ranged_items()[0]  # Get the bow used for the attack
 
             # 50/50 chance to add arrow to target's inventory when hit
             if hasattr(target, 'inventory') and target.inventory and random.random() < 0.5:
@@ -723,9 +729,20 @@ class RangedAction(ActionWithDirection):
             self._drop_projectile_at((target.x, target.y), None)
 
         # Grant trait XP for ranged combat
-        
-
-                      
+        if final_damage > 0:
+            # Award XP to attacker for bow usage
+            self.entity.level.add_xp({'agility': int(final_damage)})
+            
+            # Award XP to target for taking damage and armor defense
+            target.level.add_xp({'vigor': int(final_damage)})
+            
+            # Award armor XP if target has armor that blocked damage
+            armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name) if hit_part and hasattr(target, "equipment") and target.equipment else []
+            if armor_defense > 0 and armor_tags:
+                target.level.add_xp({'armor': int(armor_defense/2)})
+                if "light armor" in armor_tags:
+                    target.level.add_xp({'light armor': int(armor_defense)})
+                    print("DEBUG: Gained light armor XP from ranged:", int(armor_defense))
 
 class MeleeAction(ActionWithDirection):
     """Melee action that targets a specific body part."""
@@ -736,6 +753,7 @@ class MeleeAction(ActionWithDirection):
     
     def perform(self) -> None:
         target = self.target_actor
+        part_damage = 0  # Initialize to handle cases where no damage is dealt
 
         # Check for target
         if not target:
@@ -751,11 +769,12 @@ class MeleeAction(ActionWithDirection):
                 if part.damage_level_float > 0.5:
                     if random.random() < 0.5:
                         self.entity.fighter._drop_grasped_items(part)
-                    print("DEBUG: Manipulation partially impaired by damage to part:", part.name)
+                    #print("DEBUG: Manipulation partially impaired by damage to part:", part.name)
                 elif part.damage_level_float >= 1.0:
                     self.entity.fighter._drop_grasped_items(part)
                 else:
-                    print("DEBUG: Manipulation possible with part:", part.name)
+                    #print("DEBUG: Manipulation possible with part:", part.name)
+                    pass
         # Get target body part and apply targeting effects
         hit_part = None
         damage_modifier = 1.0
@@ -807,21 +826,25 @@ class MeleeAction(ActionWithDirection):
                                     break
         
         # Calculate localized defense
-        defense = 0
+        base_defense = 0
+        armor_defense = 0
+        
         if hit_part:
-            defense = hit_part.protection + target.fighter.base_defense
+            base_defense = hit_part.protection + target.fighter.base_defense
             if hasattr(target, "equipment") and target.equipment:
-                defense += target.equipment.get_defense_for_part(hit_part.name)
-                print("DEBUG: Calculating defense for hit part:", hit_part.name, "base defense:", target.fighter.base_defense)
+                armor_defense = target.equipment.get_defense_for_part(hit_part.name)
+                #print("DEBUG: Calculating defense for hit part:", hit_part.name, "base defense:", target.fighter.base_defense)
         else:
-             defense = target.fighter.defense
+             base_defense = target.fighter.defense
 
+        total_defense = base_defense + armor_defense
+        
         # Calculate base damage
-        base_damage = self.entity.fighter.power - defense
+        base_damage = self.entity.fighter.power - total_defense
 
         # Calculate final damage
         final_damage = max(0, int(base_damage * damage_modifier))
-        print(f"DEBUG: hit_part={hit_part.name if hit_part else None}, final_damage={final_damage}")
+        #print(f"DEBUG: hit_part={hit_part.name if hit_part else None}, final_damage={final_damage}")
         
         # Determine hit success based on difficulty
         hit_chance = 85 + hit_difficulty_modifier  # Base 85% hit chance
@@ -863,6 +886,9 @@ class MeleeAction(ActionWithDirection):
         # Check for equipped weapon and use its verb if available
         weapon_verb = None
         weapon = None
+        equipped_weapons = None
+        if self.entity.equipment:
+            equipped_weapons = [item for item in self.entity.equipment.grasped_items.values() if item and hasattr(item, 'equippable') and item.equippable and item.equippable.equipment_type.name == 'WEAPON']
         if self.entity.equipment:
             # Find the first weapon in grasped items
             for item in self.entity.equipment.grasped_items.values():
@@ -949,6 +975,7 @@ class MeleeAction(ActionWithDirection):
                     )
 
                 target.fighter.take_damage(part_damage, targeted_part=self.target_part)
+
             else:
                 # This should never happen - but adding for debugging
                 print(f"ERROR: No valid body part found! target_part={self.target_part}, has_body_parts={hasattr(target, 'body_parts')}")
@@ -966,8 +993,28 @@ class MeleeAction(ActionWithDirection):
             )
 
         # Grant trait XP for melee combat
-        trait_xp_system.grant_action_xp(self.entity, self)
+        armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name)
+        xp = int(part_damage)
+        #print("DEBUG: Gained constitution XP:", int(part_damage))
+        #print(equipped_weapons)
 
+        # Add users XP
+        if equipped_weapons:
+            for weapon in equipped_weapons:
+                print(weapon.tags)
+                if "blade" in weapon.tags:
+                    self.entity.level.add_xp({'blades': xp})
+                    print("DEBUG: Gained blade XP:", int(part_damage/2))
+                if "dagger" in weapon.tags:
+                    self.entity.level.add_xp({'daggers': xp})
+                print("DEBUG: Gained dagger XP:", int(part_damage*1.5))
+
+        # Add targets XP
+        target.level.add_xp({'vigor': int(part_damage*2)})
+        if armor_tags and armor_defense > 0:
+            if "light armor" in armor_tags:
+                target.level.add_xp({'light armor': int(armor_defense*1.5)})
+                print("DEBUG: Gained light armor XP:", int(armor_defense*1.5))
 class MovementAction(ActionWithDirection):
 
     def perform(self) -> None:
