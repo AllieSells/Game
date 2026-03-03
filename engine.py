@@ -179,6 +179,27 @@ class Engine:
                                 self.animation_queue.append(FireSmoke((entity.x, entity.y)))
                         except Exception:
                             pass
+                
+                # Get sigil stone items on map
+                if entity.name == "Sigil Stone":
+                    # Spawn pulsing animation only occasionally since they now loop forever
+                    if self.animations_enabled:
+                        try:
+                            from animations import SigilStoneAnimation
+                            
+                            # Very low chance since animations loop - we only need one per sigil stone
+                            if random.random() < 0.01:  # 1% chance per tick
+                                # Check if there's already an animation at this position
+                                position = (entity.x, entity.y)
+                                has_existing_animation = any(
+                                    hasattr(anim, 'position') and anim.position == position 
+                                    and type(anim).__name__ == 'SigilStoneAnimation'
+                                    for anim in self.animation_queue
+                                )
+                                if not has_existing_animation:
+                                    self.animation_queue.append(SigilStoneAnimation(position))
+                        except Exception:
+                            pass
         
             # Update ambient sounds based on player proximity
             import sounds
@@ -591,6 +612,12 @@ class Engine:
             console=console,
             current_value=self.player.lucidity,
             maximum_value=self.player.max_lucidity,
+            total_width=21
+        )
+        render_functions.render_mana_bar(
+            console=console,
+            current_value=self.player.mana,
+            maximum_value=self.player.mana_max,
             total_width=21
         )
         render_functions.render_gold(

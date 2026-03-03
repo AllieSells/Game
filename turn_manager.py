@@ -367,6 +367,11 @@ class TurnManager:
         # Handle darkness and lucidity system
         player_effects = getattr(self.engine.player, "effects", [])
         has_darkness = "Darkness" in [getattr(e, "name", "") for e in player_effects]
+
+        if random.random() < 0.10:
+            # 10% chance to recover 10% of max mana
+            mana_recovered = int(self.engine.player.mana_max * 0.10)
+            self.engine.player.mana = min(self.engine.player.mana + mana_recovered, self.engine.player.mana_max)
         
         if has_darkness:
             # Player is in darkness; lose lucidity

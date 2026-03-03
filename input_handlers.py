@@ -866,7 +866,7 @@ class InventoryEventHandler(AskUserEventHandler):
         items_width = 32    # Item list area  
         preview_width = 22  # Preview area
         total_width = sidebar_width + items_width + preview_width + 4  # +4 for decorative spacing
-        height = max(18, number_of_items_in_inventory + 8)  # More generous spacing
+        height = max(24, number_of_items_in_inventory + 10)  # Taller for descriptions
 
         # Position based on player location
         if self.engine.player.x <= 30:
@@ -938,10 +938,10 @@ class InventoryEventHandler(AskUserEventHandler):
         else:
             console.print(items_x + 2, current_y, "~ Your pack is empty ~", fg=(120, 100, 80))
             # Draw empty preview panel with mystical styling
-            console.print(preview_x + 4, y + 8, "~ No item selected ~", fg=(120, 100, 80))
+            console.print(preview_x + 2, y + 8, "~ No item selected ~", fg=(120, 100, 80))
         
         # Draw elegant instruction footer
-        instructions = "✦ [↑↓] Navigate · [←→] Category · [Enter] Select · [Esc] Return ✦"
+        instructions = "✦ [↑↓] Navigate · [←→] Category · [Space] Select · [Esc] Return ✦"
         inst_x = x + (total_width - len(instructions)) // 2
         console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
     
@@ -1086,12 +1086,14 @@ class InventoryEventHandler(AskUserEventHandler):
         item_color = self._get_item_color(item)
         console.print(grid_x + 1, grid_y + 1, item_char, fg=item_color, bg=item_bg)
         
-        # Compact item name
+        # Item name with better positioning - use full available width and rarity color
         name_y = grid_y + 4
         item_name = item.name
-        if len(item_name) > width - 6:
-            item_name = item_name[:width - 9] + "..."
-        console.print(x + 3, name_y, item_name, fg=(255, 223, 127), bg=preview_bg)
+        # Use almost full width (width-2 for borders, width-3 for safety margin)
+        max_name_length = width - 3
+        if len(item_name) > max_name_length:
+            item_name = item_name[:max_name_length - 3] + "..."
+        console.print(x + 2, name_y, item_name, fg=item.rarity_color, bg=preview_bg)
         
         # Stats section with better spacing
         stats_y = name_y + 1
@@ -1099,24 +1101,49 @@ class InventoryEventHandler(AskUserEventHandler):
         
         # Always show at least basic info if no stats
         if not stat_lines:
+            max_item_name_length = width - 8  # Account for "Item: " prefix
+            item_display = item.name[:max_item_name_length] if len(item.name) > max_item_name_length else item.name
             stat_lines = [
-                f"Item: {item.name[:width-9]}" if len(item.name) > width-6 else f"Item: {item.name}",
+                f"Item: {item_display}",
                 "Select to interact"
             ]
         
-        # Display stat lines with proper spacing and ensure they fit
-        for i, stat_line in enumerate(stat_lines[:6]):  # Show 6 lines max
-            if stats_y + i >= y + height - 2:
+        # Display stat lines with full width utilization
+        current_stat_y = stats_y
+        for i, stat_line in enumerate(stat_lines[:6]):  # Show 6 stat lines max to leave room for description
+            if current_stat_y >= y + height - 8:  # Leave room for description
                 break
-            # Ensure text fits within borders with proper margin
-            if len(stat_line) > width - 6:
-                stat_line = stat_line[:width - 9] + "..."
+            # Use almost full available width (accounting for borders and small margin)
+            max_stat_length = width - 3
+            if len(stat_line) > max_stat_length:
+                stat_line = stat_line[:max_stat_length - 3] + "..."
             
-            # Use green color for equipped status
+            # Use appropriate colors for equipment status
             if stat_line.strip() == "Equipped":
-                console.print(x + 3, stats_y + i, stat_line, fg=(0, 255, 0), bg=preview_bg)  # Bright green
+                console.print(x + 2, current_stat_y, stat_line, fg=(0, 255, 0), bg=preview_bg)  # Bright green
+            elif stat_line.strip() == "Not equipped":
+                console.print(x + 2, current_stat_y, stat_line, fg=(255, 150, 150), bg=preview_bg)  # Light red
             else:
-                console.print(x + 3, stats_y + i, stat_line, fg=(200, 170, 120), bg=preview_bg)
+                console.print(x + 2, current_stat_y, stat_line, fg=(200, 170, 120), bg=preview_bg)
+            current_stat_y += 1
+        
+        # Add description section
+        desc_y = current_stat_y + 1
+        if desc_y < y + height - 3:  # Make sure we have room
+            # Get item description with skill-based viewing
+            description = item.get_description(self.engine.player)
+            if description and description.strip():
+                # Add separator line
+                console.print(x + 2, desc_y, "─" * (width - 4), fg=(139, 105, 60), bg=preview_bg)
+                desc_y += 1
+                
+                # Wrap and display description
+                wrapped_lines = self._wrap_text(description, width - 4)
+                for desc_line in wrapped_lines[:4]:  # Show up to 4 lines of description
+                    if desc_y >= y + height - 2:
+                        break
+                    console.print(x + 2, desc_y, desc_line, fg=(180, 160, 130), bg=preview_bg)
+                    desc_y += 1
     
     def _filter_all(self, item) -> bool:
         """Show all items."""
@@ -1170,28 +1197,30 @@ class InventoryEventHandler(AskUserEventHandler):
         console.print(title_start, y, title_text, fg=title_fg, bg=frame_bg)
     
     def _get_item_type_char(self, item) -> str:
-        """Get a beautiful fantasy character representing the item type."""
-        if getattr(item, "equippable", None):
-            eq_type = getattr(item.equippable, "equipment_type", None)
-            if eq_type:
-                eq_name = eq_type.name.lower()
-                if "weapon" in eq_name or "sword" in eq_name or "dagger" in eq_name:
-                    return "⚔"  # Crossed swords
-                elif "armor" in eq_name or "mail" in eq_name or "leather" in eq_name:
-                    return "🛡"  # Shield
-                elif "shield" in eq_name:
-                    return "⛨"  # Shield variant
-                else:
-                    return "✦"  # Equipment star
-            return "✦"  # Equipment star
-        elif getattr(item, "consumable", None):
-            if "potion" in item.name.lower():
-                return "⚗"  # Alchemical symbol (potion)
-            elif "scroll" in item.name.lower():
-                return "📜"  # Scroll
+        return " "  # Circle for misc items
+    
+    def _wrap_text(self, text: str, width: int) -> list:
+        """Wrap text to fit within the specified width."""
+        words = text.split()
+        lines = []
+        current_line = ""
+        
+        for word in words:
+            # If adding this word would exceed width, start a new line
+            if current_line and len(current_line) + 1 + len(word) > width:
+                lines.append(current_line)
+                current_line = word
             else:
-                return "✿"  # Star-like symbol for consumables
-        return "◉"  # Circle for misc items
+                if current_line:
+                    current_line += " " + word
+                else:
+                    current_line = word
+        
+        # Add the last line if it exists
+        if current_line:
+            lines.append(current_line)
+        
+        return lines
     
     def _draw_item_preview(self, console, x: int, y: int, width: int, height: int, item):
         """Draw the 3x3 item preview and stat comparison."""
@@ -1246,7 +1275,7 @@ class InventoryEventHandler(AskUserEventHandler):
         for i, stat_line in enumerate(stat_lines):
             if stats_y + i >= y + height - 2:
                 break
-            print_colored_markup(console, x + 1, stats_y + i, stat_line, default_color=(192, 192, 192))
+            print_colored_markup(console, x, stats_y + i, stat_line, default_color=(192, 192, 192))
     
     def _get_item_display_char(self, item) -> str:
         """Get the character to display in the 3x3 preview."""
@@ -1258,14 +1287,13 @@ class InventoryEventHandler(AskUserEventHandler):
         
         # More robust equipment check - avoid false positives
         is_equipped = False
-        try:
-            if hasattr(self.engine.player, 'equipment') and hasattr(item, 'equippable'):
-                is_equipped = self.engine.player.equipment.item_is_equipped(item)
-        except Exception as e:
-            # If there's any error, assume not equipped
-            is_equipped = False
+        if hasattr(self.engine.player, 'equipment') and hasattr(item, 'equippable'):
+            is_equipped = self.engine.player.equipment.item_is_equipped(item)
             
-        if is_equipped:
+        # Use the item's actual color if available, otherwise fall back to type-based colors
+        if hasattr(item, 'color') and item.color:
+            return item.color
+        elif is_equipped:
             return color.green  # Bright green for equipped items only
         elif getattr(item, "equippable", None):
             return color.light_gray  # Light gray for unequipped equipment
@@ -1281,12 +1309,8 @@ class InventoryEventHandler(AskUserEventHandler):
         """Get the color name for text markup based on item type and status."""
         # More robust equipment check - avoid false positives
         is_equipped = False
-        try:
-            if hasattr(self.engine.player, 'equipment') and hasattr(item, 'equippable'):
-                is_equipped = self.engine.player.equipment.item_is_equipped(item)
-        except Exception as e:
-            # If there's any error, assume not equipped
-            is_equipped = False
+        if hasattr(self.engine.player, 'equipment') and hasattr(item, 'equippable'):
+            is_equipped = self.engine.player.equipment.item_is_equipped(item)
             
         if is_equipped:
             return "green"  # Bright green for equipped items only
@@ -1313,7 +1337,17 @@ class InventoryEventHandler(AskUserEventHandler):
             eq_type = getattr(item.equippable, "equipment_type", None)
             if eq_type:
                 type_name = eq_type.name.replace("_", " ").title()
-                lines.append(f"Type: {type_name}")
+                # Abbreviate type names to save space
+                type_abbreviations = {
+                    "Main Hand": "Weapon",
+                    "Off Hand": "Shield", 
+                    "Chest": "Armor",
+                    "Head": "Helmet",
+                    "Legs": "Leggings",
+                    "Feet": "Boots"
+                }
+                type_display = type_abbreviations.get(type_name, type_name)
+                lines.append(type_display)
                 
                 # Show appropriate stat based on equipment type
                 eq_name = eq_type.name.lower()
@@ -1366,10 +1400,10 @@ class InventoryEventHandler(AskUserEventHandler):
             if is_equipped:
                 lines.append("Equipped")  # Will be colored green in display
             else:
-                lines.append("Status: Not equipped")
+                lines.append("Not equipped")
                 
         elif getattr(item, "consumable", None):
-            lines.append("Type: Consumable")
+            lines.append("Consumable")
             
             # Healing items
             if hasattr(item.consumable, "amount") and "heal" in item.name.lower():
@@ -1377,20 +1411,14 @@ class InventoryEventHandler(AskUserEventHandler):
                 current_hp = player.fighter.hp
                 max_hp = player.fighter.max_hp
                 potential_hp = min(max_hp, current_hp + heal_amount)
-                lines.append(f"Healing: {heal_amount}")
+                lines.append(f"Heals: {heal_amount}")
                 lines.append(f"HP: {current_hp}→{potential_hp}")
             
-            # Usage info
-            if "potion" in item.name.lower():
-                lines.append("Use: Q to quaff")
-            elif "scroll" in item.name.lower():
-                lines.append("Use: R to read")
-            else:
-                lines.append("Use: I to activate")
+
         
         else:
-            lines.append("Type: Miscellaneous")
-            lines.append("Use: D to drop")
+            lines.append("Miscellaneous")
+            lines.append("Press D to drop")
         
         # Limit to available space
         return lines[:6]
@@ -1436,46 +1464,34 @@ class InventoryEventHandler(AskUserEventHandler):
             # If inventory empty, do nothing
             if len(filtered_groups) == 0:
                 return None
-            try:
-                selected_group = filtered_groups[getattr(self, "selected_index", 0)]
-                selected_item = selected_group['item']
-            except Exception:
-                self.engine.message_log.add_message("Invalid selection.", color.invalid)
-                return None
+            selected_group = filtered_groups[getattr(self, "selected_index", 0)]
+            selected_item = selected_group['item']
             return self.on_item_selected(selected_item)
 
         # Letter selection still supported but operates on the filtered list
         index = key - tcod.event.KeySym.A
 
         if 0 <= index <= 26:
-            try:
-                selected_group = filtered_groups[index]
-                selected_item = selected_group['item']
-            except IndexError:
-                self.engine.message_log.add_message("Invalid entry.", color.invalid)
-                return None
+            selected_group = filtered_groups[index]
+            selected_item = selected_group['item']
             return self.on_item_selected(selected_item)
 
         return super().ev_keydown(event)
 
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
         if item.consumable:
-            # Execute consumable action and stay in inventory
             action_or_handler = item.consumable.get_action(self.engine.player)
             if action_or_handler:
-                # Check if it's a handler (needs input) or action (can perform immediately)
                 if hasattr(action_or_handler, 'perform'):
                     action_or_handler.perform()
-                    return None  # Stay in inventory
+                    return None
                 else:
-                    # It's a handler that needs input, return it
                     return action_or_handler
-            return None  # Stay in inventory
+            return None
         elif item.equippable:
-            # Execute equip action and stay in inventory
             action = actions.EquipAction(self.engine.player, item)
             action.perform()
-            return None  # Stay in inventory
+            return None
         else:
             return None
 
@@ -1513,8 +1529,20 @@ class InventoryActivateHandler(InventoryEventHandler):
     TITLE = "Select an item to use"
 
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        # Returns the action for the selected item
-        return None
+        if item.consumable:
+            action_or_handler = item.consumable.get_action(self.engine.player)
+            if action_or_handler:
+                if hasattr(action_or_handler, 'perform'):
+                    try:
+                        action_or_handler.perform()
+                    except exceptions.Impossible as exc:
+                        self.engine.message_log.add_message(exc.args[0], color.impossible)
+                    return None
+                else:
+                    return action_or_handler
+            return None
+        else:
+            return None
         
 class ThrowSelectionHandler(InventoryEventHandler):
     # Handles selecting an item to throw
@@ -1524,6 +1552,7 @@ class ThrowSelectionHandler(InventoryEventHandler):
         # Returns the action for throwing the selected item
         return ThrowTargetHandler(self.engine, item)
     
+
 
 
 class QuaffActivateHandler(InventoryEventHandler):
@@ -2246,6 +2275,388 @@ class LimbTargetingHandler(AskUserEventHandler):
             self.engine.message_log.add_message(str(e), color.impossible)
         
         return MainGameEventHandler(self.engine)
+
+
+class SpellCastingHandler(AskUserEventHandler):
+    """Handle spell selection and casting with hotkey support."""
+    
+    TITLE = "Cast Spell"
+    
+    # Spell registry for easy spell management
+    SPELL_REGISTRY = {}
+    
+    @classmethod
+    def _initialize_spell_registry(cls):
+        """Initialize the spell registry with available spells."""
+        if not cls.SPELL_REGISTRY:  # Only initialize once
+            from components.spells import DarkvisionSpell, TeleportSpell
+            
+            cls.SPELL_REGISTRY = {
+                "Darkvision": DarkvisionSpell,
+                "Teleport": TeleportSpell,
+                # Add new spells here: "SpellName": SpellClass,
+            }
+    
+    def __init__(self, engine: Engine):
+        super().__init__(engine)
+        self.selected_index = 0
+        self.scroll_offset = 0
+        
+        # Initialize spell registry
+        self._initialize_spell_registry()
+        
+        # Get available spells from player
+        self.available_spells = self._get_available_spells()
+        
+        # Initialize quick cast slots if not present
+        if not hasattr(self.engine.player, 'quickcast_slots'):
+            self.engine.player.quickcast_slots = [None] * 9
+        
+        # Create assignment keys (1-9 for assigning to slots)
+        self.assignment_keys = {
+            tcod.event.KeySym.N1: 0,
+            tcod.event.KeySym.N2: 1,
+            tcod.event.KeySym.N3: 2,
+            tcod.event.KeySym.N4: 3,
+            tcod.event.KeySym.N5: 4,
+            tcod.event.KeySym.N6: 5,
+            tcod.event.KeySym.N7: 6,
+            tcod.event.KeySym.N8: 7,
+            tcod.event.KeySym.N9: 8,
+        }
+    
+    def _get_available_spells(self) -> list:
+        """Get list of spells the player can cast."""
+        player = self.engine.player
+        if not hasattr(player, 'known_spells') or not player.known_spells:
+            return []
+        
+        spells = []
+        for spell_name in player.known_spells:
+            if spell_name in self.SPELL_REGISTRY:
+                spell_class = self.SPELL_REGISTRY[spell_name]
+                spells.append(spell_class())
+        
+        return spells
+    
+    def _can_cast_spell(self, spell) -> bool:
+        """Check if player has enough mana to cast the spell."""
+        return self.engine.player.mana >= spell.mana_cost
+    
+    def _get_spell_school_color(self, spell) -> Tuple[int, int, int]:
+        """Get color based on spell school/type."""
+        tags = getattr(spell, 'spell_tags', [])
+        if 'darkvision' in tags:
+            return (138, 43, 226)  # Rich purple
+        elif 'fire' in tags:
+            return (255, 69, 0)  # Bright red-orange
+        elif 'ice' in tags:
+            return (135, 206, 235)  # Sky blue
+        elif 'healing' in tags:
+            return (50, 205, 50)  # Lime green
+        elif 'lightning' in tags:
+            return (255, 255, 0)  # Bright yellow
+        else:
+            return (200, 200, 200)  # Light gray
+    
+    def on_render(self, console: tcod.Console) -> None:
+        """Render the spell casting interface."""
+        # First render the underlying game
+        super().on_render(console)
+        
+        if not self.available_spells:
+            # Show "no spells known" message
+            window_width = 40
+            window_height = 8
+            x = (console.width - window_width) // 2
+            y = (console.height - window_height) // 2
+            
+            MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+            MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Spellcasting")
+            
+            console.print(x + 2, y + 3, "You know no spells.", fg=color.impossible)
+            console.print(x + 2, y + 6, "[Esc] Cancel", fg=color.grey)
+            return
+        
+        # Calculate window dimensions
+        window_width = 70  # Wider for quick cast display
+        spell_list_height = len(self.available_spells)
+        window_height = min(40, max(20, spell_list_height + 15))  # Taller menu
+        
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height) // 2
+        
+        # Draw main window
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Spellcasting")
+        
+        # Show player's current mana
+        mana_text = f"Mana: {self.engine.player.mana}/{self.engine.player.mana_max}"
+        console.print(x + 2, y + 1, mana_text, fg=(100, 149, 237))  # Cornflower blue
+
+        
+        # Calculate visible spell range for scrolling
+        visible_height = window_height - 12  # More space for headers and footers
+        start_index = self.scroll_offset
+        end_index = min(len(self.available_spells), start_index + visible_height)
+        
+        # Clamp selected index to valid range
+        self.selected_index = max(0, min(self.selected_index, len(self.available_spells) - 1))
+        
+        # Update scroll offset to keep selected spell visible
+        if self.selected_index < start_index:
+            self.scroll_offset = self.selected_index
+        elif self.selected_index >= end_index:
+            self.scroll_offset = self.selected_index - visible_height + 1
+            self.scroll_offset = max(0, self.scroll_offset)
+        
+        # Recalculate visible range after scroll adjustment
+        start_index = self.scroll_offset
+        end_index = min(len(self.available_spells), start_index + visible_height)
+        
+        # Render spell list
+        list_start_y = y + 2  # Start lower due to quick cast display
+        for i, spell_index in enumerate(range(start_index, end_index)):
+            spell = self.available_spells[spell_index]
+            render_y = list_start_y + i
+            
+            # Determine colors and selection
+            is_selected = (spell_index == self.selected_index)
+            can_cast = self._can_cast_spell(spell)
+            
+            if is_selected:
+                # Highlight selected spell
+                for highlight_x in range(x + 1, x + window_width - 1):
+                    console.print(highlight_x, render_y, " ", bg=(80, 60, 40))
+            
+            # Spell number and quick cast indicator
+            number_text = f"{spell_index + 1}. "
+            
+            # Check if this spell is in any quick cast slot
+            quickcast_indicator = ""
+            for slot_idx, slot_spell in enumerate(self.engine.player.quickcast_slots):
+                if slot_spell == spell.name:
+                    quickcast_indicator = f" [QC{slot_idx+1}]"
+                    break
+            
+            # Spell name with different colors based on castability
+            spell_color = self._get_spell_school_color(spell) if can_cast else (128, 128, 128)  # Dark gray
+            name_text = f"{number_text}{spell.name}{quickcast_indicator}"
+            
+            console.print(x + 2, render_y, name_text, fg=spell_color, bg=(80, 60, 40) if is_selected else None)
+            
+            # Mana cost
+            mana_text = f"({spell.mana_cost} mana)"
+            mana_x = x + window_width - len(mana_text) - 2
+            console.print(mana_x, render_y, mana_text, fg=(100, 149, 237) if can_cast else (128, 128, 128), 
+                         bg=(80, 60, 40) if is_selected else None)
+            
+
+        
+        # Show selected spell description if available
+        if self.available_spells:
+            selected_spell = self.available_spells[self.selected_index]
+            desc_start_y = y + window_height - 4
+            
+            # Word wrap the description
+            description = getattr(selected_spell, 'description', 'No description available.')
+            desc_width = window_width - 4
+            words = description.split()
+            lines = []
+            current_line = []
+            current_length = 0
+            
+            for word in words:
+                word_length = len(word)
+                if current_length + len(current_line) + word_length <= desc_width:
+                    current_line.append(word)
+                    current_length += word_length
+                else:
+                    if current_line:
+                        lines.append(' '.join(current_line))
+                    current_line = [word]
+                    current_length = word_length
+            
+            if current_line:
+                lines.append(' '.join(current_line))
+            
+            # Render description lines (limit to available space)
+            max_desc_lines = 2
+            for i, line in enumerate(lines[:max_desc_lines]):
+                console.print(x + 2, desc_start_y + i, line, fg=color.white)
+        
+        # Show scroll indicators
+        if start_index > 0:
+            console.print(x + window_width - 2, list_start_y, "↑", fg=color.yellow)
+        if end_index < len(self.available_spells):
+            console.print(x + window_width - 2, y + window_height - 5, "↓", fg=color.yellow)
+        
+        # Instructions
+        instructions = [
+            "[↑↓] Navigate  [1-9] Assign/Unbind  [Enter] Cast  [Esc] Exit"
+        ]
+        
+        for i, instruction in enumerate(instructions):
+            console.print(x + 2, y + window_height - 2 + i, instruction, fg=color.grey)
+    
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        """Handle keyboard input for spell casting."""
+        if not self.available_spells:
+            # No spells known - only allow escape
+            if event.sym == tcod.event.KeySym.ESCAPE:
+                return MainGameEventHandler(self.engine)
+            return None
+        
+        key = event.sym
+        
+        # Navigation
+        if key == tcod.event.KeySym.UP:
+            if self.selected_index > 0:
+                self.selected_index -= 1
+                sounds.play_ui_move_sound()
+            return None
+        elif key == tcod.event.KeySym.DOWN:
+            if self.selected_index < len(self.available_spells) - 1:
+                self.selected_index += 1
+                sounds.play_ui_move_sound()
+            return None
+        
+        # Assign/unbind spell to quick cast slot with number keys
+        elif key in self.assignment_keys:
+            slot_index = self.assignment_keys[key]
+            if self.available_spells:
+                selected_spell = self.available_spells[self.selected_index]
+                current_slot_spell = self.engine.player.quickcast_slots[slot_index]
+                
+                # If same spell is already in this slot, unbind it
+                if current_slot_spell == selected_spell.name:
+                    self.engine.player.quickcast_slots[slot_index] = None
+                    self.engine.message_log.add_message(
+                        f"Unbound {selected_spell.name} from quick cast slot {slot_index + 1}", 
+                        (255, 165, 0)  # Orange
+                    )
+                else:
+                    # Assign spell to slot
+                    self.engine.player.quickcast_slots[slot_index] = selected_spell.name
+                    self.engine.message_log.add_message(
+                        f"Assigned {selected_spell.name} to quick cast slot {slot_index + 1}", 
+                        (255, 215, 0)  # Gold
+                    )
+                sounds.play_ui_move_sound()
+            return None
+        
+        # Clear selected slot with Delete key
+        elif key == tcod.event.KeySym.DELETE:
+            # Clear the slot that matches the currently selected spell
+            if self.available_spells:
+                selected_spell = self.available_spells[self.selected_index]
+                for slot_idx, slot_spell in enumerate(self.engine.player.quickcast_slots):
+                    if slot_spell == selected_spell.name:
+                        self.engine.player.quickcast_slots[slot_idx] = None
+                        self.engine.message_log.add_message(
+                            f"Cleared {selected_spell.name} from quick cast slot {slot_idx + 1}", 
+                            (255, 165, 0)  # Orange
+                        )
+                        sounds.play_ui_move_sound()
+                        break
+                else:
+                    self.engine.message_log.add_message(
+                        f"{selected_spell.name} is not assigned to any quick cast slot", 
+                        (128, 128, 128)  # Gray
+                    )
+            return None
+        
+        # Cast from quick cast slot with Shift+number keys
+        elif (key in self.assignment_keys and 
+              event.mod & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT)):
+            slot_index = self.assignment_keys[key]
+            spell_name = self.engine.player.quickcast_slots[slot_index]
+            if spell_name:
+                # Find the spell object
+                for spell in self.available_spells:
+                    if spell.name == spell_name:
+                        return self._cast_spell(spell)
+                self.engine.message_log.add_message(
+                    f"Spell {spell_name} no longer available", 
+                    color.impossible
+                )
+            else:
+                self.engine.message_log.add_message(
+                    f"Quick cast slot {slot_index + 1} is empty", 
+                    color.impossible
+                )
+            return None
+        
+        # Cast selected spell
+        elif key in CONFIRM_KEYS:
+            if self.available_spells:
+                selected_spell = self.available_spells[self.selected_index]
+                return self._cast_spell(selected_spell)
+            return None
+        
+        # Cancel
+        elif key == tcod.event.KeySym.ESCAPE:
+            return MainGameEventHandler(self.engine)
+        
+        return super().ev_keydown(event)
+    
+    def _cast_spell(self, spell) -> Optional[ActionOrHandler]:
+        """Attempt to cast the selected spell."""
+        player = self.engine.player
+        
+        # Check mana cost
+        if not self._can_cast_spell(spell):
+            self.engine.message_log.add_message(
+                f"Not enough mana {spell.mana_cost} required.", 
+                color.impossible
+            )
+            return None
+        
+        # Check if spell requires targeting
+        if hasattr(spell, 'get_targeting_handler') and callable(spell.get_targeting_handler):
+            targeting_handler = spell.get_targeting_handler(self.engine, player)
+            if targeting_handler is not None:
+                # Don't deduct mana yet - let the spell handle it on successful cast
+                return targeting_handler
+        
+        # Cast spells that don't require targeting directly on the player
+        try:
+            from actions import SpellAction
+            spell_action = SpellAction(player, spell, (player.x, player.y))
+            spell_action.perform()
+            
+            self.engine.message_log.add_message(
+                f"You cast {spell.name}!", 
+                self._get_spell_school_color(spell)
+            )
+            
+            # Play spell sound if available
+            if hasattr(spell, 'cast_sound') and spell.cast_sound:
+                spell.cast_sound()
+            
+        except Exception as e:
+            # Don't restore mana since it wasn't consumed yet
+            self.engine.message_log.add_message(
+                f"Failed to cast {spell.name}: {str(e)}", 
+                color.impossible
+            )
+            return None
+        
+        # Return to main game after successful cast
+        return MainGameEventHandler(self.engine)
+    
+    @classmethod
+    def _create_spell_by_name_static(cls, spell_name):
+        """Create a spell object by its name (static version for use by other handlers)."""
+        # Ensure registry is initialized
+        cls._initialize_spell_registry()
+        
+        if spell_name in cls.SPELL_REGISTRY:
+            spell_class = cls.SPELL_REGISTRY[spell_name]
+            return spell_class()
+        
+        return None
+
 
 class LookHandler(SelectIndexHandler):
     """Enhanced look handler with detailed inspection sidebar and tabbed interface."""
@@ -3419,7 +3830,7 @@ class MainGameEventHandler(EventHandler):
             return QuaffActivateHandler(self.engine)
         elif key == tcod.event.KeySym.D:
             return InventoryDropHandler(self.engine)
-        elif key == tcod.event.KeySym.C:
+        elif key == tcod.event.KeySym.F:
             from character_sheet_ui import CharacterScreen
             return CharacterScreen(self.engine)
         # t key for targeting mode
@@ -3427,8 +3838,92 @@ class MainGameEventHandler(EventHandler):
             return AttackModeHandler(self.engine)
         elif key == tcod.event.KeySym.S:
             return LookHandler(self.engine)
+        elif key == tcod.event.KeySym.C:
+            return SpellCastingHandler(self.engine)
 
-
+        # Quick cast from slots (Shift+1-9)
+        elif (key in [tcod.event.KeySym.N1, tcod.event.KeySym.N2, tcod.event.KeySym.N3, 
+                      tcod.event.KeySym.N4, tcod.event.KeySym.N5, tcod.event.KeySym.N6,
+                      tcod.event.KeySym.N7, tcod.event.KeySym.N8, tcod.event.KeySym.N9] and
+              modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT)):
+            
+            # Initialize quickcast slots if not present
+            if not hasattr(player, 'quickcast_slots'):
+                player.quickcast_slots = [None] * 9
+            
+            # Map key to slot index
+            key_to_slot = {
+                tcod.event.KeySym.N1: 0, tcod.event.KeySym.N2: 1, tcod.event.KeySym.N3: 2,
+                tcod.event.KeySym.N4: 3, tcod.event.KeySym.N5: 4, tcod.event.KeySym.N6: 5,
+                tcod.event.KeySym.N7: 6, tcod.event.KeySym.N8: 7, tcod.event.KeySym.N9: 8,
+            }
+            
+            slot_index = key_to_slot[key]
+            spell_name = player.quickcast_slots[slot_index]
+            
+            if spell_name:
+                if hasattr(player, 'known_spells') and spell_name in player.known_spells:
+                    # Create spell object based on name
+                    spell_obj = SpellCastingHandler._create_spell_by_name_static(spell_name)
+                    
+                    if spell_obj:
+                        # Check if spell requires targeting
+                        if (hasattr(spell_obj, 'get_targeting_handler') and 
+                            callable(spell_obj.get_targeting_handler)):
+                            targeting_handler = spell_obj.get_targeting_handler(self.engine, player)
+                            if targeting_handler is not None:
+                                # Check mana before entering targeting mode
+                                if player.mana >= spell_obj.mana_cost:
+                                    return targeting_handler
+                                else:
+                                    self.engine.message_log.add_message(
+                                        f"Not enough mana. (requires {spell_obj.mana_cost})",
+                                        color.impossible
+                                    )
+                                    return None
+                        
+                        # Check mana and cast instant spells
+                        if player.mana >= spell_obj.mana_cost:
+                            try:
+                                from actions import SpellAction
+                                spell_action = SpellAction(player, spell_obj, (player.x, player.y))
+                                spell_action.perform()
+                                
+                                self.engine.message_log.add_message(
+                                    f"Quick cast: {spell_obj.name}!", 
+                                    (138, 43, 226)  # Purple
+                                )
+                                
+                                # This counts as an action
+                                return WaitAction(player)
+                            except Exception as e:
+                                # Don't restore mana since spell handles consumption
+                                self.engine.message_log.add_message(
+                                    f"Failed to cast {spell_name}: {str(e)}", 
+                                    color.impossible
+                                )
+                        else:
+                            self.engine.message_log.add_message(
+                                f"Not enough mana for {spell_name} (requires {spell_obj.mana_cost})", 
+                                color.impossible
+                            )
+                    else:
+                        self.engine.message_log.add_message(
+                            f"Spell {spell_name} not implemented", 
+                            color.impossible
+                        )
+                else:
+                    self.engine.message_log.add_message(
+                        f"You don't know the spell: {spell_name}", 
+                        color.impossible
+                    )
+            else:
+                self.engine.message_log.add_message(
+                    f"Quick cast slot {slot_index + 1} is empty", 
+                    color.impossible
+                )
+            
+            return None
         
         # No valid key was pressed
         # print(action)

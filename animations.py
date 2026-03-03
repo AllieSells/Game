@@ -46,6 +46,91 @@ class ThrowAnimation:
         self.current_frame += 1
         self.frames -= 1
 
+class TeleportAnimation:
+    def __init__(self, position):
+        self.position = position
+        self.frames = 20  # duration in frames
+        self.render_priority = 2  # Render above actors for visibility
+
+    def tick(self, console, game_map):
+        x, y = self.position
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        if game_map.visible[x, y]:
+            # Animate teleportation with a distortion effect
+            import math
+            
+            progress = (10 - self.frames) / 10.0  # 0.0 to 1.0 progress through animation
+            pulse_cycle = math.sin(progress * math.pi) * 0.5 + 0.5  # Oscillates between 0.5 and 1.0
+            color = (
+                int(255 * pulse_cycle),
+                int(0 * pulse_cycle),
+                int(255 * pulse_cycle)
+            )
+            if random.random() < 0.3:
+                x += random.choice([-1, 0, 1])
+            if random.random() < 0.3:
+                y += random.choice([-1, 0, 1])
+            if game_map.in_bounds(x, y) and game_map.visible[x, y]:
+                console.print(x, y, "`", fg=color)
+
+        self.frames -= 1
+
+class SigilStoneAnimation:
+    def __init__(self, position):
+        self.position = position
+        self.frames = 60  # longer duration for slower breathing effect
+        self.render_priority = 1  # Render above items but below actors
+
+    def tick(self, console, game_map):
+        x, y = self.position
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        # Check if there's still a sigil stone at this position
+        has_sigil_stone = any(
+            item.x == x and item.y == y and item.name == "Sigil Stone"
+            for item in game_map.items
+        )
+        
+        # If no sigil stone, let animation expire
+        if not has_sigil_stone:
+            self.frames -= 1
+            return
+
+        if game_map.visible[x, y]:
+            # Animate the sigil stone with a slow, gentle breathing effect
+            import math
+            
+            # Find the sigil stone at this position to get its color
+            sigil_stone = None
+            for item in game_map.items:
+                if item.x == x and item.y == y and item.name == "Sigil Stone":
+                    sigil_stone = item
+                    break
+            
+            # Use the entity's color or fallback to purple
+            base_color = sigil_stone.color if sigil_stone else (255, 0, 255)
+            
+            progress = (60 - self.frames) / 60.0  # 0.0 to 1.0 progress through animation
+            # Create slow breathing pulse - half cycle for gentle fade in and out
+            pulse_cycle = math.sin(progress * math.pi) * 0.4 + 0.6  # Oscillates between 0.6 and 1.0
+            color = (
+                int(base_color[0] * pulse_cycle),
+                int(base_color[1] * pulse_cycle),
+                int(base_color[2] * pulse_cycle)
+            )
+            console.print(x, y, "♦", fg=color)
+
+        self.frames -= 1
+        
+        # Loop the animation seamlessly only if sigil stone is still there
+        if self.frames <= 0:
+            self.frames = 60
+
 
 class GrassRustleAnimation:
     def __init__(self, position):

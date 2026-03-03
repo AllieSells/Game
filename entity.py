@@ -161,6 +161,9 @@ class Actor(Entity):
         verb_past: Optional[str] = None,
         verb_participial: Optional[str] = None,
         equipment_table: Optional[dict] = None,  # Random equipment spawning table
+        known_spells: Optional[list] = None,  # List of spells this actor can use
+        mana: int = 0,
+        mana_max: int = 0,
     ):
         super().__init__(
             x=x,
@@ -230,8 +233,13 @@ class Actor(Entity):
         self.verb_past = verb_past or self.verb_base + "ed"
         self.verb_participial = verb_participial or self.verb_base + "ing"
         self.dodge_chance = dodge_chance
+        self.mana = mana
+        self.mana_max = mana_max
         self.preferred_dodge_direction = preferred_dodge_direction
         self.equipment_table = equipment_table  # Store equipment table for spawning
+        self.known_spells = known_spells if known_spells is not None else []
+        self.quickcast_slots = [None] * 9  # Quick cast spell slots (1-9)
+
     
     def add_effect(self, effect: Effect) -> None:
         """Attach an Effect to this actor."""
@@ -674,6 +682,8 @@ class Item(Entity):
             liquid_type: Optional[liquid_system.LiquidType] = None,
             liquid_amount: Optional[int] = None,
             weight: Optional[float] = None,
+            identification_level: int = 0,  # Required skill level to see true description
+            identification_skill: str = "lore",  # Which skill is used for identification
 
 
 
@@ -717,6 +727,59 @@ class Item(Entity):
         self.liquid_type = liquid_type
         self.liquid_amount = liquid_amount
         self.weight = weight
+        self.identification_level = identification_level
+        self.identification_skill = identification_skill
+        
+    def get_description(self, observer=None) -> str:
+        """Get the item description, potentially distorted based on observer's skill level."""
+        if not observer or not hasattr(observer, 'level') or self.identification_level == 0:
+            return self.description
+            
+        # Check if observer has the required skill level
+        if hasattr(observer.level, 'traits') and self.identification_skill in observer.level.traits:
+            observer_skill_level = observer.level.traits[self.identification_skill]['level']
+            
+            if observer_skill_level >= self.identification_level:
+                return self.description
+            else:
+                return self._distort_description()
+        
+        # Fallback: if observer doesn't have the skill, show distorted version
+        return self._distort_description() if self.identification_level > 0 else self.description
+    
+    def _distort_description(self) -> str:
+        """Create a distorted version of the description."""
+        import random
+        import hashlib
+        
+        # Create a consistent seed based on the item's name and description
+        # This ensures the same item always produces the same distorted text
+        seed_string = f"{self.name}_{self.description}"
+        seed_hash = hashlib.md5(seed_string.encode()).hexdigest()
+        seed_value = int(seed_hash[:8], 16)  # Use first 8 hex chars as seed
+        
+        # Set the random seed for consistent distortion
+        #random.seed(seed_value)
+        
+        words = self.description.split()
+        distorted_words = []
+
+
+        for word in words:
+            chars = list(word)
+            for char in chars:
+                if random.random() < 0.2:  # 20% chance to replace a character
+                    chars[chars.index(char)] = '?'  # Replace with '?'
+                else: 
+                    # Shuffle characters
+                    random.shuffle(chars)
+            distorted_words.append(''.join(chars))
+        
+        # Reset random seed to not affect other random operations
+        import time
+        random.seed(int(time.time() * 1000) % (2**32))
+        
+        return ' '.join(distorted_words)
 
     def roll_for_enchantment(self, enchantment_chance: float ) -> Item:
         """Rolls given chance to apply enchantment"""

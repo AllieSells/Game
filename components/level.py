@@ -24,6 +24,9 @@ class Level(BaseComponent):
               'blades',
               'daggers',
               'swords',
+              'magic',
+              'arcana',
+              'alchemy',
               ]
     
     # Define trait categories - traits that serve as category headers
@@ -32,6 +35,7 @@ class Level(BaseComponent):
         'strength': ['agility', 'vigor'],
         'armor': ['light armor', 'medium armor', 'heavy armor', 'shields'],
         'blades': ['daggers', 'swords'],
+        'magic': ['arcana', 'alchemy']
     }
     
     # Trait abbreviations for compact display
@@ -47,6 +51,9 @@ class Level(BaseComponent):
         'blades': 'BLD',
         'daggers': 'DAG',
         'swords': 'SWD',
+        'magic': 'MAG',
+        'arcana': 'ARC',
+        'alchemy': 'ALC',
     }
     
     # Special non-trait stats to include
@@ -109,6 +116,15 @@ class Level(BaseComponent):
         # Subtract the required XP and increment level
         self.traits[trait_name]['xp'] -= xp_required
         self.traits[trait_name]['level'] += 1
+
+        if trait_name == 'vigor':
+            # When vigor levels up, also increase max health and redistribute to body parts
+            self._increase_max_health(health_per_level=5)
+        elif trait_name == 'arcana':
+            # When arcana levels up, increase mana and max mana
+            if hasattr(self.parent, 'mana') and hasattr(self.parent, 'mana_max'):
+                self.parent.mana_max += 10
+                self.parent.mana = min(self.parent.mana + 10, self.parent.mana_max)
 
         # Message to indicate level up
         if hasattr(self.parent, 'parent') and hasattr(self.parent.parent, 'engine'):

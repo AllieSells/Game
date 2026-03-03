@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from entity import Actor, Entity, Item
     from components.container import Container
     from components.body_parts import BodyPartType
+    from components.spells import Spell
 else:
     # Runtime import for BodyPartType if needed
     try:
@@ -190,6 +191,24 @@ class PickupAction(Action):
                 # Grant trait XP for picking up items (strength training)
                 return
         raise exceptions.Impossible("There is nothing here to pick up.")
+
+class SpellAction(Action):
+    def __init__(self, entity: Actor, spell: Spell, target_xy: Optional[Tuple[int, int]] = None):
+        super().__init__(entity)
+        self.spell = spell
+        if not target_xy:
+            target_xy = entity.x, entity.y
+        self.target_xy = target_xy
+
+
+    @property
+    def target_actor(self) -> Optional[Actor]:
+        # Returns actor at this actions destination
+        return self.engine.game_map.get_actor_at_location(*self.target_xy)
+    
+    def perform(self) -> None:
+        # Activate the spell (mana cost should be handled by caller)
+        self.spell.activate(self)
 
 class ItemAction(Action):
     def __init__(

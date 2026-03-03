@@ -479,6 +479,17 @@ def play_darkvision_sound():
     sound = Sound("RP/sfx/darkvision.mp3")
     play_sound_with_pitch_variation(sound, pitch_range=(0.75, 0.9), volume=0.75)
 
+def play_stone_sound():
+    sounds = [
+        Sound("RP/sfx/materials/stone/stone1.mp3"),
+        Sound("RP/sfx/materials/stone/stone2.mp3"),
+        Sound("RP/sfx/materials/stone/stone3.mp3"),
+    ]
+    sound = random.choice(sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.1), volume=1.0)
+
+def play_teleport_sound():
+    play_sound_with_pitch_variation(Sound("RP/sfx/teleportcast.mp3"), pitch_range=(0.8, 1.2), volume=0.75)
 
 # Fade out lightning sound over 0.5 second with pitch variation
 def play_lightning_sound():

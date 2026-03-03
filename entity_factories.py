@@ -89,14 +89,16 @@ lightning_scroll = Item(
     color=(255,255,0),
     name="Lightning Scroll",
     consumable=consumable.LightningDamageConsumable(damage=20, maximum_range=5),
-    description="A tattered scroll crackling with electricity.",
+    description="A scroll inscribed with complex electromagical formulae and crackling runes that channel the raw power of storm and lightning through precise arcane geometry.",
     equip_sound=sounds.play_equip_paper_sound,
     unequip_sound=sounds.play_unequip_paper_sound,
     pickup_sound=sounds.pick_up_paper_sound,
     drop_sound=sounds.drop_paper_sound,
     rarity_color=color.common,
     tags = ["scroll", "damage", "lightning", "paper"],
-    weight=0.1
+    weight=0.1,
+    identification_level=0,  # Requires magic level 2 to understand the formulae
+    identification_skill="arcana",  # Uses the 'arcana' skill
 )
 
 confusion_scroll = Item(
@@ -330,10 +332,53 @@ fungus = Item(
 )
 
 
+sigil_stone = Item(
+    char="♦",
+    color=(255, 0, 255),
+    name="Sigil Stone",
+    description="A mysterious stone etched with intricate arcane symbols that pulse with otherworldly energy. Ancient runes spiral across its surface, their meaning lost to time but still radiating magical power.",
+    rarity_color=color.rare,
+    tags = ["sigil", "stone", "arcane", "magic"],
+    consumable=consumable.SigilStoneConsumable(None),
+    pickup_sound=sounds.play_stone_sound,
+    drop_sound=sounds.play_stone_sound,
+    equip_sound=sounds.play_stone_sound,
+    unequip_sound=sounds.play_stone_sound,
+    identification_level=0,  # Requires lore level 3 to fully understand
+    identification_skill="arcana",  # Uses the 'arcana' skill
+)
+
+
 
 # =====================================================
 # FUNCTIONS
 # =====================================================
+
+def generate_sigil_stone() -> Item:
+    unlocks_and_descriptions = {
+        'Teleport' : "Distort space around you"
+        #"Darkvision": "Sight persists in darkness"
+    }
+    
+    # Get a random key-value pair from the dictionary
+    unlock_name, description = random.choice(list(unlocks_and_descriptions.items()))
+
+    item_color = (random.randint(100, 255), random.randint(0, 255), random.randint(100, 255))
+    return Item(
+        char="♦",
+        color=item_color,
+        name="Sigil Stone",
+        description=description,
+        rarity_color=color.rare,
+        tags = ["sigil", "stone", "arcane", "magic"],
+        consumable=consumable.SigilStoneConsumable(unlock_name=unlock_name),
+        pickup_sound=sounds.play_stone_sound,
+        drop_sound=sounds.play_stone_sound,
+        equip_sound=sounds.play_stone_sound,
+        unequip_sound=sounds.play_stone_sound,
+        identification_level=3,  # Requires lore level 3 to fully understand
+        identification_skill="arcana",  # Uses the 'arcana' skill
+    )
 
 def get_random_potion() -> Item:
     potion_types = [poison_potion, lesser_health_potion, health_potion]

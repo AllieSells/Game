@@ -109,7 +109,41 @@ class HealingConsumables(Consumable):
             self.consume()
         else:
             raise Impossible(f"Your health is already full.")
+
+class SigilStoneConsumable(Consumable):
+
+    def __init__(self, unlock_name: str):
+        self.unlock_name = unlock_name
+    def activate(self, action: actions.ItemAction) -> None:
+        consumer = action.entity
+        if self.unlock_name not in consumer.known_spells:
+            if "Teleport" in self.unlock_name:
+                consumer.known_spells.append("Teleport")
+                consumer.level.add_xp({'arcana': 100})
+                consumer.level.add_xp({'magic': 50})
+                self.engine.message_log.add_message(
+                    f"Your power grows as you unlock the secrets of Teleportation.", color.status_effect_applied
+                )
+                #sounds.play_teleport_sound()
+                self.consume()
+            if "Darkvision" in self.unlock_name:
+                consumer.known_spells.append("Darkvision")
+                consumer.level.add_xp({'arcana': 100})
+                consumer.level.add_xp({'magic': 50})
+                self.engine.message_log.add_message(
+                    f"Your power grows as you unlock the secrets of Darkvision.", color.status_effect_applied
+                )
+                sounds.play_darkvision_sound()
+                self.consume()
+        elif self.unlock_name in consumer.known_spells:
+            consumer.mana = min(consumer.mana + 10, consumer.mana_max)
+            self.engine.message_log.add_message(
+                f"Your power grows.", color.status_effect_applied
+            )
+        else:
+            pass
         
+
 class DarkvisionConsumable(Consumable):
     def __init__(self, duration: int):
         self.duration = duration

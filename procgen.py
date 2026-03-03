@@ -841,7 +841,8 @@ def generate_dungeon(
                     _copy.deepcopy(entity_factories.arrow),
                     _copy.deepcopy(entity_factories.arrow),
                     _copy.deepcopy(entity_factories.get_random_potion()),
-                    _copy.deepcopy(entity_factories.get_random_scroll())
+                    _copy.deepcopy(entity_factories.get_random_scroll()),
+                    _copy.deepcopy(entity_factories.generate_sigil_stone()),
                 ]
 
                 test_chest = entity_factories.make_chest_with_loot(loot, capacity=15)

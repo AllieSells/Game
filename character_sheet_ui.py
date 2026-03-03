@@ -100,7 +100,7 @@ class CharacterScreen(AskUserEventHandler):
         console.print(x=x + 2, y=controls_y + 1, string="SPACE: Expand  ESC: Close", fg=color.dark_gray)
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[AskUserEventHandler]:
-        if event.sym == tcod.event.KeySym.ESCAPE or event.sym == tcod.event.KeySym.C:
+        if event.sym == tcod.event.KeySym.ESCAPE or event.sym == tcod.event.KeySym.F:
             # Return to main game handler to close character sheet
             from input_handlers import MainGameEventHandler
             return MainGameEventHandler(self.engine)

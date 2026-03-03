@@ -186,6 +186,26 @@ def render_bar(
         x=HP_BAR_X, y=HP_BAR_Y, string=f"HP: {current_value}/{maximum_value}", fg=color.fantasy_text
     )
 
+# Mana bar render with adjustable coordinates
+def render_mana_bar(
+        console: 'Console', current_value: int, maximum_value: int, total_width: int
+) -> None:
+    MANA_BAR_X = 1
+    MANA_BAR_Y = 45
+    try:
+        bar_width = int(float(current_value) / maximum_value * (total_width - 2))  # Account for border
+    except ZeroDivisionError:
+        bar_width = 0
+
+    if bar_width > 0:
+        console.draw_rect(
+            x=MANA_BAR_X, y=MANA_BAR_Y, width=bar_width, height=1, ch=1, bg=(0, 0, 120)
+        )
+
+    console.print(
+        x=MANA_BAR_X, y=MANA_BAR_Y, string=f"Mana: {current_value}/{maximum_value}", fg=color.fantasy_text
+    )
+
 # Lucidity bar render with adjustable coordinates
 def render_lucidity_bar(
         console: 'Console', current_value: int, maximum_value: int, total_width: int
