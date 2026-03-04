@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from game_map import GameMap, GameWorld
 
 import time
-
+from animations import FireFlicker, BonefireFlicker, FireSmoke
 
 class Engine:
 
@@ -155,14 +155,24 @@ class Engine:
                                 traceback.print_exc()
                                 pass
                 
-
+                # Get liquid system
+                for coating in self.game_map.liquid_system.coatings.values():
+                    if coating.liquid_type == LiquidType.FIRE:
+                        # Add flicker animation to animation queue
+                        self.animation_queue.append(
+                            FireFlicker(coating.get_pos())
+                        )
+                
+                
                 # Periodically spawn fire animations for campfire and bonfire items on the map.
                 # Get campfire and bonfire on map
+                
+
                 if entity.name in ("Campfire", "Bonfire"):
                     # Spawn flicker more frequently and independently from smoke.
                     if self.animations_enabled:
                         try:
-                            from animations import FireFlicker, BonefireFlicker, FireSmoke
+                            
 
                             # Bonfire has more frequent and intense animations
                             flicker_chance = 0.35 if entity.name == "Bonfire" else 0.20

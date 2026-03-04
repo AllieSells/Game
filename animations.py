@@ -78,6 +78,71 @@ class TeleportAnimation:
 
         self.frames -= 1
 
+class ExplosionAnimation:
+    def __init__(self, position, color=(255, 0, 0)):
+        self.position = position
+        self.color = color
+        self.frames = 10  # duration in frames
+        self.render_priority = 1  # Render above items but below actors
+    
+    def tick(self, console, game_map):
+        x, y = self.position
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        if game_map.visible[x, y]:
+            # Animate explosion with expanding circles
+            import math
+            
+            progress = (10 - self.frames) / 10.0  # 0.0 to 1.0 progress through animation
+            radius = int(progress * 3)  # Expand from 0 to 3 tiles
+            
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    if dx * dx + dy * dy <= radius * radius:
+                        sx, sy = x + dx, y + dy
+                        if game_map.in_bounds(sx, sy) and game_map.visible[sx, sy]:
+                            if random.random() < 0.5:
+                                console.print(sx, sy, "*", fg=self.color)
+                            else:
+                                console.print(sx, sy, "o", fg=self.color)
+
+        self.frames -= 1
+        
+
+class SplashAnimation:
+    def __init__(self, position, color=(0, 255, 0)):
+        self.position = position
+        self.color = color
+        self.frames = 10  # duration in frames
+        self.render_priority = 1  # Render above items but below actors
+
+    def tick(self, console, game_map):
+        x, y = self.position
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        if game_map.visible[x, y]:
+            # Animate splash with expanding circles
+            import math
+            
+            progress = (10 - self.frames) / 10.0  # 0.0 to 1.0 progress through animation
+            radius = int(progress * 2)  # Expand from 0 to 2 tiles
+            
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    if dx * dx + dy * dy <= radius * radius:
+                        sx, sy = x + dx, y + dy
+                        if game_map.in_bounds(sx, sy) and game_map.visible[sx, sy]:
+                            if random.random() < 0.5:
+                                console.print(sx, sy, ".", fg=self.color)
+                            else:
+                                console.print(sx, sy, "*", fg=self.color)
+
+        self.frames -= 1
+
 class SigilStoneAnimation:
     def __init__(self, position):
         self.position = position

@@ -18,14 +18,55 @@ from game_map import GameWorld
 import input_handlers
 from render_functions import MenuRenderer
 import sounds
+import random
+import hashlib
+import sys
+import os
+
+
+def get_data_path(filename):
+    """Get the correct path for data files in both development and PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller executable
+        base_path = sys._MEIPASS
+    else:
+        # Running in development
+        base_path = os.path.dirname(__file__)
+    return os.path.join(base_path, filename)
 
 
 # Load the background image and remove the alpha channel.
-background_image = tcod.image.load("image.png")[:, :, :3]
+background_image = tcod.image.load(get_data_path("image.png"))[:, :, :3]
+
+# Global variable to store the current seed for display
+_current_seed = None
+
+def _convert_seed(seed_string: str) -> int:
+    """Convert a string seed to an integer using hash."""
+    return int(hashlib.md5(seed_string.encode()).hexdigest()[:8], 16)
+
+def _set_global_seed(game_seed: Optional[int] = None, seed_string: Optional[str] = None) -> int:
+    """Set the global random seed and return the seed used."""
+    global _current_seed
+    
+    
+    if seed_string:
+        _current_seed = _convert_seed(seed_string)
+    elif game_seed is not None:
+        _current_seed = game_seed
+    else:
+        _current_seed = random.randint(0, 2**31 - 1)
+    
+    random.seed(_current_seed)
+    return _current_seed
+
+def get_current_seed() -> Optional[int]:
+    """Get the current seed for display purposes."""
+    return _current_seed
 
 
 
-def new_game() -> Engine:
+def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None) -> Engine:
     """Return a brand new game session as an Engine instance."""
     map_width = 80
     map_height = 40
@@ -34,12 +75,8 @@ def new_game() -> Engine:
     room_min_size = 6
     max_rooms = 30
 
-
-
-    import random
-
-    
-
+    # Set global seed once for the entire generation
+    _set_global_seed(game_seed=game_seed, seed_string=seed_string)
 
     player = copy.deepcopy(entity_factories.player)
     
@@ -62,11 +99,12 @@ def new_game() -> Engine:
     )
 
     # Global variance generation
+    import random  # Keep local for compatibility
     for x in range(random.randint(5, 10)):
         fungus = entity_factories.get_random_fungus()
         engine.game_world.fungi.append(fungus)
         print(fungus.name)
-
+    
     engine.game_world.generate_floor()
     engine.update_fov()
     
@@ -75,15 +113,21 @@ def new_game() -> Engine:
 
     engine.message_log.add_message("Press ? For Controls")
     engine.message_log.add_message(
+        f"Seed: {get_current_seed()}", color.welcome_text
+    )
+    engine.message_log.add_message(
         "You enter the dungeon. Haunted figures move in the dark...", color.welcome_text
     )
 
     return engine
 
-def new_debug_game() -> Engine:
+def new_debug_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None) -> Engine:
     """Return a debug game session using overworld chunk generation."""
     map_width = 80
     map_height = 40
+    
+    # Set global seed once at the start
+    _set_global_seed(game_seed=game_seed, seed_string=seed_string)
     
     player = copy.deepcopy(entity_factories.player)
     
@@ -189,6 +233,158 @@ def load_game(filename: str) -> Engine:
     except Exception:
         pass
     return engine 
+
+class SeedInputScreen(input_handlers.BaseEventHandler):
+    """Handle seed input for custom world generation."""
+    
+    def __init__(self, parent_menu):
+        super().__init__()
+        self.parent_menu = parent_menu
+        self.seed_input = ""
+        self.cursor_visible = True
+        self.cursor_blink_timer = 0
+
+    def on_render(self, console: tcod.Console) -> None:
+        """Render the seed input screen with parchment styling.""" 
+        console.draw_semigraphics(background_image, 0, 0)
+
+        # Calculate menu window dimensions and position
+        window_width = 50
+        window_height = 12
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height) // 2
+
+        # Draw parchment background and ornate border
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Enter Seed")
+
+        # Title
+        console.print(
+            x + (window_width // 2),
+            y + 3,
+            "Enter World Seed",
+            fg=color.gold_accent,
+            bg=color.parchment_bg,
+            alignment=tcod.CENTER,
+        )
+
+        # Input description
+        console.print(
+            x + (window_width // 2),
+            y + 5,
+            "Enter seed (optional) or leave blank for random",
+            fg=color.fantasy_text,
+            bg=color.parchment_bg,
+            alignment=tcod.CENTER,
+        )
+
+        # Input box background
+        input_x = x + 3
+        input_y = y + 7
+        input_width = window_width - 6
+        for dx in range(input_width):
+            console.print(input_x + dx, input_y, " ", bg=(60, 50, 35))
+
+        # Draw seed input with cursor
+        display_text = self.seed_input
+        if len(display_text) > input_width - 3:
+            display_text = "..." + display_text[-(input_width - 6):]
+        
+        # Blink cursor
+        self.cursor_blink_timer += 1
+        if self.cursor_blink_timer % 60 < 30:
+            self.cursor_visible = True
+        else:
+            self.cursor_visible = False
+        
+        cursor = "|" if self.cursor_visible else " "
+        display_text_with_cursor = display_text + cursor
+
+        console.print(
+            input_x + 1,
+            input_y,
+            display_text_with_cursor,
+            fg=color.gold_accent,
+            bg=(60, 50, 35),
+        )
+
+        # Instructions
+        console.print(
+            x + (window_width // 2),
+            y + window_height - 2,
+            "[Enter] Start Game  [Esc] Back  [Del] Clear",
+            fg=color.light_gray,
+            bg=color.parchment_bg,
+            alignment=tcod.CENTER,
+        )
+
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[input_handlers.BaseEventHandler]:
+        if event.sym == tcod.event.KeySym.ESCAPE:
+            # Go back to main menu
+            sounds.start_menu_ambience()
+            sounds.start_menu_music()
+            return self.parent_menu
+        elif event.sym == tcod.event.KeySym.RETURN or event.sym == tcod.event.KeySym.KP_ENTER:
+            # Start game with entered seed (or random if empty)
+            loading_screen = LoadingScreen(self.parent_menu)
+            if self.seed_input.strip():  # Only set seed if something was entered
+                # Try to parse as integer first, otherwise use as string
+                if self.seed_input.strip().isdigit():
+                    loading_screen.game_seed = int(self.seed_input.strip())
+                else:
+                    loading_screen.seed_string = self.seed_input.strip()
+            # If no seed entered, LoadingScreen will use random generation
+            return loading_screen
+        elif event.sym == tcod.event.KeySym.BACKSPACE:
+            # Remove last character
+            if len(self.seed_input) > 0:
+                self.seed_input = self.seed_input[:-1]
+        elif event.sym == tcod.event.KeySym.DELETE:
+            # Clear entire input
+            self.seed_input = ""
+        elif event.sym == tcod.event.KeySym.SPACE:
+            # Add space
+            if len(self.seed_input) < 40:
+                self.seed_input += " "
+        else:
+            # Handle regular character input
+            if len(self.seed_input) < 40:  # Limit length
+                # Convert key to character for printable keys
+                char = None
+                
+                # Get the key value as integer
+                key_val = int(event.sym)
+                
+                # Letters (a-z = 97-122, A-Z handled with shift)
+                if 97 <= key_val <= 122:  # a-z range
+                    char = chr(key_val)
+                    if event.mod & tcod.event.Modifier.SHIFT:
+                        char = char.upper()
+                
+                # Numbers 0-9 (48-57)
+                elif 48 <= key_val <= 57:
+                    if event.mod & tcod.event.Modifier.SHIFT:
+                        # Shift+number symbols
+                        shift_chars = ")!@#$%^&*("
+                        char = shift_chars[key_val - 48]
+                    else:
+                        char = chr(key_val)
+                
+                # Some common symbols
+                elif key_val == 45:  # minus/underscore
+                    char = "_" if event.mod & tcod.event.Modifier.SHIFT else "-"
+                elif key_val == 61:  # equals/plus  
+                    char = "+" if event.mod & tcod.event.Modifier.SHIFT else "="
+                elif key_val == 46:  # period/greater than
+                    char = ">" if event.mod & tcod.event.Modifier.SHIFT else "."
+                elif key_val == 44:  # comma/less than
+                    char = "<" if event.mod & tcod.event.Modifier.SHIFT else ","
+                
+                if char:
+                    self.seed_input += char
+
+        return None
+
 
 class LoadingScreen(input_handlers.BaseEventHandler):
     """Display a loading screen while generating the world."""
@@ -367,8 +563,14 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             # Step 3: Generate buildings (this is where most of the work happens)
             self.current_step = 2
             
-            # Start actual generation
-            self.engine = new_game()
+            # Start actual generation with any configured seed
+            if hasattr(self, 'game_seed') or hasattr(self, 'seed_string'):
+                self.engine = new_game(
+                    game_seed=getattr(self, 'game_seed', None),
+                    seed_string=getattr(self, 'seed_string', None)
+                )
+            else:
+                self.engine = new_game()
             
             # Step 4: Doors and entrances (already done in new_game)
             self.current_step = 3
@@ -430,9 +632,9 @@ class LoadingScreen(input_handlers.BaseEventHandler):
 class DebugLevelScreen(input_handlers.BaseEventHandler):
     """Create a simple debug level immediately."""
     
-    def __init__(self, parent_menu):
+    def __init__(self, parent_menu, game_seed=None, seed_string=None):
         self.parent_menu = parent_menu
-        self.engine = new_debug_game()
+        self.engine = new_debug_game(game_seed=game_seed, seed_string=seed_string)
     
     def handle_events(self, event: tcod.event.Event) -> input_handlers.BaseEventHandler:
         """Immediately transition to debug level."""
@@ -601,9 +803,9 @@ class MainMenu(input_handlers.BaseEventHandler):
             # Stop menu ambience when leaving menu  
             sounds.stop_menu_ambience()
             sounds.stop_all_music()
-            # Skip character creation and start game directly
+            # Go to seed input screen (optional seed entry)
             sounds.play_stairs_sound()
-            return LoadingScreen(self)
+            return SeedInputScreen(self)
         elif action == "debug_level":
             # Stop menu ambience when leaving menu
             sounds.stop_menu_ambience()

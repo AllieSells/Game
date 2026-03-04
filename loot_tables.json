@@ -1,0 +1,30 @@
+{
+  "starter_chest": [
+    {"item": "torch", "count": 1},
+    {"item": "dagger", "count": 1}, 
+    {"item": "leather_armor", "count": 1},
+    {"item": "leather_cap", "count": 1},
+    {"item": "leather_boots", "count": 1},
+    {"item": "leather_leggings", "count": 1},
+    {"item": "bow", "count": 1},
+    {"item": "arrow", "count": 4},
+    {"item": "random_potion", "count": 1},
+    {"item": "random_scroll", "count": 1},
+    {"item": "sigil_stone", "count": 1}
+  ],
+  
+  "basic_chest": [
+    {"item": "lesser_health_potion", "count": 1, "chance": 35},
+    {"item": "lightning_scroll", "count": 1, "chance": 25},
+    {"item": "confusion_scroll", "count": 1, "chance": 10},
+    {"item": "torch", "count": 1, "chance": 20},
+    {"item": "arrow", "count": 3, "chance": 15}
+  ],
+
+  "advanced_chest": [
+    {"item": "fireball_scroll", "count": 1, "chance": 25},
+    {"item": "sword", "count": 1, "chance": 5},
+    {"item": "chain_mail", "count": 1, "chance": 15},
+    {"item": "lightning_scroll", "count": 1, "chance": 25}
+  ]
+}

@@ -161,7 +161,7 @@ class Actor(Entity):
         verb_past: Optional[str] = None,
         verb_participial: Optional[str] = None,
         equipment_table: Optional[dict] = None,  # Random equipment spawning table
-        known_spells: Optional[list] = None,  # List of spells this actor can use
+        known_spells: Optional[list] = None,  # List of spell objects this actor can use
         mana: int = 0,
         mana_max: int = 0,
     ):
@@ -758,26 +758,21 @@ class Item(Entity):
         seed_hash = hashlib.md5(seed_string.encode()).hexdigest()
         seed_value = int(seed_hash[:8], 16)  # Use first 8 hex chars as seed
         
-        # Set the random seed for consistent distortion
-        #random.seed(seed_value)
+        # Use local random instance to avoid affecting global seed
+        local_random = random.Random(seed_value)
         
         words = self.description.split()
         distorted_words = []
 
-
         for word in words:
             chars = list(word)
             for char in chars:
-                if random.random() < 0.2:  # 20% chance to replace a character
+                if local_random.random() < 0.2:  # 20% chance to replace a character
                     chars[chars.index(char)] = '?'  # Replace with '?'
                 else: 
                     # Shuffle characters
-                    random.shuffle(chars)
+                    local_random.shuffle(chars)
             distorted_words.append(''.join(chars))
-        
-        # Reset random seed to not affect other random operations
-        import time
-        random.seed(int(time.time() * 1000) % (2**32))
         
         return ' '.join(distorted_words)
 

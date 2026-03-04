@@ -21,6 +21,7 @@ from typing import Dict, Tuple, Optional, TYPE_CHECKING
 import random
 import numpy as np
 import sounds
+from random import randint
 
 if TYPE_CHECKING:
     from game_map import GameMap
@@ -35,6 +36,7 @@ class LiquidType(Enum):
     SLIME = auto()
     HEALTHPOTION = auto()
     POISON = auto()
+    FIRE = auto()
 
     def get_coat_string(self) -> str:
         """Get a string representation of coating description."""
@@ -45,7 +47,8 @@ class LiquidType(Enum):
             LiquidType.OIL: "oily",
             LiquidType.SLIME: "slimy",
             LiquidType.HEALTHPOTION: "",
-            LiquidType.POISON: "poisoned"
+            LiquidType.POISON: "poisoned",
+            LiquidType.FIRE: "burning"
         }
         return descriptions.get(self, "")
     
@@ -58,7 +61,8 @@ class LiquidType(Enum):
             LiquidType.OIL: "oil",
             LiquidType.SLIME: "slime",
             LiquidType.HEALTHPOTION: "a light red liquid",
-            LiquidType.POISON: "a pale green liquid"
+            LiquidType.POISON: "a pale green liquid",
+            LiquidType.FIRE: "fire"
         }
         return names.get(self, "unknown liquid")
     
@@ -72,7 +76,8 @@ class LiquidType(Enum):
             LiquidType.OIL: color.yellow,
             LiquidType.SLIME: color.green,
             LiquidType.HEALTHPOTION: color.light_red,
-            LiquidType.POISON: color.light_green
+            LiquidType.POISON: color.light_green,
+            LiquidType.FIRE: (random.randint(200, 255), random.randint(50, 100), 0)
         }
         return colors.get(self, color.white)
     
@@ -85,7 +90,8 @@ class LiquidType(Enum):
             LiquidType.OIL: 0.02,     # 2% per turn (lasts ~50 turns)
             LiquidType.SLIME: 0.01,   # 1% per turn (lasts ~100 turns)
             LiquidType.HEALTHPOTION: 0.1,  # 10% per turn (lasts ~10 turns)
-            LiquidType.POISON: 0.33  # 33% per turn (lasts ~3 turns)
+            LiquidType.POISON: 0.33,  # 33% per turn (lasts ~3 turns)
+            LiquidType.FIRE: 0.5  # 50% per turn (lasts ~2 turns)
         }
         return chances.get(self, 0.001)
 
@@ -97,6 +103,7 @@ class LiquidCoating:
     depth: int  # 1-3, affects appearance
     age: int = 0  # For aging/evaporation effects
     original_tile: Optional[np.ndarray] = None  # Store original tile data
+    pos: Tuple[int, int] = (0, 0) 
     
     def get_char(self) -> int:
         """Get ASCII character code based on liquid type and depth."""
@@ -106,7 +113,8 @@ class LiquidCoating:
             LiquidType.OIL: [ord("˙"), ord("·"), ord("~")], 
             LiquidType.SLIME: [ord("˙"), ord("·"), ord("∿")],
             LiquidType.HEALTHPOTION: [ord("`"), ord("·"), ord("~")],
-            LiquidType.POISON: [ord("`"), ord("·"), ord("~")]
+            LiquidType.POISON: [ord("`"), ord("·"), ord("~")],
+            LiquidType.FIRE: [ord("'"), ord("·"), ord("x")]
         }
         
         char_list = chars[self.liquid_type]
@@ -139,6 +147,10 @@ class LiquidCoating:
             LiquidType.POISON: {
                 'dark': (57, 110, 57),
                 'light': (135, 242, 135)
+            },
+            LiquidType.FIRE: {
+                'dark': (255, 85, 23),
+                'light': (255, 85, 23)
             }
         }
         
@@ -157,7 +169,12 @@ class LiquidCoating:
             int(original_bg[i] * (1 - blend_factor) + liquid_color[i] * blend_factor)
             for i in range(3)
         )
-
+    
+    def get_pos(self) -> Tuple[int, int]:
+        """Get the position of this coating based on original tile data."""
+        if self.original_tile is not None:
+            return self.pos
+        return (0, 0)  # Default position if original tile is not set
 
 class LiquidSystem:
     """Manages liquid coatings on the game map."""
@@ -193,13 +210,13 @@ class LiquidSystem:
             else:
                 # Replace with new liquid if different type
                 self._restore_original_tile(x, y)
-                coating = LiquidCoating(liquid_type, depth)
+                coating = LiquidCoating(liquid_type, depth, pos=pos)
                 self._store_original_tile(x, y, coating)
                 self.coatings[pos] = coating
                 self._update_tile_graphics(x, y, coating)
         else:
             # New coating
-            coating = LiquidCoating(liquid_type, min(depth, 3))
+            coating = LiquidCoating(liquid_type, min(depth, 3), pos=pos)
             self._store_original_tile(x, y, coating)
             self.coatings[pos] = coating
             self._update_tile_graphics(x, y, coating)
@@ -376,6 +393,7 @@ class LiquidSystem:
             LiquidType.OIL: 0,
             LiquidType.SLIME: 0,
             LiquidType.HEALTHPOTION: -1,  # Negative for healing
+            LiquidType.FIRE: 2
         }
         
         multiplier = damage_multipliers.get(liquid_type, 0)

@@ -40,11 +40,13 @@ def new_tile(
 SHROUD = np.array((ord(" "), (255, 255, 255), (10, 10, 10)), dtype=graphic_dt)
 
 def random_floor_char() -> int:
+    # Don't re-seed here as it can break generation flow
     return ord(random.choice([" ", " ", " ", " ", " ", " ", ".", ",", " "]))
 
 
 def fill_random_grasses() -> np.ndarray:
-    # Generates a grass tile
+    # Generates a grass tile - don't re-seed to avoid breaking generation
+    
     char = random_floor_char()
 
     grass_color = (random.randint(35, 40), random.randint(105, 110), random.randint(35, 40))
@@ -64,6 +66,8 @@ def fill_random_grasses() -> np.ndarray:
 
 def random_floor_tile():
     """Generate a random floor tile with varied appearance."""
+    # Don't re-seed to avoid breaking main generation flow
+    
     # Use the existing random_floor_char function
     char = random_floor_char()
     
@@ -84,6 +88,8 @@ def random_wall_tile():
     new tile via `new_tile(...)` avoids subtle numpy structured-array
     assignment issues and ensures the returned tile is distinct.
     """
+    # Don't re-seed to avoid breaking main generation flow
+    
     # Chance to be mossy
     if random.random() < 0.05:
         base = mossy_wall

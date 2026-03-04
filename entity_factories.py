@@ -355,9 +355,12 @@ sigil_stone = Item(
 # =====================================================
 
 def generate_sigil_stone() -> Item:
+    # Use current random state - no individual seeding needed
     unlocks_and_descriptions = {
-        'Teleport' : "Distort space around you"
-        #"Darkvision": "Sight persists in darkness"
+        #'Teleport' : "Distort space around you",
+        #"Darkvision": "Sight persists in darkness",
+        #'Poison Spray': "Summon corrosive elements at your will",
+        'Fireball': 'Unleash flames upon your foes',
     }
     
     # Get a random key-value pair from the dictionary
@@ -381,14 +384,17 @@ def generate_sigil_stone() -> Item:
     )
 
 def get_random_potion() -> Item:
+    # Use current random state
     potion_types = [poison_potion, lesser_health_potion, health_potion]
     return random.choice(potion_types)
 
 def get_random_scroll() -> Item:
+    # Use current random state
     scroll_types = [darkvision_scroll, confusion_scroll, fireball_scroll, lightning_scroll]
     return random.choice(scroll_types)
 
 def get_random_fungus() -> Item:
+    # Use current random state
     import random
     fungus_types = {
             "prefix": ["Cap", "Spot", "Gill", "Twist", "Iron", "Glow", "Silent", "Blood", "Red", "Blue", "Yellow",
@@ -542,7 +548,7 @@ def make_chest_with_loot(items: list, capacity: int = 10) -> Actor:
     return new_chest
 
 basic_entity_levelling = Level(
-    level_up_base=0
+    level_up_base=50
 )
 
 # =====================================================

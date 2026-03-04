@@ -24,9 +24,17 @@ class Level(BaseComponent):
               'blades',
               'daggers',
               'swords',
-              'magic',
               'arcana',
-              'alchemy',
+              'abjuration',
+              'conjuration',
+              'divination',
+              'enchantment',
+              'evocation',
+              'illusion',
+                'necromancy',
+                'transmutation'
+
+                
               ]
     
     # Define trait categories - traits that serve as category headers
@@ -35,7 +43,7 @@ class Level(BaseComponent):
         'strength': ['agility', 'vigor'],
         'armor': ['light armor', 'medium armor', 'heavy armor', 'shields'],
         'blades': ['daggers', 'swords'],
-        'magic': ['arcana', 'alchemy']
+        'arcana': ['abjuration', 'conjuration', 'divination', 'enchantment', 'evocation', 'illusion', 'necromancy', 'transmutation']
     }
     
     # Trait abbreviations for compact display
@@ -50,25 +58,29 @@ class Level(BaseComponent):
         'shields': 'SHD',
         'blades': 'BLD',
         'daggers': 'DAG',
-        'swords': 'SWD',
-        'magic': 'MAG',
+        'swords': 'SWD',   
         'arcana': 'ARC',
-        'alchemy': 'ALC',
+        'abjuration': 'ABJ',
+        'conjuration': 'CON',
+        'divination': 'DIV',
+        'enchantment': 'ENC',
+        'evocation': 'EVO',
+        'illusion': 'ILL',
+        'necromancy': 'NEC',
+        'transmutation': 'TRN'
     }
     
     # Special non-trait stats to include
     SPECIAL_STATS = ['level', 'gold', 'hp']
     
     # Default values for all traits
-    DEFAULT_LEVEL_UP_BASE = 0
-    DEFAULT_LEVEL_UP_FACTOR = 10
+    DEFAULT_LEVEL_UP_BASE = 50
 
     def __init__(
         self,
         current_level: int = 1,
         current_xp: int = 0,
         level_up_base: int = 50,
-        level_up_factor: int = 100,
         xp_given: int = 0,
         score: int = 0
     ):
@@ -83,7 +95,6 @@ class Level(BaseComponent):
         self.current_level = current_level
         self.current_xp = current_xp
         self.level_up_base = level_up_base
-        self.level_up_factor = level_up_factor
         self.xp_given = xp_given
         self.score = score
 
@@ -91,7 +102,7 @@ class Level(BaseComponent):
     def xp_to_next(self, trait: str) -> int:
         if trait in self.traits:
             current_level = self.traits[trait]['level']
-            return self.level_up_base + current_level * self.level_up_factor
+            return self.level_up_base * (current_level ** 2)  # Quadratic
         return 0
 
     def total_xp(self, trait: str) -> int:
@@ -100,9 +111,12 @@ class Level(BaseComponent):
         return 0
 
     def add_xp(self, trait_awards: Dict[str, int], multiplier: float = 1.0) -> None:
+        print(trait_awards)
         for trait_name, xp in trait_awards.items():
+            print(f"Adding {int(xp * multiplier)} XP to {trait_name} (Before: {self.total_xp(trait_name)} XP)")
             if trait_name in self.traits:
                 self.traits[trait_name]['xp'] += int(xp * multiplier)
+                print(f"Added {int(xp * multiplier)} XP to {trait_name} (Total: {self.traits[trait_name]['xp']} XP)")
 
                 # Check if trait levels up
                 while self.traits[trait_name]['xp'] >= self.xp_to_next(trait_name):
@@ -113,9 +127,14 @@ class Level(BaseComponent):
         # Calculate XP required for this level up
         xp_required = self.xp_to_next(trait_name)
         
+        # Safety check to prevent infinite loops
+        if xp_required <= 0:
+            return
+        
         # Subtract the required XP and increment level
         self.traits[trait_name]['xp'] -= xp_required
-        self.traits[trait_name]['level'] += 1
+        level_increased_to = self.traits[trait_name]['level'] + 1
+        self.traits[trait_name]['level'] = level_increased_to
 
         if trait_name == 'vigor':
             # When vigor levels up, also increase max health and redistribute to body parts
@@ -125,6 +144,11 @@ class Level(BaseComponent):
             if hasattr(self.parent, 'mana') and hasattr(self.parent, 'mana_max'):
                 self.parent.mana_max += 10
                 self.parent.mana = min(self.parent.mana + 10, self.parent.mana_max)
+        elif trait_name in ['abjuration', 'conjuration', 'divination', 'enchantment', 'evocation', 'illusion', 'necromancy', 'transmutation']:
+            for spell in self.parent.known_spells:
+                if spell.school == trait_name:
+                    spell.level_up_spell(level_increased_to)
+                    
 
         # Message to indicate level up
         if hasattr(self.parent, 'parent') and hasattr(self.parent.parent, 'engine'):
@@ -132,13 +156,7 @@ class Level(BaseComponent):
                 f"{trait_name.capitalize()} increased to level {self.traits[trait_name]['level']}!", 
                 fg=(0, 255, 0)  # Green color as RGB tuple
             )
-        import sounds
         sounds.play_level_up_sound()
-
-        
-        # Apply trait-specific benefits
-        if trait_name == 'vigor':
-            self._increase_max_health()
     
     def _increase_max_health(self, health_per_level: int = 5) -> None:
         """Increase max health and redistribute to body parts proportionally."""

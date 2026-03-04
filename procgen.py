@@ -92,6 +92,9 @@ class RectangularRoom:
         )
     
 def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) -> None:
+    # Don't re-seed here as it breaks dungeon generation flow
+    # The main generation seed is set at the start of generate_dungeon
+    
     number_of_monsters = random.randint(
         0, get_max_value_for_floor(max_monsters_by_floor, floor_number)
     )
@@ -119,8 +122,10 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) 
             x = room.x1+1 if random.random() < 0.5 else room.x2-1
             y = random.randint(room.y1+1, room.y2-1)
         if not any(e.x == x and e.y == y for e in dungeon.entities):
-            # Choose chest loot based on item weights from item dictionary
-            loot = get_entities_at_random(item_chances, random.randint(0, get_max_value_for_floor(max_items_by_floor, floor_number)), floor_number)
+            # Choose chest loot from loot table based on floor
+            import loot_tables
+            table_name = "basic_chest" if floor_number <= 3 else "advanced_chest"
+            loot = loot_tables.generate_loot_from_table(table_name)
             chest = entity_factories.make_chest_with_loot(loot, capacity=6)
             chest.spawn(dungeon, x, y)
 
@@ -234,6 +239,8 @@ def place_campfires(game_map: GameMap, map_type: str, **kwargs) -> None:
 
 def place_village_entities(building: Building, village: GameMap, floor_number: int) -> None:
     """Place entities inside a village building."""
+    # Don't re-seed here to avoid breaking village generation flow
+    
     # Buildings have fewer monsters than dungeon rooms
     number_of_items = random.randint(1, 2)     # 1-2 items
     
@@ -292,8 +299,8 @@ def place_village_entities(building: Building, village: GameMap, floor_number: i
     # Maybe place a chest (lower chance than dungeons)
     if random.random() < 0.3:
         try:
-            import copy as _copy
-            loot = get_entities_at_random(item_chances, random.randint(1, 2), floor_number)
+            import loot_tables
+            loot = loot_tables.generate_loot_from_table("basic_chest")
             chest = entity_factories.make_chest_with_loot(loot, capacity=4)
             
             # Place chest against a wall
@@ -312,6 +319,8 @@ def place_village_entities(building: Building, village: GameMap, floor_number: i
 
 def generate_circle_based_grass(game_map: GameMap, map_width: int, map_height: int) -> None:
     """Generate natural grass distribution using overlapping circles with priority system."""
+    # Use existing random state - no need to re-seed here
+    
     # Track which tiles have been placed (first value never overwrites second)
     placed = [[False for _ in range(map_height)] for _ in range(map_width)]
     
@@ -376,6 +385,9 @@ def generate_village(
 
     """Generate a village with a large open center and square buildings dotted around."""
     player = engine.player
+    
+    # Don't re-seed here - let it use the initial seed from setup_game.py
+    
     import components.names as names
     name = names.get_location_name("Village")
     village = GameMap(engine, map_width, map_height, entities=[player], type="dungeon", name=name)  # Use dungeon type for world borders
@@ -787,6 +799,9 @@ def generate_dungeon(
         map_height: int,
         engine: Engine,
 ) -> GameMap:
+    # Don't re-seed here - it breaks room generation variety
+    # Seeding is handled at the top level in setup_game.py
+    
     # Generates new map
     player = engine.player
     dungeon = GameMap(engine, map_width, map_height, entities=[player], type="dungeon", name="Dungeon")
@@ -826,24 +841,10 @@ def generate_dungeon(
             place_campfires(dungeon, "dungeon_first_room", room=new_room, player_pos=new_room.center)
             # Spawn a chest on first floor only
             if engine.game_world.current_floor == 1:
-                # Build a small loot list: health potion + torch (deepcopy to avoid shared parents)
-                import copy as _copy
-                loot = [
-                    _copy.deepcopy(entity_factories.torch),
-                    _copy.deepcopy(entity_factories.dagger),
-                    _copy.deepcopy(entity_factories.generate_armor('leather armor')),
-                    _copy.deepcopy(entity_factories.generate_armor('leather cap')),
-                    _copy.deepcopy(entity_factories.generate_armor('leather boots')),
-                    _copy.deepcopy(entity_factories.generate_armor('leather leggings')),
-                    _copy.deepcopy(entity_factories.bow),
-                    _copy.deepcopy(entity_factories.arrow),
-                    _copy.deepcopy(entity_factories.arrow),
-                    _copy.deepcopy(entity_factories.arrow),
-                    _copy.deepcopy(entity_factories.arrow),
-                    _copy.deepcopy(entity_factories.get_random_potion()),
-                    _copy.deepcopy(entity_factories.get_random_scroll()),
-                    _copy.deepcopy(entity_factories.generate_sigil_stone()),
-                ]
+                
+                # Generate loot from table
+                import loot_tables
+                loot = loot_tables.generate_loot_from_table("starter_chest")
 
                 test_chest = entity_factories.make_chest_with_loot(loot, capacity=15)
                 cx, cy = new_room.center
@@ -861,8 +862,6 @@ def generate_dungeon(
                 # Place doors at the exits of the previous room
                 if (x == rooms[-1].x1 or x == rooms[-1].x2) and (y >= rooms[-1].y1 and y <= rooms[-1].y2):
                     dungeon.tiles[x,y] = tile_types.closed_door
-                
-
 
             center_of_last_room = new_room.center
 
@@ -871,15 +870,18 @@ def generate_dungeon(
             for y in range(new_room.y1 + 1, new_room.y2):
                 dungeon.tiles[x, y] = tile_types.random_floor_tile()
 
+        # Add the room to the list BEFORE entity placement
+        rooms.append(new_room)
 
+        # Place entities in non-first rooms
+        if len(rooms) > 1:  # Skip first room for entity placement  
+            place_entities(new_room, dungeon, engine.game_world.current_floor)
 
-        
-        place_entities(new_room, dungeon, engine.game_world.current_floor)
-
+    # Place stairs in the center of the last room
+    if rooms:
+        center_of_last_room = rooms[-1].center
         dungeon.tiles[center_of_last_room] = tile_types.down_stairs
         dungeon.downstairs_location = center_of_last_room
-
-        rooms.append(new_room)
 
     # Post-processing: Remove isolated walls that have no floors touching them
     remove_isolated_walls(dungeon)

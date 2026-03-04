@@ -32,7 +32,7 @@ import components.level
 # Second value adds to base 85% hit chance, so a -20 would make it 65% base hit chance, while a +30 would make it 115% (capped at 100% in code)
 BODY_PART_MODIFIERS = {
     "HEAD": (1.5, -50),    # 50% more damage to head, much harder to hit (35% base hit chance)
-    "NECK": (1.5, -70),    # 30% more damage to neck, very hard to hit (15% base hit chance)
+    "NECK": (1.5, -70),    # 50% more damage to neck, very hard to hit (15% base hit chance)
     "TORSO": (1.0, 15),    # Normal damage, easier to hit (large target) (100% base hit chance)
     "LEG": (0.9, -10),      # Slightly less damage, slightly harder to hit (75% base hit chance)
     "ARM": (0.9, -10),     # Slightly less damage, harder to hit (75% base hit chance)

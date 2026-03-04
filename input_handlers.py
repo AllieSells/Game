@@ -23,7 +23,6 @@ import exceptions
 from render_functions import MenuRenderer
 
 from text_utils import *
-from text_engine import TextEngine
 import sounds
 
 
@@ -2289,11 +2288,12 @@ class SpellCastingHandler(AskUserEventHandler):
     def _initialize_spell_registry(cls):
         """Initialize the spell registry with available spells."""
         if not cls.SPELL_REGISTRY:  # Only initialize once
-            from components.spells import DarkvisionSpell, TeleportSpell
+            from components.spells import DarkvisionSpell, TeleportSpell, PoisonSpraySpell
             
             cls.SPELL_REGISTRY = {
                 "Darkvision": DarkvisionSpell,
                 "Teleport": TeleportSpell,
+                "Poison Spray": PoisonSpraySpell,
                 # Add new spells here: "SpellName": SpellClass,
             }
     
@@ -2331,34 +2331,31 @@ class SpellCastingHandler(AskUserEventHandler):
         if not hasattr(player, 'known_spells') or not player.known_spells:
             return []
         
-        spells = []
-        for spell_name in player.known_spells:
-            if spell_name in self.SPELL_REGISTRY:
-                spell_class = self.SPELL_REGISTRY[spell_name]
-                spells.append(spell_class())
-        
-        return spells
+        # known_spells now contains spell objects directly
+        return player.known_spells
     
     def _can_cast_spell(self, spell) -> bool:
         """Check if player has enough mana to cast the spell."""
         return self.engine.player.mana >= spell.mana_cost
     
-    def _get_spell_school_color(self, spell) -> Tuple[int, int, int]:
+    def _get_spell_school_color(self, school) -> Tuple[int, int, int]:
         """Get color based on spell school/type."""
-        tags = getattr(spell, 'spell_tags', [])
-        if 'darkvision' in tags:
-            return (138, 43, 226)  # Rich purple
-        elif 'fire' in tags:
-            return (255, 69, 0)  # Bright red-orange
-        elif 'ice' in tags:
-            return (135, 206, 235)  # Sky blue
-        elif 'healing' in tags:
-            return (50, 205, 50)  # Lime green
-        elif 'lightning' in tags:
-            return (255, 255, 0)  # Bright yellow
+        if school == "evocation":
+            return (255, 150, 150) 
+        elif school == "conjuration":
+            return (150, 150, 255)  
+        elif school == "divination":
+            return (255, 255, 150)
+        elif school == "abjuration":
+            return (255, 255, 255)
+        elif school == "enchantment":
+             return (150, 255, 150)
+        elif school == "transmutation":
+            return (255, 150, 150)
+        elif school == "illusion":
+            return (255, 150, 255)
         else:
-            return (200, 200, 200)  # Light gray
-    
+             return (200, 200, 200) 
     def on_render(self, console: tcod.Console) -> None:
         """Render the spell casting interface."""
         # First render the underlying game
@@ -2438,10 +2435,13 @@ class SpellCastingHandler(AskUserEventHandler):
                 if slot_spell == spell.name:
                     quickcast_indicator = f" [QC{slot_idx+1}]"
                     break
-            
+            if spell.arcana_level > self.engine.player.level.traits['arcana']['level']:
+                spell_name = '???'
+            else:
+                spell_name = spell.name
             # Spell name with different colors based on castability
-            spell_color = self._get_spell_school_color(spell) if can_cast else (128, 128, 128)  # Dark gray
-            name_text = f"{number_text}{spell.name}{quickcast_indicator}"
+            spell_color = self._get_spell_school_color(spell.school) if can_cast else (90, 90, 90)  # Dark gray
+            name_text = f"{number_text}{spell_name}{quickcast_indicator}"
             
             console.print(x + 2, render_y, name_text, fg=spell_color, bg=(80, 60, 40) if is_selected else None)
             
@@ -2458,8 +2458,13 @@ class SpellCastingHandler(AskUserEventHandler):
             selected_spell = self.available_spells[self.selected_index]
             desc_start_y = y + window_height - 4
             
+            if selected_spell.arcana_level > self.engine.player.level.traits['arcana']['level']:
+                description = "???"
+            else:
+            
+                description = getattr(selected_spell, 'description', 'No description available.')
             # Word wrap the description
-            description = getattr(selected_spell, 'description', 'No description available.')
+            
             desc_width = window_width - 4
             words = description.split()
             lines = []
@@ -2572,14 +2577,19 @@ class SpellCastingHandler(AskUserEventHandler):
             slot_index = self.assignment_keys[key]
             spell_name = self.engine.player.quickcast_slots[slot_index]
             if spell_name:
-                # Find the spell object
+                # Find the spell object by name
+                spell_obj = None
                 for spell in self.available_spells:
                     if spell.name == spell_name:
-                        return self._cast_spell(spell)
-                self.engine.message_log.add_message(
-                    f"Spell {spell_name} no longer available", 
-                    color.impossible
-                )
+                        spell_obj = spell
+                        break
+                if spell_obj:
+                    return self._cast_spell(spell_obj)
+                else:
+                    self.engine.message_log.add_message(
+                        f"Spell {spell_name} no longer available", 
+                        color.impossible
+                    )
             else:
                 self.engine.message_log.add_message(
                     f"Quick cast slot {slot_index + 1} is empty", 
@@ -3862,54 +3872,53 @@ class MainGameEventHandler(EventHandler):
             spell_name = player.quickcast_slots[slot_index]
             
             if spell_name:
-                if hasattr(player, 'known_spells') and spell_name in player.known_spells:
-                    # Create spell object based on name
-                    spell_obj = SpellCastingHandler._create_spell_by_name_static(spell_name)
-                    
-                    if spell_obj:
-                        # Check if spell requires targeting
-                        if (hasattr(spell_obj, 'get_targeting_handler') and 
-                            callable(spell_obj.get_targeting_handler)):
-                            targeting_handler = spell_obj.get_targeting_handler(self.engine, player)
-                            if targeting_handler is not None:
-                                # Check mana before entering targeting mode
-                                if player.mana >= spell_obj.mana_cost:
-                                    return targeting_handler
-                                else:
-                                    self.engine.message_log.add_message(
-                                        f"Not enough mana. (requires {spell_obj.mana_cost})",
-                                        color.impossible
-                                    )
-                                    return None
-                        
-                        # Check mana and cast instant spells
-                        if player.mana >= spell_obj.mana_cost:
-                            try:
-                                from actions import SpellAction
-                                spell_action = SpellAction(player, spell_obj, (player.x, player.y))
-                                spell_action.perform()
-                                
+                # Find spell object by name in known_spells
+                spell_obj = None
+                if hasattr(player, 'known_spells'):
+                    for spell in player.known_spells:
+                        if spell.name == spell_name:
+                            spell_obj = spell
+                            break
+                
+                if spell_obj:
+                    # Check if spell requires targeting
+                    if (hasattr(spell_obj, 'get_targeting_handler') and 
+                        callable(spell_obj.get_targeting_handler)):
+                        targeting_handler = spell_obj.get_targeting_handler(self.engine, player)
+                        if targeting_handler is not None:
+                            # Check mana before entering targeting mode
+                            if player.mana >= spell_obj.mana_cost:
+                                return targeting_handler
+                            else:
                                 self.engine.message_log.add_message(
-                                    f"Quick cast: {spell_obj.name}!", 
-                                    (138, 43, 226)  # Purple
-                                )
-                                
-                                # This counts as an action
-                                return WaitAction(player)
-                            except Exception as e:
-                                # Don't restore mana since spell handles consumption
-                                self.engine.message_log.add_message(
-                                    f"Failed to cast {spell_name}: {str(e)}", 
+                                    f"Not enough mana. (requires {spell_obj.mana_cost})",
                                     color.impossible
                                 )
-                        else:
+                                return None
+                    
+                    # Check mana and cast instant spells
+                    if player.mana >= spell_obj.mana_cost:
+                        try:
+                            from actions import SpellAction
+                            spell_action = SpellAction(player, spell_obj, (player.x, player.y))
+                            spell_action.perform()
+                            
                             self.engine.message_log.add_message(
-                                f"Not enough mana for {spell_name} (requires {spell_obj.mana_cost})", 
+                                f"Quick cast: {spell_obj.name}!", 
+                                (138, 43, 226)  # Purple
+                            )
+                            
+                            # This counts as an action
+                            return WaitAction(player)
+                        except Exception as e:
+                            # Don't restore mana since spell handles consumption
+                            self.engine.message_log.add_message(
+                                f"Failed to cast {spell_name}: {str(e)}", 
                                 color.impossible
                             )
                     else:
                         self.engine.message_log.add_message(
-                            f"Spell {spell_name} not implemented", 
+                            f"Not enough mana for {spell_name} (requires {spell_obj.mana_cost})", 
                             color.impossible
                         )
                 else:

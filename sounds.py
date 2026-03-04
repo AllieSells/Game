@@ -9,6 +9,17 @@ from typing import Optional, Tuple, List, Dict
 import time
 import queue
 import os
+import sys
+
+def get_data_path(filename):
+    """Get the correct path for data files in both development and PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller executable
+        base_path = sys._MEIPASS
+    else:
+        # Running in development
+        base_path = os.path.dirname(__file__)
+    return os.path.join(base_path, filename)
 
 # Global audio cache to avoid reloading files repeatedly
 _audio_cache = {}
@@ -369,7 +380,8 @@ class Sound:
             return _audio_cache[filename]
         
         try:
-            data, samplerate = sf.read(filename)
+            audio_path = get_data_path(filename)
+            data, samplerate = sf.read(audio_path)
             # Ensure audio is in float32 format
             data = data.astype(np.float32)
             _audio_cache[filename] = (data, samplerate)
@@ -578,6 +590,14 @@ confusion_sound = Sound("RP/sfx/confusion_cast.wav")
 pickup_coin_sound = Sound("RP/sfx/pickup_coin.wav")
 level_up_sound = Sound("RP/sfx/level_up.wav")
 torch_burns_out_sound = Sound("RP/sfx/burn_out.wav")
+
+def play_explosion_sound():
+    explosion_sounds = [
+        Sound("RP/sfx/spells/fireball/fireball1.mp3"),
+        Sound("RP/sfx/spells/fireball/fireball2.mp3"),
+    ]
+    sound = random.choice(explosion_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.75)
 
 def play_chest_open_sound():
     chest_open_sounds = [

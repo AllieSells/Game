@@ -6,8 +6,8 @@ import glob
 import os
 from PyInstaller.utils.hooks import collect_submodules
 
-# Path to working folder
-project_folder = r'C:\Users\lalex\Game'
+# Path to working folder (current directory)
+project_folder = os.path.dirname(os.path.abspath(SPEC))
 
 # Entry script
 entry_script = os.path.join(project_folder, 'main.py')
@@ -22,10 +22,20 @@ hiddenimports = [
 # Add all modules in components folder
 hiddenimports += collect_submodules('components')
 
-# Include all PNG files in project folder
-datas = [(f, '.') for f in glob.glob(os.path.join(project_folder, '*.png'))]
+# Filter out excluded modules  
+hiddenimports = [imp for imp in hiddenimports if imp not in ['inflect', 'typeguard', 'text_engine']]
 
-# Analysis
+# Include data files
+datas = []
+# PNG files
+datas += [(f, '.') for f in glob.glob(os.path.join(project_folder, '*.png'))]
+# JSON files (loot tables)
+datas += [(f, '.') for f in glob.glob(os.path.join(project_folder, '*.json'))]
+# RP folder (sounds, sprites, etc.)
+datas += [('RP', 'RP')]
+# Markdown documentation
+datas += [(f, '.') for f in glob.glob(os.path.join(project_folder, '*.md'))]
+
 a = Analysis(
     [entry_script],
     pathex=[project_folder],
@@ -34,7 +44,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=[],
+    excludes=['inflect', 'typeguard'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=None,
@@ -53,8 +63,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,  # change to True if you want a console window
-    icon="RP/icon.png"
+    console=False,  # Temporarily enable to see errors
+    icon=os.path.join(project_folder, 'icon.ico')
 )
 
 coll = COLLECT(

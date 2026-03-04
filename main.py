@@ -2,11 +2,23 @@ import os
 import warnings
 import tcod
 import traceback
+import sys
 
 import color
 import exceptions
 import input_handlers
 import setup_game
+
+
+def get_data_path(filename):
+    """Get the correct path for data files in both development and PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller executable
+        base_path = sys._MEIPASS
+    else:
+        # Running in development
+        base_path = os.path.dirname(__file__)
+    return os.path.join(base_path, filename)
 
 
 """
@@ -42,7 +54,7 @@ def main() -> None:
     screen_height = 50  
 
     tileset = tcod.tileset.load_tilesheet(  
-        "RP/AllieClassic.png", 16, 16, tcod.tileset.CHARMAP_CP437
+        get_data_path("RP/AllieClassic.png"), 16, 16, tcod.tileset.CHARMAP_CP437
     )
 
     handler: input_handlers.BaseEventHandler = setup_game.MainMenu()
