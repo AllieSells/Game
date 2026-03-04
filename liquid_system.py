@@ -91,7 +91,7 @@ class LiquidType(Enum):
             LiquidType.SLIME: 0.01,   # 1% per turn (lasts ~100 turns)
             LiquidType.HEALTHPOTION: 0.1,  # 10% per turn (lasts ~10 turns)
             LiquidType.POISON: 0.33,  # 33% per turn (lasts ~3 turns)
-            LiquidType.FIRE: 0.5  # 50% per turn (lasts ~2 turns)
+            LiquidType.FIRE: 0.33  # 50% per turn (lasts ~2 turns)
         }
         return chances.get(self, 0.001)
 
@@ -424,19 +424,22 @@ class LiquidSystem:
                 target.fighter.take_damage(actual_damage, targeted_part=affected_body_part.part_type, causes_bleeding=False)
             else:
                 target.fighter.take_damage(actual_damage, causes_bleeding=False)
-            effect_verb = "burns" if liquid_type == LiquidType.POISON else "affects"
+            effect_verb = "burns" if liquid_type == LiquidType.POISON or liquid_type == LiquidType.FIRE else "affects"
             effect_type = "damage"
         
         # Generate appropriate message
         liquid_name = liquid_type.get_display_name().capitalize()
         if affected_body_part:
-            message = f"{liquid_name} on your {affected_body_part.name} {effect_verb} you for {actual_damage} {effect_type}!"
+            message = f"The {liquid_name.lower()} on your {affected_body_part.name} {effect_verb} you for {actual_damage} {effect_type}!"
         else:
             message = f"You take {actual_damage} {liquid_name} {effect_type}!"
         
         # Play appropriate sound
         if liquid_type == LiquidType.POISON and not is_healing:
             sounds.play_poison_burn_sound()
+        if liquid_type == LiquidType.FIRE and not is_healing:
+            sounds.play_poison_burn_sound()  # Reusing poison burn sound for fire for now
+
         
         # Show message for player
         if target == self.game_map.engine.player:

@@ -19,7 +19,7 @@ missing module named pwd - imported by posixpath (delayed, conditional, optional
 missing module named grp - imported by shutil (delayed, optional), tarfile (optional), pathlib (delayed, optional), subprocess (delayed, conditional, optional), setuptools._distutils.archive_util (optional), py._path.local (delayed), _pytest._py.path (delayed)
 missing module named _posixsubprocess - imported by subprocess (conditional), multiprocessing.util (delayed)
 missing module named fcntl - imported by subprocess (optional), pty (delayed, optional), ptyprocess.ptyprocess (top-level)
-missing module named posix - imported by os (conditional, optional), posixpath (optional), shutil (conditional), importlib._bootstrap_external (conditional)
+missing module named posix - imported by os (conditional, optional), shutil (conditional), importlib._bootstrap_external (conditional), posixpath (optional)
 missing module named resource - imported by posix (top-level), ptyprocess.ptyprocess (top-level)
 missing module named _posixshmem - imported by multiprocessing.resource_tracker (conditional), multiprocessing.shared_memory (conditional)
 missing module named multiprocessing.set_start_method - imported by multiprocessing (top-level), multiprocessing.spawn (top-level)

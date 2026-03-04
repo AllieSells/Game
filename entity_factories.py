@@ -357,9 +357,9 @@ sigil_stone = Item(
 def generate_sigil_stone() -> Item:
     # Use current random state - no individual seeding needed
     unlocks_and_descriptions = {
-        #'Teleport' : "Distort space around you",
-        #"Darkvision": "Sight persists in darkness",
-        #'Poison Spray': "Summon corrosive elements at your will",
+        'Teleport' : "Distort space around you",
+        "Darkvision": "Sight persists in darkness",
+        'Poison Spray': "Summon corrosive elements at your will",
         'Fireball': 'Unleash flames upon your foes',
     }
     

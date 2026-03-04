@@ -201,13 +201,13 @@ class FireballSpell(Spell):
         super().__init__(
             name="Fireball",
             description="Launch a fiery explosion that damages all in the area.",
-            damage=10,
+            damage=15,
             duration=0,
             mana_cost=10,
             components=['V', 'S', 'M'],
             spell_tags=["fire", "area"],
             school="evocation",
-            arcana_level = 2,
+            arcana_level = 3,
             cast_xp = 10
         )
 
@@ -225,6 +225,7 @@ class FireballSpell(Spell):
     
     def activate(self, action: actions.SpellAction) -> None:
         target_xy = action.target_xy
+        consumer = action.entity
 
         if not action.engine.game_map.visible[target_xy]:
             raise Impossible("You cannot target an area you cannot see!")
@@ -234,7 +235,8 @@ class FireballSpell(Spell):
             if actor.distance(*target_xy) <= 1:
                 actor.fighter.take_damage(self.damage, causes_bleeding=False)
                 targets_hit = True
-        
+        consumer.mana -= self.mana_cost
+        consumer.level.add_xp({self.school: self.cast_xp})
         action.engine.animation_queue.append(animations.ExplosionAnimation(target_xy))
         action.engine.game_map.liquid_system.create_splash(target_xy[0], target_xy[1], LiquidType.FIRE, radius=2, max_depth=2)
         action.engine.message_log.add_message(
