@@ -112,6 +112,8 @@ class Level(BaseComponent):
 
     def add_xp(self, trait_awards: Dict[str, int], multiplier: float = 1.0) -> None:
         print(trait_awards)
+        any_level_ups = False  # Track if any level ups occurred
+        
         for trait_name, xp in trait_awards.items():
             print(f"Adding {int(xp * multiplier)} XP to {trait_name} (Before: {self.total_xp(trait_name)} XP)")
             if trait_name in self.traits:
@@ -120,9 +122,14 @@ class Level(BaseComponent):
 
                 # Check if trait levels up
                 while self.traits[trait_name]['xp'] >= self.xp_to_next(trait_name):
-                    self.level_up(trait_name)
+                    self.level_up(trait_name, play_sound=False)  # Don't play sound for individual level ups
+                    any_level_ups = True
+        
+        # Play level up sound once if any traits leveled up
+        if any_level_ups:
+            sounds.play_level_up_sound()
 
-    def level_up(self, trait_name: str) -> None:
+    def level_up(self, trait_name: str, play_sound: bool = True) -> None:
         """Handles level up benefits for traits"""
         # Calculate XP required for this level up
         xp_required = self.xp_to_next(trait_name)
@@ -147,7 +154,7 @@ class Level(BaseComponent):
         elif trait_name in ['abjuration', 'conjuration', 'divination', 'enchantment', 'evocation', 'illusion', 'necromancy', 'transmutation']:
             for spell in self.parent.known_spells:
                 if spell.school == trait_name:
-                    spell.level_up_spell(level_increased_to)
+                    spell.level_up_spell(level_increased_to, self.parent)
                     
 
         # Message to indicate level up
@@ -156,7 +163,10 @@ class Level(BaseComponent):
                 f"{trait_name.capitalize()} increased to level {self.traits[trait_name]['level']}!", 
                 fg=(0, 255, 0)  # Green color as RGB tuple
             )
-        sounds.play_level_up_sound()
+        
+        # Only play sound if requested
+        if play_sound:
+            sounds.play_level_up_sound()
     
     def _increase_max_health(self, health_per_level: int = 5) -> None:
         """Increase max health and redistribute to body parts proportionally."""

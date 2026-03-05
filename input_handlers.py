@@ -1365,7 +1365,7 @@ class InventoryEventHandler(AskUserEventHandler):
                 elif "armor" in eq_name or "mail" in eq_name or "leather" in eq_name or "shield" in eq_name:
                     # Armor shows defense
                     if hasattr(item.equippable, "defense_bonus"):
-                        defense = item.equippable.defense_bonus
+                        defense = item.equippable.get_defense()
                         if is_equipped:
                             current_defense = player.fighter.defense
                             lines.append(f"Defense: {current_defense}({-defense:+d})")
@@ -1386,7 +1386,7 @@ class InventoryEventHandler(AskUserEventHandler):
                                 lines.append(f"Power: {current_power} (+{power})")
                                 
                     if hasattr(item.equippable, "defense_bonus"):
-                        defense = item.equippable.defense_bonus
+                        defense = item.equippable.get_defense()
                         if defense != 0:
                             if is_equipped:
                                 current_defense = player.fighter.defense
@@ -1551,7 +1551,6 @@ class ThrowSelectionHandler(InventoryEventHandler):
         # Returns the action for throwing the selected item
         return ThrowTargetHandler(self.engine, item)
     
-
 
 
 class QuaffActivateHandler(InventoryEventHandler):
@@ -2462,7 +2461,7 @@ class SpellCastingHandler(AskUserEventHandler):
                 description = "???"
             else:
             
-                description = getattr(selected_spell, 'description', 'No description available.')
+                description = selected_spell.get_description()
             # Word wrap the description
             
             desc_width = window_width - 4
@@ -3815,6 +3814,9 @@ class MainGameEventHandler(EventHandler):
             else:
                 # No preference set or no enemy, use normal movement/attack
                 action = BumpAction(player, dx, dy)
+
+
+        ## KEY INPUTS
         elif key in WAIT_KEYS:
             action = WaitAction(player)
         elif key ==tcod.event.K_ESCAPE:
@@ -3830,6 +3832,8 @@ class MainGameEventHandler(EventHandler):
         # Throw Handler
         elif key == tcod.event.KeySym.T:
             return ThrowSelectionHandler(self.engine)
+        elif key == tcod.event.KeySym.F1:
+            return CheatMaxLevel(self.engine)
         elif key == tcod.event.KeySym.E:
             # Visual equipment interface
             from equipment_ui import EquipmentUI
@@ -4289,4 +4293,38 @@ class HelpMenuHandler(AskUserEventHandler):
         console.print(
             x=x + 1, y=y + 1, string=text
         )
+
+
+class CheatMaxLevel(EventHandler):
+    """Debug cheat handler - gives one level to all traits"""
+    
+    def __init__(self, engine: Engine):
+        super().__init__(engine)
+        self._execute_cheat()
+    
+    def _execute_cheat(self) -> None:
+        """Give XP to level up all traits by one level"""
+        player = self.engine.player
+        
+        # Calculate XP needed to level up each trait
+        for trait_name in player.level.traits:
+            current_level = player.level.traits[trait_name]['level']
+            xp_needed = player.level.xp_to_next(trait_name)
+            
+            # Give enough XP to level up once
+            player.level.add_xp({trait_name: xp_needed})
+        
+        # Show debug message
+        self.engine.message_log.add_message(
+            "DEBUG CHEAT: All traits leveled up!", 
+            (255, 255, 0)  # Yellow
+        )
+    
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        """Return to main game on any key"""
+        return MainGameEventHandler(self.engine)
+    
+    def on_render(self, console: tcod.Console) -> None:
+        """Render the main game in the background"""
+        self.engine.render(console)
 

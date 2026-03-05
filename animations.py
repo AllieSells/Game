@@ -405,6 +405,70 @@ class FireballAnimation:
         self.frames -= 1
 
 
+class HealAnimation:
+    def __init__(self, position):
+        self.position = position
+        self.frames = 20  # duration in frames
+        self.render_priority = 1  # Render above items but below actors
+
+    def tick(self, console, game_map):
+        x, y = self.position
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        if game_map.visible[x, y]:
+            # Animate healing with a green pulse effect
+            import math
+            # Random rising pulsing particles
+            for _ in range(3):
+                offset_x = random.randint(-1, 1)
+                offset_y = random.randint(-1, 0)  # Only rise upwards
+                particle_x = x + offset_x
+                particle_y = y + offset_y
+                if game_map.in_bounds(particle_x, particle_y) and game_map.visible[particle_x, particle_y]:
+                    # Create a pulsing green color
+                    progress = (10 - self.frames) / 10.0  # 0.0 to 1.0 progress through animation
+                    pulse_cycle = math.sin(progress * math.pi) * 0.5 + 0.5  # Oscillates between 0.5 and 1.0
+                    color_intensity = int(255 * pulse_cycle)
+                    console.print(particle_x, particle_y, "+", fg=(0, color_intensity, 0))  # green pulse
+                    self.frames -= 1
+            
+
+class DarkBoltAnimation:
+    def __init__(self, path):
+        self.path = path
+        self.frames = 5  # duration in frames
+
+    def tick(self, console, game_map):
+        # Use shadowcasting FOV from the source of the dark bolt so
+        # the bolt doesn't render through walls
+        if not self.path:
+            self.frames -= 1
+            return
+
+        origin = (int(self.path[0][0]), int(self.path[0][1]))
+        try:
+            radius = max(len(self.path), 10)
+            fov_map = compute_fov(game_map.tiles["transparent"], origin, radius=radius, algorithm=tcod.FOV_SHADOW)
+        except Exception:
+            fov_map = game_map.visible
+
+        for x, y in self.path:
+            x = int(x)
+            y = int(y)
+            if not game_map.in_bounds(x, y):
+                continue
+            
+            # Only draw if visible and not blocked by walls
+            if fov_map[x, y] and game_map.visible[x, y]:
+                r = random.randint(100, 150)
+                g = random.randint(0, 50)
+                b = random.randint(100, 150)
+                console.print(x, y, "^", fg=(r, g, b))  # purple flicker
+
+        self.frames -= 1
+
 class FireFlicker:
     def __init__(self, position):
         self.position = position

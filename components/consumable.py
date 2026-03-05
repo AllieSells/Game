@@ -117,70 +117,63 @@ class SigilStoneConsumable(Consumable):
         self.unlock_name = unlock_name
     def activate(self, action: actions.ItemAction) -> None:
         consumer = action.entity
-        # Check if consumer already knows this spell by name
+        # Spell lookup table: spell_key -> (spell_class, school, sound_function)
+        spell_lut = {
+            "Teleport": (TeleportSpell, 'conjuration', None),  # sounds.play_teleport_sound commented out
+            "Darkvision": (DarkvisionSpell, 'transmutation', sounds.play_darkvision_sound),
+            "Poison Spray": (PoisonSpraySpell, 'conjuration', None),
+            "Fireball": (FireballSpell, 'evocation', None),
+            "Healing Word": (HealingWordSpell, 'evocation', None),
+            'Inflict Wounds': (InflictWoundsSpell, 'necromancy', None)
+        }
+        
+        # Check if consumer already knows this spell (base name or leveled version)
         spell_names = [spell.name for spell in consumer.known_spells]
-        if self.unlock_name not in spell_names:
-            if "Teleport" in self.unlock_name:
-                consumer.known_spells.append(TeleportSpell())
-                consumer.level.add_xp({'arcana': 50})
-                consumer.level.add_xp({'conjuration': 25})
-                if consumer.level.traits['arcana']['level'] >= self.parent.identification_level:
-                    self.engine.message_log.add_message(
-                    f"Your power grows as you unlock the secrets of Teleportation.", color.status_effect_applied
-                )
-                else:
-                    self.engine.message_log.add_message(
-                        f'Your power grows mysteriously.', color.status_effect_applied
-                    )
-                #sounds.play_teleport_sound()
-                self.consume()
-            if "Darkvision" in self.unlock_name:
-                consumer.known_spells.append(DarkvisionSpell())
-                consumer.level.add_xp({'arcana': 50})
-                consumer.level.add_xp({'transmutation': 25})
-                if consumer.level.traits['arcana']['level'] >= self.parent.identification_level:
-                    self.engine.message_log.add_message(
-                    f"Your power grows as you unlock the secrets of Darkvision.", color.status_effect_applied
-                )
-                else:
-                    self.engine.message_log.add_message(
-                        f'Your power grows mysteriously.', color.status_effect_applied
-                    )
-                sounds.play_darkvision_sound()
-                self.consume()
-            if "Poison Spray" in self.unlock_name:
-                consumer.known_spells.append(PoisonSpraySpell())
-                consumer.level.add_xp({'arcana': 50})
-                consumer.level.add_xp({'conjuration': 25})
-                if consumer.level.traits['arcana']['level'] >= self.parent.identification_level:
-                    self.engine.message_log.add_message(
-                    f"Your power grows as you unlock the secrets of Poison Spray.", color.status_effect_applied
-                )
-                else:
-                    self.engine.message_log.add_message(
-                        f"Your power grows mysteriously.", color.status_effect_applied
-                    )
-                self.consume()
-            if "Fireball" in self.unlock_name:
-                consumer.known_spells.append(FireballSpell())
-                consumer.level.add_xp({'arcana': 50})
-                consumer.level.add_xp({'evocation': 25})
-                if consumer.level.traits['arcana']['level'] >= self.parent.identification_level:
-                    self.engine.message_log.add_message(
-                    f"Your power grows as you unlock the secrets of Fireball.", color.status_effect_applied
-                )
-                else:
-                    self.engine.message_log.add_message(
-                        f"Your power grows mysteriously.", color.status_effect_applied
-                    )
-                self.consume()
+        
+        # Check if the base spell or any leveled version exists
+        base_spell_known = False
+        for known_spell_name in spell_names:
+            # Check if it's an exact match or a leveled version (ends with " II", " III", etc.)
+            if (known_spell_name == self.unlock_name or 
+                (known_spell_name.startswith(self.unlock_name + " ") and 
+                 known_spell_name[len(self.unlock_name):].strip() in ["II", "III", "IV", "V"])):
+                base_spell_known = True
+                break
+        
+        if not base_spell_known:
+            # Check if this is a new spell to unlock
+            spell_found = False
+            for spell_key, (spell_class, school, sound_func) in spell_lut.items():
+                if spell_key in self.unlock_name:
+                    consumer.known_spells.append(spell_class())
+                    consumer.level.add_xp({'arcana': 50})
+                    consumer.level.add_xp({school: 25})
+                    
+                    if consumer.level.traits['arcana']['level'] >= self.parent.identification_level:
+                        self.engine.message_log.add_message(
+                            f"Your power grows as you unlock the secrets of {spell_key}.", 
+                            color.status_effect_applied
+                        )
+                    else:
+                        self.engine.message_log.add_message(
+                            f"Your power grows mysteriously.", 
+                            color.status_effect_applied
+                        )
+                    
+                    if sound_func:
+                        sound_func()
+                    
+                    self.consume()
+                    spell_found = True
+                    break
         elif self.unlock_name in spell_names:
+            print("test")
             consumer.mana = min(consumer.mana + 10, consumer.mana_max)
+            consumer.level.add_xp({'arcana': 10})
             self.engine.message_log.add_message(
                 f"Your power grows.", color.status_effect_applied
             )
-        else:
-            pass
+            self.consume()
         
 
 class DarkvisionConsumable(Consumable):

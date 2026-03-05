@@ -16,12 +16,14 @@ import components.level
 
 
 class CharacterScreen(AskUserEventHandler):
+    # Class variable to remember expanded categories across instances
+    _last_expanded_categories = set()  # Default to all categories closed
 
     def __init__(self, engine: Engine):
         super().__init__(engine)
         self.selected_slot = 0
         self.selected_category = 0
-        self.expanded_categories = set([0])  # Start with first category expanded
+        self.expanded_categories = CharacterScreen._last_expanded_categories.copy()  # Restore previous state
         self.scroll_offset = 0  # For scrolling through categories
         self.max_visible_lines = 22  # Maximum lines to show before scrolling
     
@@ -140,6 +142,8 @@ class CharacterScreen(AskUserEventHandler):
                 self.expanded_categories.remove(self.selected_category)
             else:
                 self.expanded_categories.add(self.selected_category)
+            # Save the current state for next time
+            CharacterScreen._last_expanded_categories = self.expanded_categories.copy()
             self._adjust_scroll()
             self._play_ui_sound()
         

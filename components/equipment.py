@@ -25,15 +25,27 @@ class Equipment(BaseComponent):
     @property
     def defense_bonus(self) -> int:
         bonus = 0
+        processed_items = set()  # Track unique items to avoid double-counting
 
-        # Calculate defense from all equipped items
-        for item in self.equipped_items.values():
-            if item.equippable is not None:
-                bonus += item.equippable.defense_bonus
-                
-        for item in self.grasped_items.values():
-            if item.equippable is not None:
-                bonus += item.equippable.defense_bonus
+        # Collect all unique equipped items (both worn and grasped)
+        all_items = list(self.equipped_items.values()) + list(self.grasped_items.values())
+        
+        for item in all_items:
+            # Skip if we've already processed this item (avoid duplicates)
+            if item in processed_items or item.equippable is None:
+                continue
+            
+            processed_items.add(item)
+            item_defense = item.equippable.defense_bonus
+            
+            # Apply light armor skill bonus if applicable
+            modifier = 0
+            if 'light armor' in item.equippable.parent.tags:
+                modifier = self.parent.level.traits['light armor']['level'] - 1
+                # Debug output to see what's happening
+                print(f"DEBUG: Applying light armor bonus {modifier} to {item.name}")
+            
+            bonus += item_defense + modifier
 
         return bonus
 

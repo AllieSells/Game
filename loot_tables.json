@@ -18,7 +18,8 @@
     {"item": "lightning_scroll", "count": 1, "chance": 25},
     {"item": "confusion_scroll", "count": 1, "chance": 10},
     {"item": "torch", "count": 1, "chance": 20},
-    {"item": "arrow", "count": 3, "chance": 15}
+    {"item": "arrow", "count": 3, "chance": 15},
+    {"item": "sigil_stone", "count": 1, "chance": 10}
   ],
 
   "advanced_chest": [

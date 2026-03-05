@@ -500,8 +500,21 @@ def play_stone_sound():
     sound = random.choice(sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.1), volume=1.0)
 
+def play_heal_spell_sound():
+    play_sound_with_pitch_variation(Sound("RP/sfx/spells/health/health1.mp3"), pitch_range=(0.8, 1.2), volume=0.75)
+
 def play_teleport_sound():
-    play_sound_with_pitch_variation(Sound("RP/sfx/teleportcast.mp3"), pitch_range=(0.8, 1.2), volume=0.75)
+    play_sound_with_pitch_variation(Sound("RP/sfx/spells/teleport/teleport1.mp3"), pitch_range=(0.8, 1.2), volume=0.75)
+
+
+def play_dark_spell_sound():
+    sounds = [
+        Sound("RP/sfx/spells/dark/dark1.mp3"),
+        Sound("RP/sfx/spells/dark/dark2.mp3"),
+        Sound("RP/sfx/spells/dark/dark3.mp3"),
+    ]
+    sound = random.choice(sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.75)
 
 # Fade out lightning sound over 0.5 second with pitch variation
 def play_lightning_sound():

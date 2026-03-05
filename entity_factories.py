@@ -247,7 +247,7 @@ leather_cap = Item(
     pickup_sound=sounds.pick_up_leather_sound,
     drop_sound=sounds.drop_leather_sound,
     rarity_color=color.common,
-    tags = ["leather", "armor", "headgear"],
+    tags = ["leather", "armor", "headgear", 'light armor'],
     weight=0.5
 )
 
@@ -361,6 +361,8 @@ def generate_sigil_stone() -> Item:
         "Darkvision": "Sight persists in darkness",
         'Poison Spray': "Summon corrosive elements at your will",
         'Fireball': 'Unleash flames upon your foes',
+        'Healing Word': 'Soothing light mends wounds',
+        'Inflict Wounds': 'Invoke necrotic forces upon your foes',
     }
     
     # Get a random key-value pair from the dictionary

@@ -23,6 +23,15 @@ class Equippable(BaseComponent):
         self.power_bonus = power_bonus
         self.defense_bonus = defense_bonus
         self.required_tags = required_tags or set()  # Tags that body parts must have to equip this item
+
+    def get_defense(self) -> int:
+        """Calculate total defense provided by this item, including any trait bonuses."""
+        bonus = 0
+        if 'light armor' in self.parent.tags:
+            bonus = self.defense_bonus + self.engine.player.level.traits['light armor']['level'] - 1
+        else:
+            bonus = self.defense_bonus
+        return bonus
 class Arrow(Equippable):
     def __init__(self) -> None:
         super().__init__(equipment_type=EquipmentType.PROJECTILE, power_bonus=3, required_tags={"hand", "grasp"})
@@ -43,7 +52,7 @@ class Sword(Equippable):
 
 class LeatherCap(Equippable):
     def __init__(self) -> None:
-        super().__init__(equipment_type=EquipmentType.HELMET, defense_bonus=1, required_tags={"head"})
+        super().__init__(equipment_type=EquipmentType.HELMET, defense_bonus=1, required_tags={"head", "neck"})
 
 class LeatherLeggings(Equippable):
     def __init__(self) -> None:
@@ -76,7 +85,7 @@ class Shield(Equippable):
 
 class Helmet(Equippable):
     def __init__(self) -> None:
-        super().__init__(equipment_type=EquipmentType.HELMET, defense_bonus=1, required_tags={"head"})
+        super().__init__(equipment_type=EquipmentType.HELMET, defense_bonus=1, required_tags={"head", "neck"})
 
 class Boots(Equippable):
     def __init__(self) -> None:
