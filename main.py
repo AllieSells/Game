@@ -90,10 +90,12 @@ def main() -> None:
         except exceptions.QuitWithoutSaving:
             raise
         except SystemExit: # save and quit
-            save_game(handler, "savegame.sav")
+            os.makedirs("SAVEGAME", exist_ok=True)
+            save_game(handler, "SAVEGAME/savegame.sav")
             raise
         except BaseException: # Save on any other unexpected exception
-            save_game(handler, "savegame.sav")
+            os.makedirs("SAVEGAME", exist_ok=True)
+            save_game(handler, "SAVEGAME/savegame.sav")
             raise
 
 

@@ -80,6 +80,9 @@ class CharacterScreen(AskUserEventHandler):
         window_height = 30
         x = (console.width - window_width) // 2
         y = (console.height - window_height -4) // 2
+        
+        # Fade the background except for the character sheet
+        super().render_faded(console, x, y, window_width, window_height)
 
         MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
         MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Character Sheet")

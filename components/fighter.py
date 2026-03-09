@@ -67,17 +67,6 @@ class Fighter(BaseComponent):
     def die(self) -> None:
         sounds.play_death_sound()
         
-        # Create large blood pool when entity dies
-        if hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'liquid_system'):
-            from liquid_system import LiquidType
-            # Create larger blood pool on death
-            self.parent.gamemap.liquid_system.create_splash(
-                self.parent.x, self.parent.y,
-                LiquidType.BLOOD,
-                radius=1,  # Larger radius for death
-                max_depth=1  # Maximum blood depth
-            )
-        
         if self.engine.player is self.parent:
             death_message = "YOU DIED IDIOT"
             death_message_color = color.player_die
@@ -235,7 +224,7 @@ class Fighter(BaseComponent):
             try:
                 self.parent.gamemap.engine.message_log.add_message(
                     f"Your injuries begin to mend.",
-                    color.health_recovered
+                    color.light_green
                 )
             except:
                 pass

@@ -46,18 +46,15 @@ def generate_loot_from_table(table_name):
     return loot_items
 
 def create_item(item_name):
-    """Create an item instance from name."""
-    if item_name == "random_potion":
-        return copy.deepcopy(entity_factories.get_random_potion())
-    elif item_name == "random_scroll":
-        return copy.deepcopy(entity_factories.get_random_scroll())
-    elif item_name == "sigil_stone":
-        return copy.deepcopy(entity_factories.generate_sigil_stone())
-    elif item_name.startswith("leather_"):
-        armor_type = item_name.replace("_", " ")
-        return copy.deepcopy(entity_factories.generate_armor(armor_type))
-    elif hasattr(entity_factories, item_name):
-        return copy.deepcopy(getattr(entity_factories, item_name))
+    """Create an item instance from name by looking it up directly in entity_factories."""
+    if hasattr(entity_factories, item_name):
+        item_or_function = getattr(entity_factories, item_name)
+        
+        # If it's a function, call it; if it's an object, copy it
+        if callable(item_or_function):
+            return copy.deepcopy(item_or_function())
+        else:
+            return copy.deepcopy(item_or_function)
     else:
-        print(f"Unknown item: {item_name}")
+        print(f"Unknown item: {item_name} (not found in entity_factories)")
         return None

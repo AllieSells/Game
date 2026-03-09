@@ -1,10 +1,11 @@
 from re import T
 from components.ai import DarkHostileEnemy, Friendly, HostileEnemy
-from components import consumable, equippable
+from components import equippable
 from components.effect import Effect
 from components.equipment import Equipment
 from components.fighter import Fighter
 from components.inventory import Inventory
+from components import consumable
 from components.level import Level
 from components.container import Container
 from components.body_parts import BodyParts, AnatomyType
@@ -18,9 +19,12 @@ import liquid_system
 import color
 import random
 
+
+
 poison_potion = Item(
     char="o",
     color=color.dark_green,
+    value=10,
     name="Poison Potion",
     consumable=consumable.PoisonConsumables(amount=5, duration=5),
     description="A small vial filled with a pale green liquid.",
@@ -39,6 +43,7 @@ poison_potion = Item(
 lesser_health_potion = Item(
     char="o",
     color=(247, 143, 143),
+    value=10,
     name="Lesser Health Potion",
     consumable=consumable.HealingConsumables(amount=8),
     description="A small vial filled with a light red liquid.",
@@ -55,6 +60,7 @@ lesser_health_potion = Item(
 health_potion = Item(
     char="!",
     color=(242, 135, 135),
+    value=15,
     name="Health Potion",
     consumable=consumable.HealingConsumables(amount=15),
     description="A medium vial filled with a light red liquid.",
@@ -72,6 +78,7 @@ health_potion = Item(
 darkvision_scroll = Item(
     char="~",
     color=color.dark_purple,
+    value=10,
     name="Darkvision Scroll",
     consumable=consumable.DarkvisionConsumable(duration=150),
     description="A tattered scroll that seems to absorb light.",
@@ -87,6 +94,7 @@ darkvision_scroll = Item(
 lightning_scroll = Item(
     char="~",
     color=(255,255,0),
+    value=10,
     name="Lightning Scroll",
     consumable=consumable.LightningDamageConsumable(damage=20, maximum_range=5),
     description="A scroll inscribed with complex electromagical formulae and crackling runes that channel the raw power of storm and lightning through precise arcane geometry.",
@@ -104,6 +112,7 @@ lightning_scroll = Item(
 confusion_scroll = Item(
     char="~",
     color=(207, 63, 255),
+    value = 10,
     name="Confusion Scroll",
     consumable=consumable.ConfusionConsumable(number_of_turns=10),
     description="A worn scroll that seems to distort the mind.",
@@ -119,6 +128,7 @@ confusion_scroll = Item(
 fireball_scroll = Item(
     char="~",
     color=(255,0,0),
+    value = 10,
     name="Fireball Scroll",
     consumable=consumable.FireballDamageConsumable(damage=12, radius=3),
     description="A singed scroll radiating intense heat.",
@@ -149,6 +159,7 @@ bonfire = Item(
 
 torch = Item(
     char="!",
+    value = 1,
     color=(255, 200, 50),
     name="Torch",
     equippable=equippable.Torch(),
@@ -167,8 +178,11 @@ torch = Item(
     weight = 1.0
 )
 
+# Weapons
+
 dagger = Item(
     char="/", color=(0, 191, 255), name="Dagger",
+    value = 5,
     equippable=equippable.Dagger(),
     pickup_sound=sounds.pick_up_blade_sound,
     drop_sound=sounds.drop_blade_sound,
@@ -179,13 +193,14 @@ dagger = Item(
     verb_past="stabbed",
     verb_participial="stabbing",
     rarity_color=color.common,
-    tags = ["dagger", "weapon", "blade", "metal"],
+    tags = ["dagger", "weapon", "blade", "metal", "light weapon"],
     weight=1.0
 )
 
-sword = Item(
-    char="/", color=(0, 191, 255), name="Sword",
-    equippable=equippable.Sword(),
+shortsword = Item(
+    char="/", color=(192, 192, 192), name="Shortsword",
+    value = 15, 
+    equippable=equippable.Shortsword(),
     pickup_sound=sounds.pick_up_blade_sound,
     drop_sound=sounds.drop_blade_sound,
     equip_sound=sounds.play_equip_blade_sound,
@@ -195,8 +210,25 @@ sword = Item(
     verb_past="slashed",
     verb_participial="slashing",
     rarity_color=color.common,
-    tags = ["sword", "weapon", "blade", "metal"],
-    weight=3.0
+    tags = ["shortsword", "weapon", "blade", "metal", "light weapon"],
+    weight=2.0
+)
+
+longsword = Item(
+    char="|", color=(192, 192, 192), name="Longsword",
+    equippable=equippable.Longsword(),
+    value = 20,
+    pickup_sound=sounds.pick_up_blade_sound,
+    drop_sound=sounds.drop_blade_sound,
+    equip_sound=sounds.play_equip_blade_sound,
+    unequip_sound=sounds.play_unequip_blade_sound,
+    verb_base="slash",
+    verb_present="slashes",
+    verb_past="slashed",
+    verb_participial="slashing",
+    rarity_color=color.uncommon,
+    tags = ["longsword", "weapon", "blade", "metal", "heavy weapon"],
+    weight=4.0
 )
 
 
@@ -206,6 +238,7 @@ bow = Item(
     color=(160, 82, 45),
     name="Bow",
     equippable=equippable.Bow(),
+    value = 20,
     pickup_sound=sounds.pick_up_wood_sound,
     drop_sound=sounds.drop_wood_sound,
     equip_sound=sounds.pick_up_wood_sound, # Place holder
@@ -223,6 +256,7 @@ arrow = Item(
     char="|",
     color=(160, 82, 45),
     name="Arrow",
+    value = 1,
     equippable=equippable.Arrow(),
     pickup_sound=sounds.pick_up_wood_sound,
     drop_sound=sounds.drop_wood_sound,
@@ -242,6 +276,7 @@ leather_cap = Item(
     color=(139, 69, 19),
     name="Leather Cap",
     equippable=equippable.LeatherCap(),
+    value = 5,
     equip_sound=sounds.play_equip_leather_sound,
     unequip_sound=sounds.play_unequip_leather_sound,
     pickup_sound=sounds.pick_up_leather_sound,
@@ -256,6 +291,7 @@ leather_armor = Item(
     color=(139, 69, 19),
     name="Leather Armor",
     equippable=equippable.LeatherArmor(),
+    value = 15,
     equip_sound=sounds.play_equip_leather_sound,
     unequip_sound=sounds.play_unequip_leather_sound,
     pickup_sound=sounds.pick_up_leather_sound,
@@ -269,6 +305,7 @@ leather_leggings = Item(
     char="H",
     color=(139, 69, 19),
     name="Leather Leggings",
+    value = 10,
     equippable=equippable.LeatherLeggings(),
     equip_sound=sounds.play_equip_leather_sound,
     unequip_sound=sounds.play_unequip_leather_sound,
@@ -284,6 +321,7 @@ leather_boot = Item(
     color=(139, 69, 19),
     name="Leather Boots",
     equippable=equippable.LeatherBoot(),
+    value = 10,
     equip_sound=sounds.play_equip_leather_sound,
     unequip_sound=sounds.play_unequip_leather_sound,
     pickup_sound=sounds.pick_up_leather_sound,
@@ -336,6 +374,7 @@ sigil_stone = Item(
     char="♦",
     color=(255, 0, 255),
     name="Sigil Stone",
+    value = 50,
     description="A mysterious stone etched with intricate arcane symbols that pulse with otherworldly energy. Ancient runes spiral across its surface, their meaning lost to time but still radiating magical power.",
     rarity_color=color.rare,
     tags = ["sigil", "stone", "arcane", "magic"],
@@ -372,6 +411,7 @@ def generate_sigil_stone() -> Item:
     return Item(
         char="♦",
         color=item_color,
+        value = 50,
         name="Sigil Stone",
         description=description,
         rarity_color=color.rare,

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from game_map import GameMap
     from liquid_system import LiquidType
 
+
 T = TypeVar("T", bound="Entity")
 
 # Import names
@@ -215,6 +216,8 @@ class Actor(Entity):
         self.knowledge = {
             "name": self.name,
         }
+        self.tradable = False
+        self.job = None
         self.description = description
         self.unknown_name = unknown_name
         self.is_known = is_known
@@ -288,7 +291,66 @@ class Actor(Entity):
         return bool(self.ai)
     
     def generate_villager(self) -> None:
-        print("Generating villager attributes...")
+        
+        jobs = {
+            'Farmer': 30,
+            'Mason': 20,
+            'Brewer': 20,
+            'Scavenger': 50,
+            'Gaurd': 20,
+            'Blacksmith': 10,
+            'Sigil Carver': 10
+        }
+
+        self.job = random.choices(list(jobs.keys()), weights=list(jobs.values()), k=1)[0]
+        #print(f"Generating villager attributes... {self.job}: {self.job}")
+        trade_supply = random.randint(2,5)
+        import entity_factories
+        for i in range(trade_supply):
+            item = None
+            if self.job == 'Farmer':
+                self.tradable = False
+            elif self.job == 'Mason':
+                self.tradable = False
+            elif self.job == 'Brewer':
+                self.tradable = True
+                
+                item = copy.deepcopy(entity_factories.get_random_potion())
+            elif self.job == 'Scavenger':
+                self.tradable = True
+                
+                item = copy.deepcopy(random.choice([
+                    entity_factories.lesser_health_potion,
+                    entity_factories.dagger,
+                    entity_factories.leather_armor,
+                    entity_factories.leather_cap,
+                    entity_factories.leather_leggings,
+                    entity_factories.leather_boot,
+                    entity_factories.arrow
+
+                ]))
+            elif self.job == 'Guard':
+                self.tradable = False
+            elif self.job == 'Blacksmith':
+                self.tradable = True
+                
+                item = copy.deepcopy(random.choice([
+                    entity_factories.dagger,
+                    entity_factories.shortsword,
+                    entity_factories.longsword,
+                    entity_factories.chain_mail,
+                    entity_factories.arrow
+                ]))
+            elif self.job == 'Sigil Carver':
+                self.tradable = True
+                
+                item = copy.deepcopy(entity_factories.generate_sigil_stone())
+            # Only add valid items to inventory
+            if item is not None:
+                self.inventory.items.append(item)
+
+
+
         # Generate villager-specific attributes or behaviors
 
         self.opinion += random.randint(-10, 10)

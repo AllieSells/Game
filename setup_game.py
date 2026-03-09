@@ -234,156 +234,7 @@ def load_game(filename: str) -> Engine:
         pass
     return engine 
 
-class SeedInputScreen(input_handlers.BaseEventHandler):
-    """Handle seed input for custom world generation."""
-    
-    def __init__(self, parent_menu):
-        super().__init__()
-        self.parent_menu = parent_menu
-        self.seed_input = ""
-        self.cursor_visible = True
-        self.cursor_blink_timer = 0
-
-    def on_render(self, console: tcod.Console) -> None:
-        """Render the seed input screen with parchment styling.""" 
-        console.draw_semigraphics(background_image, 0, 0)
-
-        # Calculate menu window dimensions and position
-        window_width = 50
-        window_height = 12
-        x = (console.width - window_width) // 2
-        y = (console.height - window_height) // 2
-
-        # Draw parchment background and ornate border
-        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
-        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Enter Seed")
-
-        # Title
-        console.print(
-            x + (window_width // 2),
-            y + 3,
-            "Enter World Seed",
-            fg=color.gold_accent,
-            bg=color.parchment_bg,
-            alignment=tcod.CENTER,
-        )
-
-        # Input description
-        console.print(
-            x + (window_width // 2),
-            y + 5,
-            "Enter seed (optional) or leave blank for random",
-            fg=color.fantasy_text,
-            bg=color.parchment_bg,
-            alignment=tcod.CENTER,
-        )
-
-        # Input box background
-        input_x = x + 3
-        input_y = y + 7
-        input_width = window_width - 6
-        for dx in range(input_width):
-            console.print(input_x + dx, input_y, " ", bg=(60, 50, 35))
-
-        # Draw seed input with cursor
-        display_text = self.seed_input
-        if len(display_text) > input_width - 3:
-            display_text = "..." + display_text[-(input_width - 6):]
-        
-        # Blink cursor
-        self.cursor_blink_timer += 1
-        if self.cursor_blink_timer % 60 < 30:
-            self.cursor_visible = True
-        else:
-            self.cursor_visible = False
-        
-        cursor = "|" if self.cursor_visible else " "
-        display_text_with_cursor = display_text + cursor
-
-        console.print(
-            input_x + 1,
-            input_y,
-            display_text_with_cursor,
-            fg=color.gold_accent,
-            bg=(60, 50, 35),
-        )
-
-        # Instructions
-        console.print(
-            x + (window_width // 2),
-            y + window_height - 2,
-            "[Enter] Start Game  [Esc] Back  [Del] Clear",
-            fg=color.light_gray,
-            bg=color.parchment_bg,
-            alignment=tcod.CENTER,
-        )
-
-    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[input_handlers.BaseEventHandler]:
-        if event.sym == tcod.event.KeySym.ESCAPE:
-            # Go back to main menu
-            sounds.start_menu_ambience()
-            sounds.start_menu_music()
-            return self.parent_menu
-        elif event.sym == tcod.event.KeySym.RETURN or event.sym == tcod.event.KeySym.KP_ENTER:
-            # Start game with entered seed (or random if empty)
-            loading_screen = LoadingScreen(self.parent_menu)
-            if self.seed_input.strip():  # Only set seed if something was entered
-                # Try to parse as integer first, otherwise use as string
-                if self.seed_input.strip().isdigit():
-                    loading_screen.game_seed = int(self.seed_input.strip())
-                else:
-                    loading_screen.seed_string = self.seed_input.strip()
-            # If no seed entered, LoadingScreen will use random generation
-            return loading_screen
-        elif event.sym == tcod.event.KeySym.BACKSPACE:
-            # Remove last character
-            if len(self.seed_input) > 0:
-                self.seed_input = self.seed_input[:-1]
-        elif event.sym == tcod.event.KeySym.DELETE:
-            # Clear entire input
-            self.seed_input = ""
-        elif event.sym == tcod.event.KeySym.SPACE:
-            # Add space
-            if len(self.seed_input) < 40:
-                self.seed_input += " "
-        else:
-            # Handle regular character input
-            if len(self.seed_input) < 40:  # Limit length
-                # Convert key to character for printable keys
-                char = None
-                
-                # Get the key value as integer
-                key_val = int(event.sym)
-                
-                # Letters (a-z = 97-122, A-Z handled with shift)
-                if 97 <= key_val <= 122:  # a-z range
-                    char = chr(key_val)
-                    if event.mod & tcod.event.Modifier.SHIFT:
-                        char = char.upper()
-                
-                # Numbers 0-9 (48-57)
-                elif 48 <= key_val <= 57:
-                    if event.mod & tcod.event.Modifier.SHIFT:
-                        # Shift+number symbols
-                        shift_chars = ")!@#$%^&*("
-                        char = shift_chars[key_val - 48]
-                    else:
-                        char = chr(key_val)
-                
-                # Some common symbols
-                elif key_val == 45:  # minus/underscore
-                    char = "_" if event.mod & tcod.event.Modifier.SHIFT else "-"
-                elif key_val == 61:  # equals/plus  
-                    char = "+" if event.mod & tcod.event.Modifier.SHIFT else "="
-                elif key_val == 46:  # period/greater than
-                    char = ">" if event.mod & tcod.event.Modifier.SHIFT else "."
-                elif key_val == 44:  # comma/less than
-                    char = "<" if event.mod & tcod.event.Modifier.SHIFT else ","
-                
-                if char:
-                    self.seed_input += char
-
-        return None
+# Removed SeedInputScreen class - now using TextInputHandler from input_handlers
 
 
 class LoadingScreen(input_handlers.BaseEventHandler):
@@ -790,7 +641,7 @@ class MainMenu(input_handlers.BaseEventHandler):
             print("TEST")
             try:
                 sounds.play_stairs_sound()
-                engine = load_game("savegame.sav")
+                engine = load_game("SAVEGAME/savegame.sav")
                 # Start dungeon music
                 sounds.start_dungeon_music()
                 return input_handlers.MainGameEventHandler(engine)
@@ -805,7 +656,34 @@ class MainMenu(input_handlers.BaseEventHandler):
             sounds.stop_all_music()
             # Go to seed input screen (optional seed entry)
             sounds.play_stairs_sound()
-            return SeedInputScreen(self)
+            
+            # Create callback for seed input
+            def handle_seed_input(entered_seed):
+                """Handle seed input and start loading screen."""
+                # Handle cancellation (ESC was pressed)
+                if entered_seed is None:
+                    sounds.start_menu_ambience()
+                    sounds.start_menu_music()
+                    return self
+                    
+                loading_screen = LoadingScreen(self)
+                if entered_seed.strip():  # Only set seed if something was entered
+                    # Try to parse as integer first, otherwise use as string
+                    if entered_seed.strip().isdigit():
+                        loading_screen.game_seed = int(entered_seed.strip())
+                    else:
+                        loading_screen.seed_string = entered_seed.strip()
+                # If no seed entered, LoadingScreen will use random generation
+                return loading_screen
+            
+            return input_handlers.TextInputHandler(
+                engine=None,  # Setup screens don't need engine
+                title="Enter Seed",
+                prompt="Enter world seed (optional):",
+                max_length=40,
+                callback=handle_seed_input,
+                parent_handler=self  # Pass self so background can be rendered
+            )
         elif action == "debug_level":
             # Stop menu ambience when leaving menu
             sounds.stop_menu_ambience()

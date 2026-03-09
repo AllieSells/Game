@@ -10,14 +10,30 @@ import engine
 import entity_factories
 from game_map import GameMap
 import tile_types
-from spawn_definitions import (
-    max_items_by_floor,
-    max_chests_by_floor,
-    max_monsters_by_floor,
-    max_flora_by_floor,
-    item_chances,
-    enemy_chances,
-)
+from enemy_spawning import get_enemy_count_for_floor, get_enemies_for_floor
+
+# Spawn configuration data
+max_items_by_floor = {1: 2, 4: 2}
+max_chests_by_floor = {1: 1, 3: 2}
+max_flora_by_floor = {1: 3, 4: 5}
+
+item_chances = {
+    0: {
+        entity_factories.lesser_health_potion: 35,
+        entity_factories.lightning_scroll: 25,
+        entity_factories.shortsword: 10,
+    },
+    2: {
+        entity_factories.confusion_scroll: 10,
+    },
+    4: {
+        entity_factories.lightning_scroll: 25
+    },
+    6: {
+        entity_factories.fireball_scroll: 25,
+        entity_factories.chain_mail: 15,
+    },
+}
 
 if TYPE_CHECKING:
     from engine import Engine
@@ -95,16 +111,15 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) 
     # Don't re-seed here as it breaks dungeon generation flow
     # The main generation seed is set at the start of generate_dungeon
     
-    number_of_monsters = random.randint(
-        0, get_max_value_for_floor(max_monsters_by_floor, floor_number)
-    )
+    # Use new dynamic enemy spawning system
+    number_of_monsters = get_enemy_count_for_floor(floor_number)
+    
     number_of_items = random.randint(
         0, get_max_value_for_floor(max_items_by_floor, floor_number)
     )
 
-    monsters: List[Entity] = get_entities_at_random(
-        enemy_chances, number_of_monsters, floor_number
-    )
+    # Get scaled enemies using new system
+    monsters = get_enemies_for_floor(floor_number, number_of_monsters)
 
     items: List[Entity] = get_entities_at_random(
         item_chances, number_of_items, floor_number

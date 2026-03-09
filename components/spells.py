@@ -14,7 +14,7 @@ from input_handlers import (
 
 
 class Spell():
-    def __init__(self, name, duration, description, damage, mana_cost, components, spell_tags, school, arcana_level = 1, cast_xp = 5):
+    def __init__(self, name, duration, description, damage, mana_cost, components, spell_tags, school, arcana_level = 1, cast_xp = 5, radius = 0):
         self.name = name
         self.duration = duration
         self.description = description
@@ -25,14 +25,21 @@ class Spell():
         self.school = school
         self.arcana_level = arcana_level
         self.cast_xp = cast_xp
-        self.radius = 0
+        self.radius = radius
+
+    def calculate_arcana_modifiers(self, caster):
+        """Calculate arcana level equipment modifiers."""
+        arcana_level = caster.level.traits['arcana']['level']
+        for item in caster.equipment:
+            print(f"DEBUG: Checking item '{item.name}' for arcana modifiers.")
+            
 
     def give_xp(self, consumer):
         consumer.level.add_xp({self.school: self.cast_xp})
         consumer.level.add_xp({'arcana': (5+(consumer.level.traits['arcana']['level'] * 1.5))})
         print(f'DEBUG: Gave {self.cast_xp} XP to {self.school} and {(5+(consumer.level.traits["arcana"]["level"] * 1.5))} XP to arcana for casting {self.name}.')
     
-    def get_description(self):
+    def get_description(self, caster=None):
         return ""
 
 
@@ -51,7 +58,8 @@ class Spell():
             self.damage = int(self.damage * 1.5)
             self.mana_cost += 1
             self.name += " II"
-            self.radius = max(self.radius, 5)
+            self.radius = min(self.radius, 5)
+            self.duration *= 1.5
             
             # Update quickcast slots if entity is provided
             if entity and hasattr(entity, 'quickcast_slots'):
@@ -77,7 +85,7 @@ class DarkvisionSpell(Spell):
             cast_xp=5
         )
 
-    def get_description(self):
+    def get_description(self, caster=None):
         return f'Grants the ability to see in the dark for {self.duration} turns.'
 
     def activate(self, action: actions.SpellAction) -> None:
@@ -109,7 +117,7 @@ class TeleportSpell(Spell):
 
         )
     
-    def get_description(self):
+    def get_description(self, caster=None):
         return f"Instantly move to a visible location within range."
 
     def get_targeting_handler(self, engine, caster):
@@ -175,7 +183,7 @@ class PoisonSpraySpell(Spell):
         super().__init__(
             name="Poison Spray",
             description="Hurl a glob of acid that damages a single target.",
-            damage=5,
+            damage=3,
             duration=0,
             mana_cost=5,
             components=['V', 'S'],
@@ -186,7 +194,7 @@ class PoisonSpraySpell(Spell):
             radius = 1
         )
 
-    def get_description(self):
+    def get_description(self, caster=None):
         return f"Hurl a glob of acid that damages a single target ({self.damage} damage) and coats the area in poison."
 
     def get_targeting_handler(self, engine, caster):
@@ -219,7 +227,8 @@ class PoisonSpraySpell(Spell):
             target.fighter.take_damage(self.damage, causes_bleeding=False)
             consumer.mana -= self.mana_cost
             self.give_xp(consumer)
-            action.engine.game_map.liquid_system._coat_entities_in_splash(target_x, target_y, LiquidType.POISON, distance=1.0, radius=self.radius)
+            # Create poison splash around the target
+            action.engine.game_map.liquid_system.create_splash(target_x, target_y, LiquidType.POISON, radius=self.radius, max_depth=2)
             action.engine.animation_queue.append(animations.SplashAnimation((target_x, target_y), color.green))
             action.engine.message_log.add_message(
                 f"The poison hits the {target.name}!", color.green
@@ -243,7 +252,7 @@ class FireballSpell(Spell):
             radius = 2
         )
 
-    def get_description(self):
+    def get_description(self, caster=None):
         return f"Launch a fiery explosion that damages all in the area ({self.damage} damage) and coats the area in fire."
 
     def get_targeting_handler(self, engine, caster):
@@ -305,8 +314,12 @@ class HealingWordSpell(Spell):
             engine,
             callback=healing_word_callback
         )
-    def get_description(self):
-        return f"A soothing word that heals a single target ({-self.damage}+LVL HP)."
+    def get_description(self, caster=None):
+        if caster and hasattr(caster, 'level') and 'evocation' in caster.level.traits:
+            heal_bonus = caster.level.traits['evocation']['level']
+            return f"A soothing word that heals a single target ({self.damage}+{heal_bonus} HP)."
+        else:
+            return f"A soothing word that heals a single target ({self.damage}+EVO HP)."
 
     def activate(self, action: actions.SpellAction) -> None:
         consumer = action.entity
@@ -324,13 +337,14 @@ class HealingWordSpell(Spell):
                 return
             else:
                 heal_level = target.level.traits['evocation']['level'] 
-                target.fighter.heal(heal_level + self.damage)  # Negative damage is healing
+                
                 consumer.mana -= self.mana_cost
                 self.give_xp(consumer)
                 action.engine.animation_queue.append(animations.HealAnimation((target_x, target_y)))
                 action.engine.message_log.add_message(
                     f"The {target.name} is bathed in a soothing light! (4+{heal_level} HP)", color.light_green
                 )
+                target.fighter.heal(heal_level + self.damage) 
                 sounds.play_heal_spell_sound()
 class InflictWoundsSpell(Spell):
     def __init__(self):
@@ -347,7 +361,7 @@ class InflictWoundsSpell(Spell):
             cast_xp = 5
         )
 
-    def get_description(self):
+    def get_description(self, caster=None):
         return f"A dark spell that damages a single target ({self.damage} damage)."
 
     def get_targeting_handler(self, engine, caster):

@@ -44,17 +44,32 @@ class EquipmentSlot:
                 elif self.name == "L.Hand": 
                     hand_name = "left hand"
                 else:
-                    # For other slots that might handle weapons/shields, check all hands
+                    # For other slots that might handle weapons/shields, check all systems
+                    # Check grasped_items first (legacy)
                     if hasattr(equipment, 'grasped_items'):
                         for item in equipment.grasped_items.values():
                             if (item and hasattr(item, 'equippable') and item.equippable and 
                                 item.equippable.equipment_type == eq_type):
                                 return item
+                    # Check body_part_coverage (new system)
+                    if hasattr(equipment, 'body_part_coverage'):
+                        for item in equipment.body_part_coverage.values():
+                            if (item and hasattr(item, 'equippable') and item.equippable and 
+                                item.equippable.equipment_type == eq_type):
+                                return item
                     return None
                 
-                # Check specific hand for this slot
+                # Check specific hand in both systems
+                # First check grasped_items (legacy system)
                 if hasattr(equipment, 'grasped_items') and hand_name in equipment.grasped_items:
                     item = equipment.grasped_items[hand_name]
+                    if (item and hasattr(item, 'equippable') and item.equippable and 
+                        item.equippable.equipment_type == eq_type):
+                        return item
+                
+                # Then check body_part_coverage (new system)
+                if hasattr(equipment, 'body_part_coverage') and hand_name in equipment.body_part_coverage:
+                    item = equipment.body_part_coverage[hand_name]
                     if (item and hasattr(item, 'equippable') and item.equippable and 
                         item.equippable.equipment_type == eq_type):
                         return item
@@ -179,6 +194,9 @@ class EquipmentUI(AskUserEventHandler):
         x = (console.width - window_width) // 2
         y = (console.height - window_height) // 2
         
+        # Fade the background except for the equipment UI
+        super().render_faded(console, x, y, window_width, window_height)
+        
         # Draw window frame
         MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
         MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Equipment")
@@ -188,6 +206,8 @@ class EquipmentUI(AskUserEventHandler):
         
         # Draw available items list
         self._draw_items_list(console, x, y, window_width, window_height)
+
+        self._draw_player_stats(console, x, y)
         
         # Instructions
         instructions = [
@@ -263,7 +283,15 @@ class EquipmentUI(AskUserEventHandler):
                 text_parts.append((item_name, item_color))
             
             print_colored_text_with_bg(console, list_x, list_y + i, text_parts, bg_color)
-    
+    def _draw_player_stats(self, console: tcod.Console, base_x: int, base_y: int) -> None:
+        ''' Draw equipment stats like power and defense at the bottom of the equipment UI.'''
+        from text_utils import print_colored_text_with_bg
+        stats_x = base_x + 5
+        stats_y = base_y + 15
+        power = self.engine.player.fighter.power
+        defense = self.engine.player.fighter.defense
+        stats_text = f"Power: {power}   Defense: {defense}"
+        print_colored_text_with_bg(console, stats_x, stats_y, [(stats_text, color.bronze_text)], (45, 35, 25))
     def _draw_items_list(self, console: tcod.Console, base_x: int, base_y: int,
                         window_width: int, window_height: int) -> None:
         """Draw list of available items for the selected slot."""

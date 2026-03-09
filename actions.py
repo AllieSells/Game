@@ -11,8 +11,8 @@ import copy
 if TYPE_CHECKING:
     from engine import Engine
     from entity import Actor, Entity, Item
-    from components.container import Container
-    from components.body_parts import BodyPartType
+    from components.item.container import Container
+    from components.entity.body.body_parts import BodyPartType
     from components.spells import Spell
 else:
     # Runtime import for BodyPartType if needed

@@ -236,6 +236,8 @@ class Engine:
         save_data = lzma.compress(pickle.dumps(self))
         with open(filename, "wb") as f:
             f.write(save_data)
+            # Write game savename 
+            f.write(filename.encode('utf-8'))
     
     def handle_enemy_turns(self) -> None:
         """Legacy method - use turn_manager.process_player_turn_end() instead."""
@@ -519,15 +521,11 @@ class Engine:
 
 
     def update_fov(self) -> None:
-        # check if player has a torch in grasped items
+        # Check if player has a torch equipped using optimized helper
         has_torch = False
         try:
             if self.player.equipment:
-                # Check grasped items for torches
-                for item in self.player.equipment.grasped_items.values():
-                    if hasattr(item, 'name') and item.name == "Torch":
-                        has_torch = True
-                        break
+                has_torch = self.player.equipment.has_item_equipped("Torch")
         except Exception:
             has_torch = False
 

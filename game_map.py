@@ -264,11 +264,7 @@ class GameMap:
             has_torch = False
             try:
                 if player.equipment:
-                    # Check grasped items for torches
-                    for item in player.equipment.grasped_items.values():
-                        if hasattr(item, 'name') and item.name == "Torch":
-                            has_torch = True
-                            break
+                    has_torch = player.equipment.has_item_equipped("Torch")
             except Exception:
                 has_torch = False
 
@@ -451,10 +447,10 @@ class GameWorld:
         # Using geometric distribution: E[X] = 1/p = 3, so p = 1/3 ≈ 0.333
         #
         # Village equation chance
-        village_chance = ((self.floors_since_village)^2) / 25
+        village_chance = ((self.floors_since_village)**2) / 25
         gen_chance = random.random()
         #print(f"Vil chance: {village_chance}, Gen chance: {gen_chance}, Floors since village: {self.floors_since_village}")
-        if gen_chance < village_chance:
+        if gen_chance < 100:
 
             # Generate village and reset counter
             self.floors_since_village = 0  # Reset counter when village appears

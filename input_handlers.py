@@ -17,7 +17,7 @@ from actions import (
 )
 
 import color
-from dialogue_generator import ConversationNode
+from components.dialogue_generator import ConversationNode
 import engine
 import exceptions
 from render_functions import MenuRenderer
@@ -153,6 +153,30 @@ class EventHandler(BaseEventHandler):
     
     def on_render(self, console: tcod.Console) -> None:
         self.engine.render(console)
+
+    def render_faded(self, console: tcod.Console, menu_x: int = None, menu_y: int = None, menu_width: int = None, menu_height: int = None) -> None:
+        # Fades the current console to create a dimmed background effect for menus
+        # Excludes the menu area from fading if menu bounds are provided
+        fade_alpha = 0.4  # Fade strength (0.0 = no fade, 1.0 = completely faded)
+        fade_color = (20, 20, 30)  # Dark blue-gray tint
+        
+        for x in range(console.width):
+            for y in range(console.height):
+                # Skip fading pixels that are within the menu bounds
+                if (menu_x is not None and menu_y is not None and 
+                    menu_width is not None and menu_height is not None):
+                    if (menu_x <= x < menu_x + menu_width and 
+                        menu_y <= y < menu_y + menu_height):
+                        continue
+                
+                existing_color = console.bg[x, y]
+                # Safe color blending using floating point math
+                blended_color = (
+                    int(existing_color[0] * (1 - fade_alpha) + fade_color[0] * fade_alpha),
+                    int(existing_color[1] * (1 - fade_alpha) + fade_color[1] * fade_alpha),
+                    int(existing_color[2] * (1 - fade_alpha) + fade_color[2] * fade_alpha),
+                )
+                console.bg[x, y] = blended_color
     
 class AskUserEventHandler(EventHandler):
     # Handles user input for actions with special input
@@ -190,6 +214,305 @@ class CharacterScreenEventHandler(EventHandler):
         
 
 
+class TradeEventHandler(AskUserEventHandler):
+    # Container UI recycled for trading. Modified.
+    def __init__(self, engine: Engine, container: Container):
+        super().__init__(engine)
+        # Innit NPC being interacted with
+        self.container = container
+        # Skip filter, not needed
+
+        # Selected index for arrow navigation
+        self.selected_index: int = 0
+        # Which inventory is active: "Player" or NPC name
+        self.menu: str = "Player"
+
+    def on_render(self, console: tcod.Console) -> None:
+        # Renders inventory menu displaying items in both inventories with fantasy styling
+        super().on_render(console)
+        player_groups = self.engine.player.inventory.get_display_groups()
+        container_items = list(self.container.items)
+        number_of_player_items = len(player_groups)
+        number_of_container_items = len(container_items)
+
+        # Enhanced window sizing for beautiful layout
+        total_width = 70
+        height = max(number_of_player_items, number_of_container_items) + 12
+        if height < 18:
+            height = 18
+        
+        # Position window
+        x = (console.width - total_width) // 2
+        y = 10
+        
+        # Fade the background except for the container menu
+        super().render_faded(console, x, y, total_width, height)
+
+        # Draw main fantasy parchment background
+        MenuRenderer.draw_parchment_background(console, x, y, total_width, height)
+        
+        # Draw ornate main border
+        npc_color = getattr(self.container.parent, 'color', 'Container')
+        container_name = getattr(self.container.parent, 'name', 'Container')
+        is_corpse = getattr(self.container.parent, 'type', None) == 'Dead'
+        title = f"Corpse" if is_corpse else f"Trading with {container_name}"
+        MenuRenderer.draw_ornate_border(console, x, y, total_width, height, title)
+
+        # Calculate panel dimensions
+        panel_width = (total_width - 6) // 2  # Leave space for divider and margins
+        panel_height = height - 6
+        
+        # Left panel (Player inventory)
+        left_x = x + 3
+        left_y = y + 3
+        
+        # Right panel (Container inventory) 
+        right_x = x + 3 + panel_width + 2
+        right_y = y + 3
+        
+        # Draw panel backgrounds
+        panel_bg = (40, 30, 22)
+        for px in range(panel_width):
+            for py in range(panel_height):
+                console.print(left_x + px, left_y + py, " ", bg=panel_bg)
+                console.print(right_x + px, right_y + py, " ", bg=panel_bg)
+        
+        # Draw decorative divider between panels
+        divider_x = left_x + panel_width + 1
+        
+        # Panel headers
+        player_header = "You"
+        container_header = f"{container_name}"
+        
+        # Center headers in panels
+        player_header_x = left_x + (panel_width - len(player_header)) // 2
+        container_header_x = right_x + (panel_width - len(container_header)) // 2
+        
+        console.print(player_header_x, left_y + 1, player_header, fg=(255, 215, 0), bg=panel_bg)
+        console.print(container_header_x, right_y + 1, container_header, fg=(color.teal), bg=panel_bg)
+        
+        # Active panel indicator
+        if self.menu == "Player":
+            console.print(left_x + 1, left_y + 1, "☺", fg=(255, 215, 0), bg=panel_bg)
+        else:
+            console.print(right_x + 1, right_y + 1, "☺", fg=(npc_color), bg=panel_bg)
+
+        # Ensure index is selected
+        if not hasattr(self, "selected_index"):
+            self.selected_index = 0
+        # Clamp selected index based on active menu
+        if number_of_player_items > 0 and self.menu == "Player":
+            if self.selected_index >= number_of_player_items:
+                self.selected_index = max(0, number_of_player_items - 1)
+
+        if number_of_container_items > 0 and self.menu == "Container":
+            if self.selected_index >= number_of_container_items:
+                self.selected_index = max(0, number_of_container_items - 1)
+
+        # Draw player inventory items
+        item_start_y = left_y + 3
+        if number_of_player_items > 0:
+            for i, group in enumerate(player_groups):
+                if item_start_y + i >= left_y + panel_height - 1:
+                    break  # Don't draw outside panel
+                    
+                item = group['item']
+                display_name = group['display_name']
+                is_equipped = self.engine.player.equipment.item_is_equipped(item)
+                is_selected = i == self.selected_index and self.menu == "Player"
+
+                item_value = int(item.value * .75)
+                item_string = f"• {display_name} ({item_value}gp)"
+                if len(item_string) > panel_width - 2:
+                    item_string = f"• {display_name[:panel_width - 12]}... ({item_value}gp)"
+                if is_equipped:
+                    item_string = f"{item_string} (e)"
+
+                # Draw with selection highlighting
+                if is_selected:
+                    # Selection background
+                    for hx in range(panel_width - 4):
+                        console.print(left_x + 2 + hx, item_start_y + i, " ", bg=(80, 60, 30))
+                    console.print(left_x + 1, item_start_y + i, item_string, fg=item.rarity_color, bg=(80, 60, 30))
+                else:
+                    console.print(left_x + 1, item_start_y + i, item_string, fg=item.rarity_color, bg=panel_bg)
+        else:
+            console.print(left_x + 1, item_start_y, "~ Empty ~", fg=(120, 100, 80), bg=panel_bg)
+
+        # Draw container inventory items  
+        if number_of_container_items > 0:
+            for i, item in enumerate(container_items):
+                if item_start_y + i >= right_y + panel_height - 1:
+                    break  # Don't draw outside panel
+                    
+                is_selected = i == self.selected_index and self.menu == "Container"
+
+                item_value = int(item.value * 1.5)
+                item_string = f"• {item.name} ({item_value}gp)"
+                if len(item_string) > panel_width - 2:
+                    item_string = f"• {item.name[:panel_width - 12]}... ({item_value}gp)"
+
+                # Draw with selection highlighting
+                if is_selected:
+                    # Selection background
+                    for hx in range(panel_width - 4):
+                        console.print(right_x + 2 + hx, item_start_y + i, " ", bg=(80, 60, 30))
+                    console.print(right_x + 1, item_start_y + i, item_string, fg=item.rarity_color, bg=(80, 60, 30))
+                else:
+                    console.print(right_x + 1, item_start_y + i, item_string, fg=item.rarity_color, bg=panel_bg)
+        else:
+            console.print(right_x + 4, item_start_y, "~ Empty ~", fg=(120, 100, 80), bg=panel_bg)
+        
+        # Instructions footer
+        if self.menu == "Player":
+            instructions = "[Tab] Switch Panel · [↑↓] Navigate ·  [Space] Sell · [Esc] Close"
+        else:
+            instructions = "[Tab] Switch Panel · [↑↓] Navigate ·  [Space] Buy · [Esc] Close"
+        inst_x = x + (total_width - len(instructions)) // 2
+        console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
+
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        player = self.engine.player
+        key = event.sym
+        modifier = event.mod
+
+        # Get display groups for selection
+        player_groups = self.engine.player.inventory.get_display_groups()
+
+        # Skip filter
+
+        # Tab shifts active menu
+        if key == tcod.event.K_TAB:
+            self.menu = "Container" if self.menu == "Player" else "Player"
+            return None
+
+        # Arrow-key navigation: up/down to move selection, Enter to confirm
+        if key == tcod.event.K_UP:
+            # Check if selection is in bounds, then play UI sound
+            if self.selected_index > 0:
+                sounds.play_ui_move_sound()
+            self.selected_index = max(0, self.selected_index - 1)
+            return None
+        elif key == tcod.event.K_DOWN:
+            
+            if self.menu == "Player":
+                max_index = max(0, len(player_groups) - 1)
+            else:
+                max_index = max(0, len(self.container.items) - 1)
+            # Check if selection is in bounds, then play UI sound
+            if self.selected_index < max_index:
+                sounds.play_ui_move_sound()
+            self.selected_index = min(max_index, self.selected_index + 1)
+            return None
+        elif key in CONFIRM_KEYS:
+            # Confirm selection from the active menu
+            if self.menu == "Player":
+                if not player_groups:
+                    return None
+                selected_group = player_groups[self.selected_index]
+                return self.on_item_selected(selected_group['item'])
+            else:
+                if not self.container.items:
+                    return None
+                return self.on_item_selected(self.container.items[self.selected_index])
+    
+        # Letter selection still supported but operates on the filtered list
+        index = key - tcod.event.KeySym.A
+
+        if 0 <= index <= 26:
+            try:
+                if self.menu == "Player":
+                    selected_group = player_groups[index]
+                    selected_item = selected_group['item']
+                else:
+                    selected_item = self.container.items[index]
+            except IndexError:
+                self.engine.message_log.add_message("Invalid entry.", color.invalid)
+                return None
+            return self.on_item_selected(selected_item)
+        return super().ev_keydown(event)
+    
+    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
+        # Transfer this item between inventories
+        if self.menu == "Player":
+            # Transfer from player to container
+            try:
+                # Check if equipped
+                if self.engine.player.equipment.item_is_equipped(item):
+                    # Get slot item is in
+                    slot = self.engine.player.equipment.get_slot(item)
+                    self.engine.player.equipment.unequip_item(item, add_message=True)
+                    
+
+                # Check container capacity
+                if len(self.container.items) >= self.container.capacity:
+                    self.engine.message_log.add_message("Trade failed.", color.error)
+                    return self
+
+                self.engine.player.inventory.items.remove(item)
+                # Move item into the container and update its parent so
+                # later logic (consumption, transfers) sees the correct owner.
+                self.container.items.append(item)
+                try:
+                    item.parent = self.container
+                except Exception:
+                    pass
+
+                if hasattr(item, "drop_sound") and item.drop_sound is not None:
+                    try:
+                        item.drop_sound()
+                    except Exception as e:
+                        print(f"DEBUG: Error calling drop sound: {e}")
+                sounds.play_equip_manycoins_sound()
+                self.engine.player.gold += int(item.value * .75)
+                
+                self.engine.message_log.add_message(f"You sell the {item.name}.")
+            except Exception as e:
+                print(f"DEBUG: Transfer failed with exception: {e}")
+                print(traceback.format_exc())
+                self.engine.message_log.add_message(f"Could not transfer {item.name}.", color.error)
+        else:
+            # Transfer from container to player
+            try:
+                if self.engine.player.gold < int(item.value * 1.5):
+                    self.engine.message_log.add_message("You don't have enough gold.", color.error)
+                    return self
+                else:
+                    self.container.items.remove(item)
+                    if len(self.engine.player.inventory.items) > self.engine.player.inventory.capacity:
+                        self.engine.message_log.add_message("Your inventory is full.", color.error)
+                        # Return item to container
+                        self.container.items.append(item)
+                    else:   
+                        # Add to player inventory and update parent link.
+                        self.engine.player.inventory.items.append(item)
+                        try:
+                            item.parent = self.engine.player.inventory
+                        except Exception:
+                            pass
+                        
+                        # Play item pickup sound if it exists
+                        if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
+                            #print(f"DEBUG: About to call pickup sound for {item.name}")
+                            try:
+                                item.pickup_sound()
+                                #print(f"DEBUG: Successfully called pickup sound for {item.name}")
+                            except Exception as e:
+                                print(f"DEBUG: Error calling pickup sound: {e}")
+                        else:
+                            print(f"DEBUG: No pickup sound for {item}")
+                        sounds.play_equip_manycoins_sound()
+                        self.engine.player.gold -= int(item.value * 1.5)
+
+                        self.engine.message_log.add_message(f"You buy the {item.name}.")
+            except Exception:
+                print(traceback.format_exc(), color.error)
+                self.engine.message_log.add_message(f"Could not transfer {item.name} to {self.container.name}.", color.error)
+        # Return back to container handler
+        return self
+    
+
+
 
 class DialogueEventHandler(AskUserEventHandler):
     """Handles dialogue interactions with NPCs with hierarchical menu system."""
@@ -198,7 +521,7 @@ class DialogueEventHandler(AskUserEventHandler):
         super().__init__(engine)
         self.npc = npc
         # Initialize dialogue system
-        from dialogue_generator import ConversationNode
+        from components.dialogue_generator import ConversationNode
         self.dialogue = ConversationNode()
         
         # Menu system
@@ -214,8 +537,8 @@ class DialogueEventHandler(AskUserEventHandler):
                 "options": [
                     {"text": "Hello", "action": "dialogue", "context": ["Greeting"]},
                     {"text": "Questions", "action": "submenu", "target": "questions"},
-                    {"text": "Farewell", "action": "dialogue", "context": ["Goodbye"]},
-                    {"text": "[Exit]", "action": "exit"}
+                    {"text": "Trade", "action": "trade", "target": "trade"},
+                    {"text": "Farewell", "action": "exit"}
                 ]
             },
             "questions": {
@@ -233,7 +556,7 @@ class DialogueEventHandler(AskUserEventHandler):
         # Generate initial dialogue text
         self.current_dialogue = self.dialogue.generate_dialogue(character=self.npc, context=self.npc.dialogue_context)
         print(self.npc.dialogue_context)
-        if "Identity" in self.npc.dialogue_context:
+        if self.npc.dialogue_context and "Identity" in self.npc.dialogue_context:
             print("KNOWN")
             self.npc.is_known = True
             # Increase opinion when identity is known
@@ -261,10 +584,13 @@ class DialogueEventHandler(AskUserEventHandler):
         super().on_render(console)
         
         # Draw the dialogue box
-        width = 65
+        width = 40
         height = 20
         x = (self.engine.game_map.width - width) // 2
         y = (self.engine.game_map.height - height) // 2
+        
+        # Fade the background except for the dialogue area
+        super().render_faded(console, x, y, width, height)
 
         current_menu_data = self.menu_structure[self.current_menu]
         
@@ -274,7 +600,18 @@ class DialogueEventHandler(AskUserEventHandler):
         
         # Display current dialogue if available
         if hasattr(self, 'current_dialogue') and self.current_dialogue:
-            console.print(x + 2, y + 2, self.current_dialogue[0], fg=color.teal)
+            dialogue_text = self.current_dialogue[0]
+            # Use wrap_colored_text to get properly wrapped lines, then print each line
+            from text_utils import wrap_colored_text, print_colored_text
+            max_dialogue_width = width - 4  # Account for dialogue box margins
+            wrapped_lines = wrap_colored_text(dialogue_text, max_dialogue_width, default_color=color.teal)
+            
+            current_y = y + 2
+            for line_parts in wrapped_lines:
+                if current_y >= y + height - 3:  # Don't overflow the dialogue box
+                    break
+                print_colored_text(console, x + 2, current_y, line_parts)
+                current_y += 1
         
         # Display menu options in inventory-style format
         start_y = y + 5
@@ -286,8 +623,7 @@ class DialogueEventHandler(AskUserEventHandler):
                 break
             
             # Generate letter key for this option
-            item_key = chr(ord("a") + i)
-            option_text = f"({item_key}) {option['text']}"
+            option_text = f"• {option['text']}"
             
             # Draw selection marker for arrow navigation (like inventory)
             marker = ">" if i == self.selected_index else " "
@@ -297,17 +633,17 @@ class DialogueEventHandler(AskUserEventHandler):
                 # Draw white background for the entire line
                 line_width = len(marker + option_text) + 2  # Extra space for padding
                 for j in range(line_width):
-                    console.print(x + 1 + j, option_y, " ", fg=color.black, bg=color.white)
+                    console.print(x + 1 + j, option_y, " ", fg=color.white, bg=color.selected_bronze)
                 # Draw the text on top with black text
-                console.print(x + 1, option_y, marker, fg=color.black, bg=color.white)
-                console.print(x + 2, option_y, option_text, fg=color.black, bg=color.white)
+                console.print(x + 1, option_y, marker, fg=color.white, bg=color.selected_bronze)
+                console.print(x + 2, option_y, option_text, fg=color.white, bg=color.selected_bronze)
             else:
                 console.print(x + 1, option_y, marker)
                 console.print(x + 2, option_y, option_text, fg=color.white)
         
         # Instructions
         instructions_y = y + height - 3
-        console.print(x + 2, instructions_y, "↑↓: Navigate  Enter: Select  Esc: Exit", fg=color.grey)
+        console.print(x + 1, instructions_y+1, "↑↓: Navigate  Enter: Select  Esc: Exit", fg=color.grey)
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         sounds.play_ui_move_sound()
@@ -354,8 +690,22 @@ class DialogueEventHandler(AskUserEventHandler):
             
         selected_option = options[self.selected_index]
         action = selected_option["action"]
+
+        if action == "trade":
+            if self.npc.tradable == True:
+                return TradeEventHandler(self.engine, self.npc.inventory)
+            else:
+                context = ["RefuseTrade"]
+                self.npc.dialogue_context = context
+                self.current_dialogue = self.dialogue.generate_dialogue(
+                    character=self.npc, context=context
+                )
+                
+                display_name = self.npc.name if self.npc.is_known else self.npc.unknown_name
+                self.engine.message_log.add_message(f"{display_name}: {self.current_dialogue[0]}", color.blue)
+                
         
-        if action == "exit":
+        elif action == "exit":
             self.npc.dialogue_context = ["Goodbye"]
             return MainGameEventHandler(self.engine)
             
@@ -400,6 +750,9 @@ class DialogueEventHandler(AskUserEventHandler):
         return None
 
 
+
+
+
 class LevelUpEventHandler(AskUserEventHandler):
     TITLE = "Level Up!"
 
@@ -411,6 +764,9 @@ class LevelUpEventHandler(AskUserEventHandler):
         height = 12
         x = (console.width - width) // 2
         y = (console.height - height) // 2
+        
+        # Fade the background except for the level up menu
+        super().render_faded(console, x, y, width, height)
 
         # Draw parchment background and ornate border
         MenuRenderer.draw_parchment_background(console, x, y, width, height)
@@ -497,23 +853,26 @@ class ContainerEventHandler(AskUserEventHandler):
         
         # Position window
         x = (console.width - total_width) // 2
-        y = 1
+        y = 10
+        
+        # Fade the background except for the container menu
+        super().render_faded(console, x, y, total_width, height)
 
         # Draw main fantasy parchment background
-        self._draw_parchment_background(console, x, y, total_width, height)
+        MenuRenderer.draw_parchment_background(console, x, y, total_width, height)
         
         # Draw ornate main border
         container_name = getattr(self.container.parent, 'name', 'Container')
         is_corpse = getattr(self.container.parent, 'type', None) == 'Dead'
         title = f"Corpse" if is_corpse else f"Container: {container_name}"
-        self._draw_ornate_border(console, x, y, total_width, height, title)
+        MenuRenderer.draw_ornate_border(console, x, y, total_width, height, title)
 
         # Calculate panel dimensions
         panel_width = (total_width - 6) // 2  # Leave space for divider and margins
         panel_height = height - 6
         
         # Left panel (Player inventory)
-        left_x = x + 3
+        left_x = x + 2
         left_y = y + 3
         
         # Right panel (Container inventory) 
@@ -528,12 +887,12 @@ class ContainerEventHandler(AskUserEventHandler):
                 console.print(right_x + px, right_y + py, " ", bg=panel_bg)
         
         # Draw decorative divider between panels
-        divider_x = left_x + panel_width + 1
-        self._draw_decorative_divider(console, divider_x, left_y, panel_height)
+        divider_x = left_x + panel_width
+        #self._draw_decorative_divider(console, divider_x, left_y, panel_height)
         
         # Panel headers
-        player_header = "✦ Your Inventory ✦"
-        container_header = f"✦ Corpse ✦" if is_corpse else f"✦ {container_name} ✦"
+        player_header = "Your Inventory"
+        container_header = f"Corpse" if is_corpse else f"{container_name}"
         
         # Center headers in panels
         player_header_x = left_x + (panel_width - len(player_header)) // 2
@@ -612,7 +971,7 @@ class ContainerEventHandler(AskUserEventHandler):
             console.print(right_x + 4, item_start_y, "~ Empty ~", fg=(120, 100, 80), bg=panel_bg)
         
         # Instructions footer
-        instructions = "✦ [Tab] Switch Panel · [↑↓] Navigate · [Enter] Transfer · [Esc] Close ✦"
+        instructions = "[Tab] Switch Panel · [↑↓] Navigate ·  [Enter] Transfer · [Esc] Close"
         inst_x = x + (total_width - len(instructions)) // 2
         console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
 
@@ -761,57 +1120,11 @@ class ContainerEventHandler(AskUserEventHandler):
         # Return back to container handler
         return self
 
-    def _draw_parchment_background(self, console, x: int, y: int, width: int, height: int):
-        """Draw a beautiful parchment-like background."""
-        # Rich parchment color gradient
-        base_bg = (45, 35, 25)      # Base parchment
-        light_bg = (50, 38, 28)     # Slightly lighter
-        
-        for py in range(height):
-            for px in range(width):
-                # Create subtle texture variation
-                bg_color = light_bg if (px + py) % 3 == 0 else base_bg
-                console.print(x + px, y + py, " ", bg=bg_color)
-
-    def _draw_ornate_border(self, console, x: int, y: int, width: int, height: int, title: str):
-        """Draw a smooth fantasy border with decorative elements."""
-        # Elegant color scheme
-        border_fg = (139, 105, 60)     # Rich bronze
-        accent_fg = (205, 164, 87)     # Bright gold
-        title_fg = (255, 215, 0)       # Pure gold
-        bg = (35, 25, 18)              # Dark background for border
-        
-        # Simple, smooth corners and borders
-        # Top border
-        console.print(x, y, "╔", fg=accent_fg, bg=bg)
-        for i in range(1, width - 1):
-            console.print(x + i, y, "═", fg=border_fg, bg=bg)
-        console.print(x + width - 1, y, "╗", fg=accent_fg, bg=bg)
-        
-        # Bottom border
-        console.print(x, y + height - 1, "╚", fg=accent_fg, bg=bg)
-        for i in range(1, width - 1):
-            console.print(x + i, y + height - 1, "═", fg=border_fg, bg=bg)
-        console.print(x + width - 1, y + height - 1, "╝", fg=accent_fg, bg=bg)
-        
-        # Side borders - smooth
-        for i in range(1, height - 1):
-            console.print(x, y + i, "║", fg=border_fg, bg=bg)
-            console.print(x + width - 1, y + i, "║", fg=border_fg, bg=bg)
-        
-        # Clean title
-        title_decorated = f"✦ {title} ✦"
-        title_start = x + (width - len(title_decorated)) // 2
-        # Clear title area
-        for tx in range(len(title_decorated)):
-            console.print(title_start + tx, y, " ", bg=bg)
-        console.print(title_start, y, title_decorated, fg=title_fg, bg=bg)
-
     def _draw_decorative_divider(self, console, x: int, y: int, height: int):
         """Draw a smooth decorative vertical divider."""
         divider_fg = (139, 105, 60)  # Bronze
         accent_fg = (205, 164, 87)   # Gold accent
-        bg = (40, 30, 22)            # Slightly lighter than parchment
+        bg = (color.parchment_dark)            # Slightly lighter than parchment
         
         for dy in range(height):
             console.print(x, y + dy, " ", bg=bg)
@@ -873,6 +1186,9 @@ class InventoryEventHandler(AskUserEventHandler):
         else:
             x = max(0, console.width - total_width - 3)
         y = 1
+        
+        # Fade the background except for the inventory menu
+        super().render_faded(console, x, y, total_width, height)
 
         # Draw main fantasy parchment background
         MenuRenderer.draw_parchment_background(console, x, y, total_width, height)
@@ -2361,6 +2677,8 @@ class SpellCastingHandler(AskUserEventHandler):
         super().on_render(console)
         
         if not self.available_spells:
+            # Fade the entire background
+            super().render_faded(console)
             # Show "no spells known" message
             window_width = 40
             window_height = 8
@@ -2381,6 +2699,9 @@ class SpellCastingHandler(AskUserEventHandler):
         
         x = (console.width - window_width) // 2
         y = (console.height - window_height) // 2
+        
+        # Fade the background except for the spell menu
+        super().render_faded(console, x, y, window_width, window_height)
         
         # Draw main window
         MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
@@ -2461,7 +2782,7 @@ class SpellCastingHandler(AskUserEventHandler):
                 description = "???"
             else:
             
-                description = selected_spell.get_description()
+                description = selected_spell.get_description(self.engine.player)
             # Word wrap the description
             
             desc_width = window_width - 4
@@ -2678,7 +2999,7 @@ class LookHandler(SelectIndexHandler):
         self.detail_index = 0  # Index for cycling through items at location
         self.scroll_offset = 0  # For scrolling through text
         self.current_tab = LookHandler.last_selected_tab  # Start with remembered tab
-        self.tab_names = ["Overview", "Damage", "Coatings"]
+        self.tab_names = ["Glance", "Damages", "Coatings","Inspect"]
 
     def on_index_selected(self, x: int, y: int) -> Optional[ActionOrHandler]:
         """Return to main handler when location is selected."""
@@ -2687,6 +3008,9 @@ class LookHandler(SelectIndexHandler):
     def on_render(self, console: tcod.Console) -> None:
         # Highlight tile underneath cursor
         super(SelectIndexHandler, self).on_render(console)
+        
+        # Fade the entire background for the look interface
+        super().render_faded(console)
 
         x, y = self.engine.mouse_location
         x, y = int(x), int(y)
@@ -2918,8 +3242,43 @@ class LookHandler(SelectIndexHandler):
             return self.build_damage_content(current_item, max_width)
         elif self.current_tab == 2:  # Coatings
             return self.build_coatings_content(current_item, max_width)
+        elif self.current_tab == 3:  # Inspect
+            return self.build_inspect_content(current_item, max_width)
         return []
-    
+
+    def build_inspect_content(self, current_item: dict, max_width: int) -> list:
+        lines = []
+
+        if current_item['type'] == 'entity':
+            entity = current_item['object']
+        # Add entity description
+
+        if hasattr(entity, 'description') and entity.description:
+            # Wrap long descriptions to multiple lines
+            description_text = entity.description
+            words = description_text.split()
+            current_line = []
+            current_length = 0
+            
+            for word in words:
+                word_length = len(word)
+                space_length = 1 if current_line else 0
+                
+                if current_length + space_length + word_length <= max_width:
+                    current_line.append(word)
+                    current_length += space_length + word_length
+                else:
+                    # Add completed line and start new line
+                    if current_line:
+                        lines.append([(' '.join(current_line), color.white)])
+                    current_line = [word]
+                    current_length = word_length
+            
+            # Add the last line if it has content
+            if current_line:
+                lines.append([(' '.join(current_line), color.white)])
+        return lines
+
     def build_overview_content(self, current_item: dict, max_width: int) -> list:
         """Build overview content - general information."""
         lines = []
@@ -2946,37 +3305,11 @@ class LookHandler(SelectIndexHandler):
                             name_text = f"You don't know what this is."
                         lines.append([(name_text, color.white)])
                     else:
-                        lines.append([(entity.name, color.white)])
+                        lines.append([(entity.name, color.light_blue)])
             else:
                 if hasattr(entity, 'name'):
-                    lines.append([(entity.name, color.white)])
+                    lines.append([(entity.name, color.light_blue)])
                     
-            # Add entity description
-            if hasattr(entity, 'description') and entity.description:
-                # Wrap long descriptions to multiple lines
-                description_text = entity.description
-                words = description_text.split()
-                current_line = []
-                current_length = 0
-                
-                for word in words:
-                    word_length = len(word)
-                    space_length = 1 if current_line else 0
-                    
-                    if current_length + space_length + word_length <= max_width:
-                        current_line.append(word)
-                        current_length += space_length + word_length
-                    else:
-                        # Add completed line and start new line
-                        if current_line:
-                            lines.append([(' '.join(current_line), color.white)])
-                        current_line = [word]
-                        current_length = word_length
-                
-                # Add the last line if it has content
-                if current_line:
-                    lines.append([(' '.join(current_line), color.white)])
-
             # Build comprehensive equipment description
             if hasattr(entity, 'equipment') and entity.equipment:
                 equipment = entity.equipment
@@ -3037,6 +3370,9 @@ class LookHandler(SelectIndexHandler):
                 lines.append([("It has a lock.", color.red)])
                 lines.append([("", color.white)])  # Empty line for spacing
 
+            if hasattr(entity, 'tradable') and entity.tradable:
+                lines.append([(f"{(entity.knowledge['pronouns']['subject']).capitalize()} seems willing to trade.", color.light_green)])
+
             # Add opinion if sentient
             if hasattr(entity, 'sentient') and entity.sentient:
                 if hasattr(entity, "opinion"):
@@ -3088,7 +3424,7 @@ class LookHandler(SelectIndexHandler):
                 
                 if not damaged_parts:
                     # Wrap "No visible damage" message
-                    message = "No visible damage."
+                    message = "Healthy."
                     words = message.split()
                     current_line = []
                     current_length = 0
@@ -3265,7 +3601,7 @@ class LookHandler(SelectIndexHandler):
                 
                 if not coated_parts:
                     # Wrap "No coatings detected" message
-                    message = "No coatings detected."
+                    message = "Clean."
                     words = message.split()
                     current_line = []
                     current_length = 0
@@ -3678,9 +4014,14 @@ class MainGameEventHandler(EventHandler):
         elif key in MOVE_KEYS and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT):
             dx, dy = MOVE_KEYS[key]
             preferred_target = getattr(player, 'current_attack_type', None)
+            
+            # Get the target actor at the attack location
+            target_x = player.x + dx
+            target_y = player.y + dy
+            target_actor = self.engine.game_map.get_actor_at_location(target_x, target_y)
 
             # Convert preferred target tag to specific body part for ranged attacks
-            if preferred_target:
+            if preferred_target and target_actor:
                 # Find all body parts with the preferred target tag  
                 import random
                 matching_parts = []
@@ -3692,10 +4033,16 @@ class MainGameEventHandler(EventHandler):
                 # Randomly select one matching part if any found
                 if matching_parts:
                     target_part = random.choice(matching_parts)
-            else:
+                else:
+                    target_part = None
+            elif target_actor:
                 if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
                     # Target random part
                     target_part = random.choice(list(target_actor.body_parts.body_parts.keys()))
+                else:
+                    target_part = None
+            else:
+                target_part = None
 
             equipment = getattr(player, 'equipment', None)
             held_items = []
@@ -3820,7 +4167,8 @@ class MainGameEventHandler(EventHandler):
         elif key in WAIT_KEYS:
             action = WaitAction(player)
         elif key ==tcod.event.K_ESCAPE:
-            raise SystemExit()
+            print("Test exit")
+            return PauseHandler(self.engine)
         elif key == tcod.event.KeySym.V:
             return HistoryViewer(self.engine)
         elif key == tcod.event.KeySym.G:
@@ -3963,6 +4311,87 @@ CURSOR_Y_KEYS = {
     tcod.event.KeySym.PAGEDOWN: 10,
 }
 
+class PauseHandler(AskUserEventHandler):
+
+
+    def __init__(self, engine: Engine):
+        super().__init__(engine)
+        self.categories = ["Resume Game", "Save and Exit", "Exit without Saving", "Settings"]
+        self.selected_option = 0
+        self.scroll_offset = 0
+        self.max_visible_lines = 10  # Max lines to show in options list before scrolling
+        self.selected_option = 0  # Default to first option
+
+    """Open pause menu, settings, save and exit, etc"""
+    def on_render(self, console):
+        super().on_render(console)  # Draw the main state as the background.
+        window_width = 34
+        window_height = 11
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height -4) // 2
+        
+        # Fade the entire screen except for the menu area
+        super().render_faded(console, x, y, window_width, window_height)
+        
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Game Paused")
+
+        self.render_options(console, x-2, y-2)
+    
+    def process_response(self, response: str):
+        if response == "Resume Game":
+            return MainGameEventHandler(self.engine)
+        elif response == "Save and Exit":
+            self.engine.save_as("SAVEGAME/savegame.sav")
+            raise exceptions.QuitWithoutSaving()
+        elif response == "Exit without Saving":
+            raise exceptions.QuitWithoutSaving()
+        elif response == "Settings":
+            return SettingsMenuHandler(self.engine)
+        else:
+            return MainGameEventHandler(self.engine)
+
+    def ev_keydown(self, event):
+        
+        if event.sym == tcod.event.KeySym.ESCAPE or event.sym == tcod.event.KeySym.F:
+            # Return to main game handler to close character sheet
+            from input_handlers import MainGameEventHandler
+            return MainGameEventHandler(self.engine)
+        elif event.sym == tcod.event.KeySym.UP:
+            if event.mod & (tcod.event.Modifier.LSHIFT | tcod.event.Modifier.RSHIFT):
+                # Shift+Up: Scroll up
+                self.scroll_offset = max(0, self.scroll_offset - 1)
+                self._play_ui_sound()
+            else:
+                # Move to previous category
+                self.selected_option = (self.selected_option - 1) % len(self.categories)
+                self._play_ui_sound()
+        elif event.sym == tcod.event.KeySym.DOWN:
+            if event.mod & (tcod.event.Modifier.LSHIFT | tcod.event.Modifier.RSHIFT):
+                # Shift+Down: Scroll down
+                max_scroll = max(0, self._calculate_total_lines() - self.max_visible_lines)
+                self.scroll_offset = min(max_scroll, self.scroll_offset + 1)
+                self._play_ui_sound()
+            else:
+                # Move to next category
+                self.selected_option = (self.selected_option + 1) % len(self.categories)
+                self._play_ui_sound()
+        elif event.sym == tcod.event.KeySym.SPACE:
+            self._play_ui_sound()
+            return self.process_response(self.categories[self.selected_option])
+        # Always return self to stay in this handler (except for ESC/F above)
+        return self
+
+    def _play_ui_sound(self):
+        import sounds
+        sounds.play_ui_move_sound()
+
+    def render_options(self, console: tcod.Console, x, y):
+        for i, option in enumerate(self.categories):
+            if i == self.selected_option:
+                console.print(x + 4, y + 4 + i * 2, (">" + option), fg=color.yellow)
+            else:
+                console.print(x + 4, y + 4 + i * 2, (" " +option), fg=color.white)
 
 class HistoryViewer(EventHandler):
     """Print the history on a larger window which can be navigated."""
@@ -3976,6 +4405,9 @@ class HistoryViewer(EventHandler):
         super().on_render(console)  # Draw the main state as the background.
 
         log_console = tcod.Console(console.width - 6, console.height - 6)
+        
+        # Fade the entire background
+        super().render_faded(console)
         
         from render_functions import MenuRenderer
         
@@ -4327,4 +4759,222 @@ class CheatMaxLevel(EventHandler):
     def on_render(self, console: tcod.Console) -> None:
         """Render the main game in the background"""
         self.engine.render(console)
+
+
+class TextInputHandler(BaseEventHandler):
+    """Handler for text input with typing support."""
+    
+    def __init__(self, engine: Engine = None, title: str = "Enter Text", prompt: str = "", max_length: int = 50, callback=None, parent_handler=None):
+        # Initialize base handler
+        super().__init__()
+        self.engine = engine
+        self.title = title
+        self.prompt = prompt
+        self.max_length = max_length
+        self.text = ""
+        self.cursor_pos = 0
+        self.callback = callback
+        self.parent_handler = parent_handler
+    def _insert_char(self, char: str) -> None:
+        """Insert a character at the cursor position."""
+        if len(self.text) < self.max_length and char:
+            self.text = self.text[:self.cursor_pos] + char + self.text[self.cursor_pos:]
+            self.cursor_pos += 1
+            
+    def _delete_char(self, forward: bool = False) -> None:
+        """Delete a character (backspace or delete)."""
+        if forward and self.cursor_pos < len(self.text):
+            # Delete character at cursor
+            self.text = self.text[:self.cursor_pos] + self.text[self.cursor_pos + 1:]
+        elif not forward and self.cursor_pos > 0:
+            # Backspace - delete character before cursor
+            self.text = self.text[:self.cursor_pos - 1] + self.text[self.cursor_pos:]
+            self.cursor_pos -= 1
+            
+    def _move_cursor(self, direction: str) -> None:
+        """Move cursor in specified direction."""
+        if direction == "left":
+            self.cursor_pos = max(0, self.cursor_pos - 1)
+        elif direction == "right":
+            self.cursor_pos = min(len(self.text), self.cursor_pos + 1)
+        elif direction == "home":
+            self.cursor_pos = 0
+        elif direction == "end":
+            self.cursor_pos = len(self.text)
+            
+    def _key_to_char(self, event: tcod.event.KeyDown) -> str:
+        """Convert a key event to a character."""
+        key = event.sym
+        shift_pressed = event.mod & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT)
+        
+        # Letters (a-z)
+        if tcod.event.KeySym.A <= key <= tcod.event.KeySym.Z:
+            char = chr(ord('a') + (key - tcod.event.KeySym.A))
+            return char.upper() if shift_pressed else char
+        
+        # Numbers (0-9) 
+        elif tcod.event.KeySym.N0 <= key <= tcod.event.KeySym.N9:
+            if shift_pressed:
+                shift_symbols = ")!@#$%^&*("
+                return shift_symbols[key - tcod.event.KeySym.N0]
+            else:
+                return str(key - tcod.event.KeySym.N0)
+        
+        # Common keys
+        key_map = {
+            tcod.event.KeySym.SPACE: " ",
+            tcod.event.KeySym.MINUS: "_" if shift_pressed else "-",
+            tcod.event.KeySym.EQUALS: "+" if shift_pressed else "=",
+            tcod.event.KeySym.PERIOD: ">" if shift_pressed else ".",
+            tcod.event.KeySym.COMMA: "<" if shift_pressed else ",",
+        }
+        
+        return key_map.get(key, "")
+        
+    def render_faded(self, console: tcod.Console, menu_x: int = None, menu_y: int = None, menu_width: int = None, menu_height: int = None) -> None:
+        # Fades the current console to create a dimmed background effect for menus
+        # Excludes the menu area from fading if menu bounds are provided
+        fade_alpha = 0.4  # Fade strength (0.0 = no fade, 1.0 = completely faded)
+        fade_color = (20, 20, 30)  # Dark blue-gray tint
+        
+        for x in range(console.width):
+            for y in range(console.height):
+                # Skip fading pixels that are within the menu bounds
+                if (menu_x is not None and menu_y is not None and 
+                    menu_width is not None and menu_height is not None):
+                    if (menu_x <= x < menu_x + menu_width and 
+                        menu_y <= y < menu_y + menu_height):
+                        continue
+                
+                existing_color = console.bg[x, y]
+                # Safe color blending using floating point math
+                blended_color = (
+                    int(existing_color[0] * (1 - fade_alpha) + fade_color[0] * fade_alpha),
+                    int(existing_color[1] * (1 - fade_alpha) + fade_color[1] * fade_alpha),
+                    int(existing_color[2] * (1 - fade_alpha) + fade_color[2] * fade_alpha),
+                )
+                console.bg[x, y] = blended_color
+        
+    def on_exit(self) -> Optional[ActionOrHandler]:
+        """Handle exiting the text input - return to main game if we have engine."""
+        if self.engine is not None:
+            return MainGameEventHandler(self.engine)
+        return None
+        
+    def on_render(self, console: tcod.Console) -> None:
+        # Render background appropriately based on context
+        if self.engine is not None:
+            # In-game: render the game world
+            self.engine.render(console)
+        elif self.parent_handler is not None:
+            # Setup screen: let parent render its background first
+            self.parent_handler.on_render(console)
+        # If neither engine nor parent, keep existing console content (overlay mode)
+        
+        # Calculate window dimensions
+        window_width = max(40, len(self.prompt) + 10, self.max_length + 10)
+        window_height = 8
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height) // 2
+        
+        # Fade the background except for the input window
+        self.render_faded(console, x, y, window_width, window_height)
+        
+        # Draw input window
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, self.title)
+        
+        # Draw prompt if provided
+        if self.prompt:
+            console.print(x + 2, y + 2, self.prompt, fg=(200, 180, 140))
+        
+        # Draw input field
+        input_y = y + 4 if self.prompt else y + 3
+        
+        # Input field background
+        field_width = window_width - 4
+        for i in range(field_width):
+            console.print(x + 2 + i, input_y, " ", bg=(60, 40, 25))
+        
+        # Draw input text
+        display_text = self.text[:field_width - 2]  # Leave room for cursor
+        console.print(x + 3, input_y, display_text, fg=(255, 255, 255), bg=(60, 40, 25))
+        
+        # Draw cursor (blinking effect)
+        import time
+        if int(time.time() * 2) % 2:  # Simple blinking
+            cursor_x = x + 3 + min(len(display_text), self.cursor_pos)
+            if cursor_x < x + 2 + field_width - 1:  # Make sure cursor is visible
+                console.print(cursor_x, input_y, "_", fg=(255, 215, 0), bg=(60, 40, 25))
+        
+        # Instructions
+        instructions_y = y + window_height - 2
+        console.print(x + 2, instructions_y, "[Enter] Confirm  [Esc] Cancel  [Backspace] Delete", fg=(180, 140, 100))
+        
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        key = event.sym
+        
+        # Handle escape - cancel input
+        if key == tcod.event.KeySym.ESCAPE:
+            return self._handle_cancel()
+            
+        # Handle enter - submit text
+        elif key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.KP_ENTER:
+            return self._handle_submit()
+            
+        # Handle deletion
+        elif key == tcod.event.KeySym.BACKSPACE:
+            self._delete_char(forward=False)
+        elif key == tcod.event.KeySym.DELETE:
+            self._delete_char(forward=True)
+            
+        # Handle cursor movement
+        elif key == tcod.event.KeySym.LEFT:
+            self._move_cursor("left")
+        elif key == tcod.event.KeySym.RIGHT:
+            self._move_cursor("right")
+        elif key == tcod.event.KeySym.HOME:
+            self._move_cursor("home")
+        elif key == tcod.event.KeySym.END:
+            self._move_cursor("end")
+            
+        # Handle character input
+        else:
+            char = self._key_to_char(event)
+            if char:
+                self._insert_char(char)
+            # Fallback for unicode input
+            elif hasattr(event, 'unicode') and event.unicode and event.unicode.isprintable():
+                self._insert_char(event.unicode)
+                
+        return None
+        
+    def _handle_cancel(self) -> Optional[ActionOrHandler]:
+        """Handle cancellation (ESC key)."""
+        if self.engine is not None:
+            return MainGameEventHandler(self.engine)
+        elif self.parent_handler is not None:
+            if self.callback:
+                result = self.callback(None)
+                return result if result is not None else self.parent_handler
+            return self.parent_handler
+        else:
+            return self.callback(None) if self.callback else None
+            
+    def _handle_submit(self) -> Optional[ActionOrHandler]:
+        """Handle text submission (Enter key)."""
+        if self.callback:
+            result = self.callback(self.text)
+            if result is not None:
+                return result
+        
+        # Fallback returns
+        if self.engine is not None:
+            return MainGameEventHandler(self.engine)
+        return None
+
+    def ev_textinput(self, event: tcod.event.TextInput) -> Optional[ActionOrHandler]:
+        """Handle text input events for typing."""
+        self._insert_char(event.text)
+        return None
 

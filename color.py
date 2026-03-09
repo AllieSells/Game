@@ -74,6 +74,7 @@ bronze_border = (139, 105, 60)
 bronze_text = (160, 120, 70)
 gold_accent = (220, 180, 50)
 fantasy_text = (200, 170, 140)
+selected_bronze = (80, 60, 30)
 
 menu_title = (255, 255, 63)
 menu_text = white

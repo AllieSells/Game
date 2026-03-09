@@ -7,7 +7,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 
-from components.body_parts import BodyParts, AnatomyType, BodyPartType
+from components.entity.body.body_parts import BodyParts, AnatomyType, BodyPartType
 
 def test_hand_tag_uniqueness():
     """Test that hands have unique tags and don't share data."""

@@ -37,7 +37,16 @@ class ConversationNode:
         # Location: Asking for location
         # Response: NPC has already responded
         # Greeting: Initial greeting
-
+        if "RefuseTrade" in context_str:
+            if self.mood == "Neutral":
+                responses = {
+                    "RefuseTrade":[
+                        "I have nothing to trade with you.",
+                        "I don't have anything to trade.",
+                        "Sorry, I have nothing to trade.",
+                    ]
+                }
+                return random.choice(responses["RefuseTrade"]), ["Response"]
 
         if "Greeting" in context_str:
             if self.mood == "Neutral":

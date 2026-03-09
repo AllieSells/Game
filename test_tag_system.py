@@ -1,5 +1,5 @@
 """Test script for the tag-based equipment system."""
-from components.body_parts import BodyParts, AnatomyType
+from components.entity.body.body_parts import BodyParts, AnatomyType
 from components.equippable import Sword, Helmet, Torch, Boots, Gauntlets, LeatherArmor, Shield
 
 body_parts = BodyParts(AnatomyType.HUMANOID, max_hp=30)
