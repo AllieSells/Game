@@ -371,7 +371,7 @@ class TurnManager:
         if random.random() < 0.10:
             # 10% chance to recover 10% of max mana
             mana_recovered = int(self.engine.player.mana_max * 0.10)
-            print(f"DEBUG: Recovered {mana_recovered} mana due to natural regeneration.")
+            #print(f"DEBUG: Recovered {mana_recovered} mana due to natural regeneration.")
             self.engine.player.mana = min(self.engine.player.mana + mana_recovered, self.engine.player.mana_max)
         
         if has_darkness:

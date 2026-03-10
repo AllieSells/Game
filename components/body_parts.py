@@ -10,7 +10,7 @@ from enum import Enum, auto
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 from components.base_component import BaseComponent
-from entity import T
+
 from liquid_system import LiquidType
 import random
 

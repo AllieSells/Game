@@ -489,6 +489,44 @@ class FireFlicker:
             console.print(x, y, "x", fg=(r, g, 0))  # yellow-orange flicker
         self.frames -= 1
 
+class EntityFireFlicker:
+    def __init__(self, entity):
+        self.entity = entity
+        self.frames = 30  # Longer duration since it's more expensive to create
+        # Render priority: 2 = above actors to overlay the fire effect
+        self.render_priority = 2
+        self.original_color = entity.color  # Store original color
+
+    def tick(self, console, game_map):
+        # Check if entity still exists and has fire coating
+        if not hasattr(self.entity, 'body_parts') or not self.entity.body_parts:
+            self.frames = 0  # End animation if no body parts
+            return
+            
+        # Check if entity still has fire coating on any body part
+        from liquid_system import LiquidType
+        has_fire_coating = any(
+            part.coating == LiquidType.FIRE 
+            for part in self.entity.body_parts.body_parts.values()
+        )
+        
+        if not has_fire_coating:
+            self.frames = 0  # End animation if no fire coating
+            return
+            
+        x, y = self.entity.x, self.entity.y
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        if game_map.visible[x, y]:
+            # Create flickering fire effect using entity's character
+            r = random.randint(200, 255)
+            g = random.randint(50, 150)
+            console.print(x, y, self.entity.char, fg=(r, g, 0))
+            
+        self.frames -= 1
+
 class BonefireFlicker:
     def __init__(self, position):
         self.position = position

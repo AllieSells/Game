@@ -392,6 +392,9 @@ sigil_stone = Item(
 # =====================================================
 # FUNCTIONS
 # =====================================================
+import roman
+
+
 
 def generate_sigil_stone() -> Item:
     # Use current random state - no individual seeding needed
@@ -521,38 +524,6 @@ def get_random_coins(min_amount: int, max_amount: int) -> Item:
 # EQUIPMENT GENERATORS
 # =====================================================
 
-def generate_armor(specific: Optional[str] = None) -> Item:
-    armor_types = {
-        "leather cap": leather_cap,
-        "leather armor": leather_armor,
-        "leather leggings": leather_leggings,
-        "leather boots": leather_boot,
-        "chain mail": chain_mail
-    }
-    if specific and specific in armor_types:
-        if random.random() < 0.2:
-            armor = copy.deepcopy(armor_types[specific])
-            armor.equippable.defense_bonus += 1
-            armor.name = armor.name + " +I"
-            armor.rarity_color = color.uncommon
-            return armor
-        else:
-            armor = copy.deepcopy(armor_types[specific])
-            return armor
-    # Return None if specific armor type not found
-    return None
-
-
-def roll_enchantment(item: Item) -> Item:
-    # Check if item is equippable first
-    if item.equippable:
-        # Check if item is armor
-        if item.equippable.defense_bonus > 0:
-            item.equippable.defense_bonus += 1
-            item.name = item.name + " +I"
-            item.rarity_color = color.uncommon
-
-
     
 
 
@@ -617,10 +588,9 @@ player = Actor(
     preferred_dodge_direction="north",  # Tendency to dodge towards the north (for flavor)
 )
 
-spider = Actor(
-    char="m",
-    sight_radius=6,
-    color=(161, 156, 146),
+giant_spider = Actor(
+    char="M",
+    color=(color.gray),
     name = "Giant Spider",
     description="A large arachnid",
     ai_cls=HostileEnemy,
@@ -635,6 +605,25 @@ spider = Actor(
     verb_past="bit",
     verb_participial="biting",
     dodge_chance=0.10,  # 10% chance to dodge attacks
+)
+
+kobold = Actor(
+    char= "k",
+    color = (222, 220, 121),
+    name = "Kobold",
+    description="A small reptillian humanoid, commonly found in caves.",
+    ai_cls=HostileEnemy,
+    equipment=Equipment(),
+    fighter=Fighter(hp=6, base_defense=0, base_power=3),
+    inventory=Inventory(capacity=0),
+    level=copy.deepcopy(basic_entity_levelling),
+    speed=110,
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=6),
+    verb_base="scratch",
+    verb_present="scratches",
+    verb_past="scratched",
+    verb_participial="scratching",
+    dodge_chance=0.10, 
 )
 
 shade = Actor(

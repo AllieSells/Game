@@ -17,8 +17,9 @@ class SimpleEnemySpawner:
         # Enemy spawn chances by floor (floor: {entity_factory: weight})
         self.enemy_spawn_table: Dict[int, Dict[callable, int]] = {
             0: {
-                lambda: copy.deepcopy(entity_factories.goblin): 80,
-                lambda: copy.deepcopy(entity_factories.spider): 20,
+                lambda: copy.deepcopy(entity_factories.goblin): 70,
+                lambda: copy.deepcopy(entity_factories.giant_spider): 5,
+                lambda: copy.deepcopy(entity_factories.kobold): 25,
             },
             3: {
                 lambda: copy.deepcopy(entity_factories.troll): 15,

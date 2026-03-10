@@ -4,6 +4,7 @@ import copy
 import entity_factories
 import sys
 import os
+import entity
 
 def get_data_path(filename):
     """Get the correct path for data files in both development and PyInstaller."""
@@ -52,9 +53,15 @@ def create_item(item_name):
         
         # If it's a function, call it; if it's an object, copy it
         if callable(item_or_function):
-            return copy.deepcopy(item_or_function())
+            item = copy.deepcopy(item_or_function())
         else:
-            return copy.deepcopy(item_or_function)
+            item = copy.deepcopy(item_or_function)
+        
+        # Roll for enchantments on all created items
+        if hasattr(item, 'roll_for_enchantment'):
+            item.roll_for_enchantment()
+            
+        return item
     else:
         print(f"Unknown item: {item_name} (not found in entity_factories)")
         return None

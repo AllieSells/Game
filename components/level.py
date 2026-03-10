@@ -116,11 +116,11 @@ class Level(BaseComponent):
             self.add_xp({trait_name: xp})
 
     def add_xp(self, trait_awards: Dict[str, int], multiplier: float = 1.0) -> None:
-        print(trait_awards)
+        #print(trait_awards)
         any_level_ups = False  # Track if any level ups occurred
         
         for trait_name, xp in trait_awards.items():
-            print(f"Adding {int(xp * multiplier)} XP to {trait_name} (Before: {self.total_xp(trait_name)} XP)")
+            #print(f"Adding {int(xp * multiplier)} XP to {trait_name} (Before: {self.total_xp(trait_name)} XP)")
             if trait_name in self.traits:
                 self.traits[trait_name]['xp'] += int(xp * multiplier)
                 #print(f"Added {int(xp * multiplier)} XP to {trait_name} (Total: {self.traits[trait_name]['xp']} XP)")

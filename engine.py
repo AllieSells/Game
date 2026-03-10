@@ -155,13 +155,33 @@ class Engine:
                                 traceback.print_exc()
                                 pass
                 
-                # Get liquid system
+                # Get liquid system - check for fire coatings on tiles
                 for coating in self.game_map.liquid_system.coatings.values():
                     if coating.liquid_type == LiquidType.FIRE:
                         # Add flicker animation to animation queue
                         self.animation_queue.append(
                             FireFlicker(coating.get_pos())
                         )
+                        
+                # Check entities for fire coatings on body parts
+                if hasattr(entity, 'body_parts') and entity.body_parts:
+                    # Check if this entity has fire coating on any body part
+                    has_fire_coating = any(
+                        part.coating == LiquidType.FIRE 
+                        for part in entity.body_parts.body_parts.values()
+                    )
+                    
+                    if has_fire_coating:
+                        # Check if we already have an EntityFireFlicker animation for this entity
+                        entity_has_fire_animation = any(
+                            hasattr(anim, 'entity') and anim.entity == entity 
+                            and type(anim).__name__ == 'EntityFireFlicker'
+                            for anim in self.animation_queue
+                        )
+                        
+                        if not entity_has_fire_animation:
+                            from animations import EntityFireFlicker
+                            self.animation_queue.append(EntityFireFlicker(entity))
                 
                 
                 # Periodically spawn fire animations for campfire and bonfire items on the map.

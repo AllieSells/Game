@@ -3107,7 +3107,7 @@ class LookHandler(SelectIndexHandler):
         
         # Build scrollable text content below the preview
         text_details_y = preview_y + preview_size + 2  # Leave some space after preview
-        text_area_width = sidebar_width - 4  # Use full width minus margins
+        text_area_width = sidebar_width - 2  # Use full width minus margins
         
         # Reserve space for compact controls (only 2 lines needed now)
         controls_height = 2
@@ -3251,6 +3251,8 @@ class LookHandler(SelectIndexHandler):
 
         if current_item['type'] == 'entity':
             entity = current_item['object']
+        else:
+            return
         # Add entity description
 
         if hasattr(entity, 'description') and entity.description:
@@ -3445,8 +3447,7 @@ class LookHandler(SelectIndexHandler):
                     if current_line:
                         lines.append([(' '.join(current_line), color.green)])
                 else:
-                    lines.append([("Damage Assessment:", color.white)])
-                    lines.append([("", color.white)])  # Empty line
+                    pass
                     
                     for part in damaged_parts:
                         injury_text = ""
@@ -3542,7 +3543,7 @@ class LookHandler(SelectIndexHandler):
                             lines.append([(' '.join(current_line), color.yellow)])
             else:
                 # Wrap "No body part information available" message
-                message = "No body part information available."
+                message = "Undamaged."
                 words = message.split()
                 current_line = []
                 current_length = 0
@@ -3622,8 +3623,7 @@ class LookHandler(SelectIndexHandler):
                     if current_line:
                         lines.append([(' '.join(current_line), color.white)])
                 else:
-                    lines.append([("Coating Analysis:", color.white)])
-                    lines.append([("", color.white)])  # Empty line
+                    pass
                     
                     for part in coated_parts:
                         coating_color = part.coating.get_display_color()
@@ -3654,7 +3654,7 @@ class LookHandler(SelectIndexHandler):
                             lines.append([(' '.join(current_line), coating_color)])
             else:
                 # Wrap "No body part information available" message
-                message = "No body part information available."
+                message = "Clean."
                 words = message.split()
                 current_line = []
                 current_length = 0

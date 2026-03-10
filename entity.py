@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from components.body_parts import BodyParts, AnatomyType
     from game_map import GameMap
     from liquid_system import LiquidType
+import enchants
 
 
 T = TypeVar("T", bound="Entity")
@@ -103,14 +104,16 @@ class Entity:
                 # Deep copy to avoid shared references
                 item_copy = copy.deepcopy(chosen_item)
                 # Roll for enchantment
-                item_copy.roll_for_enchantment(enchantment_chance=0.2)
+                item_copy.roll_for_enchantment()
                 item_copy.parent = self.inventory
                 
                 # Try to equip if possible
                 equipped = False
                 if item_copy.equippable:
-                    self.equipment.equip_item(item_copy, add_message=False)
+                    result = self.equipment.equip_item(item_copy, add_message=False)
                     equipped = self.equipment.is_item_equipped(item_copy)
+                else:
+                    pass
                 
                 # If it wasn't equipped (not equippable or failed to equip), add to inventory
                 if not equipped:
@@ -295,8 +298,8 @@ class Actor(Entity):
         jobs = {
             'Farmer': 30,
             'Mason': 20,
-            'Brewer': 20,
-            'Scavenger': 50,
+            'Brewer': 10,
+            'Scavenger': 20,
             'Gaurd': 20,
             'Blacksmith': 10,
             'Sigil Carver': 10
@@ -316,6 +319,8 @@ class Actor(Entity):
                 self.tradable = True
                 
                 item = copy.deepcopy(entity_factories.get_random_potion())
+                if hasattr(item, 'roll_for_enchantment'):
+                    item.roll_for_enchantment()
             elif self.job == 'Scavenger':
                 self.tradable = True
                 
@@ -329,6 +334,8 @@ class Actor(Entity):
                     entity_factories.arrow
 
                 ]))
+                if hasattr(item, 'roll_for_enchantment'):
+                    item.roll_for_enchantment()
             elif self.job == 'Guard':
                 self.tradable = False
             elif self.job == 'Blacksmith':
@@ -341,10 +348,14 @@ class Actor(Entity):
                     entity_factories.chain_mail,
                     entity_factories.arrow
                 ]))
+                if hasattr(item, 'roll_for_enchantment'):
+                    item.roll_for_enchantment()
             elif self.job == 'Sigil Carver':
                 self.tradable = True
                 
                 item = copy.deepcopy(entity_factories.generate_sigil_stone())
+                if hasattr(item, 'roll_for_enchantment'):
+                    item.roll_for_enchantment()
             # Only add valid items to inventory
             if item is not None:
                 self.inventory.items.append(item)
@@ -791,6 +802,8 @@ class Item(Entity):
         self.weight = weight
         self.identification_level = identification_level
         self.identification_skill = identification_skill
+        self.enchantment_level = 0
+        self.enchantments = []
         
     def get_description(self, observer=None) -> str:
         """Get the item description, potentially distorted based on observer's skill level."""
@@ -838,16 +851,30 @@ class Item(Entity):
         
         return ' '.join(distorted_words)
 
-    def roll_for_enchantment(self, enchantment_chance: float ) -> Item:
-        """Rolls given chance to apply enchantment"""
-        # Check if item is equippable
-        if self.equippable:
-            if random.random() < enchantment_chance:
-                # Enchant
-                if random.random() < enchantment_chance:
-                    if self.equippable.defense_bonus > 0:
-                        self.equippable.defense_bonus += 1
-                        self.name = self.name + " +I"
-                        self.rarity_color = color.uncommon
-        return self
+    def roll_for_enchantment(self) -> Item:
+        import roman
         
+
+        # Check if this is a weapon by looking at tags
+        is_weapon = hasattr(self, 'tags') and 'weapon' in self.tags
+        
+        if random.random() < 0.25: # 25% chance to be enchanted
+
+            if random.random() < 0.5:  # 50% chance to increase enchantment level
+                self.enchantment_level += 1
+                self.name = f"{self.name} +{roman.toRoman(self.enchantment_level)}"
+                if hasattr(self.equippable, 'power_bonus') and self.equippable.power_bonus > 0:
+                    self.equippable.power_bonus += 1 
+                elif hasattr(self.equippable, 'defense_bonus') and self.equippable.defense_bonus > 0:
+                    self.equippable.defense_bonus += 1
+
+            # Only apply FLAME enchantment to weapons
+            if is_weapon and random.random() < 0.25: # 25% chance for magical enchantment
+                enchantment = enchants.Enchantment.FLAME
+                self.enchantments.append(enchantment)
+                # Update the name to show it's enchanted
+                self.name = f"Flaming {self.name}"
+                self.color = color.orange
+                self.description += " Flames dance along its surface."
+                self.rarity_color = color.orange
+        return self

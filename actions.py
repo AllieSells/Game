@@ -11,8 +11,8 @@ import copy
 if TYPE_CHECKING:
     from engine import Engine
     from entity import Actor, Entity, Item
-    from components.item.container import Container
-    from components.entity.body.body_parts import BodyPartType
+    from components.container import Container
+    from components.body_parts import BodyPartType
     from components.spells import Spell
 else:
     # Runtime import for BodyPartType if needed
@@ -21,7 +21,7 @@ else:
     except ImportError:
         BodyPartType = None
 
-
+import enchants
 import sounds
 import animations
 import components.level
@@ -32,7 +32,7 @@ import components.level
 # Second value adds to base 85% hit chance, so a -20 would make it 65% base hit chance, while a +30 would make it 115% (capped at 100% in code)
 BODY_PART_MODIFIERS = {
     "HEAD": (1.5, -50),    # 50% more damage to head, much harder to hit (35% base hit chance)
-    "NECK": (1.5, -70),    # 50% more damage to neck, very hard to hit (15% base hit chance)
+    "NECK": (1.5, -80),    # 50% more damage to neck, very hard to hit (5% base hit chance)
     "TORSO": (1.0, 15),    # Normal damage, easier to hit (large target) (100% base hit chance)
     "LEG": (0.9, -10),      # Slightly less damage, slightly harder to hit (75% base hit chance)
     "ARM": (0.9, -10),     # Slightly less damage, harder to hit (75% base hit chance)
@@ -898,6 +898,7 @@ class MeleeAction(ActionWithDirection):
                     target.y = new_y
                     self.engine.message_log.add_message(f"{target.name} dodges to the side!", color.teal)
                     break
+
         
         # Create attack description
 
@@ -905,16 +906,32 @@ class MeleeAction(ActionWithDirection):
         # Check for equipped weapon and use its verb if available
         weapon_verb = None
         weapon = None
-        equipped_weapons = None
+        
         if self.entity.equipment:
-            equipped_weapons = [item for item in self.entity.equipment.grasped_items.values() if item and hasattr(item, 'equippable') and item.equippable and item.equippable.equipment_type.name == 'WEAPON']
-        if self.entity.equipment:
-            # Find the first weapon in grasped items
-            for item in self.entity.equipment.grasped_items.values():
-                if (hasattr(item, 'equippable') and item.equippable and 
-                    item.equippable.equipment_type.name == 'WEAPON'):
-                    weapon = item
-                    break
+            # Check body_part_coverage for weapons (new system)
+            all_weapons = []
+            for body_part_name, item in self.entity.equipment.body_part_coverage.items():
+                if item and hasattr(item, 'equippable') and item.equippable:
+                    if item.equippable.equipment_type.name == 'WEAPON':
+                        all_weapons.append(item)
+            
+            equipped_weapons = all_weapons  # For XP system later
+            
+            # Prefer enchanted weapons over non-enchanted ones
+            enchanted_weapons = [w for w in all_weapons if hasattr(w, 'enchantments') and w.enchantments]
+            if enchanted_weapons:
+                weapon = enchanted_weapons[0]  # Use first enchanted weapon
+            elif all_weapons:
+                weapon = all_weapons[0]  # Fallback to first weapon
+            
+            # Also check equipped_items as fallback (legacy system)
+            if not weapon:
+                for eq_type, item in self.entity.equipment.equipped_items.items():
+                    if item and eq_type == 'WEAPON':
+                        weapon = item
+                        break
+        else:
+            equipped_weapons = []
             
             if weapon:
                 # Check for verb attributes on weapon (present tense for combat)
@@ -942,15 +959,18 @@ class MeleeAction(ActionWithDirection):
 
         
         # Play hit sound if hit
-        if hit_success and final_damage > 0:
+        if hit_success and final_damage >= 0:
             # If final blow, play different sound
             if target.fighter.hp <=  final_damage:
                 sounds.play_attack_sound_finishing_blow()
+                #print(f"DEBUG: Playing finishing blow sound {target.fighter.hp} <= {final_damage}. {target.name} Attacked by {self.entity.name} ")
             elif self.entity.equipment:
                 if target.equipment and target.equipment.equipped_items.get('ARMOR'):
                     sounds.play_attack_sound_weapon_to_armor()
+                    #print("DEBUG: Playing weapon to armor sound")
                 else:
                     sounds.play_attack_sound_weapon_to_no_armor()
+                    
         # Play block sound if attack hits but does no damage
         elif hit_success and final_damage == 0:
             sounds.play_block_sound()
@@ -978,7 +998,13 @@ class MeleeAction(ActionWithDirection):
                 self.engine.message_log.add_message(
                     f"{attack_desc}, but misses!", color.dark_gray
                 )
-        elif final_damage > 0:
+
+        if hit_success:
+            if weapon and hasattr(weapon, 'enchantments') and weapon.enchantments:
+                for enchantment in weapon.enchantments:
+                    enchantment.on_hit(self.engine, target, hit_part)
+
+        if final_damage > 0 and hit_success:
             # Apply damage to specific body part (should always have a valid part)
             if hit_part:
                 part_damage = hit_part.take_damage(final_damage)

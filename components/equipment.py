@@ -232,7 +232,7 @@ class Equipment(BaseComponent):
                 # Cover all matching body parts (like leggings on both legs)
                 for part in self.parent.body_parts.get_all_parts().values():
                     if item.equippable.required_tags.issubset(part.tags):
-                       self.body_part_coverage[part.name] = item
+                        self.body_part_coverage[part.name] = item
             else:
                 # Cover only one matching body part - prefer right hand over left hand for weapons
                 target_part = None
