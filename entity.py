@@ -857,10 +857,11 @@ class Item(Entity):
 
         # Check if this is a weapon by looking at tags
         is_weapon = hasattr(self, 'tags') and 'weapon' in self.tags
+        is_armor = hasattr(self, 'tags') and 'armor' in self.tags
         
-        if random.random() < 0.25: # 25% chance to be enchanted
+        if random.random() < 0.5: # 25% chance to be enchanted
 
-            if random.random() < 0.5:  # 50% chance to increase enchantment level
+            if (is_weapon or is_armor) and random.random() < 0.5:  # 50% chance to increase enchantment level
                 self.enchantment_level += 1
                 self.name = f"{self.name} +{roman.toRoman(self.enchantment_level)}"
                 if hasattr(self.equippable, 'power_bonus') and self.equippable.power_bonus > 0:

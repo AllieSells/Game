@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Dict, Tuple, Optional, TYPE_CHECKING
 import random
 import numpy as np
+from components.effect import BurningEffect, PoisonEffect
 import sounds
 from random import randint
 
@@ -419,14 +420,11 @@ class LiquidSystem:
             effect_verb = "heals"
             effect_type = "healing"
         else:
-            # Damage the specific body part if provided
-            if affected_body_part:
-                target.fighter.take_damage(actual_damage, targeted_part=affected_body_part.part_type, causes_bleeding=False)
-            else:
-                target.fighter.take_damage(actual_damage, causes_bleeding=False)
             effect_verb = "burns" if liquid_type == LiquidType.POISON or liquid_type == LiquidType.FIRE else "affects"
             effect_type = "damage"
-        
+            target.fighter.take_damage(actual_damage)
+            target.effects.append(BurningEffect(amount=actual_damage, duration=1)) if liquid_type == LiquidType.FIRE else target.effects.append(PoisonEffect(amount=actual_damage, duration=5))
+            #print(f"Applied {liquid_type.name} effect to {target.name} for {actual_damage} damage.")
         # Generate appropriate message
         liquid_name = liquid_type.get_display_name().capitalize()
         if affected_body_part:

@@ -227,12 +227,18 @@ class Equipment(BaseComponent):
         # Update body part coverage for all items
         if hasattr(self.parent, "body_parts"):
             equip_all = getattr(item.equippable, 'equip_all_matching', False)
-            
+            print(f"[DEBUG equip_item] {item.name}: equip_all_matching={equip_all}, required_tags={item.equippable.required_tags}")
+            all_parts = self.parent.body_parts.get_all_parts()
+            print(f"[DEBUG equip_item] All parts: { {name: part.tags for name, part in all_parts.items()} }")
+
             if equip_all:
                 # Cover all matching body parts (like leggings on both legs)
-                for part in self.parent.body_parts.get_all_parts().values():
-                    if item.equippable.required_tags.issubset(part.tags):
+                for part in all_parts.values():
+                    match = item.equippable.required_tags.issubset(part.tags)
+                    print(f"[DEBUG equip_item]   Part '{part.name}' tags={part.tags} -> match={match}")
+                    if match:
                         self.body_part_coverage[part.name] = item
+                print(f"[DEBUG equip_item] body_part_coverage after equip: {list(self.body_part_coverage.keys())}")
             else:
                 # Cover only one matching body part - prefer right hand over left hand for weapons
                 target_part = None
@@ -343,10 +349,18 @@ class Equipment(BaseComponent):
             process_item(item)
 
     def equip_to_specific_hand(self, item: Item, hand_name: str, add_message: bool = True) -> None:
-        """Directly equip an item to a specific hand, replacing what's there."""
+        """Directly equip an item to a specific hand, replacing what's there.
+        If equip_all_matching is True, equips to ALL matching parts instead."""
         if not item.equippable:
             return
         
+        equip_all = getattr(item.equippable, 'equip_all_matching', False)
+
+        # If the item covers all matching parts, delegate to equip_item which handles that correctly
+        if equip_all:
+            self.equip_item(item, add_message)
+            return
+
         eq_type = item.equippable.equipment_type
         
         # First, unequip any conflicting items
@@ -370,30 +384,38 @@ class Equipment(BaseComponent):
         self._play_equip_sound(item)
 
     def unequip_from_specific_hand(self, hand_name: str, add_message: bool = True) -> None:
-        """Directly unequip item from a specific hand."""
+        """Directly unequip item from a specific hand.
+        If the item has equip_all_matching, unequips from ALL matching parts instead."""
         item_to_unequip = None
         
         # Check grasped_items first (legacy system)
         if hand_name in self.grasped_items:
             item_to_unequip = self.grasped_items[hand_name]
-            del self.grasped_items[hand_name]
-        
         # Check body_part_coverage (modern system)
         elif hand_name in self.body_part_coverage:
             item_to_unequip = self.body_part_coverage[hand_name]
-            del self.body_part_coverage[hand_name]
+        
+        if item_to_unequip:
+            # If equip_all_matching, delegate to unequip_item which clears all coverage at once
+            if getattr(item_to_unequip.equippable, 'equip_all_matching', False):
+                self.unequip_item(item_to_unequip, add_message)
+                return
+
+            # Otherwise remove only from the specific hand
+            if hand_name in self.grasped_items:
+                del self.grasped_items[hand_name]
+            elif hand_name in self.body_part_coverage:
+                del self.body_part_coverage[hand_name]
             
             # Also remove from equipped_items if it's there
-            if item_to_unequip and item_to_unequip.equippable:
+            if item_to_unequip.equippable:
                 eq_type_name = item_to_unequip.equippable.equipment_type.name
                 if eq_type_name in self.equipped_items and self.equipped_items[eq_type_name] == item_to_unequip:
                     del self.equipped_items[eq_type_name]
-        
-        if item_to_unequip:
+            
             if add_message:
                 self.unequip_message(item_to_unequip.name)
             
-            # Play unequip sound
             self._play_unequip_sound(item_to_unequip)
 
     def _play_equip_sound(self, item: Item) -> None:

@@ -56,3 +56,21 @@ class DarkvisionEffect(Effect):
     def get_message(self):
         if self.duration == 0:
             return ("Darkness once again engulfs you...", color.purple)
+        
+class BurningEffect(Effect):
+    '''Simple designator class. Does no damage.'''
+    def __init__(self, amount: int, duration: int):
+        super().__init__(
+            name="Burning",
+            duration=duration,
+            description=f"Take {amount} fire damage each turn.",
+            type="debuff"
+        )
+        self.amount = amount  # Store the damage amount
+
+    def tick(self, target):
+        if self.duration is None:
+            return False
+        self.duration -=1
+        sounds.play_fire_burn_sound()
+        return self.duration <= 0

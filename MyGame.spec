@@ -38,7 +38,7 @@ datas += [(f, '.') for f in glob.glob(os.path.join(project_folder, '*.md'))]
 
 a = Analysis(
     [entry_script],
-    pathex=[project_folder],
+    pathex=[project_folder, os.path.join(project_folder, 'dependencies')],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,

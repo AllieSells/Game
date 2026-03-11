@@ -4,6 +4,9 @@ import tcod
 import traceback
 import sys
 
+# Add dependencies folder to sys.path
+sys.path.append(os.path.join(os.path.dirname(__file__), "dependencies"))
+
 import color
 import exceptions
 import input_handlers

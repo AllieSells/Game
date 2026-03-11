@@ -18,6 +18,7 @@ from actions import (
 
 import color
 from components.dialogue_generator import ConversationNode
+from components.effect import BurningEffect
 import engine
 import exceptions
 from render_functions import MenuRenderer
@@ -3294,6 +3295,12 @@ class LookHandler(SelectIndexHandler):
                 if hasattr(entity, 'sentient') and entity.sentient:
                     lines.append([(entity.name, color.red)])
 
+            entity_name_color = color.light_blue
+            if hasattr(entity, 'effects'):
+                if any(isinstance(e, BurningEffect) for e in entity.effects):
+                    entity_name_color = random.choice([color.orange, color.red, color.yellow])
+                    
+
             # Get name, if known
             if hasattr(entity, 'sentient') and entity.sentient:
                 if hasattr(entity, 'name'):
@@ -3307,10 +3314,11 @@ class LookHandler(SelectIndexHandler):
                             name_text = f"You don't know what this is."
                         lines.append([(name_text, color.white)])
                     else:
-                        lines.append([(entity.name, color.light_blue)])
+                        lines.append([(entity.name, entity_name_color)])
             else:
                 if hasattr(entity, 'name'):
-                    lines.append([(entity.name, color.light_blue)])
+                    lines.append([(entity.name, entity_name_color)])
+
                     
             # Build comprehensive equipment description
             if hasattr(entity, 'equipment') and entity.equipment:
@@ -3960,7 +3968,7 @@ class AreaRangedAttackHandler(SelectIndexHandler):
         # Highlights tile under cursor
         super().on_render(console)
 
-        x, y = self.engine.mouse_location
+        x, y = self.engine.mouse_location 
 
         #draw rectangle around area
         console.draw_frame(
@@ -4290,6 +4298,226 @@ class MainGameEventHandler(EventHandler):
         # print(action)
         return action
     
+class TextInputHandler(BaseEventHandler):
+    """Handler for text input with typing support."""
+    
+    def __init__(self, engine: Engine = None, title: str = "Enter Text", prompt: str = "", max_length: int = 50, callback=None, parent_handler=None):
+        # Initialize base handler
+        super().__init__()
+        self.engine = engine
+        self.title = title
+        self.prompt = prompt
+        self.max_length = max_length
+        self.text = ""
+        self.cursor_pos = 0
+        self.callback = callback
+        self.parent_handler = parent_handler
+    def _insert_char(self, char: str) -> None:
+        """Insert a character at the cursor position."""
+        if len(self.text) < self.max_length and char:
+            self.text = self.text[:self.cursor_pos] + char + self.text[self.cursor_pos:]
+            self.cursor_pos += 1
+            
+    def _delete_char(self, forward: bool = False) -> None:
+        """Delete a character (backspace or delete)."""
+        if forward and self.cursor_pos < len(self.text):
+            # Delete character at cursor
+            self.text = self.text[:self.cursor_pos] + self.text[self.cursor_pos + 1:]
+        elif not forward and self.cursor_pos > 0:
+            # Backspace - delete character before cursor
+            self.text = self.text[:self.cursor_pos - 1] + self.text[self.cursor_pos:]
+            self.cursor_pos -= 1
+            
+    def _move_cursor(self, direction: str) -> None:
+        """Move cursor in specified direction."""
+        if direction == "left":
+            self.cursor_pos = max(0, self.cursor_pos - 1)
+        elif direction == "right":
+            self.cursor_pos = min(len(self.text), self.cursor_pos + 1)
+        elif direction == "home":
+            self.cursor_pos = 0
+        elif direction == "end":
+            self.cursor_pos = len(self.text)
+            
+    def _key_to_char(self, event: tcod.event.KeyDown) -> str:
+        """Convert a key event to a character."""
+        key = event.sym
+        shift_pressed = event.mod & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT)
+        
+        # Letters (a-z)
+        if tcod.event.KeySym.A <= key <= tcod.event.KeySym.Z:
+            char = chr(ord('a') + (key - tcod.event.KeySym.A))
+            return char.upper() if shift_pressed else char
+        
+        # Numbers (0-9) 
+        elif tcod.event.KeySym.N0 <= key <= tcod.event.KeySym.N9:
+            if shift_pressed:
+                shift_symbols = ")!@#$%^&*("
+                return shift_symbols[key - tcod.event.KeySym.N0]
+            else:
+                return str(key - tcod.event.KeySym.N0)
+        
+        # Common keys
+        key_map = {
+            tcod.event.KeySym.SPACE: " ",
+            tcod.event.KeySym.MINUS: "_" if shift_pressed else "-",
+            tcod.event.KeySym.EQUALS: "+" if shift_pressed else "=",
+            tcod.event.KeySym.PERIOD: ">" if shift_pressed else ".",
+            tcod.event.KeySym.COMMA: "<" if shift_pressed else ",",
+        }
+        
+        return key_map.get(key, "")
+        
+    def render_faded(self, console: tcod.Console, menu_x: int = None, menu_y: int = None, menu_width: int = None, menu_height: int = None) -> None:
+        # Fades the current console to create a dimmed background effect for menus
+        # Excludes the menu area from fading if menu bounds are provided
+        fade_alpha = 0.4  # Fade strength (0.0 = no fade, 1.0 = completely faded)
+        fade_color = (20, 20, 30)  # Dark blue-gray tint
+        
+        for x in range(console.width):
+            for y in range(console.height):
+                # Skip fading pixels that are within the menu bounds
+                if (menu_x is not None and menu_y is not None and 
+                    menu_width is not None and menu_height is not None):
+                    if (menu_x <= x < menu_x + menu_width and 
+                        menu_y <= y < menu_y + menu_height):
+                        continue
+                
+                existing_color = console.bg[x, y]
+                # Safe color blending using floating point math
+                blended_color = (
+                    int(existing_color[0] * (1 - fade_alpha) + fade_color[0] * fade_alpha),
+                    int(existing_color[1] * (1 - fade_alpha) + fade_color[1] * fade_alpha),
+                    int(existing_color[2] * (1 - fade_alpha) + fade_color[2] * fade_alpha),
+                )
+                console.bg[x, y] = blended_color
+        
+    def on_exit(self) -> Optional[ActionOrHandler]:
+        """Handle exiting the text input - return to main game if we have engine."""
+        if self.engine is not None:
+            return MainGameEventHandler(self.engine)
+        return None
+        
+    def on_render(self, console: tcod.Console) -> None:
+        # Render background appropriately based on context
+        if self.engine is not None:
+            # In-game: render the game world
+            self.engine.render(console)
+        elif self.parent_handler is not None:
+            # Setup screen: let parent render its background first
+            self.parent_handler.on_render(console)
+        # If neither engine nor parent, keep existing console content (overlay mode)
+        
+        # Calculate window dimensions
+        window_width = max(40, len(self.prompt) + 10, self.max_length + 10)
+        window_height = 8
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height) // 2
+        
+        # Fade the background except for the input window
+        self.render_faded(console, x, y, window_width, window_height)
+        
+        # Draw input window
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, self.title)
+        
+        # Draw prompt if provided
+        if self.prompt:
+            console.print(x + 2, y + 2, self.prompt, fg=(200, 180, 140))
+        
+        # Draw input field
+        input_y = y + 4 if self.prompt else y + 3
+        
+        # Input field background
+        field_width = window_width - 4
+        for i in range(field_width):
+            console.print(x + 2 + i, input_y, " ", bg=(60, 40, 25))
+        
+        # Draw input text
+        display_text = self.text[:field_width - 2]  # Leave room for cursor
+        console.print(x + 3, input_y, display_text, fg=(255, 255, 255), bg=(60, 40, 25))
+        
+        # Draw cursor (blinking effect)
+        import time
+        if int(time.time() * 2) % 2:  # Simple blinking
+            cursor_x = x + 3 + min(len(display_text), self.cursor_pos)
+            if cursor_x < x + 2 + field_width - 1:  # Make sure cursor is visible
+                console.print(cursor_x, input_y, "|", fg=(255, 215, 0), bg=(60, 40, 25))
+        
+        # Instructions
+        instructions_y = y + window_height - 2
+        console.print(x + 1, instructions_y, "[Enter] Confirm  [Esc] Cancel", fg=(180, 140, 100))
+        
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        key = event.sym
+        
+        # Handle escape - cancel input
+        if key == tcod.event.KeySym.ESCAPE:
+            return self._handle_cancel()
+            
+        # Handle enter - submit text
+        elif key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.KP_ENTER:
+            return self._handle_submit()
+            
+        # Handle deletion
+        elif key == tcod.event.KeySym.BACKSPACE:
+            self._delete_char(forward=False)
+        elif key == tcod.event.KeySym.DELETE:
+            self._delete_char(forward=True)
+            
+        # Handle cursor movement
+        elif key == tcod.event.KeySym.LEFT:
+            self._move_cursor("left")
+        elif key == tcod.event.KeySym.RIGHT:
+            self._move_cursor("right")
+        elif key == tcod.event.KeySym.HOME:
+            self._move_cursor("home")
+        elif key == tcod.event.KeySym.END:
+            self._move_cursor("end")
+            
+        # Handle character input
+        else:
+            char = self._key_to_char(event)
+            if char:
+                self._insert_char(char)
+            # Fallback for unicode input
+            elif hasattr(event, 'unicode') and event.unicode and event.unicode.isprintable():
+                self._insert_char(event.unicode)
+                
+        return None
+        
+    def _handle_cancel(self) -> Optional[ActionOrHandler]:
+        """Handle cancellation (ESC key)."""
+        if self.engine is not None:
+            return MainGameEventHandler(self.engine)
+        elif self.parent_handler is not None:
+            if self.callback:
+                result = self.callback(None)
+                return result if result is not None else self.parent_handler
+            return self.parent_handler
+        else:
+            return self.callback(None) if self.callback else None
+            
+    def _handle_submit(self) -> Optional[ActionOrHandler]:
+        """Handle text submission (Enter key)."""
+        if self.callback:
+            result = self.callback(self.text)
+            if result is not None:
+                return result
+        
+        # Fallback returns
+        if self.engine is not None:
+            return MainGameEventHandler(self.engine)
+        return None
+
+    def ev_textinput(self, event: tcod.event.TextInput) -> Optional[ActionOrHandler]:
+        """Handle text input events for typing."""
+        self._insert_char(event.text)
+        return None
+
+
+
+
 class GameOverEventHandler(EventHandler):
     def on_quit(self) -> None:
         """Handle exiting out of a finished game."""
@@ -4342,8 +4570,9 @@ class PauseHandler(AskUserEventHandler):
         if response == "Resume Game":
             return MainGameEventHandler(self.engine)
         elif response == "Save and Exit":
+            TextInputHandler(self.engine, prompt="Enter save name:", callback=self.save_and_exit)
             self.engine.save_as("SAVEGAME/savegame.sav")
-            raise exceptions.QuitWithoutSaving()
+            raise exceptions.QuitWithoutSaving()    
         elif response == "Exit without Saving":
             raise exceptions.QuitWithoutSaving()
         elif response == "Settings":
@@ -4760,221 +4989,4 @@ class CheatMaxLevel(EventHandler):
         """Render the main game in the background"""
         self.engine.render(console)
 
-
-class TextInputHandler(BaseEventHandler):
-    """Handler for text input with typing support."""
-    
-    def __init__(self, engine: Engine = None, title: str = "Enter Text", prompt: str = "", max_length: int = 50, callback=None, parent_handler=None):
-        # Initialize base handler
-        super().__init__()
-        self.engine = engine
-        self.title = title
-        self.prompt = prompt
-        self.max_length = max_length
-        self.text = ""
-        self.cursor_pos = 0
-        self.callback = callback
-        self.parent_handler = parent_handler
-    def _insert_char(self, char: str) -> None:
-        """Insert a character at the cursor position."""
-        if len(self.text) < self.max_length and char:
-            self.text = self.text[:self.cursor_pos] + char + self.text[self.cursor_pos:]
-            self.cursor_pos += 1
-            
-    def _delete_char(self, forward: bool = False) -> None:
-        """Delete a character (backspace or delete)."""
-        if forward and self.cursor_pos < len(self.text):
-            # Delete character at cursor
-            self.text = self.text[:self.cursor_pos] + self.text[self.cursor_pos + 1:]
-        elif not forward and self.cursor_pos > 0:
-            # Backspace - delete character before cursor
-            self.text = self.text[:self.cursor_pos - 1] + self.text[self.cursor_pos:]
-            self.cursor_pos -= 1
-            
-    def _move_cursor(self, direction: str) -> None:
-        """Move cursor in specified direction."""
-        if direction == "left":
-            self.cursor_pos = max(0, self.cursor_pos - 1)
-        elif direction == "right":
-            self.cursor_pos = min(len(self.text), self.cursor_pos + 1)
-        elif direction == "home":
-            self.cursor_pos = 0
-        elif direction == "end":
-            self.cursor_pos = len(self.text)
-            
-    def _key_to_char(self, event: tcod.event.KeyDown) -> str:
-        """Convert a key event to a character."""
-        key = event.sym
-        shift_pressed = event.mod & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT)
-        
-        # Letters (a-z)
-        if tcod.event.KeySym.A <= key <= tcod.event.KeySym.Z:
-            char = chr(ord('a') + (key - tcod.event.KeySym.A))
-            return char.upper() if shift_pressed else char
-        
-        # Numbers (0-9) 
-        elif tcod.event.KeySym.N0 <= key <= tcod.event.KeySym.N9:
-            if shift_pressed:
-                shift_symbols = ")!@#$%^&*("
-                return shift_symbols[key - tcod.event.KeySym.N0]
-            else:
-                return str(key - tcod.event.KeySym.N0)
-        
-        # Common keys
-        key_map = {
-            tcod.event.KeySym.SPACE: " ",
-            tcod.event.KeySym.MINUS: "_" if shift_pressed else "-",
-            tcod.event.KeySym.EQUALS: "+" if shift_pressed else "=",
-            tcod.event.KeySym.PERIOD: ">" if shift_pressed else ".",
-            tcod.event.KeySym.COMMA: "<" if shift_pressed else ",",
-        }
-        
-        return key_map.get(key, "")
-        
-    def render_faded(self, console: tcod.Console, menu_x: int = None, menu_y: int = None, menu_width: int = None, menu_height: int = None) -> None:
-        # Fades the current console to create a dimmed background effect for menus
-        # Excludes the menu area from fading if menu bounds are provided
-        fade_alpha = 0.4  # Fade strength (0.0 = no fade, 1.0 = completely faded)
-        fade_color = (20, 20, 30)  # Dark blue-gray tint
-        
-        for x in range(console.width):
-            for y in range(console.height):
-                # Skip fading pixels that are within the menu bounds
-                if (menu_x is not None and menu_y is not None and 
-                    menu_width is not None and menu_height is not None):
-                    if (menu_x <= x < menu_x + menu_width and 
-                        menu_y <= y < menu_y + menu_height):
-                        continue
-                
-                existing_color = console.bg[x, y]
-                # Safe color blending using floating point math
-                blended_color = (
-                    int(existing_color[0] * (1 - fade_alpha) + fade_color[0] * fade_alpha),
-                    int(existing_color[1] * (1 - fade_alpha) + fade_color[1] * fade_alpha),
-                    int(existing_color[2] * (1 - fade_alpha) + fade_color[2] * fade_alpha),
-                )
-                console.bg[x, y] = blended_color
-        
-    def on_exit(self) -> Optional[ActionOrHandler]:
-        """Handle exiting the text input - return to main game if we have engine."""
-        if self.engine is not None:
-            return MainGameEventHandler(self.engine)
-        return None
-        
-    def on_render(self, console: tcod.Console) -> None:
-        # Render background appropriately based on context
-        if self.engine is not None:
-            # In-game: render the game world
-            self.engine.render(console)
-        elif self.parent_handler is not None:
-            # Setup screen: let parent render its background first
-            self.parent_handler.on_render(console)
-        # If neither engine nor parent, keep existing console content (overlay mode)
-        
-        # Calculate window dimensions
-        window_width = max(40, len(self.prompt) + 10, self.max_length + 10)
-        window_height = 8
-        x = (console.width - window_width) // 2
-        y = (console.height - window_height) // 2
-        
-        # Fade the background except for the input window
-        self.render_faded(console, x, y, window_width, window_height)
-        
-        # Draw input window
-        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
-        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, self.title)
-        
-        # Draw prompt if provided
-        if self.prompt:
-            console.print(x + 2, y + 2, self.prompt, fg=(200, 180, 140))
-        
-        # Draw input field
-        input_y = y + 4 if self.prompt else y + 3
-        
-        # Input field background
-        field_width = window_width - 4
-        for i in range(field_width):
-            console.print(x + 2 + i, input_y, " ", bg=(60, 40, 25))
-        
-        # Draw input text
-        display_text = self.text[:field_width - 2]  # Leave room for cursor
-        console.print(x + 3, input_y, display_text, fg=(255, 255, 255), bg=(60, 40, 25))
-        
-        # Draw cursor (blinking effect)
-        import time
-        if int(time.time() * 2) % 2:  # Simple blinking
-            cursor_x = x + 3 + min(len(display_text), self.cursor_pos)
-            if cursor_x < x + 2 + field_width - 1:  # Make sure cursor is visible
-                console.print(cursor_x, input_y, "_", fg=(255, 215, 0), bg=(60, 40, 25))
-        
-        # Instructions
-        instructions_y = y + window_height - 2
-        console.print(x + 2, instructions_y, "[Enter] Confirm  [Esc] Cancel  [Backspace] Delete", fg=(180, 140, 100))
-        
-    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
-        key = event.sym
-        
-        # Handle escape - cancel input
-        if key == tcod.event.KeySym.ESCAPE:
-            return self._handle_cancel()
-            
-        # Handle enter - submit text
-        elif key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.KP_ENTER:
-            return self._handle_submit()
-            
-        # Handle deletion
-        elif key == tcod.event.KeySym.BACKSPACE:
-            self._delete_char(forward=False)
-        elif key == tcod.event.KeySym.DELETE:
-            self._delete_char(forward=True)
-            
-        # Handle cursor movement
-        elif key == tcod.event.KeySym.LEFT:
-            self._move_cursor("left")
-        elif key == tcod.event.KeySym.RIGHT:
-            self._move_cursor("right")
-        elif key == tcod.event.KeySym.HOME:
-            self._move_cursor("home")
-        elif key == tcod.event.KeySym.END:
-            self._move_cursor("end")
-            
-        # Handle character input
-        else:
-            char = self._key_to_char(event)
-            if char:
-                self._insert_char(char)
-            # Fallback for unicode input
-            elif hasattr(event, 'unicode') and event.unicode and event.unicode.isprintable():
-                self._insert_char(event.unicode)
-                
-        return None
-        
-    def _handle_cancel(self) -> Optional[ActionOrHandler]:
-        """Handle cancellation (ESC key)."""
-        if self.engine is not None:
-            return MainGameEventHandler(self.engine)
-        elif self.parent_handler is not None:
-            if self.callback:
-                result = self.callback(None)
-                return result if result is not None else self.parent_handler
-            return self.parent_handler
-        else:
-            return self.callback(None) if self.callback else None
-            
-    def _handle_submit(self) -> Optional[ActionOrHandler]:
-        """Handle text submission (Enter key)."""
-        if self.callback:
-            result = self.callback(self.text)
-            if result is not None:
-                return result
-        
-        # Fallback returns
-        if self.engine is not None:
-            return MainGameEventHandler(self.engine)
-        return None
-
-    def ev_textinput(self, event: tcod.event.TextInput) -> Optional[ActionOrHandler]:
-        """Handle text input events for typing."""
-        self._insert_char(event.text)
-        return None
 

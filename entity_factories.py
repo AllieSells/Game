@@ -1,4 +1,5 @@
 from re import T
+from components import equipment
 from components.ai import DarkHostileEnemy, Friendly, HostileEnemy
 from components import equippable
 from components.effect import Effect
@@ -383,9 +384,10 @@ sigil_stone = Item(
     drop_sound=sounds.play_stone_sound,
     equip_sound=sounds.play_stone_sound,
     unequip_sound=sounds.play_stone_sound,
-    identification_level=0,  # Requires lore level 3 to fully understand
+    identification_level=3,  # Requires lore level 3 to fully understand
     identification_skill="arcana",  # Uses the 'arcana' skill
 )
+
 
 
 
@@ -525,6 +527,7 @@ def get_random_coins(min_amount: int, max_amount: int) -> Item:
 # =====================================================
 
     
+
 
 
 
@@ -724,6 +727,17 @@ chest = Actor(
     color=(222, 153, 52),
     name="Chest",
     # No AI for static container
+    ai_cls=None,
+    equipment=None,
+    fighter=None,
+    inventory=Inventory(capacity=0),
+    level=Level(xp_given=0),
+)
+
+altar = Actor(
+    char="=",
+    color = (150, 0, 150),
+    name = "Altar",
     ai_cls=None,
     equipment=None,
     fighter=None,

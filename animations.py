@@ -611,6 +611,38 @@ class GivingQuestAnimation():
 
         self.frames -= 1
 
+class EnchantedSlashAnimation:
+    def __init__(self, x, y, color):
+        self.x = x
+        self.y = y
+        self.frames = 5  # duration in frames
+        self.render_priority = 2  # Above actors
+        self.color = color
+    def tick(self, console, game_map):
+        x, y = int(self.x), int(self.y)
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        if game_map.visible[x, y]:
+            # Curved slash effect with enchanted color
+            if self.frames == 5:
+                console.print(x, y, "_", fg=self.color)  # Base color
+            elif self.frames == 4:
+                console.print(x, y, "~", fg=(min(255, self.color[0] + 50), min(255, self.color[1] + 50), min(255, self.color[2] + 50)))  # Brighter
+            elif self.frames <= 3:
+                console.print(x, y, ")", fg=(min(255, self.color[0] + 100), min(255, self.color[1] + 100), min(255, self.color[2] + 100)))  # Even brighter
+            
+            # Random spark with enchanted color
+            if random.random() < 0.3:
+                spark_x = x + random.choice([-1, 0, 1])
+                spark_y = y + random.choice([-1, 0, 1])
+                if game_map.in_bounds(spark_x, spark_y) and game_map.visible[spark_x, spark_y]:
+                    console.print(spark_x, spark_y, "`", fg=(min(255, self.color[0] + 150), min(255, self.color[1] + 150), min(255, self.color[2] + 150)))  # Bright spark
+
+        self.frames -= 1
+
+
 class SlashAnimation:
     def __init__(self, x, y):
         self.x = x

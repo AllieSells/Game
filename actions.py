@@ -1003,6 +1003,7 @@ class MeleeAction(ActionWithDirection):
             if weapon and hasattr(weapon, 'enchantments') and weapon.enchantments:
                 for enchantment in weapon.enchantments:
                     enchantment.on_hit(self.engine, target, hit_part)
+                    self.engine.animation_queue.append(animations.EnchantedSlashAnimation(target.x, target.y, enchantment.get_color()))
 
         if final_damage > 0 and hit_success:
             # Apply damage to specific body part (should always have a valid part)
