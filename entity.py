@@ -868,6 +868,7 @@ class Item(Entity):
                     self.equippable.power_bonus += 1 
                 elif hasattr(self.equippable, 'defense_bonus') and self.equippable.defense_bonus > 0:
                     self.equippable.defense_bonus += 1
+                self.value += 20
 
             # Only apply FLAME enchantment to weapons
             if is_weapon and random.random() < 0.25: # 25% chance for magical enchantment
@@ -878,4 +879,5 @@ class Item(Entity):
                 self.color = color.orange
                 self.description += " Flames dance along its surface."
                 self.rarity_color = color.orange
+                self.value += 50
         return self

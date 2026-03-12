@@ -1,3 +1,4 @@
+import json
 import sounddevice as sd
 import soundfile as sf
 import random
@@ -163,15 +164,47 @@ class AudioMixer:
     
     def play_sound(self, audio_data: np.ndarray, volume: float = 1.0):
         """Add a sound to the mixer for playback."""
+        # Apply global audio volume from settings
+        try:
+            settings = load_settings()
+            global_volume = settings.get("audio", 50)
+            
+            if isinstance(global_volume, bool):
+                # Handle old boolean format
+                global_volume_multiplier = 1.0 if global_volume else 0.0
+            else:
+                # Handle new 0-100 format
+                global_volume_multiplier = max(0.0, min(1.0, global_volume / 100.0))
+            
+            final_volume = volume * global_volume_multiplier
+        except Exception as e:
+            # Fallback if settings can't be loaded
+            final_volume = volume
+            
         with self.lock:
             self.playing_sounds.append({
                 'data': audio_data.copy(),
                 'position': 0,
-                'volume': volume
+                'volume': final_volume
             })
     
     def start_loop(self, audio_data: np.ndarray, loop_id: str, volume: float = 1.0):
         """Start a looping sound."""
+        # Apply global audio volume from settings
+        try:
+            settings = load_settings()
+            global_volume = settings.get("audio", 50)
+            if isinstance(global_volume, bool):
+                # Handle old boolean format
+                global_volume_multiplier = 1.0 if global_volume else 0.0
+            else:
+                # Handle new 0-100 format
+                global_volume_multiplier = max(0.0, min(1.0, global_volume / 100.0))
+            final_volume = volume * global_volume_multiplier
+        except:
+            # Fallback if settings can't be loaded
+            final_volume = volume
+            
         with self.lock:
             # Remove any existing loop with this ID
             self.loop_sounds = [s for s in self.loop_sounds if s.get('id') != loop_id]
@@ -181,7 +214,7 @@ class AudioMixer:
                 'id': loop_id,
                 'data': audio_data.copy(),
                 'position': 0,
-                'volume': volume,
+                'volume': final_volume,
                 'active': True
             })
     
@@ -194,10 +227,51 @@ class AudioMixer:
     
     def set_loop_volume(self, loop_id: str, volume: float):
         """Set volume of a looping sound."""
+        # Apply global audio volume from settings
+        try:
+            settings = load_settings()
+            global_volume = settings.get("audio", 50)
+            if isinstance(global_volume, bool):
+                # Handle old boolean format
+                global_volume_multiplier = 1.0 if global_volume else 0.0
+            else:
+                # Handle new 0-100 format
+                global_volume_multiplier = max(0.0, min(1.0, global_volume / 100.0))
+            
+            final_volume = max(0.0, min(1.0, volume)) * global_volume_multiplier
+        except:
+            # Fallback if settings can't be loaded
+            final_volume = max(0.0, min(1.0, volume))
+            
         with self.lock:
             for sound_info in self.loop_sounds:
                 if sound_info.get('id') == loop_id:
-                    sound_info['volume'] = max(0.0, min(1.0, volume))
+                    sound_info['volume'] = final_volume
+    
+    def update_all_loop_volumes(self):
+        """Update volumes of all currently playing loops based on current settings."""
+        try:
+            settings = load_settings()
+            global_volume = settings.get("audio", 50)
+            
+            if isinstance(global_volume, bool):
+                # Handle old boolean format
+                global_volume_multiplier = 1.0 if global_volume else 0.0
+            else:
+                # Handle new 0-100 format
+                global_volume_multiplier = max(0.0, min(1.0, global_volume / 100.0))
+                print(f"Updating loop volumes with global volume: {global_volume} (multiplier: {global_volume_multiplier})")
+                
+            with self.lock:
+                for sound_info in self.loop_sounds:
+                    if sound_info.get('active', False):
+                        # Get base volume (assume it was stored at 1.0 originally)
+                        base_volume = 0.3
+                        sound_info['volume'] = base_volume * global_volume_multiplier
+                        print(f"Updated loop '{sound_info.get('id')}' volume to {sound_info['volume']}")
+                        
+        except Exception as e:
+            print(f"Failed to update loop volumes: {e}")
     
     def _apply_lowpass_filter(self, audio_data: np.ndarray, cutoff: float) -> np.ndarray:
         """Apply low-pass filter for sound muffling effect with proper state management."""
@@ -337,6 +411,19 @@ class LoopingSound:
             _mixer.stop_loop(self.loop_id)
             self.playing = False
 
+
+def load_settings():
+    """Load settings from JSON file."""
+    try:
+        with open("settings.json", 'r') as f:
+            content = f.read()
+            # Remove JSON comments
+            lines = [line for line in content.split('\n') if not line.strip().startswith('//')]
+            clean_content = '\n'.join(lines)
+            return json.loads(clean_content)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"fullscreen": False, "audio": 50, "graphics": "high"}
+
 class Sound:
     """Sound class to mimic pygame.mixer.Sound interface."""
     
@@ -349,7 +436,7 @@ class Sound:
             self.data = self._resample_audio(self.data, self.original_samplerate, _mixer.samplerate)
         
         self.samplerate = _mixer.samplerate
-        self.volume = 1.0
+        self.volume = 1.0  # Base volume, global volume applied at playback
     
     def _resample_audio(self, audio_data: np.ndarray, from_sr: int, to_sr: int) -> np.ndarray:
         """Resample audio to target sample rate."""
@@ -1003,7 +1090,7 @@ class AmbientSoundType:
         self.entity_names = entity_names  # List of entity names that produce this ambient
         self.map_type = map_type  # Optional map type filter (e.g. "dungeon")
         self.proximity_threshold = proximity_threshold
-        self.base_volume = base_volume
+        self.base_volume = 0.3
 
 # Registry of ambient sound types
 AMBIENT_TYPES = {
@@ -1379,6 +1466,11 @@ def apply_distance_muffling():
 def clear_sound_muffling():
     """Remove all muffling effects."""
     set_sound_muffling(False)
+
+def update_all_loop_volumes_from_settings():
+    """Update volumes of all currently playing loops based on current settings."""
+    global _mixer
+    _mixer.update_all_loop_volumes()
 
 # Positional sound muffling system
 

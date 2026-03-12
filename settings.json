@@ -1,0 +1,6 @@
+{
+    // Display settings
+    "fullscreen": false,
+    "audio": 40,
+    "graphics": "high"
+}

@@ -1,8 +1,10 @@
 import os
 import warnings
 import tcod
+import tcod.sdl.video
 import traceback
 import sys
+import json
 
 # Add dependencies folder to sys.path
 sys.path.append(os.path.join(os.path.dirname(__file__), "dependencies"))
@@ -22,6 +24,21 @@ def get_data_path(filename):
         # Running in development
         base_path = os.path.dirname(__file__)
     return os.path.join(base_path, filename)
+
+def load_settings():
+    """Load settings from JSON file."""
+    try:
+        with open("settings.json", 'r') as f:
+            content = f.read()
+            # Remove JSON comments
+            lines = [line for line in content.split('\n') if not line.strip().startswith('//')]
+            clean_content = '\n'.join(lines)
+            return json.loads(clean_content)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"fullscreen": False, "audio": 50, "graphics": "high"}
+
+# Global reference for settings access
+_game_context = None
 
 
 """
@@ -53,14 +70,25 @@ def save_game(handler: input_handlers.BaseEventHandler, filename: str) -> None:
 
 
 def main() -> None:
-    screen_width = 80
-    screen_height = 50  
+    screen_width = 80 # was 80
+    screen_height = 50  # was 50
 
+    # Load settings to determine initial fullscreen state
+    settings = load_settings()
+    initial_fullscreen = settings.get("fullscreen", False)
+    
     tileset = tcod.tileset.load_tilesheet(  
         get_data_path("RP/AllieClassic.png"), 16, 16, tcod.tileset.CHARMAP_CP437
     )
 
     handler: input_handlers.BaseEventHandler = setup_game.MainMenu()
+    
+    # Set SDL window flags based on settings
+    if initial_fullscreen:
+        sdl_flags = tcod.context.SDL_WINDOW_FULLSCREEN
+    else:
+        # Allow window resizing in windowed mode
+        sdl_flags = tcod.context.SDL_WINDOW_RESIZABLE
 
     with tcod.context.new_terminal(
         screen_width,
@@ -68,7 +96,11 @@ def main() -> None:
         tileset=tileset,
         title="THE Game... idk",
         vsync=True,
+        sdl_window_flags=sdl_flags,
     ) as context:
+        global _game_context
+        _game_context = context  # Store for settings access
+        
         console = tcod.console.Console(screen_width, screen_height, order="F")
         try:
             while True:

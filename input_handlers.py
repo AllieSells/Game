@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from typing import Callable, Tuple, Optional, TYPE_CHECKING, Union
 
 import tcod.event
@@ -4570,13 +4571,13 @@ class PauseHandler(AskUserEventHandler):
         if response == "Resume Game":
             return MainGameEventHandler(self.engine)
         elif response == "Save and Exit":
-            TextInputHandler(self.engine, prompt="Enter save name:", callback=self.save_and_exit)
+            TextInputHandler(self.engine, prompt="Enter save name:", callback=self.process_response("Save and Exit"))
             self.engine.save_as("SAVEGAME/savegame.sav")
             raise exceptions.QuitWithoutSaving()    
         elif response == "Exit without Saving":
             raise exceptions.QuitWithoutSaving()
         elif response == "Settings":
-            return SettingsMenuHandler(self.engine)
+            return Settings(self.engine, parent_handler=PauseHandler(self.engine))
         else:
             return MainGameEventHandler(self.engine)
 
@@ -4607,6 +4608,7 @@ class PauseHandler(AskUserEventHandler):
                 self._play_ui_sound()
         elif event.sym == tcod.event.KeySym.SPACE:
             self._play_ui_sound()
+            print(self.categories[self.selected_option])
             return self.process_response(self.categories[self.selected_option])
         # Always return self to stay in this handler (except for ESC/F above)
         return self
@@ -4989,4 +4991,255 @@ class CheatMaxLevel(EventHandler):
         """Render the main game in the background"""
         self.engine.render(console)
 
+
+class Settings(BaseEventHandler):
+    """Settings menu handler - allows adjusting game settings."""
+    
+    TITLE = "Settings"
+    
+    def __init__(self, parent_handler=None):
+        # Load settings from JSON file
+        self.settings_file = "settings.json"
+        self.settings_data = self._load_settings()
+        
+        self.categories = {
+            "Window (restart required)": {
+                "Options": ["Windowed", "Fullscreen"],
+                "SelectedIndex": 1 if self.settings_data.get("fullscreen", False) else 0,
+                "json_key": "fullscreen"
+            },
+            "Audio": {
+                "Options": ["0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100"],
+                "SelectedIndex": self._get_audio_index(),
+                "json_key": "audio"
+            },
+            "Graphics": {
+                "Options": ["High", "Medium", "Low"],
+                "SelectedIndex": ["high", "medium", "low"].index(self.settings_data.get("graphics", "high").lower()),
+                "json_key": "graphics"
+            }
+        }
+        # Convert to list for easier navigation
+        self.category_keys = list(self.categories.keys()) + ["Back"]
+        self.selected_option = 0
+        # Parent handler for returning to main menu when engine doesn't exist
+        self.parent_handler = parent_handler
+
+    def on_render(self, console: tcod.Console) -> None:
+        # If we have a parent handler, let it render the background
+        if self.parent_handler is not None and hasattr(self.parent_handler, 'on_render'):
+            self.parent_handler.on_render(console)
+
+        window_width = 40
+        window_height = len(self.category_keys) * 2 + 9
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height-5) // 2
+        
+        # Fade the entire screen except for the menu area
+        self.render_faded(console, x, y, window_width, window_height)
+        
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, self.TITLE)
+
+        for i, category_key in enumerate(self.category_keys):
+            is_selected = i == self.selected_option
+            
+            if category_key == "Back":
+                # Special handling for Back option
+                if is_selected:
+                    console.print(x+1, y + 2 + i * 2, f">{category_key}", fg=color.gold_accent)
+                else:
+                    console.print(x+1, y + 2 + i * 2, f" {category_key}", fg=color.fantasy_text)
+            else:
+                # Regular category with current setting
+                category_data = self.categories[category_key]
+                current_option = category_data["Options"][category_data["SelectedIndex"]]
+                
+                if is_selected:
+                    console.print(x + 1, y + 2 + i * 2, f">{category_key}: {current_option}", fg=color.gold_accent)
+                else:
+                    console.print(x + 1, y + 2 + i * 2, f" {category_key}: {current_option}", fg=color.fantasy_text)
+    
+    def render_faded(self, console: tcod.Console, menu_x: int = None, menu_y: int = None, menu_width: int = None, menu_height: int = None) -> None:
+        """Fade the console background except for the menu area."""
+        fade_alpha = 0.4  # Fade strength (0.0 = no fade, 1.0 = completely faded)
+        fade_color = (20, 20, 30)  # Dark blue-gray tint
+        
+        for x in range(console.width):
+            for y in range(console.height):
+                # Skip fading pixels that are within the menu bounds
+                if (menu_x is not None and menu_y is not None and 
+                    menu_width is not None and menu_height is not None):
+                    if (menu_x <= x < menu_x + menu_width and 
+                        menu_y <= y < menu_y + menu_height):
+                        continue
+                
+                existing_color = console.bg[x, y]
+                # Safe color blending using floating point math
+                blended_color = (
+                    int(existing_color[0] * (1 - fade_alpha) + fade_color[0] * fade_alpha),
+                    int(existing_color[1] * (1 - fade_alpha) + fade_color[1] * fade_alpha),
+                    int(existing_color[2] * (1 - fade_alpha) + fade_color[2] * fade_alpha),
+                )
+                console.bg[x, y] = blended_color
+
+    def _load_settings(self) -> dict:
+        """Load settings from JSON file."""
+        try:
+            with open(self.settings_file, 'r') as f:
+                content = f.read()
+                # Remove JSON comments (lines starting with //)
+                lines = [line for line in content.split('\n') if not line.strip().startswith('//')]
+                clean_content = '\n'.join(lines)
+                return json.loads(clean_content)
+        except (FileNotFoundError, json.JSONDecodeError):
+            # Return default settings if file doesn't exist or is invalid
+            return {"fullscreen": False, "audio": 50, "graphics": "high"}
+    
+    def _get_audio_index(self) -> int:
+        """Get the correct index for audio volume setting."""
+        audio_value = self.settings_data.get("audio", 50)
+        
+        # Handle legacy boolean format
+        if isinstance(audio_value, bool):
+            return 5 if audio_value else 0  # 50% if True, 0% if False
+        
+        # Handle numeric format (0-100)
+        audio_options = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+        
+        # Find closest matching option
+        closest_index = 0
+        min_diff = abs(audio_value - audio_options[0])
+        
+        for i, option_value in enumerate(audio_options):
+            diff = abs(audio_value - option_value)
+            if diff < min_diff:
+                min_diff = diff
+                closest_index = i
+        
+        return closest_index
+    
+    def _save_settings(self) -> None:
+        """Save current settings to JSON file."""
+        try:
+            # Update settings data based on current UI selections
+            for category_key, category_data in self.categories.items():
+                if "json_key" in category_data:
+                    json_key = category_data["json_key"]
+                    selected_index = category_data["SelectedIndex"]
+                    
+                    if "Window" in category_key:  # Handle "Window (restart required)"
+                        self.settings_data[json_key] = (selected_index == 1)  # True for Fullscreen
+                    elif category_key == "Audio":
+                        audio_options = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+                        self.settings_data[json_key] = audio_options[selected_index]  # 0-100 volume
+                    elif category_key == "Graphics":
+                        options = ["high", "medium", "low"]
+                        self.settings_data[json_key] = options[selected_index]
+            
+            # Write to file with proper JSON format
+            with open(self.settings_file, 'w') as f:
+                f.write("{\n")
+                f.write("    // Display settings\n")
+                f.write(f'    "fullscreen": {json.dumps(self.settings_data.get("fullscreen", False))},\n')
+                f.write(f'    "audio": {json.dumps(self.settings_data.get("audio", 50))},\n')
+                f.write(f'    "graphics": {json.dumps(self.settings_data.get("graphics", "high"))}\n')
+                f.write("}\n")
+        except Exception as e:
+            # If saving fails, just continue - don't crash the game
+            print(f"Warning: Could not save settings: {e}")
+
+    def _handle_back(self) -> Optional[ActionOrHandler]:
+        """Handle returning to previous handler (main menu)."""
+        if self.parent_handler is not None:
+            return self.parent_handler
+        else:
+            return None  # Fallback - should not happen in practice
+
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        key = event.sym
+        sounds.play_menu_move_sound()
+        # Handle escape - go back
+        if key == tcod.event.KeySym.ESCAPE:
+            return self._handle_back()
+            
+        # Handle navigation
+        elif key == tcod.event.KeySym.UP:
+            self.selected_option = (self.selected_option - 1) % len(self.category_keys)
+        elif key == tcod.event.KeySym.DOWN:
+            self.selected_option = (self.selected_option + 1) % len(self.category_keys)
+        
+        # Handle left/right for toggling options
+        elif key in (tcod.event.KeySym.LEFT, tcod.event.KeySym.RIGHT):
+            selected_category_key = self.category_keys[self.selected_option]
+            if selected_category_key != "Back" and selected_category_key in self.categories:
+                category_data = self.categories[selected_category_key]
+                num_options = len(category_data["Options"])
+                
+                if key == tcod.event.KeySym.LEFT:
+                    category_data["SelectedIndex"] = (category_data["SelectedIndex"] - 1) % num_options
+                else:  # RIGHT
+                    category_data["SelectedIndex"] = (category_data["SelectedIndex"] + 1) % num_options
+                
+                # Save settings immediately when changed
+                self._save_settings()
+                
+                # Handle immediate fullscreen toggle for Window setting
+                if selected_category_key == "Window":
+                    self._toggle_fullscreen_immediate()
+                
+                # Update loop volumes for Audio setting
+                if selected_category_key == "Audio":
+                    try:
+                        # Import and call the global loop volume update function
+                        from sounds import update_all_loop_volumes_from_settings
+                        update_all_loop_volumes_from_settings()
+                    except Exception:
+                        pass  # Silently handle any import/call errors
+            
+        # Handle selection (Enter/Space)
+        elif key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.SPACE:
+            selected_category_key = self.category_keys[self.selected_option]
+            
+            if selected_category_key == "Back":
+                return self._handle_back()
+            elif selected_category_key in self.categories:
+                # Toggle to next option
+                category_data = self.categories[selected_category_key]
+                num_options = len(category_data["Options"])
+                category_data["SelectedIndex"] = (category_data["SelectedIndex"] + 1) % num_options
+                
+                # Save settings immediately when changed
+                self._save_settings()
+                
+                # Handle immediate fullscreen toggle for Window setting
+                if selected_category_key == "Window":
+                    self._toggle_fullscreen_immediate()
+                
+                # Update loop volumes for Audio setting
+                if selected_category_key == "Audio":
+                    try:
+                        # Import and call the global loop volume update function
+                        from sounds import update_all_loop_volumes_from_settings
+                        update_all_loop_volumes_from_settings()
+                    except Exception:
+                        pass  # Silently handle any import/call errors
+                
+        return None  # Stay in settings menu
+
+    def _toggle_fullscreen_immediate(self) -> None:
+        """Show message about fullscreen setting change."""
+        # Get the current setting from the UI
+        window_category = self.categories.get("Window", {})
+        current_index = window_category.get("SelectedIndex", 0)
+        is_fullscreen = (current_index == 1)
+        
+        # Show message to user
+        if hasattr(self, 'engine') and self.engine is not None:
+            self.engine.message_log.add_message(
+                f"Fullscreen {'enabled' if is_fullscreen else 'disabled'}. Restart game to apply.",
+                color.white
+            )
+        else:
+            print(f"Fullscreen setting: {'On' if is_fullscreen else 'Off'}. Restart to apply.")
 

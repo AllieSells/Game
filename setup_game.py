@@ -22,6 +22,7 @@ import random
 import hashlib
 import sys
 import os
+import time
 
 
 def get_data_path(filename):
@@ -35,8 +36,64 @@ def get_data_path(filename):
     return os.path.join(base_path, filename)
 
 
-# Load the background image and remove the alpha channel.
-background_image = tcod.image.load(get_data_path("image.png"))[:, :, :3]
+# Simple animated background
+class SimpleAnimatedBackground:
+    def __init__(self, frame_pattern="RP/background/frame_{:03d}_delay-0.03s.png", frame_count=240, fps=20):
+        self.frames = []
+        self.current_frame = 0
+        self.frame_time = 1.0 / fps
+        self.last_update = time.time()
+        
+        # Load frames
+        for i in range(frame_count):
+            frame_path = frame_pattern.format(i)
+            try:
+                frame = tcod.image.load(get_data_path(frame_path))[:, :, :3]
+                self.frames.append(frame)
+                if i < 3:  # Only print first few
+                    print(f"Loaded: {frame_path}")
+            except Exception:
+                # Try alternative delay pattern
+                alt_path = frame_pattern.replace("0.03s", "0.06s").format(i)
+                try:
+                    frame = tcod.image.load(get_data_path(alt_path))[:, :, :3]
+                    self.frames.append(frame)
+                    if i < 3:
+                        print(f"Loaded: {alt_path}")
+                except Exception:
+                    break
+        
+        print(f"Loaded {len(self.frames)} animation frames")
+        
+        # Fallback to static image
+        if not self.frames:
+            try:
+                frame = tcod.image.load(get_data_path("image.png"))[:, :, :3]
+                self.frames.append(frame)
+                print("Using static background")
+            except Exception:
+                print("No background found")
+    
+    def get_current_frame(self):
+        if not self.frames:
+            return None
+        
+        # Update frame
+        current_time = time.time()
+        if len(self.frames) > 1 and current_time - self.last_update >= self.frame_time:
+            self.current_frame = (self.current_frame + 1) % len(self.frames)
+            self.last_update = current_time
+        
+        return self.frames[self.current_frame]
+
+# Create animated background
+animated_bg = SimpleAnimatedBackground()
+
+# For compatibility with existing code
+def get_background_image():
+    return animated_bg.get_current_frame()
+
+background_image = get_background_image()
 
 # Global variable to store the current seed for display
 _current_seed = None
@@ -264,8 +321,10 @@ class LoadingScreen(input_handlers.BaseEventHandler):
     def on_render(self, console: tcod.Console) -> None:
         try:
             """Render the loading screen with parchment styling."""
-            # Use the same background as main menu
-            console.draw_semigraphics(background_image, 0, 0)
+            # Use animated background
+            current_bg = animated_bg.get_current_frame()
+            if current_bg is not None:
+                console.draw_semigraphics(current_bg, 0, 0)
             
             # Calculate window dimensions and position
             window_width = 60
@@ -510,8 +569,9 @@ class MainMenu(input_handlers.BaseEventHandler):
     def __init__(self):
         super().__init__()
         self.menu_options = [
-            ("Play a new game", "start_new"),
-            ("Continue last game", "load_game"), 
+            ("Enter New Dungeon", "start_new"),
+            ("Reenter Dungeon", "load_game"), 
+            ("Settings", "settings"),
             ("Debug Level", "debug_level"),
             ("Quit", "quit")
         ]
@@ -523,7 +583,9 @@ class MainMenu(input_handlers.BaseEventHandler):
 
     def on_render(self, console: tcod.Console) -> None:
         """Render the main menu with parchment styling and arrow key selection."""
-        console.draw_semigraphics(background_image, 0, 0)
+        current_bg = animated_bg.get_current_frame()
+        if current_bg is not None:
+            console.draw_semigraphics(current_bg, 0, 0) 
 
         # Calculate menu window dimensions and position
         window_width = 40
@@ -536,7 +598,7 @@ class MainMenu(input_handlers.BaseEventHandler):
         MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "WORK IN PROGRESS TITLE?")
 
         # Draw menu options with selection highlighting
-        menu_start_y = y + 4
+        menu_start_y = y + 3
         for i, (option_text, _) in enumerate(self.menu_options):
             is_selected = i == self.selected_option
             bg_color = (80, 60, 30) if is_selected else (45, 35, 25)
@@ -564,19 +626,20 @@ class MainMenu(input_handlers.BaseEventHandler):
         # Draw footer information with parchment styling
         footer_y = y + window_height - 3
         console.print(
-            x + (window_width // 2),
-            footer_y,
+            x + (window_width // 2) + 36,
+            footer_y + 20,
             "oxenfree",
             fg=color.bronze_text,
-            bg=color.parchment_bg,
+            bg=None,
             alignment=tcod.CENTER,
         )
         console.print(
-            x + (window_width // 2),
-            footer_y + 1,
+            x + (window_width // 2) + 27,
+            footer_y + 21,
             "2026 - Version 0.18.7 Beta",
             fg=color.bronze_text,
-            bg=color.parchment_bg,
+            # No background
+            bg=None,
             alignment=tcod.CENTER,
         )
 
@@ -603,11 +666,11 @@ class MainMenu(input_handlers.BaseEventHandler):
         elif event.sym in (tcod.event.KeySym.RETURN, tcod.event.KeySym.KP_ENTER, tcod.event.KeySym.SPACE):
             return self._handle_selection()
         elif event.sym in (tcod.event.KeySym.Q, tcod.event.K_ESCAPE):
-            if self.selected_option == 3:  # Quit option
+            if self.selected_option == 4:  # Quit option
                 raise SystemExit()
             else:
                 # Move selection to Quit option
-                self.selected_option = 3
+                self.selected_option = 4
                 return None
             
         # Legacy key support (optional - can be removed if desired)
@@ -690,6 +753,9 @@ class MainMenu(input_handlers.BaseEventHandler):
             sounds.stop_all_music()
             # Create debug level
             return DebugLevelScreen(self)
+        elif action == "settings":
+            from input_handlers import Settings
+            return Settings(parent_handler=self)
         
         return None
 
@@ -711,3 +777,4 @@ def initialize_music():
 
 # Initialize music tracks when module loads
 initialize_music()
+
