@@ -60,6 +60,18 @@ class Engine:
         self.grass_wave_cooldown = 180  # Ticks between waves (about 3 seconds at 60fps)
         self.active_grass_waves = []
 
+        # Persistent Simplex noise generator for torch/fire flicker.
+        # Stored on the engine (not per-map) so the animation is continuous
+        # across floor transitions and is preserved in save files.
+        import tcod.noise as _tcod_noise
+        self._noise_gen = _tcod_noise.Noise(
+            dimensions=2, algorithm=_tcod_noise.Algorithm.PERLIN
+        )
+        # Scrolling time variable that advances 0.2 per frame, matching the
+        # libtcod demo's fov_torchx.  Used to derive per-source wobble (dx, dy)
+        # and intensity delta (di) for torch/fire flicker.
+        self._torch_t: float = 0.0
+
     def get_adjacent_tiles(self, x: int, y: int) -> list[tuple[int, int]]:
         # Returns adjacent (including diagonals) tiles
         adjacent = []
@@ -106,6 +118,20 @@ class Engine:
             else:
                 # very unlikely, but avoid division by zero
                 self.tick_rate = getattr(self, "tick_rate", 0.0)
+        
+        # Generate water drop animations for random tiles 
+        try:
+            if hasattr(self.game_map, "tiles") and "name" in self.game_map.tiles.dtype.names:
+                if random.random() < 0.05:  # 5% chance each tick to try spawning drops
+                    for _ in range(2):  # Try to spawn a couple of drops each tick
+                        x = random.randint(0, self.game_map.width - 1)
+                        y = random.randint(0, self.game_map.height - 1)
+                        if (self.game_map.tiles["walkable"][x, y]
+                                and self.game_map.visible[x, y]):
+                            from animations import WaterDropAnimation
+                            self.animation_queue.append(WaterDropAnimation((x, y)))
+        except Exception:
+            traceback.print_exc()
 
         # Generate grass waves that sweep across the visible area
         try:
@@ -199,9 +225,9 @@ class Engine:
                             smoke_chance = 0.08 if entity.name == "Bonfire" else 0.01
 
                             # Flicker: frequent, short blips
-                            if random.random() < flicker_chance and entity.name is "Campfire":
+                            if random.random() < flicker_chance and entity.name == "Campfire":
                                 self.animation_queue.append(FireFlicker((entity.x, entity.y)))
-                            elif random.random() < flicker_chance and entity.name is "Bonfire":
+                            elif random.random() < flicker_chance and entity.name == "Bonfire":
                                 self.animation_queue.append(BonefireFlicker((entity.x, entity.y)))
 
                             # Smoke: rarer, longer lasting

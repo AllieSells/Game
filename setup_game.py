@@ -50,20 +50,16 @@ class SimpleAnimatedBackground:
             try:
                 frame = tcod.image.load(get_data_path(frame_path))[:, :, :3]
                 self.frames.append(frame)
-                if i < 3:  # Only print first few
-                    print(f"Loaded: {frame_path}")
             except Exception:
                 # Try alternative delay pattern
                 alt_path = frame_pattern.replace("0.03s", "0.06s").format(i)
                 try:
                     frame = tcod.image.load(get_data_path(alt_path))[:, :, :3]
                     self.frames.append(frame)
-                    if i < 3:
-                        print(f"Loaded: {alt_path}")
                 except Exception:
                     break
         
-        print(f"Loaded {len(self.frames)} animation frames")
+        print(f"Loaded {len(self.frames)} animation frames  ")
         
         # Fallback to static image
         if not self.frames:

@@ -679,3 +679,27 @@ class SlashAnimation:
 
         self.frames -= 1
         
+class WaterDropAnimation:
+    def __init__(self, position):
+        self.position = position
+        self.frames = 10  # duration in frames
+        self.render_priority = 0  # Render below everything else for subtlety
+
+    def tick(self, console, game_map):
+        x, y = self.position
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+
+        if game_map.visible[x, y]:
+            # Animate water drop with a brief blue sparkle
+            if self.frames == 10:
+                console.print(x, y, "|", fg=(0, 191, 255))  # DeepSkyBlue
+            elif self.frames == 9:
+                console.print(x, y, ";", fg=(30, 144, 255))  # DodgerBlue
+            elif self.frames == 8:
+                console.print(x, y, ".", fg=(0, 0, 255))  # Pale Blue
+            elif self.frames == 5:
+                console.print(x, y, ".", fg=(0, 0, 0))  # Darkgrey
+
+        self.frames -= 1

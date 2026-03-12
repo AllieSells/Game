@@ -88,64 +88,65 @@ class GameMap:
         """Return True if x and y are inside of the map."""
         return 0 <= x < self.width and 0 <= y < self.height
     
-    def _add_light_source(self, source_x: int, source_y: int, radius: int, max_intensity: float = 1.0) -> None:
-        """Add light from a source with distance-based falloff and FOV blocking."""
+    def _add_light_source(self, source_x: int, source_y: int, radius: int, max_intensity: float = 1.0,
+                          wobble_dx: float = 0.0, wobble_dy: float = 0.0, di: float = 0.0) -> None:
+        """Add light from a source with distance-based falloff and FOV blocking.
+
+        wobble_dx / wobble_dy shift the effective light centre each frame so
+        the flame appears to move.  di is an intensity delta (±0.2) that
+        brightens or dims the whole cone, both matching the libtcod demo
+        torch-flicker formula exactly.
+        """
         try:
             from tcod.map import compute_fov
             import tcod
-            
-            # Compute FOV to respect walls
-            try:
-                fov = compute_fov(
-                    self.tiles["transparent"], (source_x, source_y),
-                    radius=radius, algorithm=tcod.FOV_SHADOW
-                )
-            except Exception:
-                # Fallback: simple distance without FOV if compute_fov fails
-                xs = np.arange(0, self.width)
-                ys = np.arange(0, self.height)
-                dx = xs[:, None] - source_x
-                dy = ys[None, :] - source_y
-                dist = np.sqrt(dx * dx + dy * dy)
-                fov = dist <= radius
-            
-            # Calculate distance-based light intensity for all tiles in FOV
+
+            # FOV blocking uses the integer tile position (walls don't move).
+            fov = compute_fov(
+                self.tiles["transparent"], (source_x, source_y),
+                radius=radius, algorithm=tcod.FOV_SHADOW
+            )
+
+            # Effective (wobbled) light centre for distance calculation.
+            eff_x = source_x + wobble_dx
+            eff_y = source_y + wobble_dy
+
             xs = np.arange(0, self.width)
             ys = np.arange(0, self.height)
-            dx = xs[:, None] - source_x
-            dy = ys[None, :] - source_y
-            distance = np.sqrt(dx * dx + dy * dy)
-            
-            # Light falloff: intensity = max_intensity * (1 - distance / radius)^2
-            # Only apply where FOV is true and distance <= radius
-            mask = fov & (distance <= radius)
-            light_intensity = np.where(
-                mask,
-                max_intensity * np.maximum(0, (1 - distance / radius) ** 2),
-                0.0
-            )
-            
-            # Add to existing light levels (lights accumulate)
+            ddx = xs[:, None] - eff_x
+            ddy = ys[None, :] - eff_y
+            r = ddx * ddx + ddy * ddy  # squared distance from wobbled position
+
+            squared_radius = float(radius * radius)
+
+            # libtcod demo falloff: l = (R² − r) / R² + di, clamped to [0, max_intensity].
+            # Gives 1.0+di at the centre and di at the edge; di pulses the cone
+            # brighter/darker each frame while the clamp keeps values legal.
+            l = (squared_radius - r) / squared_radius + di
+
+            mask = fov & (r <= squared_radius)
+            light_intensity = np.where(mask, np.clip(l, 0.0, max_intensity), 0.0)
+
+            # Accumulate light (multiple sources add together, capped at 1.0).
             self.tiles["light_level"] = np.minimum(
-                1.0,  # Cap at maximum brightness
+                1.0,
                 self.tiles["light_level"] + light_intensity
             )
-            
-        except Exception as e:
-            # Fallback for any errors: simple distance-based lighting
+
+        except Exception:
+            # Fallback: simple distance-based lighting without wobble.
             xs = np.arange(0, self.width)
             ys = np.arange(0, self.height)
-            dx = xs[:, None] - source_x
-            dy = ys[None, :] - source_y
-            distance = np.sqrt(dx * dx + dy * dy)
-            
+            ddx = xs[:, None] - source_x
+            ddy = ys[None, :] - source_y
+            distance = np.sqrt(ddx * ddx + ddy * ddy)
+
             mask = distance <= radius
             light_intensity = np.where(
                 mask,
                 max_intensity * np.maximum(0, (1 - distance / radius) ** 2),
                 0.0
             )
-            
             self.tiles["light_level"] = np.minimum(
                 1.0,
                 self.tiles["light_level"] + light_intensity
@@ -233,9 +234,22 @@ class GameMap:
             light_bg = vis_light['bg'].astype(float)
             
             # Linear interpolation: dark + light_level * (light - dark)
-            interp_fg = (dark_fg + vis_light_levels[:, np.newaxis] * (light_fg - dark_fg)).clip(0, 255).astype(np.uint8)
-            interp_bg = (dark_bg + vis_light_levels[:, np.newaxis] * (light_bg - dark_bg)).clip(0, 255).astype(np.uint8)
-            
+            interp_fg = (dark_fg + vis_light_levels[:, np.newaxis] * (light_fg - dark_fg))
+            interp_bg = (dark_bg + vis_light_levels[:, np.newaxis] * (light_bg - dark_bg))
+
+            # Warm torch/fire tint: lit tiles shift toward amber on non-sunlit maps.
+            # warm_tint = [R_mul, G_mul, B_mul] at full brightness — keep red,
+            # slightly dim green, noticeably cut blue.
+            if not getattr(self, "sunlit", False):
+                warm_tint = np.array([1.0, 0.88, 0.60], dtype=float)
+                # Tint strength is proportional to light level (no tint in darkness)
+                tint_mul = 1.0 + vis_light_levels[:, np.newaxis] * (warm_tint - 1.0)
+                interp_fg = interp_fg * tint_mul
+                interp_bg = interp_bg * tint_mul
+
+            interp_fg = interp_fg.clip(0, 255).astype(np.uint8)
+            interp_bg = interp_bg.clip(0, 255).astype(np.uint8)
+
             # Create interpolated tiles
             result_tiles[visible_mask] = np.array(
                 list(zip(result_chars, interp_fg, interp_bg)), 
@@ -255,6 +269,39 @@ class GameMap:
         # Reset all tiles to zero light level first
         self.tiles["light_level"][:] = 0.0
 
+        # Advance the torch-flicker time variable exactly like fov_torchx in the
+        # libtcod demo (0.2 per frame).  Three 1-D noise samples at fixed offsets
+        # give independent wobble axes and intensity pulse per source.
+        self.engine._torch_t = getattr(self.engine, "_torch_t", 0.0) + 0.2
+
+        # Read flicker setting once per frame (avoid repeated disk reads).
+        try:
+            import json as _json
+            with open("settings.json") as _sf:
+                _content = "\n".join(
+                    line for line in _sf.read().splitlines()
+                    if not line.lstrip().startswith("//")
+                )
+                _flicker_on = _json.loads(_content).get("light_flicker", True)
+        except Exception:
+            _flicker_on = True
+
+        def _wobble(t_offset: float = 0.0):
+            """Return (dx, dy, di) flicker values for a light source.
+
+            When the 'light_flicker' setting is off, returns (0, 0, 0) so the
+            light still emits at full steady radius without any animation.
+            """
+            if not _flicker_on:
+                return 0.0, 0.0, 0.0
+
+            t = self.engine._torch_t + t_offset
+            noise = self.engine._noise_gen
+            def _s(x: float) -> float:
+                pt = np.array([[[x]], [[0.0]]], dtype=np.float32)
+                return float(noise.sample_mgrid(pt)[0, 0])
+            return _s(t + 20.0) * 0.9, _s(t + 30.0) * 0.9, _s(t) * 0.08
+
         if getattr(self, "sunlit", True):
             self.tiles["light_level"][:] = 1.0  # Sunlit maps are fully lit
         
@@ -270,7 +317,9 @@ class GameMap:
 
             if has_torch:
                 px, py = player.x, player.y
-                self._add_light_source(px, py, radius=7, max_intensity=1.0)
+                wdx, wdy, di = _wobble(0.0)
+                self._add_light_source(px, py, radius=7, max_intensity=1.0,
+                                       wobble_dx=wdx, wobble_dy=wdy, di=di)
 
             # Campfire and Bonfire lighting - doesn't affect FOV, only visual lighting
             try:
@@ -281,13 +330,18 @@ class GameMap:
                             # Only apply lighting if item is within map bounds
                             if not (0 <= cx < self.width and 0 <= cy < self.height):
                                 continue
-                            self._add_light_source(cx, cy, radius=5, max_intensity=0.8)
+                            # Unique noise offset so each campfire flickers independently.
+                            wdx, wdy, di = _wobble(cx * 3.7 + cy * 5.3)
+                            self._add_light_source(cx, cy, radius=5, max_intensity=0.8,
+                                                   wobble_dx=wdx, wobble_dy=wdy, di=di)
                         elif item.name == "Bonfire":
                             bx, by = item.x, item.y
                             # Only apply lighting if item is within map bounds
                             if not (0 <= bx < self.width and 0 <= by < self.height):
                                 continue
-                            self._add_light_source(bx, by, radius=15, max_intensity=1.0)
+                            wdx, wdy, di = _wobble(bx * 3.7 + by * 5.3)
+                            self._add_light_source(bx, by, radius=15, max_intensity=1.0,
+                                                   wobble_dx=wdx, wobble_dy=wdy, di=di)
                     except Exception:
                         continue
             except Exception:

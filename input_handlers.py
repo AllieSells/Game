@@ -4577,7 +4577,7 @@ class PauseHandler(AskUserEventHandler):
         elif response == "Exit without Saving":
             raise exceptions.QuitWithoutSaving()
         elif response == "Settings":
-            return Settings(self.engine, parent_handler=PauseHandler(self.engine))
+            return Settings(parent_handler=PauseHandler(self.engine))
         else:
             return MainGameEventHandler(self.engine)
 
@@ -5017,6 +5017,11 @@ class Settings(BaseEventHandler):
                 "Options": ["High", "Medium", "Low"],
                 "SelectedIndex": ["high", "medium", "low"].index(self.settings_data.get("graphics", "high").lower()),
                 "json_key": "graphics"
+            },
+            "Light Flicker": {
+                "Options": ["On", "Off"],
+                "SelectedIndex": 0 if self.settings_data.get("light_flicker", True) else 1,
+                "json_key": "light_flicker"
             }
         }
         # Convert to list for easier navigation
@@ -5094,7 +5099,7 @@ class Settings(BaseEventHandler):
                 return json.loads(clean_content)
         except (FileNotFoundError, json.JSONDecodeError):
             # Return default settings if file doesn't exist or is invalid
-            return {"fullscreen": False, "audio": 50, "graphics": "high"}
+            return {"fullscreen": False, "audio": 50, "graphics": "high", "light_flicker": True}
     
     def _get_audio_index(self) -> int:
         """Get the correct index for audio volume setting."""
@@ -5136,6 +5141,8 @@ class Settings(BaseEventHandler):
                     elif category_key == "Graphics":
                         options = ["high", "medium", "low"]
                         self.settings_data[json_key] = options[selected_index]
+                    elif category_key == "Light Flicker":
+                        self.settings_data[json_key] = (selected_index == 0)  # True for On
             
             # Write to file with proper JSON format
             with open(self.settings_file, 'w') as f:
@@ -5143,7 +5150,8 @@ class Settings(BaseEventHandler):
                 f.write("    // Display settings\n")
                 f.write(f'    "fullscreen": {json.dumps(self.settings_data.get("fullscreen", False))},\n')
                 f.write(f'    "audio": {json.dumps(self.settings_data.get("audio", 50))},\n')
-                f.write(f'    "graphics": {json.dumps(self.settings_data.get("graphics", "high"))}\n')
+                f.write(f'    "graphics": {json.dumps(self.settings_data.get("graphics", "high"))},\n')
+                f.write(f'    "light_flicker": {json.dumps(self.settings_data.get("light_flicker", True))}\n')
                 f.write("}\n")
         except Exception as e:
             # If saving fails, just continue - don't crash the game
