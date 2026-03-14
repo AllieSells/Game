@@ -1111,7 +1111,7 @@ AMBIENT_TYPES = {
     ),
     'menu': AmbientSoundType(
         name='menu',
-        sound_file='RP/sfx/loops/menu/menu3.mp3',
+        sound_file='RP/sfx/loops/fire/fire_loop.wav',
         entity_names=[None],
         map_type=None,
         proximity_threshold=999,  # Always play when active
@@ -1275,6 +1275,7 @@ _ambient_manager = AmbientSoundManager()
 
 # Global menu state tracking
 _menu_ambience_active = False
+_menu_music_active = False
 
 def _ray_cast_sound(start_x, start_y, end_x, end_y, game_map):
     """Ray-cast for sound propagation with material attenuation."""
@@ -1843,9 +1844,10 @@ def start_dungeon_music():
     start_ambient_sound('dungeon_music')
 
 def start_menu_music():
-    """Start menu music."""
-    stop_all_music()
-    start_ambient_sound('menu_music')
+    global _menu_music_active
+    if not _menu_music_active:
+        _menu_music_active = True
+        start_ambient_sound('menu_music')
 
 def stop_all_music():
     """Stop all music."""

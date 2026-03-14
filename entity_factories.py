@@ -745,6 +745,21 @@ altar = Actor(
     level=Level(xp_given=0),
 )
 
+tutorial_guide = Actor(
+    char="☺",
+    color=(156, 125, 255),
+    name="Guide",
+    ai_cls=None,
+    equipment=Equipment(),
+    fighter=Fighter(hp=999999999999, base_defense=0, base_power=0),
+    inventory=Inventory(capacity=26),
+    level=Level(xp_given=0),
+    sentient=True,
+    is_known=True,
+    type = "NPC",
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=999999999999),
+)
+
 villager = Actor(
     char="☺",
     color=(255, 255, 0),

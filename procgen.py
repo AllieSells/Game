@@ -2,7 +2,7 @@ from __future__ import annotations
 from enum import unique
 from typing import Dict, Iterator, Tuple, List, TYPE_CHECKING
 from webbrowser import get
-from numpy import number
+import copy
 import tcod
 import random
 
@@ -370,6 +370,39 @@ def generate_circle_based_grass(game_map: GameMap, map_width: int, map_height: i
                 game_map.tiles[x, y] = tile_types.fill_random_grasses()
                 placed[x][y] = True
 
+def generate_tutorial(
+        map_width: int,
+        map_height: int,
+        engine: Engine,
+) -> GameMap:
+    """Generates a pre-determined tutorial map."""
+
+    player = engine.player
+    tutorial = GameMap(engine, map_width, map_height, entities=[player], type="dungeon", name="Tutorial")  # Use dungeon type for world borders
+
+    # Create a simple room
+    room = RectangularRoom(10, 10, map_width - 4, map_height - 4)
+    tutorial.tiles[room.inner] = tile_types.random_floor_tile()
+    place_campfires(tutorial, "dungeon_first_room", room=room, player_pos=(map_width//2, map_height//2))
+    
+    import loot_tables
+    loot = loot_tables.generate_loot_from_table("starter_chest")
+
+    tutorial_chest = entity_factories.make_chest_with_loot(loot, capacity=15)
+    cx, cy = room.center
+    chest_x, chest_y = min(tutorial.width - 1, cx + 1), cy
+
+    # Get guide entity
+    
+    guide = copy.deepcopy(entity_factories.tutorial_guide)
+    guide.spawn(tutorial, player.x + 2, player.y)
+
+
+    tutorial_chest.spawn(tutorial, chest_x, chest_y)
+
+    player.place(cx, cy, tutorial)
+
+    return tutorial
 
 def generate_overworld_chunk(
         map_width: int,

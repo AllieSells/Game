@@ -1,7 +1,7 @@
 {
     // Display settings
-    "fullscreen": false,
+    "fullscreen": true,
     "audio": 100,
-    "graphics": "high",
+    "graphics": "medium",
     "light_flicker": true
 }

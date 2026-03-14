@@ -18,6 +18,7 @@ from liquid_system import LiquidType
 from message_log import MessageLog
 import render_functions
 import sounds
+from animations import TextPopupAnimation
 
 if TYPE_CHECKING:
     from entity import Actor
@@ -59,6 +60,7 @@ class Engine:
         self.grass_wave_timer = 0
         self.grass_wave_cooldown = 180  # Ticks between waves (about 3 seconds at 60fps)
         self.active_grass_waves = []
+        self.dropped_stone_dummy_var = False
 
         # Persistent Simplex noise generator for torch/fire flicker.
         # Stored on the engine (not per-map) so the animation is continuous
@@ -96,6 +98,174 @@ class Engine:
             return True
         else:
             return False
+
+    def tutorial_ticking(self, console: Console):
+        """Special tick method used during the tutorial"""
+        now = time.monotonic()
+        _last = getattr(self, "_last_tick_time", None)
+
+        if _last is None:
+            # first tick: initialize storage
+            self._last_tick_time = now
+            self._tick_intervals = deque(maxlen=60)  # smooth over last N frames
+            self.tick_rate = 0.0
+
+        else:
+            dt = now - _last
+            self._last_tick_time = now
+            if dt > 0:
+                self._tick_intervals.append(dt)
+                total = sum(self._tick_intervals)
+                # ticks per second = number of recorded ticks / total time covered
+                self.tick_rate = (len(self._tick_intervals) / total) if total > 0 else 0.0
+            else:
+                # very unlikely, but avoid division by zero
+                self.tick_rate = getattr(self, "tick_rate", 0.0)
+
+        # Tutorial state management - only update when state changes
+        current_tutorial_state = self._determine_tutorial_state()
+        last_state = getattr(self, '_last_tutorial_state', None)
+        
+        if current_tutorial_state != last_state:
+            self._update_tutorial_message(current_tutorial_state)
+            self._last_tutorial_state = current_tutorial_state
+            
+        # Process animations - this was missing!
+        # Don't call process_animations here as it needs console/game_map params
+        # Instead just clean up expired animations
+        expired = [anim for anim in list(self.animation_queue) if getattr(anim, "frames", 1) <= 0]
+        for anim in expired:
+            try:
+                self.animation_queue.remove(anim)
+            except ValueError:
+                pass
+    
+    def _determine_tutorial_state(self):
+        """Determine the current tutorial state based on player progress"""
+        # No items in inventory - need to get items from chest
+        
+        if self.turn_manager.total_player_moves == 0:
+            return "move"
+        elif len(self.player.inventory.items) == 0:
+            return "get_items"
+        elif self.player.level.traits["arcana"]["level"] > 1:
+            return "level_up_arcana"
+        elif self.dropped_stone_dummy_var:
+            return "sigil_stone_dropped"
+
+        
+        # Has items but none equipped - need to equip items
+        elif len(self.player.inventory.items) > 0 and not any(item in self.player.equipment.equipped_items.values() for item in self.player.inventory.items):
+            return "equip_items"
+        
+        elif any(entity.name == "Sigil Stone" for entity in self.game_map.entities):
+            print(self.dropped_stone_dummy_var)
+            if self.dropped_stone_dummy_var == False:
+                self.dropped_stone_dummy_var = True
+                return "sigil_stone_dropped"
+                
+            else:
+                return "sigil_stone_dropped"
+            
+
+            
+                
+        
+        # Check for goblin corpse first - if defeated, move to next phase
+        elif any(entity.name == "Corpse of Goblin" for entity in self.game_map.entities):
+            return "goblin_defeated"
+        
+        # Has any item equipped - explain equipment usage and spawn goblin if needed
+        elif any(item in self.player.equipment.equipped_items.values() for item in self.player.inventory.items):
+            # Spawn goblin if not already present (alive or dead)
+            if not any(entity.name == "Goblin" for entity in self.game_map.entities) and not any(entity.name == "Corpse of Goblin" for entity in self.game_map.entities):
+                 # Spawn a goblin enemy to demonstrate combat after equipping
+                import entity_factories
+                goblin = entity_factories.goblin
+                goblin.inventory.items.append(entity_factories.generate_sigil_stone())
+                goblin.spawn(self.game_map, 42, 17)  # Spawn a bit away from player
+            return "item_equipped"
+        
+        # Add more states here as needed
+        # elif some_other_condition:
+        #     return "next_state"
+        
+        return None
+    
+    def _update_tutorial_message(self, tutorial_state):
+        """Update the tutorial message display based on current state"""
+        # Only update if we don't already have this tutorial state showing
+        if hasattr(self, '_last_tutorial_message_state') and self._last_tutorial_message_state == tutorial_state:
+            return  # Already showing the correct message, don't interfere
+        
+        # Mark existing tutorial animation as expired
+        if hasattr(self, '_current_tutorial_animation') and self._current_tutorial_animation:
+            self._current_tutorial_animation.frames = 0
+        
+        # Tutorial messages for each state
+        messages = {
+            "move": """
+>Arrow keys move you 
+ cardinally. Numpad keys
+ move ordinally. Try it!""",
+
+            "get_items": """
+>Interact with objects
+ with ALT + Direction.
+ Try interacting with the chest (C)
+ and take the items inside.""",
+            
+            "equip_items": """
+>Great job. You can
+ interact with many
+ objects. Try equipping
+ those items using the 
+ Equipment menu (E). """,
+            
+            "item_equipped": """
+>Excellent! Try attacking
+ this goblin (g) by moving
+ into it, or using
+ SHIFT + Direction.""",
+            
+            "goblin_defeated": """
+>Great job! Inspect (S) the
+ goblin corpse to see the
+ loot it dropped. Interact with
+ it like a chest! Use the drop (D)
+ menu and drop the sigil stone. """,
+            "sigil_stone_dropped": """
+>Great. Sigil stones can be 
+ used (SPACE) from your 
+ inventory (TAB) to unlock
+ spells and level magic.
+ Pick up (G) the stone 
+ and use it now!""",
+            "level_up_arcana": """
+>Check your levels with (F).
+ Skills build from use. That
+ is all from me! Use (ESC) to exit,
+ and check the controls in settings
+ if you need a refresh.""",
+
+            
+            # Add more tutorial messages here
+            # "next_state": """Your next tutorial message here""",
+        }
+        
+        # Add the appropriate tutorial animation and store reference
+        if tutorial_state in messages:
+            tutorial_animation = TextPopupAnimation(
+                43, 21, 
+                messages[tutorial_state],
+                color=(255, 255, 0), 
+                duration=99999
+            )
+            self.animation_queue.append(tutorial_animation)
+            self._current_tutorial_animation = tutorial_animation
+            self._last_tutorial_message_state = tutorial_state
+
+                
     
     def tick(self, console: Console):
         # Calculate tick rate per second
@@ -118,25 +288,30 @@ class Engine:
             else:
                 # very unlikely, but avoid division by zero
                 self.tick_rate = getattr(self, "tick_rate", 0.0)
+
+        # Handle tutorial-specific ticking for tutorial maps
+        if hasattr(self, 'game_map') and getattr(self.game_map, 'type', None) == "tutorial":
+            self.tutorial_ticking(console)
+            return  # Skip regular game ticking for tutorials
         
         # Generate water drop animations for random tiles 
-        try:
-            if hasattr(self.game_map, "tiles") and "name" in self.game_map.tiles.dtype.names:
-                if random.random() < 0.05:  # 5% chance each tick to try spawning drops
-                    for _ in range(2):  # Try to spawn a couple of drops each tick
-                        x = random.randint(0, self.game_map.width - 1)
-                        y = random.randint(0, self.game_map.height - 1)
-                        if (self.game_map.tiles["walkable"][x, y]
-                                and self.game_map.visible[x, y]):
-                            from animations import WaterDropAnimation
-                            self.animation_queue.append(WaterDropAnimation((x, y)))
-        except Exception:
-            traceback.print_exc()
+        #try:
+        #    if hasattr(self.game_map, "tiles") and "name" in self.game_map.tiles.dtype.names:
+        #        if random.random() < 0.0 5:  # 5% chance each tick to try spawning drops
+        #            for _ in range(2):  # Try to spawn a couple of drops each tick
+        #               x = random.randint(0, self.game_map.width - 1)
+        #               y = random.randint(0, self.game_map.height - 1)
+        #               if (self.game_map.tiles["walkable"][x, y]
+        #                       and self.game_map.visible[x, y]):
+        #                   from animations import WaterDropAnimation
+        #                    self.animation_queue.append(WaterDropAnimation((x, y)))
+        #except Exception:
+        #    traceback.print_exc()
 
         # Generate grass waves that sweep across the visible area
         try:
             self.grass_wave_timer += 1
-            
+         
             # Start a new wave periodically
             if self.grass_wave_timer >= self.grass_wave_cooldown:
                 self.grass_wave_timer = 0

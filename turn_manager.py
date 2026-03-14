@@ -148,7 +148,7 @@ class TurnManager:
         player.hunger = max(0.0, player.hunger - (base_hunger_decrease * hunger_mult))
         self.total_player_moves += 1
 
-
+        
         print(f"TotalMoves: {self.total_player_moves}")
         
         # Process any remaining actor turns after player acted

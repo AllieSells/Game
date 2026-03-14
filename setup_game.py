@@ -36,6 +36,26 @@ def get_data_path(filename):
     return os.path.join(base_path, filename)
 
 
+def get_save_path(filename=""):
+    """Get the correct path for save files that need to be writable."""
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller executable - store saves next to the .exe
+        base_path = os.path.dirname(sys.executable)
+    else:
+        # Running in development - use current directory
+        base_path = os.path.dirname(__file__)
+    
+    save_dir = os.path.join(base_path, "SAVEGAME")
+    
+    # Create save directory if it doesn't exist
+    os.makedirs(save_dir, exist_ok=True)
+    
+    if filename:
+        return os.path.join(save_dir, filename)
+    else:
+        return save_dir
+
+
 # Simple animated background
 class SimpleAnimatedBackground:
     def __init__(self, frame_pattern="RP/background/frame_{:03d}_delay-0.03s.png", frame_count=240, fps=20):
@@ -174,6 +194,80 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
 
     return engine
 
+def tutorial_game(game_seed = None, seed_string = None) -> Engine:
+    """Return a new game session with a custom tutorial map."""
+
+    map_width = 80
+    map_height = 40
+
+    _set_global_seed(game_seed=game_seed, seed_string=seed_string)
+
+    player = copy.deepcopy(entity_factories.player)
+
+    engine = Engine(player=player)
+
+    engine.is_generating_world = True
+
+    # Create simple tutorial map with 8x8 room in center
+    from game_map import GameMap
+    import tile_types
+    
+    game_map = GameMap(engine, map_width, map_height, entities=[player], type="tutorial", name="Tutorial Level")
+    
+    # Calculate 8x8 room in center of map
+    center_x, center_y = map_width // 2, map_height // 2
+    room_size = 8
+    room_x1 = center_x - room_size // 2
+    room_y1 = center_y - room_size // 2
+    room_x2 = room_x1 + room_size
+    room_y2 = room_y1 + room_size
+    
+    # Create the room floor
+    game_map.tiles[room_x1:room_x2, room_y1:room_y2] = tile_types.floor
+    
+    # Place player in center of room
+    player.place(center_x, center_y, game_map)
+    
+    # Add a simple tutorial enemy (slime) in the room
+    guide = copy.deepcopy(entity_factories.tutorial_guide)
+    guide.generate_villager()
+    guide.tradable = False
+    
+    guide.spawn(game_map, center_x + 2, center_y + 2)
+
+    campfire = copy.deepcopy(entity_factories.campfire)
+    campfire.spawn(game_map, center_x - 2, center_y + 2)
+    
+    # Add a tutorial chest with basic loot
+    import loot_tables
+    loot = loot_tables.generate_loot_from_table("starter_chest")
+    tutorial_chest = entity_factories.make_chest_with_loot(loot, capacity=15)
+    tutorial_chest.spawn(game_map, center_x - 2, center_y - 2)
+    
+    engine.game_map = game_map
+    
+    # Add minimal GameWorld for engine compatibility
+    engine.game_world = GameWorld(
+        engine=engine,
+        max_rooms=0,  # Tutorial doesn't use room generation
+        room_min_size=0,
+        room_max_size=0,
+        map_width=map_width,
+        map_height=map_height,
+    )
+    engine.game_world.current_floor = 0
+    
+    engine.update_fov()
+    engine.is_generating_world = False
+    
+    engine.message_log.add_message("Welcome to the tutorial!", color.welcome_text)
+    engine.message_log.add_message("Use arrow keys to move, [Space] to interact.", color.welcome_text)
+    engine.message_log.add_message("Defeat the slime to complete the tutorial.", color.welcome_text)
+
+    return engine
+
+
+
 def new_debug_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None) -> Engine:
     """Return a debug game session using overworld chunk generation."""
     map_width = 80
@@ -268,8 +362,16 @@ def new_debug_game(game_seed: Optional[int] = None, seed_string: Optional[str] =
     return engine
 
 def load_game(filename: str) -> Engine:
-    # Load engine instance from file
-    with open(filename, "rb") as f:
+    """Load engine instance from file."""
+    # Use get_save_path to get the correct save directory
+    if not filename.startswith("SAVEGAME"):
+        filepath = get_save_path(filename)
+    else:
+        # Handle legacy format "SAVEGAME/filename.sav"
+        filename = filename.replace("SAVEGAME/", "")
+        filepath = get_save_path(filename)
+    
+    with open(filepath, "rb") as f:
         engine = pickle.loads(lzma.decompress(f.read()))
     assert isinstance(engine, Engine)
     # Clear any pending animations that may have been serialized or leftover
@@ -285,7 +387,33 @@ def load_game(filename: str) -> Engine:
                     pass
     except Exception:
         pass
-    return engine 
+    return engine
+
+
+def get_available_saves():
+    """Get list of available save files in SAVEGAME directory."""
+    save_files = []
+    save_dir = get_save_path()  # Use get_save_path instead of get_data_path
+    
+    try:
+        if os.path.exists(save_dir):
+            for filename in os.listdir(save_dir):
+                if filename.endswith('.sav'):
+                    filepath = os.path.join(save_dir, filename)
+                    # Get file modification time for sorting
+                    try:
+                        mtime = os.path.getmtime(filepath)
+                        # Remove .sav extension for display
+                        display_name = filename[:-4]
+                        save_files.append((display_name, filename, mtime))
+                    except OSError:
+                        continue
+    except OSError:
+        pass
+    
+    # Sort by modification time (newest first)
+    save_files.sort(key=lambda x: x[2], reverse=True)
+    return save_files 
 
 # Removed SeedInputScreen class - now using TextInputHandler from input_handlers
 
@@ -535,6 +663,280 @@ class LoadingScreen(input_handlers.BaseEventHandler):
         return self
 
 
+class SaveGameMenu(input_handlers.BaseEventHandler):
+    """Handle the save game selection menu."""
+    
+    def __init__(self, parent_menu):
+        super().__init__()
+        self.parent_menu = parent_menu
+        self.save_files = get_available_saves()
+        self.selected_option = 0
+        
+        # If no saves found, show message
+        if not self.save_files:
+            self.no_saves = True
+        else:
+            self.no_saves = False
+    
+    def refresh_saves(self):
+        """Refresh the save file list."""
+        self.save_files = get_available_saves()
+        if not self.save_files:
+            self.no_saves = True
+            self.selected_option = 0
+        else:
+            self.no_saves = False
+            # Keep selection valid
+            if self.selected_option >= len(self.save_files):
+                self.selected_option = max(0, len(self.save_files) - 1)
+    
+    def delete_save(self, save_index):
+        """Delete a save file by index."""
+        if 0 <= save_index < len(self.save_files):
+            display_name, filename, mtime = self.save_files[save_index]
+            filepath = get_save_path(filename)  # Use get_save_path instead of get_data_path
+            
+            try:
+                os.remove(filepath)
+                return True, f"Deleted '{display_name}' successfully."
+            except OSError as e:
+                return False, f"Failed to delete '{display_name}': {e}"
+        return False, "Invalid save selection."
+    
+    def on_render(self, console: tcod.Console) -> None:
+        """Render the save game selection menu."""
+        current_bg = animated_bg.get_current_frame()
+        if current_bg is not None:
+            console.draw_semigraphics(current_bg, 0, 0)
+        
+        # Calculate window dimensions
+        window_width = 60
+        window_height = min(20, len(self.save_files) + 8) if not self.no_saves else 12
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height) // 2
+        
+        # Draw parchment background and border
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Load Saved Game")
+        
+        if self.no_saves:
+            # Show no saves message
+            console.print(
+                x + (window_width // 2),
+                y + 5,
+                "No saved games found.",
+                fg=color.fantasy_text,
+                bg=color.parchment_bg,
+                alignment=tcod.CENTER,
+            )
+            console.print(
+                x + (window_width // 2),
+                y + 7,
+                "[Esc] Back to Main Menu",
+                fg=color.light_gray,
+                bg=color.parchment_bg,
+                alignment=tcod.CENTER,
+            )
+        else:
+            # Show save file list
+            menu_start_y = y + 3
+            visible_saves = min(10, len(self.save_files))  # Show max 10 saves
+            
+            for i in range(visible_saves):
+                save_index = i
+                if save_index >= len(self.save_files):
+                    break
+                    
+                display_name, filename, mtime = self.save_files[save_index]
+                is_selected = save_index == self.selected_option
+                
+                bg_color = (80, 60, 30) if is_selected else (45, 35, 25)
+                fg_color = color.gold_accent if is_selected else color.fantasy_text
+                marker = "> " if is_selected else "  "
+                marker2 = " <" if is_selected else "  "
+                
+                option_y = menu_start_y + i
+                
+                # Format save info with date
+                import time
+                date_str = time.strftime("%m/%d/%y %H:%M", time.localtime(mtime))
+                save_text = f"{display_name} ({date_str})"
+                
+                # Truncate if too long
+                max_text_len = window_width - 8
+                if len(save_text) > max_text_len:
+                    save_text = save_text[:max_text_len-3] + "..."
+                
+                full_text = f"{marker}{save_text}{marker2}"
+                
+                # Draw background for the entire line
+                for dx in range(window_width - 2):
+                    console.print(x + 1 + dx, option_y, " ", bg=bg_color)
+                
+                console.print(
+                    x + 2,
+                    option_y,
+                    full_text,
+                    fg=fg_color,
+                    bg=bg_color,
+                )
+            
+            # Show instructions
+            instructions_y = y + window_height - 2
+            console.print(
+                x + (window_width // 2),
+                instructions_y,
+                "[↑↓] Navigate  [Space] Load  [Del] Delete  [Esc] Back",
+                fg=color.light_gray,
+                bg=color.parchment_bg,
+                alignment=tcod.CENTER,
+            )
+    
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[input_handlers.BaseEventHandler]:
+        """Handle key input for save selection."""
+        if event.sym == tcod.event.K_ESCAPE:
+            # Return to main menu (music should already be playing)
+            return self.parent_menu
+        
+        if self.no_saves:
+            return None
+        
+        if event.sym == tcod.event.KeySym.UP:
+            sounds.play_menu_move_sound()
+            self.selected_option = (self.selected_option - 1) % len(self.save_files)
+            return None
+        elif event.sym == tcod.event.KeySym.DOWN:
+            sounds.play_menu_move_sound()
+            self.selected_option = (self.selected_option + 1) % len(self.save_files)
+            return None
+        elif event.sym in (tcod.event.KeySym.RETURN, tcod.event.KeySym.KP_ENTER, tcod.event.KeySym.SPACE):
+            # Load selected save
+            if 0 <= self.selected_option < len(self.save_files):
+                display_name, filename, mtime = self.save_files[self.selected_option]
+                
+                try:
+                    engine = load_game(filename)  # Just pass filename, load_game handles the path
+                    
+                    # Stop menu ambience when leaving menu  
+                    sounds.stop_menu_ambience()
+                    sounds.stop_all_music()
+                    sounds.play_stairs_sound()
+                    sounds.start_dungeon_music()
+
+                    return input_handlers.MainGameEventHandler(engine)
+                except FileNotFoundError:
+                    return input_handlers.PopupMessage(self, f"Save file '{display_name}' not found.")
+                except Exception as exc:
+                    traceback.print_exc()
+                    return input_handlers.PopupMessage(self, f"Failed to load save:\n{exc}")
+        elif event.sym == tcod.event.KeySym.DELETE:
+            # Delete selected save with confirmation
+            if 0 <= self.selected_option < len(self.save_files):
+                display_name, filename, mtime = self.save_files[self.selected_option]
+                save_to_delete = self.selected_option  # Capture the index before any changes
+                
+                # Create confirmation callback
+                def confirm_delete(confirmed):
+                    if confirmed:
+                        success, message = self.delete_save(save_to_delete)
+                        self.refresh_saves()  # Refresh the list after deletion
+                        # Show success message briefly and return to menu
+                        return self  # Return directly to save menu after deletion
+                    else:
+                        # User cancelled, return to save menu
+                        return self
+                
+                return ConfirmationDialog(
+                    parent_handler=self,
+                    message=f"Delete save '{display_name}'?\n\nThis cannot be undone!",
+                    callback=confirm_delete
+                )
+        
+        return None
+
+
+class ConfirmationDialog(input_handlers.BaseEventHandler):
+    """A confirmation dialog with Yes/No options."""
+    
+    def __init__(self, parent_handler, message: str, callback):
+        super().__init__()
+        self.parent_handler = parent_handler
+        self.message = message
+        self.callback = callback
+        self.selected_option = 1  # Default to "No" for safety
+        self.options = ["Yes", "No"]
+    
+    def on_render(self, console: tcod.Console) -> None:
+        """Render the confirmation dialog."""
+        # Render parent in background
+        if hasattr(self.parent_handler, 'on_render'):
+            self.parent_handler.on_render(console)
+        
+        # Calculate dialog dimensions
+        lines = self.message.split('\n')
+        dialog_width = max(30, max(len(line) for line in lines) + 4)
+        dialog_height = len(lines) + 6
+        
+        x = (console.width - dialog_width) // 2
+        y = (console.height - dialog_height) // 2
+        
+        # Apply faded background effect (dims everything except dialog area)
+        # self.render_faded(console, x, y, dialog_width, dialog_height)
+        
+        # Draw dialog box with parchment styling
+        MenuRenderer.draw_parchment_background(console, x, y, dialog_width, dialog_height)
+        MenuRenderer.draw_ornate_border(console, x, y, dialog_width, dialog_height, "Confirm")
+        
+        # Draw message
+        for i, line in enumerate(lines):
+            console.print(
+                x + (dialog_width // 2),
+                y + 2 + i,
+                line,
+                fg=color.fantasy_text,
+                bg=color.parchment_bg,
+                alignment=tcod.CENTER,
+            )
+        
+        # Draw Yes/No options
+        options_y = y + dialog_height - 3
+        total_width = sum(len(opt) for opt in self.options) + 6  # 3 spaces between options
+        start_x = x + (dialog_width - total_width) // 2
+        
+        for i, option in enumerate(self.options):
+            is_selected = i == self.selected_option
+            fg_color = color.red if is_selected and option == "Yes" else color.gold_accent if is_selected else color.fantasy_text
+            bg_color = (80, 60, 30) if is_selected else (45, 35, 25)
+            
+            text = f"[{option}]" if is_selected else f" {option} "
+            console.print(
+                start_x + i * (len(text) + 3),
+                options_y,
+                text,
+                fg=fg_color,
+                bg=bg_color,
+            )
+    
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[input_handlers.BaseEventHandler]:
+        """Handle confirmation dialog input."""
+        if event.sym in (tcod.event.K_ESCAPE, tcod.event.KeySym.N):
+            # Cancel/No
+            return self.callback(False)
+        elif event.sym == tcod.event.KeySym.Y:
+            # Yes
+            return self.callback(True)
+        elif event.sym in (tcod.event.KeySym.LEFT, tcod.event.KeySym.RIGHT):
+            # Toggle between Yes/No
+            sounds.play_menu_move_sound()
+            self.selected_option = 1 - self.selected_option
+            return None
+        elif event.sym in (tcod.event.KeySym.RETURN, tcod.event.KeySym.KP_ENTER, tcod.event.KeySym.SPACE):
+            # Confirm current selection
+            return self.callback(self.selected_option == 0)  # 0 = Yes, 1 = No
+        
+        return None
+
+
 class DebugLevelScreen(input_handlers.BaseEventHandler):
     """Create a simple debug level immediately."""
     
@@ -566,7 +968,8 @@ class MainMenu(input_handlers.BaseEventHandler):
         super().__init__()
         self.menu_options = [
             ("Enter New Dungeon", "start_new"),
-            ("Reenter Dungeon", "load_game"), 
+            ("Reenter Saved Dungeon", "load_game"), 
+            ("Tutorial", "tutorial"),
             ("Settings", "settings"),
             ("Debug Level", "debug_level"),
             ("Quit", "quit")
@@ -625,15 +1028,15 @@ class MainMenu(input_handlers.BaseEventHandler):
             x + (window_width // 2) + 36,
             footer_y + 20,
             "oxenfree",
-            fg=color.bronze_text,
+            fg=color.gold_accent,
             bg=None,
             alignment=tcod.CENTER,
         )
         console.print(
-            x + (window_width // 2) + 27,
+            x + (window_width // 2) + 28,
             footer_y + 21,
-            "2026 - Version 0.18.7 Beta",
-            fg=color.bronze_text,
+            "2026 - Early Beta Release",
+            fg=color.gold_accent,
             # No background
             bg=None,
             alignment=tcod.CENTER,
@@ -662,11 +1065,11 @@ class MainMenu(input_handlers.BaseEventHandler):
         elif event.sym in (tcod.event.KeySym.RETURN, tcod.event.KeySym.KP_ENTER, tcod.event.KeySym.SPACE):
             return self._handle_selection()
         elif event.sym in (tcod.event.KeySym.Q, tcod.event.K_ESCAPE):
-            if self.selected_option == 4:  # Quit option
+            if self.selected_option == 5:  # Quit option
                 raise SystemExit()
             else:
                 # Move selection to Quit option
-                self.selected_option = 4
+                self.selected_option = 5
                 return None
             
         # Legacy key support (optional - can be removed if desired)
@@ -694,35 +1097,28 @@ class MainMenu(input_handlers.BaseEventHandler):
             sounds.stop_all_music()
             raise SystemExit()
         elif action == "load_game":
-            # Stop menu ambience when leaving menu
+            # Show save game selection menu
+            return SaveGameMenu(self)
+        elif action == "tutorial":
             sounds.stop_menu_ambience()
             sounds.stop_all_music()
-            print("TEST")
-            try:
-                sounds.play_stairs_sound()
-                engine = load_game("SAVEGAME/savegame.sav")
-                # Start dungeon music
-                sounds.start_dungeon_music()
-                return input_handlers.MainGameEventHandler(engine)
-            except FileNotFoundError:
-                return input_handlers.PopupMessage(self, "No saved game to load.")
-            except Exception as exc:
-                traceback.print_exc() # print to stderr
-                return input_handlers.PopupMessage(self, f"Failed to load save :\n{exc}")
-        elif action == "start_new":
-            # Stop menu ambience when leaving menu  
-            sounds.stop_menu_ambience()
-            sounds.stop_all_music()
-            # Go to seed input screen (optional seed entry)
             sounds.play_stairs_sound()
+            
+            # Create tutorial game engine
+            engine = tutorial_game()
+            
+            # Start dungeon music for tutorial
+            sounds.start_dungeon_music()
+            
+            return input_handlers.MainGameEventHandler(engine)
+        elif action == "start_new":
+
             
             # Create callback for seed input
             def handle_seed_input(entered_seed):
                 """Handle seed input and start loading screen."""
                 # Handle cancellation (ESC was pressed)
                 if entered_seed is None:
-                    sounds.start_menu_ambience()
-                    sounds.start_menu_music()
                     return self
                     
                 loading_screen = LoadingScreen(self)
@@ -733,6 +1129,11 @@ class MainMenu(input_handlers.BaseEventHandler):
                     else:
                         loading_screen.seed_string = entered_seed.strip()
                 # If no seed entered, LoadingScreen will use random generation
+                            # Stop menu ambience when leaving menu  
+                sounds.stop_menu_ambience()
+                sounds.stop_all_music()
+                # Go to seed input screen (optional seed entry)
+                sounds.play_stairs_sound()
                 return loading_screen
             
             return input_handlers.TextInputHandler(
