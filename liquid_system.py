@@ -424,7 +424,7 @@ class LiquidSystem:
             effect_type = "damage"
             target.fighter.take_damage(actual_damage)
             target.effects.append(BurningEffect(amount=actual_damage, duration=1)) if liquid_type == LiquidType.FIRE else target.effects.append(PoisonEffect(amount=actual_damage, duration=5))
-            #print(f"Applied {liquid_type.name} effect to {target.name} for {actual_damage} damage.")
+            self.game_map.engine.debug_log(f"Applied {liquid_type.name} effect to {target.name} for {actual_damage} damage.", handler=type(self).__name__, event="combat")
         # Generate appropriate message
         liquid_name = liquid_type.get_display_name().capitalize()
         if affected_body_part:

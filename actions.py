@@ -117,7 +117,7 @@ class InteractAction(Action):
             else:
                 self.engine.message_log.add_message("There is nothing to interact with.")
         elif self.engine.game_map.get_actor_at_location(target_x, target_y):
-            print(f"Interacting with actor at {target_x}, {target_y}")
+            self.engine.debug_log(f"Interacting with actor at {target_x}, {target_y}", handler=type(self).__name__, event="perform")
             npc = self.engine.game_map.get_actor_at_location(target_x, target_y)
             if npc and hasattr(npc, "ai") and getattr(npc.ai, "type", None) == "Friendly":
                 # Import here to avoid circular imports
@@ -159,7 +159,7 @@ class PickupAction(Action):
                         try:
                             item.pickup_sound()
                         except Exception as e:
-                            print(f"DEBUG: Error calling pickup sound: {e}")
+                            self.engine.debug_log(f"Error calling coin pickup sound: {e}", handler=type(self).__name__, event="perform")
                     return
                 else:
                     self.engine.game_map.entities.remove(item)
@@ -184,7 +184,7 @@ class PickupAction(Action):
                     try:
                         item.pickup_sound()
                     except Exception as e:
-                        print(f"DEBUG: Error calling pickup sound: {e}")
+                        self.engine.debug_log(f"Error calling pickup sound: {e}", handler=type(self).__name__, event="perform")
 
                 self.engine.message_log.add_message(f"You picked up the {item.name}!")
                 
@@ -562,7 +562,7 @@ class RangedAction(ActionWithDirection):
             self.engine.game_map.entities.add(new_arrow)
             
         except Exception as e:
-            print(f"Could not drop projectile: {e}")
+            self.engine.debug_log(f"Error creating dropped arrow: {e}", handler=type(self).__name__, event="_drop_projectile_at")
             # Silently fail if we can't create the arrow
     
     def _handle_actor_hit(self, target: Actor, shot_verb: str) -> None:
@@ -573,11 +573,11 @@ class RangedAction(ActionWithDirection):
                 if part.damage_level_float > 0.5:
                     if random.random() < 0.5:
                         self.entity.fighter._drop_grasped_items(part)
-                    #print("DEBUG: Manipulation partially impaired by damage to part:", part.name)
+                    self.engine.debug_log(f"Manipulation partially impaired by damage to part: {part.name}", handler=type(self).__name__, event="_handle_actor_hit")
                 elif part.damage_level_float >= 1.0:
                     self.entity.fighter._drop_grasped_items(part)
                 else:
-                    #print("DEBUG: Manipulation possible with part:", part.name)
+                    self.engine.debug_log(f"Manipulation possible with part: {part.name}", handler=type(self).__name__, event="_handle_actor_hit")
                     pass
         
         hit_part = None
@@ -761,7 +761,7 @@ class RangedAction(ActionWithDirection):
                 target.level.add_xp({'armor': int(armor_defense/2)})
                 if "light armor" in armor_tags:
                     target.level.add_xp({'light armor': int(armor_defense)})
-                    print("DEBUG: Gained light armor XP from ranged:", int(armor_defense))
+                    self.engine.debug_log(f"Gained light armor XP from ranged: {int(armor_defense)}", handler=type(self).__name__, event="perform")
 
 class MeleeAction(ActionWithDirection):
     """Melee action that targets a specific body part."""
@@ -788,26 +788,25 @@ class MeleeAction(ActionWithDirection):
                 if part.damage_level_float > 0.5:
                     if random.random() < 0.5:
                         self.entity.fighter._drop_grasped_items(part)
-                    #print("DEBUG: Manipulation partially impaired by damage to part:", part.name)
+                    self.engine.debug_log(f"Manipulation partially impaired by damage to part: {part.name}", handler=type(self).__name__, event="_handle_actor_hit")
                 elif part.damage_level_float >= 1.0:
                     self.entity.fighter._drop_grasped_items(part)
                 else:
-                    #print("DEBUG: Manipulation possible with part:", part.name)
-                    pass
+                    self.engine.debug_log(f"Manipulation possible with part: {part.name}", handler=type(self).__name__, event="_handle_actor_hit")
         # Get target body part and apply targeting effects
         hit_part = None
         damage_modifier = 1.0
         hit_difficulty_modifier = 0.0  # Positive = easier to hit, negative = harder
 
         # Check if any part is targeted
-        #print("DEBUG: target_part:", self.target_part)
+        self.engine.debug_log(f"target_part: {self.target_part}", handler=type(self).__name__, event="_handle_actor_hit")
         if not self.target_part:
             # If no part targeted, use the existing random part selection
             if hasattr(target, 'body_parts') and target.body_parts:
                 random_part = target.body_parts.get_random_part()
                 self.target_part = random_part.part_type if random_part else None
 
-        #print(f"DEBUG: Targeting {target.name}'s {self.target_part.name if self.target_part else 'random part'}")
+        self.engine.debug_log(f"Targeting {target.name}'s {self.target_part.name if self.target_part else 'random part'}", handler=type(self).__name__, event="_handle_actor_hit")
         
         if self.target_part and hasattr(target, 'body_parts') and target.body_parts:
             # Get the actual BodyPart object using the enum as key
@@ -852,7 +851,7 @@ class MeleeAction(ActionWithDirection):
             base_defense = hit_part.protection + target.fighter.base_defense
             if hasattr(target, "equipment") and target.equipment:
                 armor_defense = target.equipment.get_defense_for_part(hit_part.name)
-                #print("DEBUG: Calculating defense for hit part:", hit_part.name, "base defense:", target.fighter.base_defense)
+                self.engine.debug_log(f"Calculating defense for hit part: {hit_part.name}, base defense: {target.fighter.base_defense}", handler=type(self).__name__, event="_handle_actor_hit")
         else:
              base_defense = target.fighter.defense
 
@@ -863,7 +862,7 @@ class MeleeAction(ActionWithDirection):
 
         # Calculate final damage
         final_damage = max(0, int(base_damage * damage_modifier))
-        #print(f"DEBUG: hit_part={hit_part.name if hit_part else None}, final_damage={final_damage}")
+        self.engine.debug_log(f"hit_part={hit_part.name if hit_part else None}, final_damage={final_damage}", handler=type(self).__name__, event="_handle_actor_hit")
         
         # Determine hit success based on difficulty
         hit_chance = 85 + hit_difficulty_modifier  # Base 85% hit chance
@@ -963,11 +962,11 @@ class MeleeAction(ActionWithDirection):
             # If final blow, play different sound
             if target.fighter.hp <=  final_damage:
                 sounds.play_attack_sound_finishing_blow()
-                #print(f"DEBUG: Playing finishing blow sound {target.fighter.hp} <= {final_damage}. {target.name} Attacked by {self.entity.name} ")
+                self.engine.debug_log(f"Playing finishing blow sound {target.fighter.hp} <= {final_damage}. {target.name} Attacked by {self.entity.name}", handler=type(self).__name__, event="perform")
             elif self.entity.equipment:
                 if target.equipment and target.equipment.equipped_items.get('ARMOR'):
                     sounds.play_attack_sound_weapon_to_armor()
-                    #print("DEBUG: Playing weapon to armor sound")
+                    self.engine.debug_log("Playing weapon to armor sound", handler=type(self).__name__, event="perform")
                 else:
                     sounds.play_attack_sound_weapon_to_no_armor()
                     
@@ -1024,7 +1023,7 @@ class MeleeAction(ActionWithDirection):
 
             else:
                 # This should never happen - but adding for debugging
-                print(f"ERROR: No valid body part found! target_part={self.target_part}, has_body_parts={hasattr(target, 'body_parts')}")
+                self.engine.debug_log(f"ERROR: No valid body part found! target_part={self.target_part}, has_body_parts={hasattr(target, 'body_parts')}", handler=type(self).__name__, event="_handle_actor_hit")
                 self.engine.message_log.add_message(
                     f"{attack_desc} for {final_damage} hit points. [NO BODY PART ERROR]", color.red
                 )
@@ -1041,26 +1040,26 @@ class MeleeAction(ActionWithDirection):
         # Grant trait XP for melee combat
         armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name)
         xp = int(part_damage)
-        #print("DEBUG: Gained constitution XP:", int(part_damage))
-        #print(equipped_weapons)
+        self.engine.debug_log(f"Gained constitution XP: {int(part_damage)}", handler=type(self).__name__, event="_handle_actor_hit")
+        
 
         # Add users XP
         if equipped_weapons:
             for weapon in equipped_weapons:
-                print(weapon.tags)
+                self.engine.debug_log(f"Weapon tags: {weapon.tags}", handler=type(self).__name__, event="_handle_actor_hit")
                 if "blade" in weapon.tags:
                     self.entity.level.add_xp({'blades': xp})
-                    print("DEBUG: Gained blade XP:", int(part_damage/2))
+                    self.engine.debug_log(f"Gained blade XP: {int(part_damage/2)}", handler=type(self).__name__, event="_handle_actor_hit")
                 if "dagger" in weapon.tags:
                     self.entity.level.add_xp({'daggers': xp})
-                print("DEBUG: Gained dagger XP:", int(part_damage*1.5))
+                    self.engine.debug_log(f"Gained dagger XP: {int(part_damage*1.5)}", handler=type(self).__name__, event="_handle_actor_hit")
 
         # Add targets XP
         target.level.add_xp({'vigor': int(part_damage*2)})
         if armor_tags and armor_defense > 0:
             if "light armor" in armor_tags:
                 target.level.add_xp({'light armor': int(armor_defense*1.5)})
-                print("DEBUG: Gained light armor XP:", int(armor_defense*1.5))
+                self.engine.debug_log(f"Gained light armor XP: {int(armor_defense*1.5)}", handler=type(self).__name__, event="_handle_actor_hit")
 class MovementAction(ActionWithDirection):
 
     def perform(self) -> None:
@@ -1098,6 +1097,8 @@ class MovementAction(ActionWithDirection):
             dx = dest_x - self.engine.player.x
             dy = dest_y - self.engine.player.y
             distance = (dx * dx + dy * dy) ** 0.5
+
+
             
             if distance <= 10:  # Within hearing range
                 # Check for liquid coating first, then tile type

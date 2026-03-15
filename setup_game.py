@@ -79,16 +79,19 @@ class SimpleAnimatedBackground:
                 except Exception:
                     break
         
-        print(f"Loaded {len(self.frames)} animation frames  ")
+        with open(get_data_path('logs/log.txt'), 'a') as log_file:
+            log_file.write(f"Loaded {len(self.frames)} frames for animated background.\n")
         
         # Fallback to static image
         if not self.frames:
             try:
                 frame = tcod.image.load(get_data_path("image.png"))[:, :, :3]
                 self.frames.append(frame)
-                print("Using static background")
+                with open(get_data_path('logs/log.txt'), 'a') as log_file:
+                    log_file.write("Using static background.\n")
             except Exception:
-                print("No background found")
+                with open(get_data_path('logs/log.txt'), 'a') as log_file:
+                    log_file.write("No background found.\n")
     
     def get_current_frame(self):
         if not self.frames:
@@ -157,7 +160,8 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
     player.level.current_xp = 0
 
     engine = Engine(player=player)
-    print(engine)
+    engine.debug_log(f"Starting new game with seed: {get_current_seed()}", handler=type(engine).__name__, event="game_start")
+    engine.debug_log(f"Engine: {engine}", handler=type(engine).__name__, event="game_start")
     
     # Set world generation flag to suppress equipment sounds
     engine.is_generating_world = True
@@ -176,7 +180,7 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
     for x in range(random.randint(5, 10)):
         fungus = entity_factories.get_random_fungus()
         engine.game_world.fungi.append(fungus)
-        print(fungus.name)
+        engine.debug_log(f"Generated fungus: {fungus.name}", handler=type(engine).__name__, event="world_gen")
     
     engine.game_world.generate_floor()
     engine.update_fov()
@@ -232,7 +236,7 @@ def tutorial_game(game_seed = None, seed_string = None) -> Engine:
     guide = copy.deepcopy(entity_factories.tutorial_guide)
     guide.generate_villager()
     guide.tradable = False
-    
+
     guide.spawn(game_map, center_x + 2, center_y + 2)
 
     campfire = copy.deepcopy(entity_factories.campfire)
@@ -629,7 +633,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             self.current_step = len(self.generation_steps)
             self.generation_complete = True
             self.engine = None
-            print(f"Generation failed: {e}")
+            self.engine.debug_log(f"World generation failed: {e}", handler=type(self).__name__, event="world_gen_error") if self.engine else None
             import traceback
             traceback.print_exc()
 
@@ -975,10 +979,14 @@ class MainMenu(input_handlers.BaseEventHandler):
             ("Quit", "quit")
         ]
         self.selected_option = 0
+        self.engine = Engine()
+        self.engine.debug_log("Menu Engine init", handler=type(self).__name__, event="menu_init")
         # Start menu ambience only if not already playing
         sounds.start_menu_ambience()
         # Start menu music
         sounds.start_menu_music()
+        self.menu_start_y = 0
+        self.menu_x = 0 
 
     def on_render(self, console: tcod.Console) -> None:
         """Render the main menu with parchment styling and arrow key selection."""
@@ -997,7 +1005,8 @@ class MainMenu(input_handlers.BaseEventHandler):
         MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "WORK IN PROGRESS TITLE?")
 
         # Draw menu options with selection highlighting
-        menu_start_y = y + 3
+        # Set menu_start_y here so it can be used for mouse hover calculations in ev_mousemotion
+        self.menu_start_y = y + 3
         for i, (option_text, _) in enumerate(self.menu_options):
             is_selected = i == self.selected_option
             bg_color = (80, 60, 30) if is_selected else (45, 35, 25)
@@ -1006,13 +1015,17 @@ class MainMenu(input_handlers.BaseEventHandler):
             marker2 = " <" if is_selected else "  "
             
             # Draw option with background
-            option_y = menu_start_y + i * 2
+            option_y = self.menu_start_y + i * 2
             full_text = f"{marker}{option_text}{marker2}".center(window_width - 4)
             
+            # Set menu_start_x for mouse hover calculations
+            self.menu_start_x = x + (window_width // 2)
+
             # Draw background for the entire line
             for dx in range(window_width - 2):
                 console.print(x + 1 + dx, option_y, " ", bg=bg_color)
-            
+
+             
             console.print(
                 x + (window_width // 2),
                 option_y,
@@ -1021,6 +1034,7 @@ class MainMenu(input_handlers.BaseEventHandler):
                 bg=bg_color,
                 alignment=tcod.CENTER
             )
+        
 
         # Draw footer information with parchment styling
         footer_y = y + window_height - 3
@@ -1051,17 +1065,45 @@ class MainMenu(input_handlers.BaseEventHandler):
             fg=color.fantasy_text,
             alignment=tcod.CENTER,
         )
+    def ev_mousemotion(self, event: tcod.event.MouseMotion) -> Optional[input_handlers.BaseEventHandler]:
+        """Allow mouse hover to change selection."""
+        # Calculate menu window dimensions and position
+        window_width = 40
+        window_height = 16        
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        
+        if (self.menu_start_x - window_width // 2 <= mouse_x <= self.menu_start_x + window_width // 2 and
+            self.menu_start_y <= mouse_y < self.menu_start_y + len(self.menu_options) * 2):
+            # Calculate which option is hovered
+            hovered_option = (mouse_y - self.menu_start_y) // 2
+            if 0 <= hovered_option < len(self.menu_options):
+                if hovered_option != self.selected_option:
+                    sounds.play_menu_move_sound()
+                self.selected_option = hovered_option
+        else:
+            self.selected_option = -1
+        
+        return None
+        
+    def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[input_handlers.BaseEventHandler]:
+        if event.button == tcod.event.MouseButton.LEFT:
+            return self._handle_selection()
+        return None
+        
 
     def ev_keydown(
-        self, event: tcod.event.KeyDown
-    ) -> Optional[input_handlers.BaseEventHandler]:
+        self, event: tcod.event.KeyDown) -> Optional[input_handlers.BaseEventHandler]:
         sounds.play_menu_move_sound()
+        print(self.engine.mouse_held)
         if event.sym == tcod.event.KeySym.UP:
             self.selected_option = (self.selected_option - 1) % len(self.menu_options)
             return None
         elif event.sym == tcod.event.KeySym.DOWN:
             self.selected_option = (self.selected_option + 1) % len(self.menu_options)
             return None
+        
+        elif self.engine.mouse_held == True:
+            return self._handle_selection()
         elif event.sym in (tcod.event.KeySym.RETURN, tcod.event.KeySym.KP_ENTER, tcod.event.KeySym.SPACE):
             return self._handle_selection()
         elif event.sym in (tcod.event.KeySym.Q, tcod.event.K_ESCAPE):
@@ -1071,28 +1113,20 @@ class MainMenu(input_handlers.BaseEventHandler):
                 # Move selection to Quit option
                 self.selected_option = 5
                 return None
-            
-        # Legacy key support (optional - can be removed if desired)
-        elif event.sym == tcod.event.KeySym.C:
-            self.selected_option = 1  # Continue option
-            return self._handle_selection()
-        elif event.sym == tcod.event.KeySym.N:
-            self.selected_option = 0  # New game option 
-            return self._handle_selection()
-        elif event.sym == tcod.event.KeySym.D:
-            self.selected_option = 2  # Debug option
-            return self._handle_selection()
-
+        
         return None
     
     def _handle_selection(self) -> Optional[input_handlers.BaseEventHandler]:
         """Handle the currently selected menu option."""
+        if self.selected_option < 0:
+            return None
         if self.selected_option >= len(self.menu_options):
             return None
             
         _, action = self.menu_options[self.selected_option]
         
         if action == "quit":
+            print("Quitting game...")
             sounds.stop_menu_ambience()
             sounds.stop_all_music()
             raise SystemExit()
@@ -1153,7 +1187,6 @@ class MainMenu(input_handlers.BaseEventHandler):
         elif action == "settings":
             from input_handlers import Settings
             return Settings(parent_handler=self)
-        
         return None
 
 

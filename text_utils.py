@@ -3,6 +3,7 @@ import re
 import tcod
 import color
 from typing import Optional, Tuple, TYPE_CHECKING
+import os
 
 def parse_colored_text(text: str, default_color=color.white) -> list:
     """
@@ -169,7 +170,9 @@ def print_wrapped_colored_text(console: tcod.console.Console, x: int, y: int, te
     
     for i, text_fragment in enumerate(text):
         text_part = text_fragment[0]
-        print(text_part)  # Debug: print the text part being processed
+        log_path = os.path.join(os.getcwd(), 'logs', 'log.txt')
+        with open(log_path, 'a') as log_file:
+            log_file.write(f"Processing text fragment {i}: '{text_part}' with color {text_fragment[1]}\n")
         text_color = text_fragment[1]
         
         # Skip empty fragments

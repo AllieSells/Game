@@ -39,7 +39,7 @@ class Fighter(BaseComponent):
     def hp(self, value: int) -> None:
         self._hp = max(0, min(value, self.max_hp))  # Clamp the value between 0 and max_hp
         if self._hp == 0 and self.parent.ai:
-            print("why not die")
+            self.engine.debug_log(f"{self.parent.name} has 0 HP. Triggering death.", handler=self.__class__.__name__, event="DeathTrigger")
             self.die()
 
     @property

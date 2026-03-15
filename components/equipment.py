@@ -182,7 +182,7 @@ class Equipment(BaseComponent):
                     engine = Engine.instance
                     engine.message_log.add_message(f"Cannot equip {equippable_item.name}: {reason}", color.impossible)
                 except:
-                    print(f"Cannot equip {equippable_item.name}: {reason}")
+                    self.engine.debug_log(f"Cannot equip {equippable_item.name}: {reason}", handler=self.__class__.__name__, event="EquipError")
     
     def equip_item(self, item: Item, add_message: bool = True) -> None:
         """Equip an item using the modular system."""
@@ -227,18 +227,18 @@ class Equipment(BaseComponent):
         # Update body part coverage for all items
         if hasattr(self.parent, "body_parts"):
             equip_all = getattr(item.equippable, 'equip_all_matching', False)
-            print(f"[DEBUG equip_item] {item.name}: equip_all_matching={equip_all}, required_tags={item.equippable.required_tags}")
+            self.engine.debug_log(f"DEBUG: Equipping item: {item.name}: equip_all_matching={equip_all}, required_tags={item.equippable.required_tags}", handler=self.__class__.__name__, event="EquipDebug")
             all_parts = self.parent.body_parts.get_all_parts()
-            print(f"[DEBUG equip_item] All parts: { {name: part.tags for name, part in all_parts.items()} }")
+            self.engine.debug_log(f"DEBUG: Equipping item: All parts: { {name: part.tags for name, part in all_parts.items()} }", handler=self.__class__.__name__, event="EquipDebug")
 
             if equip_all:
                 # Cover all matching body parts (like leggings on both legs)
                 for part in all_parts.values():
                     match = item.equippable.required_tags.issubset(part.tags)
-                    print(f"[DEBUG equip_item]   Part '{part.name}' tags={part.tags} -> match={match}")
+                    self.engine.debug_log(f"DEBUG: Equipping item:   Part '{part.name}' tags={part.tags} -> match={match}", handler=self.__class__.__name__, event="EquipDebug")
                     if match:
                         self.body_part_coverage[part.name] = item
-                print(f"[DEBUG equip_item] body_part_coverage after equip: {list(self.body_part_coverage.keys())}")
+                self.engine.debug_log(f"DEBUG: Equipping item: body_part_coverage after equip: {list(self.body_part_coverage.keys())}", handler=self.__class__.__name__, event="EquipDebug")
             else:
                 # Cover only one matching body part - prefer right hand over left hand for weapons
                 target_part = None
@@ -432,7 +432,12 @@ class Equipment(BaseComponent):
             try:
                 item.equip_sound()
             except Exception as e:
-                print(f"Error playing equip sound: {e}")
+                try:
+                    engine = self.parent.gamemap.engine
+                    if hasattr(engine, 'debug_log'):
+                        engine.debug_log(f"Error playing equip sound: {e}", handler=self.__class__.__name__, event="EquipSoundError")
+                except Exception:
+                    pass
     
     def _play_unequip_sound(self, item: Item) -> None:
         """Play unequip sound for an item."""
@@ -448,4 +453,9 @@ class Equipment(BaseComponent):
             try:
                 item.unequip_sound()
             except Exception as e:
-                print(f"Error playing unequip sound: {e}")
+                try:
+                    engine = self.parent.gamemap.engine
+                    if hasattr(engine, 'debug_log'):
+                        engine.debug_log(f"Error playing unequip sound: {e}", handler=self.__class__.__name__, event="UnequipSoundError")
+                except Exception:
+                    pass

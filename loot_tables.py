@@ -22,7 +22,8 @@ def load_loot_tables():
         with open(get_data_path('loot_tables.json'), 'r') as f:
             return json.load(f)
     except FileNotFoundError:
-        print("Warning: loot_tables.json not found")
+        with open(get_data_path('logs/log.txt'), 'a') as log_file:
+            log_file.write("GAME ERROR: loot_tables.json not found. No loot tables loaded.\n")
         return {}
 
 def generate_loot_from_table(table_name):
@@ -63,5 +64,6 @@ def create_item(item_name):
             
         return item
     else:
-        print(f"Unknown item: {item_name} (not found in entity_factories)")
+        with open(get_data_path('logs/log.txt'), 'a') as log_file:
+            log_file.write(f"GAME ERROR: Unknown item: {item_name} (not found in entity_factories)\n")
         return None

@@ -7,6 +7,7 @@ import tcod
 
 import color
 import text_utils
+import time
 
 # Try to import animation helpers if they exist; fall back gracefully.
 try:
@@ -27,7 +28,6 @@ BODY_PART_ABBREV = {
     "upper_limbs": "Arm",   # Arms/Hands region
     "lower_limbs": "Leg",   # Legs/Feet region
 }
-
 
 class MenuRenderer:
     """Provides reusable rendering utilities for menus and UIs."""
@@ -120,10 +120,34 @@ def status_effect_overlay(console: Console, effects: list) -> None:
 
 def render_debug_overlay(console: Console, fps: float, player_pos: Tuple[int, int], handler_name: str, entity_count: int) -> None:          
     x, y = player_pos
-    console.print(0, 38, f"Player: ({x}, {y})", fg=(255, 255, 255))
-    console.print(0, 39, f"Handler: {handler_name}", fg=(255, 255, 255))
-    console.print(0, 40, f"Entities: {entity_count}", fg=(255, 255, 255))
-    console.print(0, 41, f"FPS: {fps:.1f}", fg=(255, 255, 255))
+    
+    render_x = 0
+    render_y = 0
+    # Store frame times for the last N seconds
+    if not hasattr(render_debug_overlay, "_frame_times"):
+        render_debug_overlay._frame_times = []
+        render_debug_overlay._last_update = time.time()
+
+    now = time.time()
+    render_debug_overlay._frame_times.append(fps)
+    # Keep only the last 5 seconds worth of frame rates
+    while render_debug_overlay._frame_times and now - render_debug_overlay._last_update > 5:
+        render_debug_overlay._frame_times.pop(0)
+        render_debug_overlay._last_update += 1
+
+    if render_debug_overlay._frame_times:
+        min_fps = min(render_debug_overlay._frame_times)
+        max_fps = max(render_debug_overlay._frame_times)
+        console.print(render_x, render_y + 5, f"Min FPS (5s): {min_fps:.1f}", fg=(255, 255, 255))
+        console.print(render_x, render_y + 6, f"Max FPS (5s): {max_fps:.1f}", fg=(255, 255, 255))
+    frame_time = 1.0 / fps if fps > 0 else 0
+    frame_time_ms = frame_time * 1000
+
+    console.print(render_x, render_y, f"Player: ({x}, {y})", fg=(255, 255, 255))
+    console.print(render_x, render_y + 1, f"Handler: {handler_name}", fg=(255, 255, 255))
+    console.print(render_x, render_y + 2, f"Entities: {entity_count}", fg=(255, 255, 255))
+    console.print(render_x, render_y + 3, f"FPS: {fps:.1f}", fg=(255, 255, 255))
+    console.print(render_x, render_y + 4, f"Frame Time: {frame_time_ms:.2f}ms", fg=(255, 255, 255))
 
 
 
@@ -339,8 +363,7 @@ def render_combat_stats(
         for part_type, body_part in player.body_parts.body_parts.items():
             if hasattr(body_part, 'coating') and body_part.coating:
                 from liquid_system import LiquidType
-                if body_part.coating != LiquidType.NONE:
-                    unique_coatings.add(body_part.coating)
+                unique_coatings.add(body_part.coating)
         
         if unique_coatings:
             # Display each unique coating with its color and description

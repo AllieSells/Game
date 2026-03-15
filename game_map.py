@@ -504,8 +504,9 @@ class GameWorld:
         village_chance = ((self.floors_since_village)**2) / 25
         
         gen_chance = random.random()
-        print(f"DEBUG: Floors since village: {self.floors_since_village}, Gen Chance: {gen_chance:.2f}, < Village chance: {village_chance:.2f}")
-        #print(f"Vil chance: {village_chance}, Gen chance: {gen_chance}, Floors since village: {self.floors_since_village}")
+        
+        self.engine.debug_log(f"Floors since village: {self.floors_since_village}, Gen Chance: {gen_chance:.2f}, < Village chance: {village_chance:.2f}", handler=type(self).__name__, event="generate_floor")
+        self.engine.debug_log(f"Village chance equation: (({self.floors_since_village})^2) / 25 = {village_chance:.2f}", handler=type(self).__name__, event="generate_floor")
         if gen_chance < village_chance:
 
             # Generate village and reset counter

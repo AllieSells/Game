@@ -46,6 +46,30 @@ class ThrowAnimation:
         self.current_frame += 1
         self.frames -= 1
 
+class TextPopupAnimation:
+    def __init__(self, x, y, text, color=(255, 255, 255), duration=120):
+        self.x = x
+        self.y = y
+        self.text = text
+        self.color = color
+        self.frames = duration  # duration in frames
+        self.total_duration = duration
+
+    def tick(self, console, game_map):
+        if self.frames <= 0:
+            return
+        
+        # Calculate how many characters to show based on elapsed time (slowed down by 3x)
+        elapsed = self.total_duration - self.frames
+        chars_to_show = min(len(self.text), elapsed // 3 + 1)  # Show one character every 3 frames
+        
+        # Show progressive text revelation at the same position
+        displayed_text = self.text[:chars_to_show]
+        console.print(self.x, self.y, displayed_text, fg=self.color)
+        
+        self.frames -= 1
+
+
 class TeleportAnimation:
     def __init__(self, position):
         self.position = position
@@ -647,7 +671,7 @@ class SlashAnimation:
     def __init__(self, x, y):
         self.x = x
         self.y = y
-        self.frames = 3  # duration in frames
+        self.frames = 5  # duration in frames
         self.render_priority = 2  # Above actors
     def tick(self, console, game_map):
         """Render a brief slash effect at the stored (x,y).

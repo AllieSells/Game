@@ -148,8 +148,9 @@ class TurnManager:
         player.hunger = max(0.0, player.hunger - (base_hunger_decrease * hunger_mult))
         self.total_player_moves += 1
 
+
+        self.engine.debug_log(f"TOTAL PLAYER MOVES: {self.total_player_moves}", handler=self.__class__.__name__, event="PlayerTurnEnd")
         
-        print(f"TotalMoves: {self.total_player_moves}")
         
         # Process any remaining actor turns after player acted
         self._process_remaining_turns()
@@ -210,7 +211,7 @@ class TurnManager:
                                     
                                     # Debug: Print coating info if this is the player
                                     if entity == self.engine.player:
-                                        print(f"COATED: {body_part.name} with {liquid_coating.liquid_type.get_display_name()}")
+                                        self.engine.debug_log(f"COATED: {body_part.name} with {liquid_coating.liquid_type.get_display_name()}", handler=self.__class__.__name__, event="BodyPartCoating")
                             else:
                                 # Clear coating if not in deep liquid (but only occasionally to simulate gradual removal)
                                 if body_part.coating != LiquidType.NONE:
@@ -220,7 +221,7 @@ class TurnManager:
                                         body_part.coating_age = 0
                                         # Debug: Print clearing info if this is the player
                                         if entity == self.engine.player:
-                                            print(f"CLEARED: {body_part.name} coating cleared after being away from liquid")
+                                            self.engine.debug_log(f"CLEARED: {body_part.name} coating cleared after being away from liquid", handler=self.__class__.__name__, event="BodyPartCoating")
         except Exception:
             import traceback
             traceback.print_exc()
@@ -240,7 +241,7 @@ class TurnManager:
                                 coating_name = body_part.coating.get_display_name()
                                 # Debug: Print evaporation if this is the player
                                 #if entity == self.engine.player:
-                                    #print(f"EVAPORATED: {body_part.name} coating ({coating_name}) evaporated after {body_part.coating_age} turns (chance: {evap_chance})")
+                                self.engine.debug_log(f"EVAPORATED: {body_part.name} coating ({coating_name}) evaporated after {body_part.coating_age} turns (chance: {evap_chance})", handler=self.__class__.__name__, event="BodyPartCoating")
                                 body_part.coating = LiquidType.NONE
                                 body_part.coating_age = 0
         except Exception:
@@ -371,7 +372,7 @@ class TurnManager:
         if random.random() < 0.10:
             # 10% chance to recover 10% of max mana
             mana_recovered = int(self.engine.player.mana_max * 0.10)
-            #print(f"DEBUG: Recovered {mana_recovered} mana due to natural regeneration.")
+            self.engine.debug_log(f"DEBUG: Recovered {mana_recovered} mana due to natural regeneration.", handler=self.__class__.__name__, event="ManaRecovery")
             self.engine.player.mana = min(self.engine.player.mana + mana_recovered, self.engine.player.mana_max)
         
         if has_darkness:

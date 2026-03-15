@@ -1,14 +1,36 @@
-
-# Package with python -m PyInstaller MyGame.spec
-
 print("Starting THE Game...")
+import time
+# Package with python -m PyInstaller MyGame.spec
+initial_time = time.time() # Track total loading
+
 
 import os
 import warnings
 import sys
 
+from PIL import Image
+import numpy as np
+import tcod.sdl.mouse
+
+# Cursor variables will be initialized after tcod context is created
+cursor = None
+cursor_click = None
+
 # Add dependencies folder to sys.path immediately
 sys.path.append(os.path.join(os.path.dirname(__file__), "dependencies"))
+log_path = os.path.join(os.path.dirname(__file__), "logs/log.txt")
+if not os.path.exists(os.path.dirname(log_path)):
+    os.makedirs(os.path.dirname(log_path))
+    with open(log_path, "w") as log_file:
+        log_file.write("Log file created.\n")
+        log_file.write(f"{time.ctime()}: Game started.\n")
+        
+else:
+    # Clear existing log file at startup
+    with open(log_path, "w") as log_file:
+        log_file.write("Log file cleared at startup.\n")
+        log_file.write(f"{time.ctime()}: Game started.\n")
+
 
 # Suppress warnings immediately to prevent spam
 if not os.environ.get("GAME_SHOW_WARNINGS"):
@@ -28,6 +50,7 @@ def get_data_path(filename):
 # Import tcod and create window as fast as possible
 print("Opening window...")
 import tcod
+print(f"Version: {tcod.__version__}")
 
 # Import color module immediately for loading screen
 try:
@@ -43,7 +66,7 @@ except ImportError:
 # Create window immediately
 screen_width = 80
 screen_height = 50
-
+ 
 # Load tileset immediately - create a basic one if file fails
 try:
     tileset = tcod.tileset.load_tilesheet(  
@@ -105,30 +128,42 @@ show_loading_screen(context, console, 0.05, "Starting...")
 
 # Now load remaining modules
 import json
-import time
+
 start_time = time.time() # Track total loading
 
 
 # Continue with module imports
 show_loading_screen(context, console, 0.15, "Avoiding glitches...")
 import exceptions
-print(f"DEBUG: Loaded exceptions module in {time.time() - start_time:.2f} seconds")
+str = (f"Loaded exceptions module in {time.time() - start_time:.2f} seconds")
+print(str)
+with open(get_data_path('logs/log.txt'), 'a') as log_file:
+    log_file.write(str + "\n")
 
 start_time = time.time() # Track total loading
 show_loading_screen(context, console, 0.30, "Building inputs...")
 import input_handlers
-print(f"DEBUG: Loaded input_handlers module in {time.time() - start_time:.2f} seconds")
+str = (f"Loaded input_handlers module in {time.time() - start_time:.2f} seconds")
+print(str)
+with open(get_data_path('logs/log.txt'), 'a') as log_file:
+    log_file.write(str + "\n")
 
 start_time = time.time() # Track total loading
 show_loading_screen(context, console, 0.45, "Setting up dungeons...")
 import setup_game
-print(f"DEBUG: Loaded setup_game module in {time.time() - start_time:.2f} seconds")
+str = (f"Loaded setup_game module in {time.time() - start_time:.2f} seconds")
+print(str)
+with open(get_data_path('logs/log.txt'), 'a') as log_file:
+    log_file.write(str + "\n")
 
 start_time = time.time() # Track total loading
 show_loading_screen(context, console, 0.60, "Importing bananas...")
 import tcod.sdl.video
 import traceback
-print(f"DEBUG: Loaded tcod.sdl.video and traceback modules in {time.time() - start_time:.2f} seconds")
+str = (f"Loaded tcod.sdl.video and traceback modules in {time.time() - start_time:.2f} seconds")
+print(str)
+with open(get_data_path('logs/log.txt'), 'a') as log_file:
+    log_file.write(str + "\n")
 
 def load_settings():
     """Load settings from JSON file."""
@@ -186,8 +221,8 @@ def save_game(handler: input_handlers.BaseEventHandler, filename: str) -> None:
 
 
 def main() -> None:
-    start_time = time.time() # Track total loading
-    global _game_context, context, console
+    
+    global _game_context, context, console, cursor, cursor_click
     
     # Use the global context and console that were created during initial loading
     _game_context = context
@@ -199,6 +234,7 @@ def main() -> None:
     
     show_loading_screen(context, console, 0.85, "Initializing main menu...")
     handler: input_handlers.BaseEventHandler = setup_game.MainMenu()
+   
     
     show_loading_screen(context, console, 0.95, "Finalizing setup...")
     # Update context title
@@ -211,13 +247,49 @@ def main() -> None:
         print("DEBUG: Set initial fullscreen mode from settings")
 
     show_loading_screen(context, console, 1.0, "Ready!")
-    print(f"Finished loading in {time.time() - start_time:.2f} seconds")
+    str = (f"Finished loading in {time.time() - initial_time:.2f} seconds")
+    print(str)
+    with open(get_data_path('logs/log.txt'), 'a') as log_file:
+        log_file.write(str + "\n")
+        log_file.write(f"Settings loaded: {settings}\n")
+        log_file.write(f"=========================================================================================================================================================================================================================\n")
     # Brief pause to show completion
     time.sleep(0.3)
     
+    # Load custom cursors after tcod context is fully initialized
+    cursor_point = Image.open("RP/cursors/cursor_point.png").convert("RGBA")
+    pixels_cursor_point = np.array(cursor_point, dtype=np.uint8)
+    cursor = tcod.sdl.mouse.new_color_cursor(pixels_cursor_point, (0, 0))   
+
+    cursor_click_img = Image.open("RP/cursors/cursor_click.png").convert("RGBA")
+    pixels_cursor_click = np.array(cursor_click_img, dtype=np.uint8)
+    cursor_click = tcod.sdl.mouse.new_color_cursor(pixels_cursor_click, (0, 0))
+
+    cursor_bag_img = Image.open("RP/cursors/cursor_bag.png").convert("RGBA")
+    pixels_cursor_bag = np.array(cursor_bag_img, dtype=np.uint8)
+    cursor_bag = tcod.sdl.mouse.new_color_cursor(pixels_cursor_bag, (0, 0))
+    
     # Start the main game loop
+    target_fps = 30
+    frame_time = 1.0 / target_fps
+    last_time = time.time()
+
+    # Set initial cursor (cursors were already loaded at top of file)
+    tcod.sdl.mouse.set_cursor(cursor)
+    _mouse_held = False
+
     try:
         while True:
+            hint = getattr(getattr(handler, 'engine', None), 'cursor_hint', None)
+            if hint == 'bag':
+                tcod.sdl.mouse.set_cursor(cursor_bag)
+            elif _mouse_held:
+                tcod.sdl.mouse.set_cursor(cursor_click)
+            else:
+                tcod.sdl.mouse.set_cursor(cursor)
+
+            current_time = time.time()
+            
             console.clear()
             handler.on_render(console=console)
             context.present(console)
@@ -228,6 +300,10 @@ def main() -> None:
             try:
                 for event in tcod.event.get():
                     context.convert_event(event)
+                    if isinstance(event, tcod.event.MouseButtonDown) and event.button == tcod.event.BUTTON_LEFT:
+                        _mouse_held = True
+                    elif isinstance(event, tcod.event.MouseButtonUp) and event.button == tcod.event.BUTTON_LEFT:
+                        _mouse_held = False
                     handler = handler.handle_events(event)
             except Exception: # handles game exceptions
                 traceback.print_exc() #prints error to stderr
@@ -235,6 +311,13 @@ def main() -> None:
                     handler.engine.message_log.add_message(
                         traceback.format_exc(), color.error 
                     )
+            
+            # Frame limiting 
+            elapsed = time.time() - current_time
+            sleep_time = frame_time - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            last_time = current_time
 
     except exceptions.QuitWithoutSaving:
         raise

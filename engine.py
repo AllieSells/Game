@@ -4,8 +4,8 @@ import lzma
 import pickle
 import trace
 import traceback
-from typing import TYPE_CHECKING
-
+from typing import TYPE_CHECKING, Optional
+import os
 from tcod.console import Console
 from tcod.map import compute_fov
 from collections import deque
@@ -20,6 +20,7 @@ import render_functions
 import sounds
 from animations import TextPopupAnimation
 
+
 if TYPE_CHECKING:
     from entity import Actor
     from game_map import GameMap, GameWorld
@@ -27,15 +28,18 @@ if TYPE_CHECKING:
 import time
 from animations import FireFlicker, BonefireFlicker, FireSmoke
 
+
+
 class Engine:
 
-    game_map: GameMap
-    game_world: GameWorld
+    game_map: Optional[GameMap]
+    game_world: Optional[GameWorld]
 
-    def __init__(self, player: Actor):
+    def __init__(self, player: Optional[Actor] = None):
         self.message_log = MessageLog()
         self.mouse_location = (0,0)
         self.player = player
+        self.mouse_held = False
         
         self.animation_queue = deque()
         self.animations_enabled = True
@@ -61,6 +65,9 @@ class Engine:
         self.grass_wave_cooldown = 180  # Ticks between waves (about 3 seconds at 60fps)
         self.active_grass_waves = []
         self.dropped_stone_dummy_var = False
+
+        self.mouse_x = 0
+        self.mouse_y = 0
 
         # Persistent Simplex noise generator for torch/fire flicker.
         # Stored on the engine (not per-map) so the animation is continuous
@@ -98,6 +105,20 @@ class Engine:
             return True
         else:
             return False
+    def debug_log(self, message: str, handler: Optional[str] = None, event: Optional[str] = None) -> None:
+        """Log a debug message if debug mode is enabled."""
+        if self.debug:
+            print(f"[DEBUG] {message}")
+        # If log file doesn't exist, create it and write header
+        log_path = "logs/log.txt"
+        if not os.path.exists(log_path):
+            mkdir_path = os.path.dirname(log_path)
+            if not os.path.exists(mkdir_path):
+                os.makedirs(mkdir_path)
+
+        else:
+            with open(log_path, "a") as log_file:
+                log_file.write(f" {time.ctime()}: Handler: {handler}, Event: {event}, Message: {message}\n")
 
     def tutorial_ticking(self, console: Console):
         """Special tick method used during the tutorial"""
@@ -159,7 +180,7 @@ class Engine:
             return "equip_items"
         
         elif any(entity.name == "Sigil Stone" for entity in self.game_map.entities):
-            print(self.dropped_stone_dummy_var)
+
             if self.dropped_stone_dummy_var == False:
                 self.dropped_stone_dummy_var = True
                 return "sigil_stone_dropped"
@@ -268,6 +289,8 @@ class Engine:
                 
     
     def tick(self, console: Console):
+
+
         # Calculate tick rate per second
         now = time.monotonic()
         _last = getattr(self, "_last_tick_time", None)
@@ -345,9 +368,9 @@ class Engine:
                 # Get Quest Givers on map
                 if hasattr(entity, "type"):
                     if entity.type == "Quest Giver":
-                        #print("Quest Giver found on map:", entity.name, "at", (entity.x, entity.y))
+
                         # Spawn a flicker or glow animation to highlight quest giver
-                        if self.animations_enabled and random.random() < .01: 
+                        if self.animations_enabled and random.random() < .10: 
                             try:
                                 from animations import GivingQuestAnimation
                                 # Pass the entity reference instead of static coordinates
@@ -819,6 +842,7 @@ class Engine:
     def render(self, console: Console) -> None:
         self.game_map.render(console)
 
+
         # Render damage indicator if active - render above all HUD elements
         if self.damage_indicator_timer > 0:
             self.render_damage_indicator(console)
@@ -830,7 +854,6 @@ class Engine:
         )
 
         self.message_log.render(console=console, x=21, y=43, width=58, height=3)  # MESSAGE_LOG coordinates
-
         render_functions.render_bar(
             console=console,
             current_value=self.player.fighter.hp,
@@ -866,7 +889,6 @@ class Engine:
             player=self.player,
         )
 
-        #print(self.player.current_attack_type)
 
         render_functions.render_effects(
             console=console,

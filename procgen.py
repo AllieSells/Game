@@ -246,7 +246,7 @@ def place_campfires(game_map: GameMap, map_type: str, **kwargs) -> None:
         # Occasional campfire in village buildings (lower chance than dungeons)
         building = kwargs.get("building")
         if building and random.random() < 0.95:  # 95% chance for buildings
-            print("Placing campfire in building")
+
             x = random.randint(building.x1 + 1, building.x2 - 1)
             y = random.randint(building.y1 + 1, building.y2 - 1)
             if not any(e.x == x and e.y == y for e in game_map.entities):

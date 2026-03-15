@@ -306,7 +306,7 @@ class Actor(Entity):
         }
 
         self.job = random.choices(list(jobs.keys()), weights=list(jobs.values()), k=1)[0]
-        #print(f"Generating villager attributes... {self.job}: {self.job}")
+        #self.engine.debug_log(f"Generating villager attributes... {self.job}: {self.job}", handler=type(self).__name__, event="generate_villager")
         trade_supply = random.randint(2,5)
         import entity_factories
         for i in range(trade_supply):
@@ -864,10 +864,12 @@ class Item(Entity):
             if (is_weapon or is_armor) and random.random() < 0.5:  # 50% chance to increase enchantment level
                 self.enchantment_level += 1
                 self.name = f"{self.name} +{roman.toRoman(self.enchantment_level)}"
-                if hasattr(self.equippable, 'power_bonus') and self.equippable.power_bonus > 0:
-                    self.equippable.power_bonus += 1 
-                elif hasattr(self.equippable, 'defense_bonus') and self.equippable.defense_bonus > 0:
-                    self.equippable.defense_bonus += 1
+                if hasattr(self.equippable, 'power_bonus') and self.equippable.power_bonus >= 0:
+                    self.equippable.power_bonus += self.enchantment_level
+                    self.description += f" Well-made, gives +{self.enchantment_level} power."
+                elif hasattr(self.equippable, 'defense_bonus') and self.equippable.defense_bonus >= 0:
+                    self.equippable.defense_bonus += self.enchantment_level
+                    self.description += f" Well-made, gives +{self.enchantment_level} defense."
                 self.value += 20
 
             # Only apply FLAME enchantment to weapons

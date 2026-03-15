@@ -193,6 +193,8 @@ class EquipmentUI(AskUserEventHandler):
         window_height = 20
         x = (console.width - window_width) // 2
         y = (console.height - window_height) // 2
+        self._ui_x = x
+        self._ui_y = y
         
         # Fade the background except for the equipment UI
         super().render_faded(console, x, y, window_width, window_height)
@@ -524,6 +526,20 @@ class EquipmentUI(AskUserEventHandler):
                     self.selected_item = (self.selected_item + 1) % len(compatible_groups)
             return None
         
+        # W/S as alternative slot navigation
+        elif key == tcod.event.KeySym.W:
+            if self.selected_slot > 0:
+                sounds.play_ui_move_sound()
+            self.selected_slot = max(0, self.selected_slot - 1)
+            self.selected_item = 0
+            return None
+        elif key == tcod.event.KeySym.S:
+            if self.selected_slot < len(self.slots) - 1:
+                sounds.play_ui_move_sound()
+            self.selected_slot = min(len(self.slots) - 1, self.selected_slot + 1)
+            self.selected_item = 0
+            return None
+
         # Equip/Unequip selected item
         elif key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.KP_ENTER or key == tcod.event.KeySym.SPACE:
             return self._handle_equip_selected()
@@ -612,3 +628,64 @@ class EquipmentUI(AskUserEventHandler):
                 self.engine.player.equipment.unequip_item(equipped_item, add_message=True)
         
         return None  # Stay in equipment UI
+
+    def ev_mousemotion(self, event) -> None:
+        """Hover over slots or items to change selection."""
+        super().ev_mousemotion(event)
+        if not hasattr(self, '_ui_x'):
+            return None
+
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        bx, by = self._ui_x, self._ui_y
+
+        # Slots panel: list_x = base_x+3, rows base_y+3..base_y+3+len(slots)
+        if bx + 3 <= mouse_x < bx + 38 and by + 3 <= mouse_y < by + 3 + len(self.slots):
+            hovered_slot = mouse_y - (by + 3)
+            if hovered_slot != self.selected_slot:
+                sounds.play_ui_move_sound()
+                self.selected_item = 0
+            self.selected_slot = hovered_slot
+            return None
+
+        # Items panel: list_x = base_x+40, items start at base_y+3
+        if self.slots and bx + 40 <= mouse_x < bx + 64 and mouse_y >= by + 3:
+            compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot])
+            if not compatible_groups:
+                return None
+            start_index = max(0, self.selected_item - 8)
+            display_i = mouse_y - (by + 3)
+            actual_index = start_index + display_i
+            if 0 <= display_i < 13 and 0 <= actual_index < len(compatible_groups):
+                if actual_index != self.selected_item:
+                    sounds.play_ui_move_sound()
+                self.selected_item = actual_index
+
+    def ev_mousebuttondown(self, event) -> Optional[AskUserEventHandler]:
+        """Click a slot to select it; click an item to equip/unequip it."""
+        if event.button != tcod.event.BUTTON_LEFT:
+            return None
+        if not hasattr(self, '_ui_x'):
+            return None
+
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        bx, by = self._ui_x, self._ui_y
+
+        # Slots panel click -> select slot
+        if bx + 3 <= mouse_x < bx + 38 and by + 3 <= mouse_y < by + 3 + len(self.slots):
+            self.selected_slot = mouse_y - (by + 3)
+            self.selected_item = 0
+            return None
+
+        # Items panel click -> equip/unequip
+        if self.slots and bx + 40 <= mouse_x < bx + 64 and mouse_y >= by + 3:
+            compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot])
+            if not compatible_groups:
+                return None
+            start_index = max(0, self.selected_item - 8)
+            display_i = mouse_y - (by + 3)
+            actual_index = start_index + display_i
+            if 0 <= display_i < 13 and 0 <= actual_index < len(compatible_groups):
+                self.selected_item = actual_index
+                return self._handle_equip_selected()
+
+        return None

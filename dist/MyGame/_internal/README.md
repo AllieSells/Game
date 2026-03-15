@@ -1,2 +1,0 @@
-# Game
-IDEK BRO 

@@ -31,13 +31,15 @@ class Spell():
         """Calculate arcana level equipment modifiers."""
         arcana_level = caster.level.traits['arcana']['level']
         for item in caster.equipment:
-            print(f"DEBUG: Checking item '{item.name}' for arcana modifiers.")
+            with open("logs/log.txt", "a") as log_file:
+                log_file.write(f"DEBUG: Checking item '{item.name}' for arcana modifiers.\n")
             
 
     def give_xp(self, consumer):
         consumer.level.add_xp({self.school: self.cast_xp})
         consumer.level.add_xp({'arcana': (5+(consumer.level.traits['arcana']['level'] * 1.5))})
-        print(f'DEBUG: Gave {self.cast_xp} XP to {self.school} and {(5+(consumer.level.traits["arcana"]["level"] * 1.5))} XP to arcana for casting {self.name}.')
+        with open("logs/log.txt", "a") as log_file:
+            log_file.write(f'DEBUG: Gave {self.cast_xp} XP to {self.school} and {(5+(consumer.level.traits["arcana"]["level"] * 1.5))} XP to arcana for casting {self.name}.\n')
     
     def get_description(self, caster=None):
         return ""
@@ -66,7 +68,9 @@ class Spell():
                 for i, slot_spell in enumerate(entity.quickcast_slots):
                     if slot_spell == old_name:
                         entity.quickcast_slots[i] = self.name
-                        print(f"Updated quickcast slot {i+1}: '{old_name}' -> '{self.name}'")
+                        with open("logs/log.txt", "a") as log_file:
+                            log_file.write(f"DEBUG: Updated quickcast slot {i+1}: '{old_name}' -> '{self.name}'\n")
+
 
 
 class DarkvisionSpell(Spell):

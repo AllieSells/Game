@@ -99,10 +99,84 @@ class CharacterScreen(AskUserEventHandler):
         # Render stats on top of the bar
         self.render_stats(console, stats_x, stats_y)
         
+        # Cache render coords for mouse interaction
+        self._render_x = x
+        self._render_y = y
+        self._stats_x = stats_x
+        self._stats_y = stats_y
+
         # Show controls at bottom
         controls_y = y + window_height - 4
-        console.print(x=x + 2, y=controls_y, string="↑↓: Navigate  Shift+↑↓: Scroll ", fg=color.dark_gray)
-        console.print(x=x + 2, y=controls_y + 1, string="SPACE: Expand  ESC: Close", fg=color.dark_gray)
+        console.print(x=x + 2, y=controls_y, string="↑↓: Navigate  Scroll: Scroll ", fg=color.dark_gray)
+        console.print(x=x + 2, y=controls_y + 1, string="Click/SPACE: Expand  ESC: Close", fg=color.dark_gray)
+
+    def ev_mousewheel(self, event: tcod.event.MouseWheel) -> AskUserEventHandler:
+        if event.y < 0:
+            max_scroll = max(0, self._calculate_total_lines() - self.max_visible_lines)
+            self.scroll_offset = min(max_scroll, self.scroll_offset + 1)
+        elif event.y > 0:
+            self.scroll_offset = max(0, self.scroll_offset - 1)
+        else:
+            return self
+        self._play_ui_sound()
+        return self
+
+    def ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:
+        """Hover over a category row to select it."""
+        if not hasattr(self, '_stats_y'):
+            return
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        stats_x = self._stats_x
+        stats_y = self._stats_y
+        current_screen_y = stats_y
+        logical_line = 0
+        for i, category in enumerate(self.categories):
+            if logical_line >= self.scroll_offset and logical_line < self.scroll_offset + self.max_visible_lines:
+                if mouse_y == current_screen_y and stats_x <= mouse_x < stats_x + 20:
+                    if i != self.selected_category:
+                        self.selected_category = i
+                        self._play_ui_sound()
+                    return
+                current_screen_y += 1
+            logical_line += 1
+            if i in self.expanded_categories:
+                for _ in range(len(category['stats']) + 1):
+                    if logical_line >= self.scroll_offset and logical_line < self.scroll_offset + self.max_visible_lines:
+                        current_screen_y += 1
+                    logical_line += 1
+
+    def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> AskUserEventHandler:
+        if event.button != tcod.event.BUTTON_LEFT:
+            return self
+        if not hasattr(self, '_stats_y'):
+            return self
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        # Walk through visible lines to find which category was clicked
+        stats_x = self._stats_x
+        stats_y = self._stats_y
+        current_screen_y = stats_y
+        logical_line = 0
+        for i, category in enumerate(self.categories):
+            if logical_line >= self.scroll_offset and logical_line < self.scroll_offset + self.max_visible_lines:
+                row_y = current_screen_y
+                if mouse_y == row_y and stats_x <= mouse_x < stats_x + 20:
+                    if i in self.expanded_categories:
+                        self.expanded_categories.remove(i)
+                    else:
+                        self.expanded_categories.add(i)
+                    CharacterScreen._last_expanded_categories = self.expanded_categories.copy()
+                    self.selected_category = i
+                    self._adjust_scroll()
+                    self._play_ui_sound()
+                    return self
+                current_screen_y += 1
+            logical_line += 1
+            if i in self.expanded_categories:
+                for _ in range(len(category['stats']) + 1):
+                    if logical_line >= self.scroll_offset and logical_line < self.scroll_offset + self.max_visible_lines:
+                        current_screen_y += 1
+                    logical_line += 1
+        return self
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[AskUserEventHandler]:
         if event.sym == tcod.event.KeySym.ESCAPE or event.sym == tcod.event.KeySym.F:
