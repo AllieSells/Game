@@ -105,14 +105,12 @@ class BaseEventHandler(tcod.event.EventDispatch[ActionOrHandler]):
         if event.button == tcod.event.BUTTON_LEFT:
             self.engine.mouse_held = True
         
-        print(f"Mouse button {event.button} clicked at tile ({event.tile.x}, {event.tile.y})")
     
         return None
 
     def ev_mousebuttonup(self, event: tcod.event.MouseButtonUp):
         if event.button == tcod.event.BUTTON_LEFT:
             self.engine.mouse_held = False
-            print(f"Mouse button {event.button} released at tile ({event.tile.x}, {event.tile.y})")
 
         return None
     
@@ -1055,6 +1053,7 @@ class ContainerEventHandler(AskUserEventHandler):
             self.menu = "Player"
             self.selected_index = hovered_index
             self.engine.cursor_hint = None
+
         # Check if mouse is over the right (container) panel item area
         elif right_x <= mouse_x < right_x + panel_width and item_start_y <= mouse_y < item_start_y + min(len(container_items), max_visible):
             hovered_index = (mouse_y - item_start_y) + self.container_scroll
@@ -2773,7 +2772,6 @@ class LimbTargetingHandler(AskUserEventHandler):
         """Execute the targeted attack and return to main game."""
         if not self.available_parts:
             return MainGameEventHandler(self.engine)
-            
         selected_part_type, selected_part = self.available_parts[self.selected_index]
         
         # Calculate direction to target
@@ -4203,6 +4201,72 @@ class MainGameEventHandler(EventHandler):
 
 
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
+        if event.button == tcod.event.MouseButton.LEFT:
+
+            preferred_target = getattr(self.engine.player, 'current_attack_type', None)
+            dx = max(-1, min(1, self.engine.mouse_x - self.engine.player.x))
+            dy = max(-1, min(1, self.engine.mouse_y - self.engine.player.y))
+            # Get the target actor at the attack location
+            target_x = self.engine.player.x + dx
+            target_y = self.engine.player.y + dy
+
+            target_actor = self.engine.game_map.get_actor_at_location(target_x, target_y)
+            # Convert preferred target tag to specific body part for ranged attacks
+            if preferred_target and target_actor:
+                # Find all body parts with the preferred target tag  
+                import random
+                matching_parts = []
+                if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
+                    for part_type, body_part in target_actor.body_parts.body_parts.items():
+                        if preferred_target in body_part.tags:
+                            matching_parts.append(part_type)
+                
+                # Randomly select one matching part if any found
+                if matching_parts:
+                    target_part = random.choice(matching_parts)
+                else:
+                    target_part = None
+            elif target_actor:
+                if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
+                    # Target random part
+                    target_part = random.choice(list(target_actor.body_parts.body_parts.keys()))
+                else:
+                    target_part = None
+            else:
+                target_part = None
+
+            equipment = getattr(self.engine.player, 'equipment', None)
+            held_items = []
+            if equipment:
+                held_items = list(equipment.grasped_items.values()) + list(equipment.equipped_items.values())
+
+            has_bow = False
+            has_arrow = False
+            has_melee_weapon = False
+
+            for item in held_items:
+                if not item or not hasattr(item, 'equippable') or not item.equippable:
+                    continue
+
+                eq_type_name = item.equippable.equipment_type.name
+                item_tags = {tag.lower() for tag in getattr(item, 'tags', [])}
+
+                if eq_type_name == 'RANGED' or 'bow' in item_tags:
+                    has_bow = True
+                if eq_type_name == 'PROJECTILE' or 'arrow' in item_tags or 'ammunition' in item_tags:
+                    has_arrow = True
+                if eq_type_name == 'WEAPON':
+                    has_melee_weapon = True
+
+            if has_bow and has_arrow:
+                return actions.RangedAction(self.engine.player, dx, dy, target_part)
+            elif has_melee_weapon:
+                return actions.MeleeAction(self.engine.player, dx, dy, target_part)
+            else:
+                self.engine.message_log.add_message(
+                    "No suitable weapon readied for directional attack.", color.impossible
+                    )
+                return None
         if event.button == tcod.event.MouseButton.RIGHT:
             # Check if within reach of player
             mouse_x, mouse_y = self.engine.mouse_x, self.engine.mouse_y
@@ -4249,72 +4313,7 @@ class MainGameEventHandler(EventHandler):
         # F3 shows limb stats debug
         elif key == tcod.event.K_F3:
             return EntityDebugHandler(self.engine)
-        
-        # Directional attack (Shift + movement key, including diagonals)
-        elif key in MOVE_KEYS and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT):
-            dx, dy = MOVE_KEYS[key]
-            preferred_target = getattr(player, 'current_attack_type', None)
-            
-            # Get the target actor at the attack location
-            target_x = player.x + dx
-            target_y = player.y + dy
-            target_actor = self.engine.game_map.get_actor_at_location(target_x, target_y)
 
-            # Convert preferred target tag to specific body part for ranged attacks
-            if preferred_target and target_actor:
-                # Find all body parts with the preferred target tag  
-                import random
-                matching_parts = []
-                if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
-                    for part_type, body_part in target_actor.body_parts.body_parts.items():
-                        if preferred_target in body_part.tags:
-                            matching_parts.append(part_type)
-                
-                # Randomly select one matching part if any found
-                if matching_parts:
-                    target_part = random.choice(matching_parts)
-                else:
-                    target_part = None
-            elif target_actor:
-                if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
-                    # Target random part
-                    target_part = random.choice(list(target_actor.body_parts.body_parts.keys()))
-                else:
-                    target_part = None
-            else:
-                target_part = None
-
-            equipment = getattr(player, 'equipment', None)
-            held_items = []
-            if equipment:
-                held_items = list(equipment.grasped_items.values()) + list(equipment.equipped_items.values())
-
-            has_bow = False
-            has_arrow = False
-            has_melee_weapon = False
-
-            for item in held_items:
-                if not item or not hasattr(item, 'equippable') or not item.equippable:
-                    continue
-
-                eq_type_name = item.equippable.equipment_type.name
-                item_tags = {tag.lower() for tag in getattr(item, 'tags', [])}
-
-                if eq_type_name == 'RANGED' or 'bow' in item_tags:
-                    has_bow = True
-                if eq_type_name == 'PROJECTILE' or 'arrow' in item_tags or 'ammunition' in item_tags:
-                    has_arrow = True
-                if eq_type_name == 'WEAPON':
-                    has_melee_weapon = True
-
-            if has_bow and has_arrow:
-                action = actions.RangedAction(player, dx, dy, target_part)
-            elif has_melee_weapon:
-                action = actions.MeleeAction(player, dx, dy, target_part)
-            else:
-                self.engine.message_log.add_message(
-                    "No suitable weapon readied for directional attack.", color.impossible
-                )
 
         # Dodge change direction (Ctrl + arrow key direction OR numpad direction)
         elif key == tcod.event.KeySym.A and modifier & (tcod.event.KMOD_LCTRL | tcod.event.KMOD_RCTRL):

@@ -44,6 +44,7 @@ class Engine:
         self.animation_queue = deque()
         self.animations_enabled = True
         self.debug = False
+        self.cursor_hint = None 
         
         # Initialize turn manager for centralized turn processing
         self.turn_manager = None  # Will be set after import to avoid circular imports
@@ -894,8 +895,23 @@ class Engine:
             console=console,
             effects=self.player.effects
         )
-
-
+        tile = self.mouse_x, self.mouse_y
+        # Only recompute cursor_hint when the mouse tile changes
+        if getattr(self, '_last_cursor_tile', None) != tile:
+            self._last_cursor_tile = tile
+            interactable = False
+            self.cursor_hint = None
+            if self.game_map.in_bounds(*tile):
+                if self.game_map.tiles[tile]['interactable']:
+                    interactable = True
+            # Get entities at mouse location
+            for ent in self.game_map.entities:
+                if hasattr(ent, "container") and ent.container and (
+                    ent.x == self.mouse_x and ent.y == self.mouse_y
+                ):
+                    interactable = True
+            if interactable:
+                self.cursor_hint = "interact"
         render_functions.render_names_at_mouse_location(
             console=console, x=1, y=42, engine=self  # MOUSE_LOCATION coordinates
             )

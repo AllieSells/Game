@@ -69,6 +69,8 @@ class MenuRenderer:
 
 
 
+
+
 def get_names_at_location(x: int, y: int, game_map: GameMap) -> str:
     x, y = int(x), int(y)
     if not game_map.in_bounds(x, y) or not game_map.visible[x, y]:

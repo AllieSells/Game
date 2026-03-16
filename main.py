@@ -268,6 +268,10 @@ def main() -> None:
     cursor_bag_img = Image.open("RP/cursors/cursor_bag.png").convert("RGBA")
     pixels_cursor_bag = np.array(cursor_bag_img, dtype=np.uint8)
     cursor_bag = tcod.sdl.mouse.new_color_cursor(pixels_cursor_bag, (0, 0))
+
+    cursor_interact_img =  Image.open("RP/cursors/cursor_open.png").convert("RGBA")
+    pixels_cursor_interact = np.array(cursor_interact_img, dtype=np.uint8)
+    cursor_interact = tcod.sdl.mouse.new_color_cursor(pixels_cursor_interact, (0, 0))
     
     # Start the main game loop
     target_fps = 30
@@ -283,6 +287,9 @@ def main() -> None:
             hint = getattr(getattr(handler, 'engine', None), 'cursor_hint', None)
             if hint == 'bag':
                 tcod.sdl.mouse.set_cursor(cursor_bag)
+            elif hint == 'interact':
+                tcod.sdl.mouse.set_cursor(cursor_interact)
+
             elif _mouse_held:
                 tcod.sdl.mouse.set_cursor(cursor_click)
             else:
