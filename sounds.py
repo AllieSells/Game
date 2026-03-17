@@ -637,7 +637,7 @@ def play_death_sound():
     play_sound_with_pitch_variation(death_sound, volume=0.25)
 
 # Menu Sounds
-def play_menu_move_sound():
+def play_ui_move_sound():
     menu_move_sounds = [
         #Sound("RP/sfx/buttons/button1.wav"),
         Sound("RP/sfx/buttons/button2.wav"),

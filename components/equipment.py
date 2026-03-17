@@ -420,10 +420,13 @@ class Equipment(BaseComponent):
 
     def _play_equip_sound(self, item: Item) -> None:
         """Play equipment sound for an item."""
-        # Skip sounds during world generation or level transitions
         try:
             engine = self.parent.gamemap.engine
-            if getattr(engine, 'is_generating_world', False) or getattr(engine, 'is_transitioning_level', False):
+            # Suppress during world gen, level transitions, or when entity is on a
+            # pre-generated (inactive) map (background thread safety).
+            if (getattr(engine, 'is_generating_world', False)
+                    or getattr(engine, 'is_transitioning_level', False)
+                    or (hasattr(engine, 'game_map') and engine.game_map is not self.parent.gamemap)):
                 return
         except Exception:
             pass
@@ -441,10 +444,13 @@ class Equipment(BaseComponent):
     
     def _play_unequip_sound(self, item: Item) -> None:
         """Play unequip sound for an item."""
-        # Skip sounds during world generation or level transitions
         try:
             engine = self.parent.gamemap.engine
-            if getattr(engine, 'is_generating_world', False) or getattr(engine, 'is_transitioning_level', False):
+            # Suppress during world gen, level transitions, or when entity is on a
+            # pre-generated (inactive) map (background thread safety).
+            if (getattr(engine, 'is_generating_world', False)
+                    or getattr(engine, 'is_transitioning_level', False)
+                    or (hasattr(engine, 'game_map') and engine.game_map is not self.parent.gamemap)):
                 return
         except Exception:
             pass

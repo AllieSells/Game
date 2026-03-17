@@ -96,6 +96,16 @@ class BaseEventHandler(tcod.event.EventDispatch[ActionOrHandler]):
         mouse_pos_y = event.tile.y
         self.engine.mouse_x = int(mouse_pos_x)
         self.engine.mouse_y = int(mouse_pos_y)
+
+        if self.engine.mouse_y == 40 and 36 <= self.engine.mouse_x <= 50:
+            self.engine.hovered_inventory_button = "inventory"
+        elif self.engine.mouse_y == 40 and 52 <= self.engine.mouse_x <= 64:
+            self.engine.hovered_inventory_button = "equipment"
+        else:
+            self.engine.hovered_inventory_button = None
+
+
+
         #print(self.engine.mouse_x, self.engine.mouse_y)
         
         return None
@@ -860,7 +870,7 @@ class LevelUpEventHandler(AskUserEventHandler):
     def ev_mousebuttondown(
             self, event: tcod.event.MouseButtonDown
     ) -> Optional[ActionOrHandler]:
-        # Don't allow player to click to exit
+        # Cant click out
         return None
 class ContainerEventHandler(AskUserEventHandler):
     # Handler displays both inventories and allows transferring items
@@ -877,6 +887,10 @@ class ContainerEventHandler(AskUserEventHandler):
         # Scroll offsets for each panel
         self.player_scroll: int = 0
         self.container_scroll: int = 0
+        self.width = 70
+        self.height = 25
+        self.x = 0
+        self.y = 0
 
     def on_render(self, console: tcod.Console) -> None:
         # Renders inventory menu displaying items in both inventories with fantasy styling
@@ -890,6 +904,7 @@ class ContainerEventHandler(AskUserEventHandler):
         total_width = 70
         height = 25
         
+
         # Position window
         x = (console.width - total_width) // 2
         y = 10
@@ -1069,6 +1084,8 @@ class ContainerEventHandler(AskUserEventHandler):
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
         if event.button != tcod.event.BUTTON_LEFT:
             return None
+
+
         self.engine.mouse_held = True
         if not hasattr(self, 'x') or not hasattr(self, 'y'):
             return None
@@ -1078,6 +1095,10 @@ class ContainerEventHandler(AskUserEventHandler):
         left_x = self.x + 2
         right_x = self.x + 3 + panel_width + 2
         item_start_y = self.y + 6
+
+        # Check if mouse click was outside UI
+        if not (left_x <= mouse_x < right_x + panel_width and item_start_y <= mouse_y < item_start_y + 15):
+            return MainGameEventHandler(self.engine)
 
         player_groups = self.engine.player.inventory.get_display_groups()
         container_items = list(self.container.items)
@@ -1298,6 +1319,8 @@ class InventoryEventHandler(AskUserEventHandler):
             ("Consumables", self._filter_consumables),
             ("Misc", self._filter_misc)
         ]
+        self.height = None
+        self.width = None
 
     def on_render(self, console: tcod.Console) -> None:
         """Render a beautiful fantasy-themed inventory with atmospheric styling."""
@@ -1319,6 +1342,7 @@ class InventoryEventHandler(AskUserEventHandler):
         preview_width = 22  # Preview area
         total_width = sidebar_width + items_width + preview_width + 4  # +4 for decorative spacing
         height = max(24, number_of_items_in_inventory + 10)  # Taller for descriptions
+        self.height, self.width = height, total_width
 
         # Position based on player location
         if self.engine.player.x <= 30:
@@ -1917,6 +1941,10 @@ class InventoryEventHandler(AskUserEventHandler):
         items_start_y = self._render_y + 4
         items_width = 32
 
+        # Check if out of bounds of UI
+        if (mouse_x < self.width and mouse_x >= items_x + items_width) or mouse_y < self._render_y or mouse_y >= self._render_y + self.height:
+            return self.on_exit()
+
         item_groups = self.engine.player.inventory.get_display_groups()
         category_filter = self.categories[self.current_category][1]
         filtered_groups = [g for g in item_groups if self.item_filter(g['item']) and category_filter(g['item'])]
@@ -1927,7 +1955,6 @@ class InventoryEventHandler(AskUserEventHandler):
             self.selected_index = clicked_index
             return self.on_item_selected(filtered_groups[clicked_index]['item'])
 
-        return self.on_exit()
 
     def ev_mousewheel(self, event: tcod.event.MouseWheel) -> Optional[ActionOrHandler]:
         if event.y < 0:
@@ -4199,13 +4226,40 @@ class AreaRangedAttackHandler(SelectIndexHandler):
 
 class MainGameEventHandler(EventHandler):
 
+    def handle_events(self, event: tcod.event.Event) -> BaseEventHandler:
+        # Return any handler change that was queued by auto-move in engine.tick()
+        pending = getattr(self.engine, '_pending_handler', None)
+        if pending is not None:
+            self.engine._pending_handler = None
+            return pending
+
+        # Cancel auto-move on any deliberate keyboard or mouse input
+        if isinstance(event, (tcod.event.KeyDown, tcod.event.MouseButtonDown)):
+            if getattr(self.engine, 'auto_move_path', None):
+                self.engine.auto_move_path = []
+                self.engine.cursor_hint = None
+
+        return super().handle_events(event)
+
+
+
 
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
         if event.button == tcod.event.MouseButton.LEFT:
 
+            if self.engine.mouse_y == 40 and 36 <= self.engine.mouse_x <= 50:
+                return InventoryActivateHandler(self.engine)
+            elif self.engine.mouse_y == 40 and 52 <= self.engine.mouse_x <= 64:
+                from equipment_ui import EquipmentUI
+                return EquipmentUI(self.engine)
+
             preferred_target = getattr(self.engine.player, 'current_attack_type', None)
             dx = max(-1, min(1, self.engine.mouse_x - self.engine.player.x))
             dy = max(-1, min(1, self.engine.mouse_y - self.engine.player.y))
+
+            if self.engine.mouse_y > 38:
+                return None
+
             # Get the target actor at the attack location
             target_x = self.engine.player.x + dx
             target_y = self.engine.player.y + dy
@@ -4268,16 +4322,22 @@ class MainGameEventHandler(EventHandler):
                     )
                 return None
         if event.button == tcod.event.MouseButton.RIGHT:
-            # Check if within reach of player
-            mouse_x, mouse_y = self.engine.mouse_x, self.engine.mouse_y
-            reach = max(abs(mouse_x - self.engine.player.x), abs(mouse_y - self.engine.player.y))
-            # Get direction in tiles from player pos for X
-            dx = mouse_x - self.engine.player.x
-            dy = mouse_y - self.engine.player.y
-            if reach <= 1:
-                return actions.InteractAction(self.engine.player, dx, dy)
+
+            # First check if interactable under mouse
+            if self.engine.cursor_hint == "interact":
+                # Check if within reach of player
+                mouse_x, mouse_y = self.engine.mouse_x, self.engine.mouse_y
+                reach = max(abs(mouse_x - self.engine.player.x), abs(mouse_y - self.engine.player.y))
+                # Get direction in tiles from player pos for X
+                dx = mouse_x - self.engine.player.x
+                dy = mouse_y - self.engine.player.y
+                if reach <= 1:
+                    return actions.InteractAction(self.engine.player, dx, dy)
+                else:
+                    self.engine.message_log.add_message("That is out of reach.", color.impossible)
+            # If no interact, walk to tile clicked
             else:
-                self.engine.message_log.add_message("That is out of reach.", color.impossible)
+                return actions.MoveToAction(self.engine.player, self.engine.mouse_x, self.engine.mouse_y)
     
     def ev_keyup(self, event: tcod.event.KeyUp) -> Optional[ActionOrHandler]:
         if event.sym in (tcod.event.KeySym.LALT, tcod.event.KeySym.RALT):
@@ -4963,6 +5023,13 @@ class HistoryViewer(EventHandler):
         )
         log_console.blit(console, 3, 3)
 
+    def ev_mousewheel(self, event: tcod.event.MouseWheel) -> Optional[MainGameEventHandler]:
+        if event.y > 0:
+            self.cursor = max(0, self.cursor - 1)  # Scroll up
+        elif event.y < 0:
+            self.cursor = min(self.log_length - 1, self.cursor + 1)  # Scroll down
+        return None
+
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[MainGameEventHandler]:
         # Smooth scrolling that clamps at edges instead of wrapping around
         if event.sym in CURSOR_Y_KEYS:
@@ -5236,7 +5303,7 @@ class HelpMenuHandler(BaseEventHandler):
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         key = event.sym
-        sounds.play_menu_move_sound()
+        sounds.play_ui_move_sound()
         # Handle escape - go back
         if key == tcod.event.KeySym.ESCAPE:
             return self._handle_back()
@@ -5552,7 +5619,7 @@ class Settings(BaseEventHandler):
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         key = event.sym
-        sounds.play_menu_move_sound()
+        sounds.play_ui_move_sound()
         # Handle escape - go back
         if key == tcod.event.KeySym.ESCAPE:
             return self._handle_back()

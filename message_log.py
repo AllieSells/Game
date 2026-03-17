@@ -48,6 +48,8 @@ class MessageLog:
         # Render messages 
         self.render_messages(console, x, y, width, height, self.messages)
 
+    
+
     @staticmethod
     def wrap(string: str, width: int) -> Iterable[str]:
         # wrapped messages

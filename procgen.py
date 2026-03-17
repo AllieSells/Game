@@ -9,8 +9,12 @@ import random
 import engine
 import entity_factories
 from game_map import GameMap
+from typing import Optional
+import numpy as np
 import tile_types
 from enemy_spawning import get_enemy_count_for_floor, get_enemies_for_floor
+
+from setup_game import _current_seed
 
 # Spawn configuration data
 max_items_by_floor = {1: 2, 4: 2}
@@ -75,6 +79,36 @@ def get_entities_at_random(
 
     return chosen_entities
 
+
+class CavernRoom:
+    def __init__(self, x: int, y: int, width: int, height: int):
+        self.x1 = x
+        self.y1 = y
+        self.x2 = x + width
+        self.y2 = y + height
+    
+    @property
+    def center(self) -> Tuple[int, int]:
+        center_x = (self.x1 + self.x2) // 2
+        center_y = (self.y1 + self.y2) // 2
+
+        return (center_x, center_y)
+    
+    @property
+    def inner(self) -> Tuple[slice, slice]:
+        """Return the inner area of this room as a 2D array index."""
+        return (slice(self.x1 + 1, self.x2), slice(self.y1 + 1, self.y2))
+
+
+    def intersects(self, other: CavernRoom) -> bool:
+        """Return True if this room overlaps with another CavernRoom."""
+        return (
+            self.x1 <= other.x2
+            and self.x2 >= other.x1
+            and self.y1 <= other.y2
+            and self.y2 >= other.y1
+        )
+    
 
 
 
@@ -838,6 +872,199 @@ def apply_wall_merging(dungeon: GameMap) -> None:
         dungeon.tiles[x, y] = new_tile
 
 
+def place_entities_cave(floor_tiles: List[Tuple[int, int]], dungeon: GameMap, floor_number: int, max_rooms: int) -> None:
+    """Place monsters, chests, and campfires on walkable tiles within a cave section."""
+    if len(floor_tiles) < 8:
+        return
+    # Clamp cave sections to max rooms
+    if len(floor_tiles) > max_rooms:
+        floor_tiles = random.sample(floor_tiles, max_rooms)
+
+    number_of_monsters = get_enemy_count_for_floor(floor_number)
+    print(f"Placing {number_of_monsters} monsters in cave section with {len(floor_tiles)} floor tiles for floor #{floor_number}")
+    monsters = get_enemies_for_floor(floor_number, number_of_monsters)
+
+    shuffled = list(floor_tiles)
+    random.shuffle(shuffled)
+
+    # Place monsters
+    for entity in monsters:
+        for x, y in shuffled:
+            if not any(e.x == x and e.y == y for e in dungeon.entities):
+                entity.spawn(dungeon, x, y)
+                break
+
+    # Maybe place a chest (30% chance per section)
+    if random.random() < 0.30:
+        import loot_tables
+        table_name = "basic_chest" if floor_number <= 3 else "advanced_chest"
+        loot = loot_tables.generate_loot_from_table(table_name)
+        chest = entity_factories.make_chest_with_loot(loot, capacity=6)
+        for x, y in shuffled:
+            if not any(e.x == x and e.y == y for e in dungeon.entities):
+                chest.spawn(dungeon, x, y)
+                break
+
+    # Maybe place a campfire (15% chance per section)
+    if random.random() < 0.15:
+        for x, y in shuffled:
+            if not any(e.x == x and e.y == y for e in dungeon.entities):
+                entity_factories.campfire.spawn(dungeon, x, y)
+                break
+
+
+class DisjointSet:
+    """Union-Find data structure with path compression and union by rank.
+    Used to track connected cave regions during cavern generation."""
+
+    def __init__(self) -> None:
+        self.parent: Dict[Tuple[int, int], Tuple[int, int]] = {}
+        self.rank: Dict[Tuple[int, int], int] = {}
+
+    def find(self, x: Tuple[int, int]) -> Tuple[int, int]:
+        if x not in self.parent:
+            self.parent[x] = x
+            self.rank[x] = 0
+        # Iterative path compression — avoids Python recursion limits on large maps
+        root = x
+        while self.parent[root] != root:
+            root = self.parent[root]
+        while self.parent[x] != root:
+            nxt = self.parent[x]
+            self.parent[x] = root
+            x = nxt
+        return root
+
+    def union(self, x: Tuple[int, int], y: Tuple[int, int]) -> None:
+        rx, ry = self.find(x), self.find(y)
+        if rx == ry:
+            return
+        if self.rank.get(rx, 0) < self.rank.get(ry, 0):
+            rx, ry = ry, rx
+        self.parent[ry] = rx
+        if self.rank.get(rx, 0) == self.rank.get(ry, 0):
+            self.rank[rx] = self.rank.get(rx, 0) + 1
+
+
+def join_caverns(dungeon: GameMap, width: int, height: int) -> None:
+    """Connect disjoint cave regions by drawing meandering lines toward the map center.
+
+    Closely follows the Monte Carlo cave-joining algorithm from CA_CaveFactory:
+      1. Build a DisjointSet for all floor tiles (8-directional adjacency).
+      2. Collect one representative point per distinct cave.
+      3. For each cave, walk a randomly-meandering line toward the map centre.
+      4. Stop only when the NEXT tile is:
+           (a) already a floor belonging to a DIFFERENT cave's set, OR
+           (b) already connected to the centre reference tile.
+         (Stepping onto your own freshly-carved tiles does NOT stop the walk.)
+      5. Each stop unions the two sets, progressively merging all caves.
+    """
+    ds = DisjointSet()
+
+    # Build DS: union all 8-directionally adjacent interior floor pairs
+    for x in range(1, width - 1):
+        for y in range(1, height - 1):
+            if dungeon.tiles[x, y]["walkable"]:
+                ds.find((x, y))
+                for dx in range(-1, 2):
+                    for dy in range(-1, 2):
+                        if dx == 0 and dy == 0:
+                            continue
+                        nx2, ny2 = x + dx, y + dy
+                        if 1 <= nx2 < width - 1 and 1 <= ny2 < height - 1:
+                            if dungeon.tiles[nx2, ny2]["walkable"]:
+                                ds.union((x, y), (nx2, ny2))
+
+    # Find the nearest floor tile to map centre as destination reference
+    cx0, cy0 = width // 2, height // 2
+    center_ref: Optional[Tuple[int, int]] = None
+    for r in range(max(width, height)):
+        found = False
+        for dx in range(-r, r + 1):
+            for dy in range(-r, r + 1):
+                if abs(dx) != r and abs(dy) != r:
+                    continue
+                tx, ty = cx0 + dx, cy0 + dy
+                if 1 <= tx < width - 1 and 1 <= ty < height - 1 and dungeon.tiles[tx, ty]["walkable"]:
+                    center_ref = (tx, ty)
+                    found = True
+                    break
+            if found:
+                break
+        if found:
+            break
+
+    if center_ref is None:
+        return  # No floor tiles — nothing to connect
+
+    # Collect one representative point per distinct cave
+    cave_reps: Dict[Tuple[int, int], Tuple[int, int]] = {}
+    for x in range(1, width - 1):
+        for y in range(1, height - 1):
+            if dungeon.tiles[x, y]["walkable"]:
+                root = ds.find((x, y))
+                if root not in cave_reps:
+                    cave_reps[root] = (x, y)
+
+    def get_dir(pt1: Tuple[int, int], pt2: Tuple[int, int]) -> Tuple[int, int]:
+        h = 0 if pt1[0] == pt2[0] else (1 if pt2[0] > pt1[0] else -1)
+        v = 0 if pt1[1] == pt2[1] else (1 if pt2[1] > pt1[1] else -1)
+        return h, v
+
+    def should_stop(pt: Tuple[int, int], npt: Tuple[int, int]) -> bool:
+        """Stop if npt is already a floor tile from a DIFFERENT cave set.
+        Mirrors the reference __stop_drawing logic exactly."""
+        npt_root = ds.find(npt)
+        # Condition 1: npt is connected to the centre reference
+        if npt_root == ds.find(center_ref):
+            return True
+        # Condition 2: npt is a pre-existing floor in a different set
+        if dungeon.tiles[npt[0], npt[1]]["walkable"] and npt_root != ds.find(pt):
+            return True
+        return False
+
+    # Process one representative from every distinct cave
+    for start_pt in cave_reps.values():
+        pt = start_pt
+        for _ in range(width * height):  # safety bound
+            h_dir, v_dir = get_dir(pt, (cx0, cy0))
+
+            # Equal-probability 3-way step: row-only, col-only, or diagonal
+            # (matches the reference randrange(0,3) distribution)
+            move = random.randint(0, 2)
+            if move == 0:
+                npt = (pt[0] + h_dir, pt[1])
+            elif move == 1:
+                npt = (pt[0], pt[1] + v_dir)
+            else:
+                npt = (pt[0] + h_dir, pt[1] + v_dir)
+
+            # Clamp to interior
+            npt = (max(1, min(width - 2, npt[0])), max(1, min(height - 2, npt[1])))
+
+            # No progress (already at centre or fully clamped) — stop this line
+            if npt == pt:
+                break
+
+            if should_stop(pt, npt):
+                ds.union(pt, npt)
+                break
+
+            # Carve wall → floor, union with current position, advance
+            if not dungeon.tiles[npt[0], npt[1]]["walkable"]:
+                dungeon.tiles[npt[0], npt[1]] = tile_types.random_floor_tile()
+            ds.find(npt)
+            ds.union(pt, npt)
+            # Widen corridor: carve the 4 cardinal neighbors of npt
+            for _wx, _wy in [(npt[0]+1, npt[1]), (npt[0]-1, npt[1]),
+                             (npt[0], npt[1]+1), (npt[0], npt[1]-1)]:
+                if 1 <= _wx < width - 1 and 1 <= _wy < height - 1:
+                    if not dungeon.tiles[_wx, _wy]["walkable"]:
+                        dungeon.tiles[_wx, _wy] = tile_types.random_floor_tile()
+                    ds.find((_wx, _wy))
+                    ds.union(npt, (_wx, _wy))
+            pt = npt
+
 
 def generate_dungeon(
         max_rooms: int,
@@ -846,94 +1073,222 @@ def generate_dungeon(
         map_width: int,
         map_height: int,
         engine: Engine,
+        noise_map: Optional[np.ndarray] = None, # Stored as np.ndarray {"x": int, "y": int, "value": float} for each floor
+        player_proxy=None,
+        floor_num: Optional[int] = None,
 ) -> GameMap:
     # Don't re-seed here - it breaks room generation variety
     # Seeding is handled at the top level in setup_game.py
     
+    # Use proxy instead of real player for background floor generation
+    _placer = player_proxy if player_proxy is not None else engine.player
+    _floor = floor_num if floor_num is not None else engine.game_world.current_floor
+    
     # Generates new map
-    player = engine.player
-    dungeon = GameMap(engine, map_width, map_height, entities=[player], type="dungeon", name="Dungeon")
-
+    dungeon = GameMap(engine, map_width, map_height, entities=[_placer], type="dungeon", name="Dungeon")
     rooms: List[RectangularRoom] = []
-
     center_of_last_room = (0, 0)
+    
+    # Check if noise_map "type" value is less than -0.5 for dungeon
+    if noise_map is not None and noise_map.get("type", 0) < -0.5:
+        for r in range(max_rooms):
+            room_height = random.randint(room_min_size, room_max_size)
+            room_width = random.randint(room_min_size, room_max_size)
 
-
-    for r in range(max_rooms):
-        room_width = random.randint(room_min_size, room_max_size)
-        room_height = random.randint(room_min_size, room_max_size)
-
-        # Keep rooms away from world borders - ensure at least 2 tiles buffer
-        # This prevents room walls from being adjacent to world borders
-        min_x = 2
-        max_x = dungeon.width - room_width - 3
-        min_y = 2  
-        max_y = dungeon.height - room_height - 3
-        
-        # Make sure we have valid bounds for room placement
-        if max_x <= min_x or max_y <= min_y:
-            continue
+            # Keep rooms away from world borders - ensure at least 2 tiles buffer
+            # This prevents room walls from being adjacent to world borders
+            min_x = 2
+            max_x = dungeon.width - room_width - 3
+            min_y = 2  
+            max_y = dungeon.height - room_height - 3
             
-        x = random.randint(min_x, max_x)
-        y = random.randint(min_y, max_y)
-
-        new_room = RectangularRoom(x, y, room_width, room_height)
-
-        if any(new_room.intersects(other_room) for other_room in rooms):
-            continue
-
-        if len(rooms) == 0:
-            # First room, where player starts
-            player.place(*new_room.center, dungeon)
-            # Guaranteed campfire in first room
-            place_campfires(dungeon, "dungeon_first_room", room=new_room, player_pos=new_room.center)
-            # Spawn a chest on first floor only
-            if engine.game_world.current_floor == 1:
+            # Make sure we have valid bounds for room placement
+            if max_x <= min_x or max_y <= min_y:
+                continue
                 
-                # Generate loot from table
-                import loot_tables
-                loot = loot_tables.generate_loot_from_table("starter_chest")
+            x = random.randint(min_x, max_x)
+            y = random.randint(min_y, max_y)
 
-                test_chest = entity_factories.make_chest_with_loot(loot, capacity=15)
-                cx, cy = new_room.center
-                chest_x, chest_y = min(dungeon.width - 1, cx + 1), cy
-                # Only place if empty
-                if not any(e.x == chest_x and e.y == chest_y for e in dungeon.entities):
-                    test_chest.place(chest_x, chest_y, dungeon)
-        else:
-            for x, y in tunnel_between(rooms[-1].center, new_room.center):
-                dungeon.tiles[x,y] = tile_types.random_floor_tile()
+            new_room = RectangularRoom(x, y, room_width, room_height)
 
-                # Place doors at the entrances of the new room
-                if (x == new_room.x1 or x == new_room.x2) and (y >= new_room.y1 and y <= new_room.y2):
-                    dungeon.tiles[x,y] = tile_types.closed_door
-                # Place doors at the exits of the previous room
-                if (x == rooms[-1].x1 or x == rooms[-1].x2) and (y >= rooms[-1].y1 and y <= rooms[-1].y2):
-                    dungeon.tiles[x,y] = tile_types.closed_door
+            if any(new_room.intersects(other_room) for other_room in rooms):
+                continue
 
-            center_of_last_room = new_room.center
+            if len(rooms) == 0:
+                # First room, where player starts
+                _placer.place(*new_room.center, dungeon)
+                # Guaranteed campfire in first room
+                place_campfires(dungeon, "dungeon_first_room", room=new_room, player_pos=new_room.center)
+                # Spawn a chest on first floor only
+                if _floor == 1:
+                    
+                    # Generate loot from table
+                    import loot_tables
+                    loot = loot_tables.generate_loot_from_table("starter_chest")
 
-        # Carve out the room floor with random tiles for each position
-        for x in range(new_room.x1 + 1, new_room.x2):
-            for y in range(new_room.y1 + 1, new_room.y2):
-                dungeon.tiles[x, y] = tile_types.random_floor_tile()
+                    test_chest = entity_factories.make_chest_with_loot(loot, capacity=15)
+                    cx, cy = new_room.center
+                    chest_x, chest_y = min(dungeon.width - 1, cx + 1), cy
+                    # Only place if empty
+                    if not any(e.x == chest_x and e.y == chest_y for e in dungeon.entities):
+                        test_chest.place(chest_x, chest_y, dungeon)
+            else:
+                for x, y in tunnel_between(rooms[-1].center, new_room.center):
+                    dungeon.tiles[x,y] = tile_types.random_floor_tile()
 
-        # Add the room to the list BEFORE entity placement
-        rooms.append(new_room)
+                    # Place doors at the entrances of the new room
+                    if (x == new_room.x1 or x == new_room.x2) and (y >= new_room.y1 and y <= new_room.y2):
+                        dungeon.tiles[x,y] = tile_types.closed_door
+                    # Place doors at the exits of the previous room
+                    if (x == rooms[-1].x1 or x == rooms[-1].x2) and (y >= rooms[-1].y1 and y <= rooms[-1].y2):
+                        dungeon.tiles[x,y] = tile_types.closed_door
 
-        # Place entities in non-first rooms
-        if len(rooms) > 1:  # Skip first room for entity placement  
-            place_entities(new_room, dungeon, engine.game_world.current_floor)
+                center_of_last_room = new_room.center
 
-    # Place stairs in the center of the last room
+            # Carve out the room floor with random tiles for each position
+            for x in range(new_room.x1 + 1, new_room.x2):
+                for y in range(new_room.y1 + 1, new_room.y2):
+                    dungeon.tiles[x, y] = tile_types.random_floor_tile()
+
+            # Add the room to the list BEFORE entity placement
+            rooms.append(new_room)
+
+            # Place entities in non-first rooms
+            if len(rooms) > 1:  # Skip first room for entity placement  
+                place_entities(new_room, dungeon, _floor)
+
+    # Check if noise_map "type" value is greater than 0.5 for cavern
+    is_cavern = noise_map is not None and noise_map.get("type", 0) > 0.5
+    if is_cavern:
+        # Seed map: 40% floor, 60% wall
+        for x in range(1, dungeon.width - 1):
+            for y in range(1, dungeon.height - 1):
+                if random.random() < 0.4:
+                    dungeon.tiles[x, y] = tile_types.random_floor_tile()
+                else:
+                    dungeon.tiles[x, y] = tile_types.wall
+
+        # Cellular automata smoothing — 4 passes, double-buffered so each pass
+        # reads cleanly from the previous iteration without in-place bias.
+        for _pass in range(4):
+            new_tiles = dungeon.tiles.copy()
+            for x in range(1, dungeon.width - 1):
+                for y in range(1, dungeon.height - 1):
+                    wall_count = 0
+                    for dx in range(-1, 2):
+                        for dy in range(-1, 2):
+                            if dx == 0 and dy == 0:
+                                continue
+                            neighbor_tile = dungeon.tiles[x + dx, y + dy]
+                            if not neighbor_tile["walkable"] and not neighbor_tile["interactable"]:
+                                wall_count += 1
+                    if wall_count > 5:
+                        new_tiles[x, y] = tile_types.wall
+                    elif wall_count < 5:
+                        new_tiles[x, y] = tile_types.random_floor_tile()
+                    # else: keep same (already copied)
+            dungeon.tiles = new_tiles
+
+        # Connect all disjoint cave regions into one traversable map
+        join_caverns(dungeon, map_width, map_height)
+
+        # Place player near map centre in the main (joined) cave
+        for _r in range(max(map_width, map_height)):
+            _placed = False
+            for _dx in range(-_r, _r + 1):
+                for _dy in range(-_r, _r + 1):
+                    if abs(_dx) != _r and abs(_dy) != _r:
+                        continue
+                    _px, _py = map_width // 2 + _dx, map_height // 2 + _dy
+                    if (1 <= _px < map_width - 1 and 1 <= _py < map_height - 1
+                            and dungeon.tiles[_px, _py]["walkable"]):
+                        _placer.place(_px, _py, dungeon)
+                        _placed = True
+                        break
+                if _placed:
+                    break
+            if _placed:
+                break
+
+        # Starter chest on floor 1, placed adjacent to the player
+        if _floor == 1:
+            import loot_tables
+            _loot = loot_tables.generate_loot_from_table("starter_chest")
+            _start_chest = entity_factories.make_chest_with_loot(_loot, capacity=15)
+            _cx, _cy = _placer.x, _placer.y
+            for _cdx, _cdy in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)]:
+                _ccx, _ccy = _cx + _cdx, _cy + _cdy
+                if (1 <= _ccx < map_width - 1 and 1 <= _ccy < map_height - 1
+                        and dungeon.tiles[_ccx, _ccy]["walkable"]
+                        and not any(e.x == _ccx and e.y == _ccy for e in dungeon.entities)):
+                    _start_chest.spawn(dungeon, _ccx, _ccy)
+                    break
+
+        # Spawn entities in grid sections across the cave (skip player start section)
+        _section_size = 15
+        _player_sx = (_placer.x // _section_size) * _section_size
+        _player_sy = (_placer.y // _section_size) * _section_size
+        for _gx in range(1, map_width - 1, _section_size):
+            for _gy in range(1, map_height - 1, _section_size):
+                if _gx == _player_sx and _gy == _player_sy:
+                    continue  # Skip the player's starting section
+                _section_tiles = [
+                    (_tx, _ty)
+                    for _tx in range(_gx, min(_gx + _section_size, map_width - 1))
+                    for _ty in range(_gy, min(_gy + _section_size, map_height - 1))
+                    if dungeon.tiles[_tx, _ty]["walkable"]
+                ]
+                place_entities_cave(_section_tiles, dungeon, _floor, max_rooms)
+
+        # Place stairs toward a corner of the map (far from player start)
+        stair_candidates = [
+            (map_width * 3 // 4, map_height * 3 // 4),
+            (map_width // 4,     map_height * 3 // 4),
+            (map_width * 3 // 4, map_height // 4),
+            (map_width // 4,     map_height // 4),
+        ]
+        for _sx0, _sy0 in stair_candidates:
+            for _r in range(max(map_width, map_height)):
+                _stair_placed = False
+                for _dx in range(-_r, _r + 1):
+                    for _dy in range(-_r, _r + 1):
+                        if abs(_dx) != _r and abs(_dy) != _r:
+                            continue
+                        _sx, _sy = _sx0 + _dx, _sy0 + _dy
+                        if (1 <= _sx < map_width - 1 and 1 <= _sy < map_height - 1
+                                and dungeon.tiles[_sx, _sy]["walkable"]):
+                            dungeon.tiles[_sx, _sy] = tile_types.down_stairs
+                            dungeon.downstairs_location = (_sx, _sy)
+                            _stair_placed = True
+                            break
+                    if _stair_placed:
+                        break
+                if _stair_placed:
+                    break
+            if dungeon.downstairs_location != (0, 0):
+                break
+
+    # Place stairs in the center of the last room (rectangular dungeon)
     if rooms:
         center_of_last_room = rooms[-1].center
         dungeon.tiles[center_of_last_room] = tile_types.down_stairs
         dungeon.downstairs_location = center_of_last_room
 
     # Post-processing: Remove isolated walls that have no floors touching them
-    remove_isolated_walls(dungeon)
-    
+    # Skip for caverns - it destroys wall masses by hollowing out their interiors
+    if not is_cavern:
+        remove_isolated_walls(dungeon)
+
+    # Seal the border: overwrite the 1-tile inset ring with walls so the world
+    # border is never directly reachable regardless of map type or generation.
+    if is_cavern:
+        for _bx in range(1, dungeon.width - 1):
+            dungeon.tiles[_bx, 1] = tile_types.wall
+            dungeon.tiles[_bx, dungeon.height - 2] = tile_types.wall
+        for _by in range(1, dungeon.height - 1):
+            dungeon.tiles[1, _by] = tile_types.wall
+            dungeon.tiles[dungeon.width - 2, _by] = tile_types.wall
+
     # Apply wall merging system to create connected wall appearances
     apply_wall_merging(dungeon)
 

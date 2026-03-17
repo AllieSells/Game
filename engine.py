@@ -45,6 +45,7 @@ class Engine:
         self.animations_enabled = True
         self.debug = False
         self.cursor_hint = None 
+        self.hovered_inventory_button = None
         
         # Initialize turn manager for centralized turn processing
         self.turn_manager = None  # Will be set after import to avoid circular imports
@@ -69,6 +70,11 @@ class Engine:
 
         self.mouse_x = 0
         self.mouse_y = 0
+
+        # Auto-movement (pathfind-to-click)
+        self.auto_move_path = []  # List of (x, y) tuples remaining in the queued path
+        self._last_auto_move_time = 0.0
+        self._pending_handler = None  # Handler change queued by auto-move (e.g. GameOver)
 
         # Persistent Simplex noise generator for torch/fire flicker.
         # Stored on the engine (not per-map) so the animation is continuous
@@ -463,6 +469,45 @@ class Engine:
         except Exception:
             traceback.print_exc()
             pass
+
+        # Auto-movement: advance one step along the queued path every 150 ms
+        auto_path = getattr(self, 'auto_move_path', None)
+        if auto_path and getattr(self, 'turn_manager', None):
+            self.cursor_hint = "walk"
+            import color as _color
+            now_am = time.monotonic()
+            if now_am - self._last_auto_move_time >= 0.15:
+                # Cancel if an enemy is visible
+                enemy_visible = any(
+                    actor is not self.player and self.game_map.visible[actor.x, actor.y]
+                    for actor in self.game_map.actors
+                )
+                if enemy_visible:
+                    self.auto_move_path = []
+                    self.cursor_hint = None
+                    self.message_log.add_message("No longer pathing, spotted an enemy.", _color.yellow)
+                else:
+                    next_pos = auto_path.pop(0)
+                    dx = next_pos[0] - self.player.x
+                    dy = next_pos[1] - self.player.y
+                    from actions import MovementAction
+                    try:
+                        self.turn_manager.process_pre_player_turn()
+                        MovementAction(self.player, dx, dy).perform()
+                        self._last_auto_move_time = now_am
+                        # Clear cursor hint when path is exhausted
+                        if not auto_path:
+                            self.cursor_hint = None
+                        result = self.turn_manager.process_player_turn_end()
+                        if result is not None:
+                            self.auto_move_path = []
+                            self.cursor_hint = None
+                            self._pending_handler = result
+                    except exceptions.Impossible as exc:
+                        self.auto_move_path = []
+                        self.cursor_hint = None
+                        self.message_log.add_message(exc.args[0], _color.impossible)
+                        self.message_log.add_message(exc.args[0], _color.impossible)
 
 
 
@@ -883,6 +928,11 @@ class Engine:
             map=self.game_map
         )
 
+        render_functions.render_ui_buttons(
+            console=console,
+            hovered_button=self.hovered_inventory_button
+        )
+
         render_functions.render_combat_stats(
             console=console,
             dodge_direction=getattr(self.player, "preferred_dodge_direction", "None"),
@@ -900,24 +950,33 @@ class Engine:
         if getattr(self, '_last_cursor_tile', None) != tile:
             self._last_cursor_tile = tile
             interactable = False
+            fightable = False
             self.cursor_hint = None
             if self.game_map.in_bounds(*tile):
                 if self.game_map.tiles[tile]['interactable']:
                     interactable = True
             # Get entities at mouse location
             for ent in self.game_map.entities:
+                # Check if interactable
                 if hasattr(ent, "container") and ent.container and (
                     ent.x == self.mouse_x and ent.y == self.mouse_y
                 ):
                     interactable = True
+                # Check if enemy, has hp, and NOT player
+                if hasattr(ent, "fighter") and ent.fighter and ent.fighter.hp > 0 and ent.fighter != self.player.fighter and (
+                    ent.x == self.mouse_x and ent.y == self.mouse_y
+                ):
+                    fightable = True
             if interactable:
                 self.cursor_hint = "interact"
+            elif fightable:
+                self.cursor_hint = "fight"
         render_functions.render_names_at_mouse_location(
             console=console, x=1, y=42, engine=self  # MOUSE_LOCATION coordinates
             )
         
         if self.debug:
-            render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities))
+            render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities), self)
 
     def trigger_damage_indicator(self):
         """Trigger the damage indicator visual effect"""

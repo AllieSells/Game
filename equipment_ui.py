@@ -629,6 +629,22 @@ class EquipmentUI(AskUserEventHandler):
         
         return None  # Stay in equipment UI
 
+    def ev_mousewheel(self, event) -> None:
+        """Scroll through "slots with mouse wheel."""
+        if event.y > 0:  # Scroll down
+            if self.selected_slot > 0:
+                sounds.play_ui_move_sound()
+            self.selected_slot = max(0, self.selected_slot - 1)
+            self.selected_item = 0
+            return None
+        elif event.y < 0:  # Scroll up
+            if self.selected_slot < len(self.slots) - 1:
+                sounds.play_ui_move_sound()
+            self.selected_slot = min(len(self.slots) - 1, self.selected_slot + 1)
+            self.selected_item = 0
+            return None
+
+
     def ev_mousemotion(self, event) -> None:
         """Hover over slots or items to change selection."""
         super().ev_mousemotion(event)
@@ -639,7 +655,7 @@ class EquipmentUI(AskUserEventHandler):
         bx, by = self._ui_x, self._ui_y
 
         # Slots panel: list_x = base_x+3, rows base_y+3..base_y+3+len(slots)
-        if bx + 3 <= mouse_x < bx + 38 and by + 3 <= mouse_y < by + 3 + len(self.slots):
+        if bx + 3 <= mouse_x < bx + 18 and by + 3 <= mouse_y < by + 3 + len(self.slots):
             hovered_slot = mouse_y - (by + 3)
             if hovered_slot != self.selected_slot:
                 sounds.play_ui_move_sound()
@@ -662,16 +678,27 @@ class EquipmentUI(AskUserEventHandler):
 
     def ev_mousebuttondown(self, event) -> Optional[AskUserEventHandler]:
         """Click a slot to select it; click an item to equip/unequip it."""
+
+
         if event.button != tcod.event.BUTTON_LEFT:
             return None
         if not hasattr(self, '_ui_x'):
             return None
 
+
+
         mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
         bx, by = self._ui_x, self._ui_y
 
+        # Check if out of bounds of equipment UI
+        if mouse_x < bx or mouse_x >= bx + 65 or mouse_y < by or mouse_y >= by + 20:
+            # Exit menu if clicking outside of it
+            from input_handlers import MainGameEventHandler
+            return MainGameEventHandler(self.engine)
+
+
         # Slots panel click -> select slot
-        if bx + 3 <= mouse_x < bx + 38 and by + 3 <= mouse_y < by + 3 + len(self.slots):
+        if bx + 3 <= mouse_x < bx + 18 and by + 3 <= mouse_y < by + 3 + len(self.slots):
             self.selected_slot = mouse_y - (by + 3)
             self.selected_item = 0
             return None

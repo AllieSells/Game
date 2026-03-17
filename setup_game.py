@@ -182,7 +182,8 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
         engine.game_world.fungi.append(fungus)
         engine.debug_log(f"Generated fungus: {fungus.name}", handler=type(engine).__name__, event="world_gen")
     
-    engine.game_world.generate_floor()
+    # Generate world noise 
+    engine.game_world.generate_world()
     engine.update_fov()
     
     # Clear world generation flag after generation is complete
@@ -806,11 +807,11 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
             return None
         
         if event.sym == tcod.event.KeySym.UP:
-            sounds.play_menu_move_sound()
+            sounds.play_ui_move_sound()
             self.selected_option = (self.selected_option - 1) % len(self.save_files)
             return None
         elif event.sym == tcod.event.KeySym.DOWN:
-            sounds.play_menu_move_sound()
+            sounds.play_ui_move_sound()
             self.selected_option = (self.selected_option + 1) % len(self.save_files)
             return None
         elif event.sym in (tcod.event.KeySym.RETURN, tcod.event.KeySym.KP_ENTER, tcod.event.KeySym.SPACE):
@@ -931,7 +932,7 @@ class ConfirmationDialog(input_handlers.BaseEventHandler):
             return self.callback(True)
         elif event.sym in (tcod.event.KeySym.LEFT, tcod.event.KeySym.RIGHT):
             # Toggle between Yes/No
-            sounds.play_menu_move_sound()
+            sounds.play_ui_move_sound()
             self.selected_option = 1 - self.selected_option
             return None
         elif event.sym in (tcod.event.KeySym.RETURN, tcod.event.KeySym.KP_ENTER, tcod.event.KeySym.SPACE):
@@ -1078,7 +1079,7 @@ class MainMenu(input_handlers.BaseEventHandler):
             hovered_option = (mouse_y - self.menu_start_y) // 2
             if 0 <= hovered_option < len(self.menu_options):
                 if hovered_option != self.selected_option:
-                    sounds.play_menu_move_sound()
+                    sounds.play_ui_move_sound()
                 self.selected_option = hovered_option
         else:
             self.selected_option = -1
@@ -1093,7 +1094,7 @@ class MainMenu(input_handlers.BaseEventHandler):
 
     def ev_keydown(
         self, event: tcod.event.KeyDown) -> Optional[input_handlers.BaseEventHandler]:
-        sounds.play_menu_move_sound()
+        sounds.play_ui_move_sound()
         print(self.engine.mouse_held)
         if event.sym == tcod.event.KeySym.UP:
             self.selected_option = (self.selected_option - 1) % len(self.menu_options)

@@ -272,7 +272,16 @@ def main() -> None:
     cursor_interact_img =  Image.open("RP/cursors/cursor_open.png").convert("RGBA")
     pixels_cursor_interact = np.array(cursor_interact_img, dtype=np.uint8)
     cursor_interact = tcod.sdl.mouse.new_color_cursor(pixels_cursor_interact, (0, 0))
+
+    cursor_sword_img = Image.open("RP/cursors/cursor_sword.png").convert("RGBA")
+    pixels_cursor_sword = np.array(cursor_sword_img, dtype=np.uint8)
+    cursor_sword = tcod.sdl.mouse.new_color_cursor(pixels_cursor_sword, (0, 0))
     
+    cursor_walk_img = Image.open("RP/cursors/cursor_walk.png").convert("RGBA")
+    pixels_cursor_walk = np.array(cursor_walk_img, dtype=np.uint8)
+    cursor_walk = tcod.sdl.mouse.new_color_cursor(pixels_cursor_walk, (0, 0))
+
+
     # Start the main game loop
     target_fps = 30
     frame_time = 1.0 / target_fps
@@ -287,9 +296,13 @@ def main() -> None:
             hint = getattr(getattr(handler, 'engine', None), 'cursor_hint', None)
             if hint == 'bag':
                 tcod.sdl.mouse.set_cursor(cursor_bag)
+            elif hint == "fight":
+                tcod.sdl.mouse.set_cursor(cursor_sword)
             elif hint == 'interact':
                 tcod.sdl.mouse.set_cursor(cursor_interact)
 
+            elif hint == 'walk':
+                tcod.sdl.mouse.set_cursor(cursor_walk)
             elif _mouse_held:
                 tcod.sdl.mouse.set_cursor(cursor_click)
             else:

@@ -120,7 +120,7 @@ def status_effect_overlay(console: Console, effects: list) -> None:
             y -= 1
 
 
-def render_debug_overlay(console: Console, fps: float, player_pos: Tuple[int, int], handler_name: str, entity_count: int) -> None:          
+def render_debug_overlay(console: Console, fps: float, player_pos: Tuple[int, int], handler_name: str, entity_count: int, engine: Engine) -> None:          
     x, y = player_pos
     
     render_x = 0
@@ -150,6 +150,7 @@ def render_debug_overlay(console: Console, fps: float, player_pos: Tuple[int, in
     console.print(render_x, render_y + 2, f"Entities: {entity_count}", fg=(255, 255, 255))
     console.print(render_x, render_y + 3, f"FPS: {fps:.1f}", fg=(255, 255, 255))
     console.print(render_x, render_y + 4, f"Frame Time: {frame_time_ms:.2f}ms", fg=(255, 255, 255))
+    console.print(render_x, render_y + 5, f"Mouse Pos: ({engine.mouse_x}, {engine.mouse_y})", fg=(255, 255, 255))
 
 
 
@@ -293,6 +294,19 @@ def render_gold(
     
     console.print(x=GOLD_X, y=GOLD_Y, string=f"Gold: {gold_amount}", fg=color.gold_accent)
 
+def render_ui_buttons(
+        console: 'Console', hovered_button: str = None) -> None:
+    # === ADJUSTABLE COORDINATES ===
+    INVENTORY_BUTTON_X = 36
+    EQUIPMENT_BUTTON_X = 52
+    BUTTON_Y = 40
+    # ==============================
+    inv_color = color.gold_accent if hovered_button == "inventory" else color.bronze_text
+    equip_color = color.gold_accent if hovered_button == "equipment" else color.bronze_text
+    console.print(x=INVENTORY_BUTTON_X, y=BUTTON_Y, string="Inventory [TAB]", fg=inv_color)
+    console.print(x=EQUIPMENT_BUTTON_X, y=BUTTON_Y, string="Equipment [E]", fg=equip_color)
+
+
 # Combat status panel with adjustable coordinates
 def render_combat_stats(
         console: 'Console', dodge_direction: str = "North", attack_type: str = "Random", player=None,
@@ -319,8 +333,10 @@ def render_combat_stats(
     console.draw_rect(x=PANEL_X+1, y=PANEL_Y+3, width=8, height=1, ch=ord('─'), bg=color.parchment_dark, fg=color.bronze_border)
     # Middle part of horizontal line (between dividers at x=12 and x=20)  
     console.draw_rect(x=10, y=PANEL_Y+3, width=10, height=1, ch=ord('─'), bg=color.parchment_dark, fg=color.bronze_border)
-    # Right part of horizontal line (after second divider at x=20)
-    console.draw_rect(x=21, y=PANEL_Y+3, width=PANEL_WIDTH-22, height=1, ch=ord('─'), bg=color.parchment_dark, fg=color.bronze_border)
+    # Right part of horizontal line split into sections to preserve T-junctions at DIVIDER_X3=35 and DIVIDER_X4=65
+    console.draw_rect(x=21, y=PANEL_Y+3, width=14, height=1, ch=ord('─'), bg=color.parchment_dark, fg=color.bronze_border)   # x=21..34
+    console.draw_rect(x=36, y=PANEL_Y+3, width=29, height=1, ch=ord('─'), bg=color.parchment_dark, fg=color.bronze_border)   # x=36..64
+    console.draw_rect(x=66, y=PANEL_Y+3, width=PANEL_WIDTH-67, height=1, ch=ord('─'), bg=color.parchment_dark, fg=color.bronze_border)  # x=66..
     # Combat stats on first content line
     dodge_text = f"DDG: {dodge_direction[0].upper() if dodge_direction else 'R'}"
     console.print(x=COMBAT_TEXT_X, y=PANEL_Y + 1, string=dodge_text, fg=color.bronze_text)
@@ -467,6 +483,8 @@ def render_bottom_ui_border(console: tcod.Console):
     UI_RIGHT = console.width - 1
     DIVIDER_X = 20  # Vertical divider between stats and message log
     DIVIDER_X2 = 9
+    DIVIDER_X3 = 35
+    DIVIDER_X4 = 65
     # ==============================
     
     # Fill entire interior with parchment background
@@ -487,6 +505,10 @@ def render_bottom_ui_border(console: tcod.Console):
             console.print(DIVIDER_X, y, "│", fg=color.bronze_border)  # Center divider
         if y <= UI_TOP + 3:  # Draw secondary divider on the left side for the top stats area
             console.print(DIVIDER_X2, y, "│", fg=color.bronze_border)  # Divider between message log and player info
+        if y <= UI_TOP + 3:  # Draw vertical line for menu separation in the top section
+            console.print(DIVIDER_X3, y, "│", fg=color.bronze_border)  # Divider between message log and player info
+        if y <= UI_TOP + 3:  # Draw vertical line for menu separation in the top section
+            console.print(DIVIDER_X4, y, "│", fg=color.bronze_border)  # Divider between message log and player info
     
     # Draw corners
     console.print(UI_LEFT, UI_TOP, "┌", fg=color.bronze_border)  # Top-left
@@ -499,6 +521,10 @@ def render_bottom_ui_border(console: tcod.Console):
     console.print(DIVIDER_X, UI_BOTTOM, "┴", fg=color.bronze_border)  # Bottom T-junction
     console.print(DIVIDER_X2, UI_TOP, "┬", fg=color.bronze_border)  # Top T-junction for second divider  
     console.print(DIVIDER_X2, UI_TOP + 3, "┴", fg=color.bronze_border)  # Bottom T-junction for second divider
+    console.print(DIVIDER_X3, UI_TOP, "┬", fg=color.bronze_border)  # Top T-junction for third divider
+    console.print(DIVIDER_X3, UI_TOP + 3, "┴", fg=color.bronze_border)  # Bottom T-junction for third divider
+    console.print(DIVIDER_X4, UI_TOP, "┬", fg=color.bronze_border)  # Top T-junction for fourth divider
+    console.print(DIVIDER_X4, UI_TOP + 3, "┴", fg=color.bronze_border)  # Bottom T-junction for fourth divider
     
     # Add left and right T-junctions on the horizontal divider line
     console.print(UI_LEFT, UI_TOP + 3, "├", fg=color.bronze_border, bg=(0, 0, 0))  # Left T-junction

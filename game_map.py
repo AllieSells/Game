@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Iterable, Iterator, Optional, TYPE_CHECKING
 import numpy as np
 from tcod.console import Console
@@ -14,6 +15,28 @@ if TYPE_CHECKING:
     from engine import Engine
     from entity import Entity
 
+
+class _FloorProbe:
+    """Throwaway placement anchor used by background floor generation.
+
+    Substitutes for the real player inside generate_dungeon so the background
+    thread never reads or writes player.x / player.y.  After generation, probe.x
+    and probe.y hold the first-room centre that becomes the player's spawn point.
+    """
+    def __init__(self) -> None:
+        self.x: int = 0
+        self.y: int = 0
+        self.parent = None
+
+    def place(self, x: int, y: int, gamemap=None) -> None:
+        self.x = x
+        self.y = y
+        if gamemap:
+            if self.parent and hasattr(self.parent, "entities"):
+                self.parent.entities.discard(self)
+            self.parent = gamemap
+            gamemap.entities.add(self)
+
 class GameMap:
     def __init__(
             self, engine: Engine, width: int, height: int, entities: Iterable[Entity] = (), type: str = "dungeon", name: str = "Dungeon", sunlit: bool = False
@@ -23,6 +46,7 @@ class GameMap:
         self.entities = set(entities)
         self.type = type
         self.sunlit = sunlit
+        self.temperature = 20
         
         # Initialize tiles. For dungeon maps, populate per-tile using
         # tile_types.random_wall_tile() so we get variation (mossy walls etc.).
@@ -452,7 +476,7 @@ class GameWorld:
             max_rooms: int,
             room_min_size: int,
             room_max_size: int,
-            current_floor: int = 0
+            current_floor: int = 0,
         ):
             self.engine = engine
 
@@ -472,7 +496,221 @@ class GameWorld:
             # Each entry is a tuple: (gamemap, player_xy, floor_number)
             self.up_stack: list[tuple] = []
             self.down_stack: list[tuple] = []
+            self._stack_lock = threading.Lock()  # guards down_stack across threads
+            self._bg_thread: Optional[threading.Thread] = None
             self.fungi = []  # Global list of fungi in the world
+
+            # world_noise is populated by generate_world_noise()
+            self.world_noise: np.ndarray = np.zeros((4, 1), dtype=np.float32)
+            # Seeded RNG held across batches so noise extends smoothly between them
+            self._noise_rng = None
+            # Next floor number to generate when down_stack runs low
+            self._next_batch_floor: int = 1
+
+    # pickle support: strip out the non-serialisable lock and thread objects
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        # Wait for any running background thread before saving
+        bg = state.get("_bg_thread")
+        if bg is not None and bg.is_alive():
+            bg.join()
+        state.pop("_stack_lock", None)
+        state.pop("_bg_thread", None)
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        # Recreate the lock and clear the thread handle on restore
+        self._stack_lock = threading.Lock()
+        self._bg_thread = None
+
+    # ---------------------------------------------------------------------------
+    # Noise tracks (indices into world_noise axis-0)
+    # ---------------------------------------------------------------------------
+    TRACK_TEMPERATURE = 0  # -10..10: cold → hot
+    TRACK_VEGETATION = 1  # -10..10: sparse → dense
+    TRACK_TYPE    = 2  # -10..10: dungeon halls → natural caves
+    TRACK_SPECIAL    = 3  # -10..10: normal floor → special / event floor
+
+    # Each deeper floor steps this far in noise space → smooth transitions
+    _FLOOR_SCALE = 0.3
+    # Number of waypoints spread across _MAX_FLOORS — fewer = smoother, more = choppier
+    _WAYPOINTS = 2
+    # Pre-allocate for this many floors; extended automatically if needed
+    _MAX_FLOORS  = 6
+    # Optional guaranteed starting values per track (raw float -1..1, or None to randomise).
+    # e.g. TRACK_TYPE starts at -10 on the -10..10 scale → -1.0 raw.
+    _START_ANCHORS = {
+        TRACK_TYPE: 10.0,  # floor 1 is always full dungeon halls
+    }
+
+    def _generate_noise_batch(self, rng, num_floors: int, anchor_values=None) -> np.ndarray:
+        """Return a (4, num_floors) noise array built from cubic-spline random waypoints.
+
+        anchor_values -- optional shape-(4,) array that pins the first waypoint of
+        each track to the last value of the previous batch, giving smooth continuation.
+        """
+        from scipy.interpolate import CubicSpline
+
+        n_wp = max(self._WAYPOINTS, 2)
+        wp_floors = np.linspace(0, num_floors - 1, n_wp)
+        tracks = []
+        for t in range(4):
+            wp_values = rng.uniform(-1.0, 1.0, size=n_wp)
+            if anchor_values is not None:
+                wp_values[0] = float(anchor_values[t])
+            cs = CubicSpline(wp_floors, wp_values)
+            tracks.append(np.clip(cs(np.arange(num_floors)), -1.0, 1.0))
+        return np.array(tracks, dtype=np.float32)
+
+    def generate_world_noise(self) -> None:
+        """Build the initial world noise profile (first batch)."""
+        from setup_game import _current_seed
+        self._noise_rng = np.random.default_rng(_current_seed)
+        # Build anchor array from _START_ANCHORS (None entries stay random)
+        initial_anchors = np.array(
+            [self._START_ANCHORS.get(t, None) for t in range(4)], dtype=object
+        )
+        # Only pass anchors if at least one track has a fixed start
+        if any(v is not None for v in initial_anchors):
+            anchor_arr = np.array(
+                [float(v) if v is not None else self._noise_rng.uniform(-1.0, 1.0)
+                 for v in initial_anchors],
+                dtype=np.float32,
+            )
+            self.world_noise = self._generate_noise_batch(self._noise_rng, self._MAX_FLOORS, anchor_values=anchor_arr)
+        else:
+            self.world_noise = self._generate_noise_batch(self._noise_rng, self._MAX_FLOORS)
+
+        self.engine.debug_log(f"Generated {self._MAX_FLOORS} floors (seed={_current_seed})", handler=type(self).__name__, event="world_noise")
+
+    def _extend_world_noise(self) -> None:
+        """Append another noise batch anchored to the tail of the current array."""
+        anchor = self.world_noise[:, -1]
+        new_batch = self._generate_noise_batch(self._noise_rng, self._MAX_FLOORS, anchor_values=anchor)
+        self.world_noise = np.concatenate([self.world_noise, new_batch], axis=1)
+        self.engine.debug_log(f"Extended to {self.world_noise.shape[1]} total floors", handler=type(self).__name__, event="world_noise")
+
+    def get_floor_noise(self, floor: int) -> dict:
+        def _to_int(raw: float) -> int:
+            return int(max(-10, min(10, round(raw * 10))))
+
+        # Auto-extend the noise array on demand so any floor index can be looked up
+        while floor >= self.world_noise.shape[1] and self._noise_rng is not None:
+            self._extend_world_noise()
+
+        idx = min(max(floor, 0), self.world_noise.shape[1] - 1)
+        return {
+            "temperature": _to_int(self.world_noise[self.TRACK_TEMPERATURE, idx]),
+            "vegetation":  _to_int(self.world_noise[self.TRACK_VEGETATION,  idx]),
+            "type":        _to_int(self.world_noise[self.TRACK_TYPE,        idx]),
+            "special":     _to_int(self.world_noise[self.TRACK_SPECIAL,     idx]),
+        }
+
+    
+    def _generate_floor_batch(self, start_floor_num: int) -> None:
+        """Generate _MAX_FLOORS maps and append them to down_stack.
+
+        Thread-safe: uses _FloorProbe instead of the real player, never mutates
+        self.current_floor, and holds _stack_lock only while appending.
+        world_noise must already cover [start_floor_num-1 .. start_floor_num+_MAX_FLOORS-2]
+        before this is called (guaranteed by _spawn_bg_batch pre-extension).
+        """
+        from procgen import generate_dungeon
+
+        batch: list[tuple] = []
+        for i in range(self._MAX_FLOORS):
+            floor_num = start_floor_num + i
+            noise = self.get_floor_noise(floor_num - 1)
+            probe = _FloorProbe()
+            new_map = generate_dungeon(
+                max_rooms=self.max_rooms,
+                room_min_size=self.room_min_size,
+                room_max_size=self.room_max_size,
+                map_width=self.map_width,
+                map_height=self.map_height,
+                engine=self.engine,
+                noise_map=noise,
+                player_proxy=probe,
+                floor_num=floor_num,
+            )
+            new_map.entities.discard(probe)
+            probe.parent = None
+            batch.append((new_map, (probe.x, probe.y), floor_num))
+
+        with self._stack_lock:
+            self.down_stack.extend(batch)
+
+        self.engine.debug_log(f"Batch ready: floors {start_floor_num}\u2013{start_floor_num + self._MAX_FLOORS - 1} ({len(self.down_stack)} queued)", handler=type(self).__name__, event="world_noise")
+
+    def _spawn_bg_batch(self, start_floor_num: int) -> None:
+        """Kick off a background thread to generate the next batch, if none is running.
+
+        Noise is pre-extended on the main thread before the thread starts so the
+        background thread only reads world_noise (never writes it).
+        """
+        if self._bg_thread is not None and self._bg_thread.is_alive():
+            return
+        # Pre-extend noise synchronously so bg thread is read-only on noise data
+        needed = start_floor_num + self._MAX_FLOORS - 2
+        while needed >= self.world_noise.shape[1] and self._noise_rng is not None:
+            self._extend_world_noise()
+        self._bg_thread = threading.Thread(
+            target=self._generate_floor_batch,
+            args=(start_floor_num,),
+            daemon=True,
+        )
+        self._bg_thread.start()
+        self.engine.debug_log(f"Background: generating floors {start_floor_num}\u2013{start_floor_num + self._MAX_FLOORS - 1}", handler=type(self).__name__, event="world_noise")
+
+    def generate_world(self) -> None:
+        """Activate floor 1 immediately, then generate the rest in a background thread.
+
+        down_stack holds upcoming pre-built floors (index 0 = next floor down).
+        up_stack is a full history of every floor the player has stood on, so
+        the player can always ascend all the way back to floor 1.
+        """
+        from procgen import generate_dungeon
+
+        self.generate_world_noise()
+        with self._stack_lock:
+            self.down_stack = []
+
+        # Floor 1: generate and activate synchronously so the player can start immediately
+        probe = _FloorProbe()
+        noise = self.get_floor_noise(0)
+        floor1_map = generate_dungeon(
+            max_rooms=self.max_rooms,
+            room_min_size=self.room_min_size,
+            room_max_size=self.room_max_size,
+            map_width=self.map_width,
+            map_height=self.map_height,
+            engine=self.engine,
+            noise_map=noise,
+            player_proxy=probe,
+            floor_num=1,
+        )
+        floor1_map.entities.discard(probe)
+        probe.parent = None
+        self._activate_floor((floor1_map, (probe.x, probe.y), 1))
+
+        # Floors 2 onward: generate in background
+        self._next_batch_floor = self._MAX_FLOORS + 2
+        self._spawn_bg_batch(2)
+
+    def _activate_floor(self, floor_entry: tuple) -> None:
+        """Set the given floor entry as the active map and place the player."""
+        new_map, start_pos, floor_num = floor_entry
+        self.current_floor = floor_num
+        self.engine.game_map = new_map
+        new_map.entities.add(self.engine.player)
+        px, py = start_pos
+        self.engine.player.place(px, py, new_map)
+        self.engine.debug_log(f"Activated floor {floor_num}, player at ({px}, {py})", handler=type(self).__name__, event="activate_floor")
+
+
+
+
 
     def generate_floor(self) -> None:
         from procgen import generate_dungeon, generate_village
@@ -530,72 +768,51 @@ class GameWorld:
     def descend(self) -> None:
         """Descend one level.
 
-        Behavior:
-        - Push the current map onto the up_stack so it can be returned to by ascending.
-        - If a previously-visited lower map exists on the down_stack, pop and restore it
-          (so descend after an ascend returns you to the same lower map).
-        - Otherwise, generate a fresh floor (via generate_floor()).
-        - In both cases, ensure an up_stairs tile exists on the newly active map at the
-          player's location so the player can ascend back.
+        The current map is pushed onto up_stack so the player can ascend all the
+        way back.  The next floor is popped from down_stack; when the queue drops
+        to a low watermark a background batch is spawned automatically.
         """
         current_map = self.engine.game_map
         player_pos = (self.engine.player.x, self.engine.player.y)
-        
-        # Set level transition flag to suppress equipment sounds
         self.engine.is_transitioning_level = True
 
-        # Push current map onto up_stack (so we can ascend later)
+        # Save current floor so the player can ascend back to it
         self.up_stack.append((current_map, player_pos, self.current_floor))
 
-        # If we have a previously-cached lower map, reuse it instead of regenerating
-        if len(self.down_stack) > 0:
-            next_map, next_player_pos, next_floor = self.down_stack.pop()
+        # If queue is empty and bg thread is still running, wait for it
+        with self._stack_lock:
+            queue_len = len(self.down_stack)
 
-            # Clear animations before map swap
-            try:
-                if hasattr(self.engine, "animation_queue"):
-                    try:
-                        self.engine.animation_queue.clear()
-                    except Exception:
-                        try:
-                            while self.engine.animation_queue:
-                                self.engine.animation_queue.popleft()
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+        if queue_len == 0:
+            if self._bg_thread is not None and self._bg_thread.is_alive():
+                self.engine.debug_log("Waiting for background generation to finish...", handler=type(self).__name__, event="descend")
+                self._bg_thread.join()
+            else:
+                # Fallback: generate synchronously
+                self.engine.debug_log("Queue empty — generating synchronously...", handler=type(self).__name__, event="descend")
+                self._generate_floor_batch(self._next_batch_floor)
+                self._next_batch_floor += self._MAX_FLOORS
 
-            # Restore the cached lower map
-            self.engine.game_map = next_map
-            # Update floor number to the stored value
-            try:
-                self.current_floor = next_floor
-            except Exception:
-                pass
+        # Spawn next background batch when queue is getting low
+        with self._stack_lock:
+            queue_len = len(self.down_stack)
+        if queue_len <= 2:
+            self._spawn_bg_batch(self._next_batch_floor)
+            self._next_batch_floor += self._MAX_FLOORS
 
-            # Place player where they were on that lower map (if provided)
-            try:
-                nx, ny = next_player_pos
-                self.engine.player.place(nx, ny, next_map)
-            except Exception:
-                pass
+        # Clear pending animations before map swap
+        try:
+            if hasattr(self.engine, "animation_queue"):
+                self.engine.animation_queue.clear()
+        except Exception:
+            pass
 
-            # Refresh ambient sounds for the restored map
-            try:
-                import sounds
-                sounds.refresh_all_ambient_sounds(self.engine.player, next_map.entities, next_map)
-            except Exception:
-                pass
-                
-            # Clear level transition flag after restoration is complete
-            self.engine.is_transitioning_level = False
+        # Activate the next floor
+        with self._stack_lock:
+            next_entry = self.down_stack.pop(0)
+        self._activate_floor(next_entry)
 
-            return
-
-        # No cached lower map: generate a new floor
-        self.generate_floor()
-
-        # After generation, place an up stairs tile at the player's current location
+        # Place up_stairs at the landing spot so the player can ascend back
         try:
             px, py = self.engine.player.x, self.engine.player.y
             self.engine.game_map.tiles[px, py] = tile_types.up_stairs
@@ -603,14 +820,16 @@ class GameWorld:
         except Exception:
             pass
 
-        # Refresh ambient sounds for the new map
+        with self._stack_lock:
+            q = len(self.down_stack)
+        self.engine.debug_log(f"Floor {self.current_floor} ({q} ahead, {len(self.up_stack)} above)", handler=type(self).__name__, event="descend")
+
         try:
             import sounds
             sounds.refresh_all_ambient_sounds(self.engine.player, self.engine.game_map.entities, self.engine.game_map)
         except Exception:
             pass
-            
-        # Clear level transition flag after everything is complete
+
         self.engine.is_transitioning_level = False
 
     def ascend(self) -> None:
@@ -631,8 +850,9 @@ class GameWorld:
         current_map = self.engine.game_map
         current_player_pos = (self.engine.player.x, self.engine.player.y)
 
-        # Push current map onto down_stack so we can go back down to it later
-        self.down_stack.append((current_map, current_player_pos, self.current_floor))
+        # Insert current map at the front of down_stack so re-descending returns here
+        with self._stack_lock:
+            self.down_stack.insert(0, (current_map, current_player_pos, self.current_floor))
 
         # Pop the map above us and restore it
         prev_map, prev_player_pos, prev_floor = self.up_stack.pop()

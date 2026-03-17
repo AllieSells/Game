@@ -280,7 +280,7 @@ class TakeStairsAction(Action):
         pos = (self.entity.x, self.entity.y)
 
         # Descend if on the downstairs tile
-        if pos == self.engine.game_map.downstairs_location:
+        if 1 == 1: #pos == self.engine.game_map.downstairs_location:
             # Use GameWorld.descend helper if available, otherwise fall back
             try:
                 self.engine.game_world.descend()
@@ -292,7 +292,7 @@ class TakeStairsAction(Action):
             return
 
         # Ascend if on an upstairs tile
-        if hasattr(self.engine.game_map, "upstairs_location") and pos == self.engine.game_map.upstairs_location:
+        if 1 == 1: #hasattr(self.engine.game_map, "upstairs_location") and pos == self.engine.game_map.upstairs_location:
             # Call ascend on the GameWorld if available; if not, try map-level ascend
             try:
                 self.engine.game_world.ascend()
@@ -1060,6 +1060,7 @@ class MeleeAction(ActionWithDirection):
             if "light armor" in armor_tags:
                 target.level.add_xp({'light armor': int(armor_defense*1.5)})
                 self.engine.debug_log(f"Gained light armor XP: {int(armor_defense*1.5)}", handler=type(self).__name__, event="_handle_actor_hit")
+
 class MovementAction(ActionWithDirection):
 
     def perform(self) -> None:
@@ -1148,6 +1149,47 @@ class MovementAction(ActionWithDirection):
                         sounds.play_grass_walk_sound()
                     elif tile_name == "Floor":
                         sounds.play_walk_sound()
+
+
+class MoveToAction(Action):
+    """Pathfinds to a destination and auto-moves the player one step per turn."""
+
+    def __init__(self, entity: Actor, dest_x: int, dest_y: int):
+        super().__init__(entity)
+        self.dest_x = dest_x
+        self.dest_y = dest_y
+
+    def perform(self) -> None:
+        import numpy as np
+        import tcod.path
+
+        dest_x, dest_y = self.dest_x, self.dest_y
+        game_map = self.engine.game_map
+
+        if not game_map.in_bounds(dest_x, dest_y):
+            raise exceptions.Impossible("That location is out of bounds.")
+
+        if not game_map.explored[dest_x, dest_y]:
+            raise exceptions.Impossible("You haven't explored that area.")
+
+        # Build cost array restricted to walkable + explored tiles
+        cost = np.array(game_map.tiles["walkable"], dtype=np.int8)
+        cost &= game_map.explored.astype(np.int8)
+
+        graph = tcod.path.SimpleGraph(cost=cost, cardinal=2, diagonal=3)
+        pathfinder = tcod.path.Pathfinder(graph)
+        pathfinder.add_root((self.entity.x, self.entity.y))
+        raw_path = pathfinder.path_to((dest_x, dest_y))[1:].tolist()
+
+        if not raw_path:
+            raise exceptions.Impossible("No path to that location.")
+
+        # Store remaining steps on the engine for subsequent turns
+        self.engine.auto_move_path = [tuple(p) for p in raw_path[1:]]
+
+        # Take the first step immediately (this turn)
+        first = raw_path[0]
+        MovementAction(self.entity, first[0] - self.entity.x, first[1] - self.entity.y).perform()
 
 
 class ThrowItem(ItemAction):
