@@ -143,8 +143,8 @@ fireball_scroll = Item(
 )
 
 campfire = Item(
-    char="☼",
-    color=(255, 140, 0),
+    char=chr(0xE003),
+    color=(255, 255, 255),
     name="Campfire",
     description="A small campfire providing warmth and light.",
     tags = ["fire", "campfire", "light", "wood"]
@@ -196,7 +196,8 @@ dagger = Item(
     verb_participial="stabbing",
     rarity_color=color.common,
     tags = ["dagger", "weapon", "blade", "metal", "light weapon"],
-    weight=1.0
+    weight=1.0,
+    equip_sprite_cp=0xE0A0
 )
 
 shortsword = Item(
@@ -290,7 +291,8 @@ leather_cap = Item(
     drop_sound=sounds.drop_leather_sound,
     rarity_color=color.common,
     tags = ["leather", "armor", "headgear", 'light armor'],
-    weight=0.5
+    weight=0.5,
+    equip_sprite_cp=0xE080
 )
 
 leather_armor = Item(
@@ -306,7 +308,8 @@ leather_armor = Item(
     drop_sound=sounds.drop_leather_sound,
     rarity_color=color.common,
     tags = ["leather", "armor", "body armor", "light armor"],
-    weight=5.0
+    weight=5.0,
+    equip_sprite_cp=0xE081
 )
 
 leather_leggings = Item(
@@ -322,7 +325,8 @@ leather_leggings = Item(
     drop_sound=sounds.drop_leather_sound,
     rarity_color=color.common,
     tags = ["leather", "armor", "leggings", "light armor"],
-    weight=3.0
+    weight=3.0,
+    equip_sprite_cp=0xE082
 )
 
 leather_boot = Item(
@@ -338,7 +342,8 @@ leather_boot = Item(
     drop_sound=sounds.drop_leather_sound,
     rarity_color=color.common,
     tags = ["leather", "armor", "boots", "light armor"],
-    weight=1.0
+    weight=1.0,
+    equip_sprite_cp=0xE083
 )
 
 
@@ -381,7 +386,7 @@ fungus = Item(
 
 
 sigil_stone = Item(
-    char="♦",
+    char=chr(0xE01F),
     color=(255, 0, 255),
     name="Sigil Stone",
     value = 50,
@@ -423,7 +428,7 @@ def generate_sigil_stone() -> Item:
 
     item_color = (random.randint(100, 255), random.randint(0, 255), random.randint(100, 255))
     return Item(
-        char="♦",
+        char=chr(0xE01F),
         color=item_color,
         value = 50,
         name="Sigil Stone",
@@ -470,6 +475,8 @@ def get_random_fungus() -> Item:
         color = (max(color[0]-50, 75), max(color[1]-50, 75), 255)
     elif "Red" in prefix:
         color = (255, max(color[1]-50, 75), max(color[2]-50, 75))
+    elif "Blood" in prefix:
+        color = (255, max(color[1]-100, 75), max(color[2]-100, 75))
 
     elif "Green" in prefix:
         color = (max(color[0]-50, 75), 255, max(color[2]-50, 75))
@@ -483,9 +490,9 @@ def get_random_fungus() -> Item:
         color = (255, 255, 255)
 
     if "cap" in suffix or "cup" in suffix or "-agaric" in suffix or "puff" in suffix:
-        char = ","
+        char = random.choice([chr(0xE100), chr(0xE101), chr(0xE102), chr(0xE103), chr(0xE104), chr(0xE105), chr(0xE106), chr(0xE107)])
     else:
-        char = "."
+        char = random.choice([chr(0xE108), chr(0xE109), chr(0xE10A), chr(0xE10B), chr(0xE10C), chr(0xE10D), chr(0xE10E), chr(0xE10F)])
     if name == "Capcap":
         name = blue("L")+red("e")+green("g")+yellow("e")+purple("n")+white("d")+green("a")+cyan("r")+red("y") + " " + purple("C")+yellow("a")+white("p")+cyan("c")+purple("a")+green("p")
         
@@ -581,8 +588,8 @@ basic_entity_levelling = Level(
 # =====================================================
 
 player = Actor(
-    char="☺",
-    color=(52, 222, 235),
+    char=chr(0xE030),
+    color=(255, 255, 255),
     name = "Player",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
@@ -601,8 +608,8 @@ player = Actor(
 )
 
 giant_spider = Actor(
-    char="M",
-    color=(color.gray),
+    char=chr(0xE032),
+    color=(color.sprite_sheet),
     name = "Giant Spider",
     description="A large arachnid",
     ai_cls=HostileEnemy,
@@ -620,8 +627,8 @@ giant_spider = Actor(
 )
 
 kobold = Actor(
-    char= "k",
-    color = (222, 220, 121),
+    char= chr(0xE033),
+    color = color.sprite_sheet,
     name = "Kobold",
     description="A small reptillian humanoid, commonly found in caves.",
     ai_cls=HostileEnemy,
@@ -654,8 +661,8 @@ shade = Actor(
 )
 
 goblin = Actor(
-    char="g",
-    color=(112, 235, 133),
+    char=chr(0xE031),
+    color=(255, 255, 255),
     name = "Goblin",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
@@ -663,6 +670,7 @@ goblin = Actor(
     inventory=Inventory(capacity=0),
     level=copy.deepcopy(basic_entity_levelling),
     speed=110,  # Fast enough to sometimes act before player
+    equipment_scale=0.75,
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
     description="",
     verb_base="claw",
@@ -704,8 +712,8 @@ goblin = Actor(
 )
 
 troll = Actor(
-    char="T",
-    color=(63, 127, 90),
+    char=chr(0xE034),
+    color=(color.sprite_sheet),
     name="Troll",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
@@ -723,16 +731,12 @@ troll = Actor(
         "weapon": {
             dagger: 5,
             None: 95
-        },
-        "armor": {
-            leather_armor: 20,
-            None: 80
         }
     }
 )
 
 chest = Actor(
-    char="C",
+    char=chr(0xE002),
     color=(222, 153, 52),
     name="Chest",
     # No AI for static container

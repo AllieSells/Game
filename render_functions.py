@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Tuple, TYPE_CHECKING
-from types import SimpleNamespace
 
 import tcod
 
@@ -16,7 +15,7 @@ except Exception:
     FireFlicker = FireSmoke = LightningAnimation = FireballAnimation = None
 
 if TYPE_CHECKING:
-    from tcod import Console
+    from tcod.console import Console
     from engine import Engine
     from game_map import GameMap
 
@@ -112,14 +111,6 @@ def get_names_at_location(x: int, y: int, game_map: GameMap) -> str:
     
     return names
 
-def status_effect_overlay(console: Console, effects: list) -> None:
-    y = 41
-    if len(effects) > 0:
-        for effect in effects:
-            console.print(x=61, y=y, string=f"{effect.name}")
-            y -= 1
-
-
 def render_debug_overlay(console: Console, fps: float, player_pos: Tuple[int, int], handler_name: str, entity_count: int, engine: Engine) -> None:          
     x, y = player_pos
     
@@ -173,15 +164,6 @@ def render_names_at_mouse(console: 'Console', mouse_x: int, mouse_y: int, game_m
         console.print(x + dx, y, " ", bg=(40, 40, 40))
 
     console.print(x + 1, y, names, fg=(255, 255, 255))
-
-
-def status_effect_overlay(console: 'Console', effects: list) -> None:
-    y = 41
-    if len(effects) > 0:
-        for effect in effects:
-            console.print(x=61, y=y, string=f"{effect.name}")
-            y -= 1
-
 
 
 # HP bar render with adjustable coordinates
@@ -307,6 +289,45 @@ def render_ui_buttons(
     console.print(x=EQUIPMENT_BUTTON_X, y=BUTTON_Y, string="Equipment [E]", fg=equip_color)
 
 
+def _player_has_bloody_coating(player) -> bool:
+    if player is None:
+        return False
+    try:
+        body_parts = getattr(player, "body_parts", None)
+        parts_map = getattr(body_parts, "body_parts", {}) if body_parts else {}
+        for body_part in parts_map.values():
+            coating = getattr(body_part, "coating", None)
+            if coating is None:
+                continue
+
+            # Support either LiquidType-like values or LiquidCoating-like objects.
+            liquid_type = getattr(coating, "liquid_type", coating)
+            name = ""
+            try:
+                name = liquid_type.get_display_name().lower()
+            except Exception:
+                name = str(getattr(liquid_type, "name", "")).lower()
+
+            if name == "blood":
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _collect_effect_display_entries(player) -> list:
+    from components.effect import BloodyEffect
+
+    effects = list(getattr(player, "effects", []) or [])
+
+    # Display-only grouping: represent blood coating as a real effect object.
+    has_bloody_effect = any(getattr(effect, "name", "") == "Bloody" for effect in effects)
+    if _player_has_bloody_coating(player) and not has_bloody_effect:
+        effects.append(BloodyEffect(duration=None))
+
+    return effects
+
+
 # Combat status panel with adjustable coordinates
 def render_combat_stats(
         console: 'Console', dodge_direction: str = "North", attack_type: str = "Random", player=None,
@@ -318,8 +339,6 @@ def render_combat_stats(
     PANEL_HEIGHT = 4
     COMBAT_TEXT_X = 1
     EFFECTS_TEXT_X = 10
-    COATING_TEXT_X = 10
-    COATING_TEXT_Y = PANEL_Y + 2
     WEAPON_TEXT_OFFSET_FROM_RIGHT = 2
     # ==============================
     
@@ -345,72 +364,33 @@ def render_combat_stats(
     attack_abbrev = BODY_PART_ABBREV.get(attack_type, attack_type[:3].upper() if attack_type else "Rnd")
     console.print(x=COMBAT_TEXT_X, y=PANEL_Y + 2, string=f"ATK: {attack_abbrev}", fg=color.bronze_text)
     
-    # Status conditions and effects on second content line
-    status_conditions = []
-    
-    # Add liquid coating status if player has it
-    if player and hasattr(player, 'liquid_coating') and player.liquid_coating:
-        for coating in player.liquid_coating:
+    # Effects box: glyph-only display (no headers). Use both rows in this UI box.
+    effect_row_top = PANEL_Y + 1
+    effect_row_bottom = PANEL_Y + 2
+    display_effects = _collect_effect_display_entries(player) if player else []
+    if display_effects:
+        max_per_row = 12
+        for idx, effect in enumerate(display_effects[: max_per_row * 2]):
             try:
-                liquid_name = coating.liquid_type.get_display_name()
-                status_conditions.append(f"{liquid_name.title()}")
-            except Exception:
-                pass
-    
-    # Add other effects
-    if player and hasattr(player, 'effects'):
-        for effect in player.effects:
-            try:
-                status_conditions.append(effect.name)
-            except Exception:
-                pass
-    
-    # Display status conditions
-    if status_conditions:
-        status_text = "Effects: " + ", ".join(status_conditions[:6])  # Limit to 6 conditions
-        console.print(x=EFFECTS_TEXT_X, y=PANEL_Y + 1, string=status_text[:76], fg=color.fantasy_text)  # Truncate if too long
-    else:
-        console.print(x=EFFECTS_TEXT_X, y=PANEL_Y + 1, string="Effects: None", fg=color.bronze_text)
+                display = effect.get_display() if hasattr(effect, "get_display") else None
+                glyph = getattr(display, "glyph", "?") if display else "?"
+                fg = getattr(display, "fg", color.fantasy_text) if display else color.fantasy_text
+                bg = getattr(display, "bg", None) if display else None
 
-    # Display liquid coating status
-    coating_text = "Coating: "
-    
-    if player and hasattr(player, 'body_parts') and player.body_parts:
-        # Collect unique coatings from all body parts
-        unique_coatings = set()
-        for part_type, body_part in player.body_parts.body_parts.items():
-            if hasattr(body_part, 'coating') and body_part.coating:
-                from liquid_system import LiquidType
-                unique_coatings.add(body_part.coating)
-        
-        if unique_coatings:
-            # Display each unique coating with its color and description
-            coating_parts = []
-            for coating in unique_coatings:
-                coat_description = coating.get_coat_string()
-                if coat_description:  # Only show coatings with descriptions
-                    coating_parts.append((coat_description, coating.get_display_color()))
-            
-            if coating_parts:
-                # Display "Status: " label
-                console.print(x=COATING_TEXT_X, y=COATING_TEXT_Y, string=coating_text, fg=color.bronze_text)
-                
-                # Display coating descriptions with colors
-                x_offset = COATING_TEXT_X + len(coating_text)
-                for i, (description, coating_color) in enumerate(coating_parts):
-                    if i > 0:
-                        console.print(x=x_offset, y=COATING_TEXT_Y, string=", ", fg=color.bronze_text)
-                        x_offset += 2
-                    # Capitalize the first coating description
-                    display_desc = description.capitalize() if i == 0 else description
-                    console.print(x=x_offset, y=COATING_TEXT_Y, string=display_desc, fg=coating_color)
-                    x_offset += len(display_desc)
-            else:
-                console.print(x=COATING_TEXT_X, y=COATING_TEXT_Y, string=coating_text + "None", fg=color.bronze_text)
-        else:
-            console.print(x=COATING_TEXT_X, y=COATING_TEXT_Y, string=coating_text + "None", fg=color.bronze_text)
-    else:
-        console.print(x=COATING_TEXT_X, y=COATING_TEXT_Y, string=coating_text + "None", fg=color.bronze_text)
+                row = 0 if idx < max_per_row else 1
+                col = idx if row == 0 else idx - max_per_row
+                draw_x = EFFECTS_TEXT_X + (col * 2)
+                draw_y = effect_row_top if row == 0 else effect_row_bottom
+
+                if isinstance(glyph, int):
+                    console.tiles_rgb[draw_x, draw_y]["ch"] = glyph
+                    console.tiles_rgb[draw_x, draw_y]["fg"] = fg
+                    if bg is not None:
+                        console.tiles_rgb[draw_x, draw_y]["bg"] = bg
+                else:
+                    console.print(x=draw_x, y=draw_y, string=str(glyph), fg=fg, bg=bg)
+            except Exception:
+                continue
 
     # Show weapon and ammo info on the right side
     if player is None:
@@ -464,11 +444,81 @@ def render_combat_stats(
         ammo_x = max(1, console.width - len(ammo_text) - WEAPON_TEXT_OFFSET_FROM_RIGHT)
         console.print(x=ammo_x, y=PANEL_Y + 2, string=ammo_text, fg=color.bronze_text)
 
-# Status effect render - now handled in render_combat_stats
-def render_effects(console: 'Console', effects: list) -> None:
-    # This function is now integrated into render_combat_stats for better organization
-    # Keeping this stub for compatibility
-    pass
+def render_status_hover_panel(console: 'Console', mouse_ui_x: int, mouse_ui_y: int, player=None) -> None:
+    """Show effect details when hovering over individual effect glyphs in the HUD."""
+    if player is None:
+        return
+
+    panel_y = 39
+    effects_x = 10
+    hovered_effect = None
+    display_effects = _collect_effect_display_entries(player)
+    if display_effects and mouse_ui_y in {panel_y + 1, panel_y + 2}:
+        max_per_row = 12
+        if mouse_ui_y == panel_y + 1:
+            row_start = 0
+            row_end = min(max_per_row, len(display_effects))
+        else:
+            row_start = max_per_row
+            row_end = min(max_per_row * 2, len(display_effects))
+
+        icon_x = effects_x
+        for idx in range(row_start, row_end):
+            if mouse_ui_x == icon_x:
+                hovered_effect = display_effects[idx]
+                break
+            icon_x += 2
+
+    hover_effects = hovered_effect is not None
+
+    if not hover_effects:
+        return
+
+    lines = []
+
+    if hover_effects:
+        try:
+            display = hovered_effect.get_display() if hasattr(hovered_effect, "get_display") else None
+            duration = getattr(hovered_effect, "duration", None)
+            turns_text = "indefinite" if duration is None else f"{duration}t"
+            title = ((getattr(display, "label", None) if display else None) or getattr(hovered_effect, "name", "Unknown")) + (f" ({turns_text})")
+            lines.append(title)
+            desc = getattr(hovered_effect, "description", "") or "No description."
+            lines.append(f"{desc}")
+        except Exception:
+            lines.append("Unknown")
+
+    if not lines:
+        return
+
+    max_width = max(24, min(console.width - 4, max(len(line) for line in lines) + 2))
+    # Main game view only blits HUD rows (y >= 39), so keep tooltip compact.
+    max_body_lines = min(len(lines), 8)
+    draw_lines = []
+    for line in lines[:max_body_lines]:
+        draw_lines.append(line[: max_width - 2])
+
+    width = max_width
+    height = len(draw_lines) + 2
+
+    x = max(1, min(mouse_ui_x + 1, console.width - width - 1))
+
+    # Restrict tooltip entirely to HUD strip so it remains visible after HUD-only blit.
+    hud_top = 39
+    hud_bottom = console.height - 1
+    max_height_in_hud = max(3, hud_bottom - hud_top + 1)
+    if height > max_height_in_hud:
+        height = max_height_in_hud
+        draw_lines = draw_lines[: max(1, height - 2)]
+
+    y = max(hud_top, min(mouse_ui_y - height, hud_bottom - height + 1))
+
+    console.draw_rect(x=x, y=y, width=width, height=height, ch=ord(" "), bg=color.parchment_bg)
+    console.draw_frame(x=x, y=y, width=width, height=height, fg=color.bronze_border, bg=color.parchment_bg)
+
+    for idx, line in enumerate(draw_lines, start=1):
+        fg = color.fantasy_text if idx == 1 else color.bronze_text
+        console.print(x=x + 1, y=y + idx, string=line, fg=fg, bg=color.parchment_bg)
 
 
 
@@ -487,48 +537,55 @@ def render_bottom_ui_border(console: tcod.Console):
     DIVIDER_X4 = 65
     # ==============================
     
-    # Fill entire interior with parchment background
-    console.draw_rect(x=UI_LEFT+1, y=UI_TOP+1, width=UI_RIGHT-UI_LEFT-1, height=UI_BOTTOM-UI_TOP-1, ch=ord(' '), bg=color.parchment_dark)
+    # Fill the entire HUD block, including the border cells, with parchment.
+    console.draw_rect(
+        x=UI_LEFT,
+        y=UI_TOP,
+        width=UI_RIGHT - UI_LEFT + 1,
+        height=UI_BOTTOM - UI_TOP + 1,
+        ch=ord(' '),
+        bg=color.parchment_dark,
+    )
     
     # Draw horizontal borders
     for x in range(UI_LEFT, UI_RIGHT + 1):
-        console.print(x, UI_TOP, "─", fg=color.bronze_border)  # Top border
-        console.print(x, UI_BOTTOM, "─", fg=color.bronze_border)  # Bottom border
+        console.print(x, UI_TOP, "─", fg=color.bronze_border, bg=color.parchment_dark)  # Top border
+        console.print(x, UI_BOTTOM, "─", fg=color.bronze_border, bg=color.parchment_dark)  # Bottom border
 
     
     
     # Draw vertical borders
     for y in range(UI_TOP + 1, UI_BOTTOM):
-        console.print(UI_LEFT, y, "│", fg=color.bronze_border)  # Left border
-        console.print(UI_RIGHT, y, "│", fg=color.bronze_border)  # Right border
+        console.print(UI_LEFT, y, "│", fg=color.bronze_border, bg=color.parchment_dark)  # Left border
+        console.print(UI_RIGHT, y, "│", fg=color.bronze_border, bg=color.parchment_dark)  # Right border
         if y >= UI_TOP + 4:  # Only draw center divider from the horizontal line down
-            console.print(DIVIDER_X, y, "│", fg=color.bronze_border)  # Center divider
+            console.print(DIVIDER_X, y, "│", fg=color.bronze_border, bg=color.parchment_dark)  # Center divider
         if y <= UI_TOP + 3:  # Draw secondary divider on the left side for the top stats area
-            console.print(DIVIDER_X2, y, "│", fg=color.bronze_border)  # Divider between message log and player info
+            console.print(DIVIDER_X2, y, "│", fg=color.bronze_border, bg=color.parchment_dark)  # Divider between message log and player info
         if y <= UI_TOP + 3:  # Draw vertical line for menu separation in the top section
-            console.print(DIVIDER_X3, y, "│", fg=color.bronze_border)  # Divider between message log and player info
+            console.print(DIVIDER_X3, y, "│", fg=color.bronze_border, bg=color.parchment_dark)  # Divider between message log and player info
         if y <= UI_TOP + 3:  # Draw vertical line for menu separation in the top section
-            console.print(DIVIDER_X4, y, "│", fg=color.bronze_border)  # Divider between message log and player info
+            console.print(DIVIDER_X4, y, "│", fg=color.bronze_border, bg=color.parchment_dark)  # Divider between message log and player info
     
     # Draw corners
-    console.print(UI_LEFT, UI_TOP, "┌", fg=color.bronze_border)  # Top-left
-    console.print(UI_RIGHT, UI_TOP, "┐", fg=color.bronze_border)  # Top-right  
-    console.print(UI_LEFT, UI_BOTTOM, "└", fg=color.bronze_border)  # Bottom-left
-    console.print(UI_RIGHT, UI_BOTTOM, "┘", fg=color.bronze_border)  # Bottom-right
+    console.print(UI_LEFT, UI_TOP, "┌", fg=color.bronze_border, bg=color.parchment_dark)  # Top-left
+    console.print(UI_RIGHT, UI_TOP, "┐", fg=color.bronze_border, bg=color.parchment_dark)  # Top-right  
+    console.print(UI_LEFT, UI_BOTTOM, "└", fg=color.bronze_border, bg=color.parchment_dark)  # Bottom-left
+    console.print(UI_RIGHT, UI_BOTTOM, "┘", fg=color.bronze_border, bg=color.parchment_dark)  # Bottom-right
     
     # Draw T-junctions where divider meets top/bottom borders
-    console.print(DIVIDER_X, UI_TOP + 3, "┬", fg=color.bronze_border)  # Top T-junction at horizontal divider
-    console.print(DIVIDER_X, UI_BOTTOM, "┴", fg=color.bronze_border)  # Bottom T-junction
-    console.print(DIVIDER_X2, UI_TOP, "┬", fg=color.bronze_border)  # Top T-junction for second divider  
-    console.print(DIVIDER_X2, UI_TOP + 3, "┴", fg=color.bronze_border)  # Bottom T-junction for second divider
-    console.print(DIVIDER_X3, UI_TOP, "┬", fg=color.bronze_border)  # Top T-junction for third divider
-    console.print(DIVIDER_X3, UI_TOP + 3, "┴", fg=color.bronze_border)  # Bottom T-junction for third divider
-    console.print(DIVIDER_X4, UI_TOP, "┬", fg=color.bronze_border)  # Top T-junction for fourth divider
-    console.print(DIVIDER_X4, UI_TOP + 3, "┴", fg=color.bronze_border)  # Bottom T-junction for fourth divider
+    console.print(DIVIDER_X, UI_TOP + 3, "┬", fg=color.bronze_border, bg=color.parchment_dark)  # Top T-junction at horizontal divider
+    console.print(DIVIDER_X, UI_BOTTOM, "┴", fg=color.bronze_border, bg=color.parchment_dark)  # Bottom T-junction
+    console.print(DIVIDER_X2, UI_TOP, "┬", fg=color.bronze_border, bg=color.parchment_dark)  # Top T-junction for second divider  
+    console.print(DIVIDER_X2, UI_TOP + 3, "┴", fg=color.bronze_border, bg=color.parchment_dark)  # Bottom T-junction for second divider
+    console.print(DIVIDER_X3, UI_TOP, "┬", fg=color.bronze_border, bg=color.parchment_dark)  # Top T-junction for third divider
+    console.print(DIVIDER_X3, UI_TOP + 3, "┴", fg=color.bronze_border, bg=color.parchment_dark)  # Bottom T-junction for third divider
+    console.print(DIVIDER_X4, UI_TOP, "┬", fg=color.bronze_border, bg=color.parchment_dark)  # Top T-junction for fourth divider
+    console.print(DIVIDER_X4, UI_TOP + 3, "┴", fg=color.bronze_border, bg=color.parchment_dark)  # Bottom T-junction for fourth divider
     
     # Add left and right T-junctions on the horizontal divider line
-    console.print(UI_LEFT, UI_TOP + 3, "├", fg=color.bronze_border, bg=(0, 0, 0))  # Left T-junction
-    console.print(UI_RIGHT, UI_TOP + 3, "┤", fg=color.bronze_border, bg=(0, 0, 0))  # Right T-junction
+    console.print(UI_LEFT, UI_TOP + 3, "├", fg=color.bronze_border, bg=color.parchment_dark)  # Left T-junction
+    console.print(UI_RIGHT, UI_TOP + 3, "┤", fg=color.bronze_border, bg=color.parchment_dark)  # Right T-junction
 
 
 

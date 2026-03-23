@@ -27,7 +27,7 @@ class ThrowAnimation:
             
             if game_map.in_bounds(x, y) and game_map.visible[x, y]:
                 # Show item character with motion trail
-                console.print(x, y, self.item_char, fg=self.item_color)
+                game_map.screen_print(console, x, y, self.item_char, fg=self.item_color)
                 
                 # Add trail effect - show previous positions fading
                 for i in range(1, min(3, current_index + 1)):
@@ -41,7 +41,7 @@ class ThrowAnimation:
                                 max(50, self.item_color[1] - i * 60), 
                                 max(50, self.item_color[2] - i * 60)
                             )
-                            console.print(trail_x, trail_y, "·", fg=fade_color)
+                            game_map.screen_print(console, trail_x, trail_y, "·", fg=fade_color)
 
         self.current_frame += 1
         self.frames -= 1
@@ -65,7 +65,7 @@ class TextPopupAnimation:
         
         # Show progressive text revelation at the same position
         displayed_text = self.text[:chars_to_show]
-        console.print(self.x, self.y, displayed_text, fg=self.color)
+        game_map.screen_print(console, self.x, self.y, displayed_text, fg=self.color)
         
         self.frames -= 1
 
@@ -98,7 +98,7 @@ class TeleportAnimation:
             if random.random() < 0.3:
                 y += random.choice([-1, 0, 1])
             if game_map.in_bounds(x, y) and game_map.visible[x, y]:
-                console.print(x, y, "`", fg=color)
+                game_map.screen_print(console, x, y, "`", fg=color)
 
         self.frames -= 1
 
@@ -128,9 +128,9 @@ class ExplosionAnimation:
                         sx, sy = x + dx, y + dy
                         if game_map.in_bounds(sx, sy) and game_map.visible[sx, sy]:
                             if random.random() < 0.5:
-                                console.print(sx, sy, "*", fg=self.color)
+                                game_map.screen_print(console, sx, sy, "*", fg=self.color)
                             else:
-                                console.print(sx, sy, "o", fg=self.color)
+                                game_map.screen_print(console, sx, sy, "o", fg=self.color)
 
         self.frames -= 1
         
@@ -161,9 +161,9 @@ class SplashAnimation:
                         sx, sy = x + dx, y + dy
                         if game_map.in_bounds(sx, sy) and game_map.visible[sx, sy]:
                             if random.random() < 0.5:
-                                console.print(sx, sy, ".", fg=self.color)
+                                game_map.screen_print(console, sx, sy, ".", fg=self.color)
                             else:
-                                console.print(sx, sy, "*", fg=self.color)
+                                game_map.screen_print(console, sx, sy, "*", fg=self.color)
 
         self.frames -= 1
 
@@ -212,7 +212,7 @@ class SigilStoneAnimation:
                 int(base_color[1] * pulse_cycle),
                 int(base_color[2] * pulse_cycle)
             )
-            console.print(x, y, "♦", fg=color)
+            game_map.screen_print(console, x, y, chr(0xE01F), fg=color)
 
         self.frames -= 1
         
@@ -263,18 +263,19 @@ class GrassRustleAnimation:
         sequence_index = max(0, min(len(sequence) - 1, sequence_index))  # Clamp to valid range
         char = sequence[sequence_index]
 
-        console.print(x, y, char, fg=color)
+        game_map.screen_print(console, x, y, char, fg=color)
 
         self.frames -= 1
 
 
 class HeardSoundAnimation:
-    def __init__(self, position, player, color=(255, 255, 0)):
+    def __init__(self, position, player, color=(255, 255, 0), direction=None):
         self.position = position
         self.player = player
         self.color = color
         self.frames = 10  # duration in frames
         self.render_priority = 1  # Render above items but below actors
+        self.direction = direction  # Will be set based on sound source direction
 
     def tick(self, console, game_map):
         x, y = self.position
@@ -289,7 +290,22 @@ class HeardSoundAnimation:
         
         # If not visible and within 10 tiles of player, show sound tile animation
         if not game_map.visible[x, y] and distance <= 10:
-            console.print(x, y, "!", fg=self.color)  # Colored sound tile
+            if self.direction is not None:
+                # Show directional sound indicator (e.g. arrow pointing towards sound source)
+                arrow_chars = { 
+                    (0, -1): chr(0xE016),  # Up
+                    (1, -1): chr(0xE017),  # Up-Right
+                    (1, 0): chr(0xE018),   # Right
+                    (1, 1): chr(0xE019),   # Down-Right
+                    (0, 1): chr(0xE01A),   # Down
+                    (-1, 1): chr(0xE01B),  # Down-Left
+                    (-1, 0): chr(0xE01C),  # Left
+                    (-1, -1): chr(0xE01D)  # Up-Left
+                }
+                char = arrow_chars.get(self.direction, '?')
+                game_map.screen_print(console, x, y, char, fg=self.color)  # Colored sound tile
+            else:
+                game_map.screen_print(console, x, y, chr(0xE009), fg=self.color)  # Colored sound tile
 
         self.frames -= 1
 
@@ -313,7 +329,7 @@ class HeardDoorAnimation:
         
         # If not visible and within 10 tiles of player, show door sound animation
         if not game_map.visible[x, y] and distance <= 10:
-            console.print(x, y, "!", fg=(0, 150, 255))  # Blue sound tile for doors
+            game_map.screen_print(console, x, y, "!", fg=(0, 150, 255))  # Blue sound tile for doors
 
         self.frames -= 1
 
@@ -367,7 +383,7 @@ class LightningAnimation:
                 ):
                     r = random.randint(200, 255)
                     g = random.randint(0, 255)
-                    console.print(x_draw, y_draw, "*", fg=(r, g, 0))  # yellow-orange flicker
+                    game_map.screen_print(console, x_draw, y_draw, "*", fg=(r, g, 0))  # yellow-orange flicker
 
         self.frames -= 1
 
@@ -424,7 +440,7 @@ class FireballAnimation:
                         g = int(100 * intensity) - random.randint(0, 50)
                         r = max(100, min(255, r))
                         g = max(0, min(150, g))
-                        console.print(x, y, "*", fg=(r, g, 0))
+                        game_map.screen_print(console, x, y, "*", fg=(r, g, 0))
 
         self.frames -= 1
 
@@ -455,7 +471,7 @@ class HealAnimation:
                     progress = (10 - self.frames) / 10.0  # 0.0 to 1.0 progress through animation
                     pulse_cycle = math.sin(progress * math.pi) * 0.5 + 0.5  # Oscillates between 0.5 and 1.0
                     color_intensity = int(255 * pulse_cycle)
-                    console.print(particle_x, particle_y, "+", fg=(0, color_intensity, 0))  # green pulse
+                    game_map.screen_print(console, particle_x, particle_y, "+", fg=(0, color_intensity, 0))  # green pulse
                     self.frames -= 1
             
 
@@ -489,7 +505,7 @@ class DarkBoltAnimation:
                 r = random.randint(100, 150)
                 g = random.randint(0, 50)
                 b = random.randint(100, 150)
-                console.print(x, y, "^", fg=(r, g, b))  # purple flicker
+                game_map.screen_print(console, x, y, "^", fg=(r, g, b))  # purple flicker
 
         self.frames -= 1
 
@@ -508,9 +524,9 @@ class FireFlicker:
             return
 
         if game_map.visible[x, y]:
-            r = random.randint(200, 255)
-            g = random.randint(0, 150)
-            console.print(x, y, "x", fg=(r, g, 0))  # yellow-orange flicker
+            chars = [chr(0xE003), chr(0xE004), chr(0xE005), chr(0xE006), chr(0xE007), chr(0xE008)]
+            char = chars[(10 - self.frames) // 2 % len(chars)]
+            game_map.screen_print(console, x, y, char, fg=(255, 200, 0))  # yellow-orange flicker
         self.frames -= 1
 
 class EntityFireFlicker:
@@ -547,7 +563,7 @@ class EntityFireFlicker:
             # Create flickering fire effect using entity's character
             r = random.randint(200, 255)
             g = random.randint(50, 150)
-            console.print(x, y, self.entity.char, fg=(r, g, 0))
+            game_map.screen_print(console, x, y, self.entity.char, fg=(r, g, 0))
             
         self.frames -= 1
 
@@ -568,7 +584,7 @@ class BonefireFlicker:
         if game_map.visible[x, y]:
             r = random.randint(200, 255)
             g = random.randint(0, 150)
-            console.print(x, y, "X", fg=(r, g, 0))  # yellow-orange flicker
+            game_map.screen_print(console, x, y, "X", fg=(r, g, 0))  # yellow-orange flicker
 
 class FireSmoke:
     def __init__(self, position):
@@ -603,7 +619,7 @@ class FireSmoke:
             and game_map.tiles["transparent"][xi, yi]
         ):
             gray_value = random.randint(100, 200)
-            console.print(xi, yi, "+", fg=(gray_value, gray_value, gray_value))  # gray smoke
+            game_map.screen_print(console, xi, yi, "+", fg=(gray_value, gray_value, gray_value))  # gray smoke
 
         self.frames -= 1
 
@@ -623,15 +639,15 @@ class GivingQuestAnimation():
         if game_map.visible[x, y]:
             # Play animation in order
             if self.frames == 10:
-                console.print(x, y, ".", fg=(255, 215, 0))  # Gold
+                game_map.screen_print(console, x, y, ".", fg=(255, 215, 0))  # Gold
             elif self.frames == 9:
-                console.print(x, y, "o", fg=(255, 255, 0))  # Yellow
+                game_map.screen_print(console, x, y, "o", fg=(255, 255, 0))  # Yellow
             elif self.frames == 8:
-                console.print(x, y, "O", fg=(173, 255, 47))  # GreenYellow
+                game_map.screen_print(console, x, y, "O", fg=(173, 255, 47))  # GreenYellow
             elif self.frames == 7:
-                console.print(x, y, "0", fg=(0, 255, 127))  # SpringGreen
+                game_map.screen_print(console, x, y, "0", fg=(0, 255, 127))  # SpringGreen
             elif self.frames <= 6:
-                console.print(x, y, "!", fg=(0, 191, 255))  # DeepSkyBlue
+                game_map.screen_print(console, x, y, "!", fg=(0, 191, 255))  # DeepSkyBlue
 
         self.frames -= 1
 
@@ -651,18 +667,18 @@ class EnchantedSlashAnimation:
         if game_map.visible[x, y]:
             # Curved slash effect with enchanted color
             if self.frames == 5:
-                console.print(x, y, "_", fg=self.color)  # Base color
+                game_map.screen_print(console, x, y, "_", fg=self.color)  # Base color
             elif self.frames == 4:
-                console.print(x, y, "~", fg=(min(255, self.color[0] + 50), min(255, self.color[1] + 50), min(255, self.color[2] + 50)))  # Brighter
+                game_map.screen_print(console, x, y, "~", fg=(min(255, self.color[0] + 50), min(255, self.color[1] + 50), min(255, self.color[2] + 50)))  # Brighter
             elif self.frames <= 3:
-                console.print(x, y, ")", fg=(min(255, self.color[0] + 100), min(255, self.color[1] + 100), min(255, self.color[2] + 100)))  # Even brighter
+                game_map.screen_print(console, x, y, ")", fg=(min(255, self.color[0] + 100), min(255, self.color[1] + 100), min(255, self.color[2] + 100)))  # Even brighter
             
             # Random spark with enchanted color
             if random.random() < 0.3:
                 spark_x = x + random.choice([-1, 0, 1])
                 spark_y = y + random.choice([-1, 0, 1])
                 if game_map.in_bounds(spark_x, spark_y) and game_map.visible[spark_x, spark_y]:
-                    console.print(spark_x, spark_y, "`", fg=(min(255, self.color[0] + 150), min(255, self.color[1] + 150), min(255, self.color[2] + 150)))  # Bright spark
+                    game_map.screen_print(console, spark_x, spark_y, "`", fg=(min(255, self.color[0] + 150), min(255, self.color[1] + 150), min(255, self.color[2] + 150)))  # Bright spark
 
         self.frames -= 1
 
@@ -688,18 +704,18 @@ class SlashAnimation:
         if game_map.visible[x, y]:
             # Curved slash effect
             if self.frames == 3:
-                console.print(x, y, "_", fg=(255, 0, 0))  # Red
+                game_map.screen_print(console, x, y, "_", fg=(255, 0, 0))  # Red
             elif self.frames == 2:
-                console.print(x, y, "~", fg=(255, 255, 0))  # Yellow
+                game_map.screen_print(console, x, y, "~", fg=(255, 255, 0))  # Yellow
             elif self.frames == 1:
-                console.print(x, y, ")", fg=(255, 255, 244))  # Yellow White
+                game_map.screen_print(console, x, y, ")", fg=(255, 255, 244))  # Yellow White
             
             # Random spark
             if random.random() < 0.3:
                 spark_x = x + random.choice([-1, 0, 1])
                 spark_y = y + random.choice([-1, 0, 1])
                 if game_map.in_bounds(spark_x, spark_y) and game_map.visible[spark_x, spark_y]:
-                    console.print(spark_x, spark_y, "`", fg=(255, 50, 0))  # Gold spark
+                    game_map.screen_print(console, spark_x, spark_y, "`", fg=(255, 50, 0))  # Gold spark
 
         self.frames -= 1
         
@@ -718,12 +734,12 @@ class WaterDropAnimation:
         if game_map.visible[x, y]:
             # Animate water drop with a brief blue sparkle
             if self.frames == 10:
-                console.print(x, y, "|", fg=(0, 191, 255))  # DeepSkyBlue
+                game_map.screen_print(console, x, y, "|", fg=(0, 191, 255))  # DeepSkyBlue
             elif self.frames == 9:
-                console.print(x, y, ";", fg=(30, 144, 255))  # DodgerBlue
+                game_map.screen_print(console, x, y, ";", fg=(30, 144, 255))  # DodgerBlue
             elif self.frames == 8:
-                console.print(x, y, ".", fg=(0, 0, 255))  # Pale Blue
+                game_map.screen_print(console, x, y, ".", fg=(0, 0, 255))  # Pale Blue
             elif self.frames == 5:
-                console.print(x, y, ".", fg=(0, 0, 0))  # Darkgrey
+                game_map.screen_print(console, x, y, ".", fg=(0, 0, 0))  # Darkgrey
 
         self.frames -= 1

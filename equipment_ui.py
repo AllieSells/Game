@@ -12,6 +12,7 @@ import color
 from equipment_types import EquipmentType
 from input_handlers import AskUserEventHandler
 from render_functions import MenuRenderer
+from tcod.console import Console
 import actions
 
 if TYPE_CHECKING:
@@ -185,7 +186,7 @@ class EquipmentUI(AskUserEventHandler):
             EquipmentSlot("Back", 0, 10, [EquipmentType.BACKPACK], "o", "•"),
         ]
     
-    def on_render(self, console: tcod.Console) -> None:
+    def on_render(self, console: Console) -> None:
         super().on_render(console)
         
         # Calculate smaller window size and position
@@ -224,7 +225,7 @@ class EquipmentUI(AskUserEventHandler):
                 fg=color.light_gray, bg=(45, 35, 25)
             )
     
-    def _draw_slots_list(self, console: tcod.Console, base_x: int, base_y: int,
+    def _draw_slots_list(self, console: Console, base_x: int, base_y: int,
                         window_width: int, window_height: int) -> None:
         """Draw equipment slots as a simple list."""
         from text_utils import print_colored_text_with_bg
@@ -285,7 +286,7 @@ class EquipmentUI(AskUserEventHandler):
                 text_parts.append((item_name, item_color))
             
             print_colored_text_with_bg(console, list_x, list_y + i, text_parts, bg_color)
-    def _draw_player_stats(self, console: tcod.Console, base_x: int, base_y: int) -> None:
+    def _draw_player_stats(self, console: Console, base_x: int, base_y: int) -> None:
         ''' Draw equipment stats like power and defense at the bottom of the equipment UI.'''
         from text_utils import print_colored_text_with_bg
         stats_x = base_x + 5
@@ -294,7 +295,7 @@ class EquipmentUI(AskUserEventHandler):
         defense = self.engine.player.fighter.defense
         stats_text = f"Power: {power}   Defense: {defense}"
         print_colored_text_with_bg(console, stats_x, stats_y, [(stats_text, color.bronze_text)], (45, 35, 25))
-    def _draw_items_list(self, console: tcod.Console, base_x: int, base_y: int,
+    def _draw_items_list(self, console: Console, base_x: int, base_y: int,
                         window_width: int, window_height: int) -> None:
         """Draw list of available items for the selected slot."""
         from text_utils import print_colored_text_with_bg

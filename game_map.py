@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from engine import Engine
     from entity import Entity
 
-
 class _FloorProbe:
     """Throwaway placement anchor used by background floor generation.
 
@@ -200,27 +199,59 @@ class GameMap:
             # Fallback to original color if anything fails
             return entity_color
     
+    def get_viewport(self, console: Console) -> tuple[int, int, int, int]:
+        """Return the world-space viewport origin and visible dimensions for a console."""
+        view_width = min(console.width, self.width)
+        view_height = min(console.height, self.height)
+        origin_x, origin_y = self.engine.get_camera_origin(view_width, view_height)
+        return origin_x, origin_y, view_width, view_height
+
+    def screen_coords(self, console: Console, x: int, y: int) -> Optional[tuple[int, int]]:
+        """Convert world coordinates to viewport-relative console coordinates."""
+        _, _, view_width, view_height = self.get_viewport(console)
+        return self.engine.world_to_screen(x, y, view_width, view_height)
+
+    def screen_print(
+        self,
+        console: Console,
+        x: int,
+        y: int,
+        string: str,
+        fg: tuple[int, int, int] | None = None,
+        bg: tuple[int, int, int] | None = None,
+    ) -> None:
+        """Print using world coordinates, clipped to the current viewport."""
+        screen_position = self.screen_coords(console, x, y)
+        if screen_position is None:
+            return
+        screen_x, screen_y = screen_position
+        console.print(x=screen_x, y=screen_y, string=string, fg=fg, bg=bg)
+
     def _render_tiles_with_gradient(self, console: Console) -> None:
         """Render tiles with gradient interpolation between dark and light based on light levels."""
         import tile_types
+
+        origin_x, origin_y, view_width, view_height = self.get_viewport(console)
+        x_slice = slice(origin_x, origin_x + view_width)
+        y_slice = slice(origin_y, origin_y + view_height)
         
         # Get base tiles for different visibility states
-        visible_mask = self.visible
-        explored_mask = self.explored
+        visible_mask = self.visible[x_slice, y_slice]
+        explored_mask = self.explored[x_slice, y_slice]
         
         # Initialize all tiles with SHROUD
         result_tiles = np.full(
-            (self.width, self.height), 
+            (view_width, view_height), 
             tile_types.SHROUD, 
             dtype=console.tiles_rgb.dtype
         )
         
         # For explored areas, start with dark tiles
-        dark_tiles = self.tiles["dark"]
-        light_tiles = self.tiles["light"]
+        dark_tiles = self.tiles["dark"][x_slice, y_slice]
+        light_tiles = self.tiles["light"][x_slice, y_slice]
         
         # Get light levels only where player can see or has explored
-        light_levels = self.tiles["light_level"]
+        light_levels = self.tiles["light_level"][x_slice, y_slice]
         
         # Visible areas get gradient lighting
         if np.any(visible_mask):
@@ -238,7 +269,12 @@ class GameMap:
                     tx, ty = px + dx, py + dy
                     if (0 <= tx < self.width and 0 <= ty < self.height 
                         and self.tiles[tx, ty]["transparent"]):
-                        light_levels[tx, ty] = max(light_levels[tx, ty], ambient_intensity)
+                        local_x = tx - origin_x
+                        local_y = ty - origin_y
+                        if 0 <= local_x < view_width and 0 <= local_y < view_height:
+                            light_levels[local_x, local_y] = max(
+                                light_levels[local_x, local_y], ambient_intensity
+                            )
 
             
             # Interpolate between dark and light tiles based on light level
@@ -286,7 +322,8 @@ class GameMap:
             result_tiles[explored_not_visible] = dark_tiles[explored_not_visible]
         
         # Apply to console
-        console.tiles_rgb[0:self.width, 0:self.height] = result_tiles
+        console.tiles_rgb[:] = tile_types.SHROUD
+        console.tiles_rgb[0:view_width, 0:view_height] = result_tiles
     
     def render(self, console: Console) -> None:
         # Update tile lighting with gradient falloff based on distance to light sources  
@@ -401,18 +438,18 @@ class GameMap:
             if self.visible[entity.x, entity.y]:
                 # Apply dynamic lighting to entity color
                 lit_color = self._apply_lighting_to_entity_color(entity.color, entity.x, entity.y)
-                console.print(x=entity.x, y=entity.y, string=entity.char, fg=lit_color)
+                self.screen_print(console, entity.x, entity.y, entity.char, fg=lit_color)
                 drawn_positions.add(pos)
             else:
                 # If tile has been explored but is not currently visible, show a generic marker
                 # Only show last-known marker for Items (not corpses or other non-actors)
                 if self.explored[entity.x, entity.y] and pos not in drawn_positions and isinstance(entity, Item):
                     try:
-                        console.print(x=entity.x, y=entity.y, string="*", fg=color.gray)
+                        self.screen_print(console, entity.x, entity.y, "*", fg=color.gray)
                         drawn_positions.add(pos)
                     except Exception:
                         try:
-                            console.print(x=entity.x, y=entity.y, string="*", fg=(192,192,192))
+                            self.screen_print(console, entity.x, entity.y, "*", fg=(192,192,192))
                             drawn_positions.add(pos)
                         except Exception:
                             pass
@@ -438,7 +475,7 @@ class GameMap:
             if self.visible[entity.x, entity.y]:
                 # Apply dynamic lighting to entity color
                 lit_color = self._apply_lighting_to_entity_color(entity.color, entity.x, entity.y)
-                console.print(x=entity.x, y=entity.y, string=entity.char, fg=lit_color)
+                self.screen_print(console, entity.x, entity.y, entity.char, fg=lit_color)
                 drawn_positions.add(pos)
             else:
                 # Do not show '*' for non-visible actors; items already handled above.
@@ -495,221 +532,67 @@ class GameWorld:
             # down_stack: maps below the current map (you can descend to these if you previously ascended)
             # Each entry is a tuple: (gamemap, player_xy, floor_number)
             self.up_stack: list[tuple] = []
-            self.down_stack: list[tuple] = []
-            self._stack_lock = threading.Lock()  # guards down_stack across threads
-            self._bg_thread: Optional[threading.Thread] = None
+            self.down_stack: list[tuple] = []  
             self.fungi = []  # Global list of fungi in the world
-
-            # world_noise is populated by generate_world_noise()
-            self.world_noise: np.ndarray = np.zeros((4, 1), dtype=np.float32)
-            # Seeded RNG held across batches so noise extends smoothly between them
             self._noise_rng = None
-            # Next floor number to generate when down_stack runs low
-            self._next_batch_floor: int = 1
 
-    # pickle support: strip out the non-serialisable lock and thread objects
-    def __getstate__(self) -> dict:
-        state = self.__dict__.copy()
-        # Wait for any running background thread before saving
-        bg = state.get("_bg_thread")
-        if bg is not None and bg.is_alive():
-            bg.join()
-        state.pop("_stack_lock", None)
-        state.pop("_bg_thread", None)
-        return state
+            # Noise values
+            self.noise_temperature = None
+            self.noise_erosion = None
+            self.noise_weirdness = None
 
-    def __setstate__(self, state: dict) -> None:
-        self.__dict__.update(state)
-        # Recreate the lock and clear the thread handle on restore
-        self._stack_lock = threading.Lock()
-        self._bg_thread = None
 
-    # ---------------------------------------------------------------------------
-    # Noise tracks (indices into world_noise axis-0)
-    # ---------------------------------------------------------------------------
-    TRACK_TEMPERATURE = 0  # -10..10: cold → hot
-    TRACK_VEGETATION = 1  # -10..10: sparse → dense
-    TRACK_TYPE    = 2  # -10..10: dungeon halls → natural caves
-    TRACK_SPECIAL    = 3  # -10..10: normal floor → special / event floor
+    def sample_noise(self, noise, x, scale):
 
-    # Each deeper floor steps this far in noise space → smooth transitions
-    _FLOOR_SCALE = 0.3
-    # Number of waypoints spread across _MAX_FLOORS — fewer = smoother, more = choppier
-    _WAYPOINTS = 2
-    # Pre-allocate for this many floors; extended automatically if needed
-    _MAX_FLOORS  = 6
-    # Optional guaranteed starting values per track (raw float -1..1, or None to randomise).
-    # e.g. TRACK_TYPE starts at -10 on the -10..10 scale → -1.0 raw.
-    _START_ANCHORS = {
-        TRACK_TYPE: 10.0,  # floor 1 is always full dungeon halls
-    }
+        weight = 18
 
-    def _generate_noise_batch(self, rng, num_floors: int, anchor_values=None) -> np.ndarray:
-        """Return a (4, num_floors) noise array built from cubic-spline random waypoints.
+        return (
+            noise.get_point(x * scale * 0.05) * 8.0 +
+            noise.get_point(x * scale * 0.15) * 8.0 +
+            noise.get_point(x * scale * 0.5) * 2.0
+        ) / weight
 
-        anchor_values -- optional shape-(4,) array that pins the first waypoint of
-        each track to the last value of the previous batch, giving smooth continuation.
-        """
-        from scipy.interpolate import CubicSpline
 
-        n_wp = max(self._WAYPOINTS, 2)
-        wp_floors = np.linspace(0, num_floors - 1, n_wp)
-        tracks = []
-        for t in range(4):
-            wp_values = rng.uniform(-1.0, 1.0, size=n_wp)
-            if anchor_values is not None:
-                wp_values[0] = float(anchor_values[t])
-            cs = CubicSpline(wp_floors, wp_values)
-            tracks.append(np.clip(cs(np.arange(num_floors)), -1.0, 1.0))
-        return np.array(tracks, dtype=np.float32)
-
-    def generate_world_noise(self) -> None:
-        """Build the initial world noise profile (first batch)."""
+    def generate_noise(self, floor_num: int) -> None:
+        import tcod
         from setup_game import _current_seed
-        self._noise_rng = np.random.default_rng(_current_seed)
-        # Build anchor array from _START_ANCHORS (None entries stay random)
-        initial_anchors = np.array(
-            [self._START_ANCHORS.get(t, None) for t in range(4)], dtype=object
-        )
-        # Only pass anchors if at least one track has a fixed start
-        if any(v is not None for v in initial_anchors):
-            anchor_arr = np.array(
-                [float(v) if v is not None else self._noise_rng.uniform(-1.0, 1.0)
-                 for v in initial_anchors],
-                dtype=np.float32,
-            )
-            self.world_noise = self._generate_noise_batch(self._noise_rng, self._MAX_FLOORS, anchor_values=anchor_arr)
-        else:
-            self.world_noise = self._generate_noise_batch(self._noise_rng, self._MAX_FLOORS)
 
-        self.engine.debug_log(f"Generated {self._MAX_FLOORS} floors (seed={_current_seed})", handler=type(self).__name__, event="world_noise")
+        self.noise_temperature = tcod.noise.Noise(dimensions=1, algorithm=tcod.noise.Algorithm.SIMPLEX, seed=_current_seed+1)
+        self.noise_erosion = tcod.noise.Noise(dimensions=1, algorithm=tcod.noise.Algorithm.SIMPLEX, seed=_current_seed+2)
+        self.noise_vegetation = tcod.noise.Noise(dimensions=1, algorithm=tcod.noise.Algorithm.SIMPLEX, seed=_current_seed+3)
+        self.noise_weirdness = tcod.noise.Noise(dimensions=1, algorithm=tcod.noise.Algorithm.SIMPLEX, seed=_current_seed+4)
 
-    def _extend_world_noise(self) -> None:
-        """Append another noise batch anchored to the tail of the current array."""
-        anchor = self.world_noise[:, -1]
-        new_batch = self._generate_noise_batch(self._noise_rng, self._MAX_FLOORS, anchor_values=anchor)
-        self.world_noise = np.concatenate([self.world_noise, new_batch], axis=1)
-        self.engine.debug_log(f"Extended to {self.world_noise.shape[1]} total floors", handler=type(self).__name__, event="world_noise")
 
-    def get_floor_noise(self, floor: int) -> dict:
-        def _to_int(raw: float) -> int:
-            return int(max(-10, min(10, round(raw * 10))))
+        # Clamped noise sampling, scaled
+        t = self.sample_noise(self.noise_temperature, floor_num*2.0, 0.3) * 10
+        e = self.sample_noise(self.noise_erosion, floor_num*2.0, 0.8) * 10.0
+        v = self.sample_noise(self.noise_vegetation, floor_num*2.0, 1.2) * 10.0
+        w = self.sample_noise(self.noise_weirdness, floor_num*2.0, 2.0) * 10.0
 
-        # Auto-extend the noise array on demand so any floor index can be looked up
-        while floor >= self.world_noise.shape[1] and self._noise_rng is not None:
-            self._extend_world_noise()
+        t *= 2.0
+        e *= 2.0
+        v *= 2.0
+        w *= 2.0
 
-        idx = min(max(floor, 0), self.world_noise.shape[1] - 1)
-        return {
-            "temperature": _to_int(self.world_noise[self.TRACK_TEMPERATURE, idx]),
-            "vegetation":  _to_int(self.world_noise[self.TRACK_VEGETATION,  idx]),
-            "type":        _to_int(self.world_noise[self.TRACK_TYPE,        idx]),
-            "special":     _to_int(self.world_noise[self.TRACK_SPECIAL,     idx]),
-        }
+        print(f"World noise at floor {floor_num}: Temperature={t:.2f}, Erosion={e:.2f}, Vegetation={v:.2f}, Weirdness={w:.2f}.")
 
-    
-    def _generate_floor_batch(self, start_floor_num: int) -> None:
-        """Generate _MAX_FLOORS maps and append them to down_stack.
-
-        Thread-safe: uses _FloorProbe instead of the real player, never mutates
-        self.current_floor, and holds _stack_lock only while appending.
-        world_noise must already cover [start_floor_num-1 .. start_floor_num+_MAX_FLOORS-2]
-        before this is called (guaranteed by _spawn_bg_batch pre-extension).
-        """
-        from procgen import generate_dungeon
-
-        batch: list[tuple] = []
-        for i in range(self._MAX_FLOORS):
-            floor_num = start_floor_num + i
-            noise = self.get_floor_noise(floor_num - 1)
-            probe = _FloorProbe()
-            new_map = generate_dungeon(
-                max_rooms=self.max_rooms,
-                room_min_size=self.room_min_size,
-                room_max_size=self.room_max_size,
-                map_width=self.map_width,
-                map_height=self.map_height,
-                engine=self.engine,
-                noise_map=noise,
-                player_proxy=probe,
-                floor_num=floor_num,
-            )
-            new_map.entities.discard(probe)
-            probe.parent = None
-            batch.append((new_map, (probe.x, probe.y), floor_num))
-
-        with self._stack_lock:
-            self.down_stack.extend(batch)
-
-        self.engine.debug_log(f"Batch ready: floors {start_floor_num}\u2013{start_floor_num + self._MAX_FLOORS - 1} ({len(self.down_stack)} queued)", handler=type(self).__name__, event="world_noise")
-
-    def _spawn_bg_batch(self, start_floor_num: int) -> None:
-        """Kick off a background thread to generate the next batch, if none is running.
-
-        Noise is pre-extended on the main thread before the thread starts so the
-        background thread only reads world_noise (never writes it).
-        """
-        if self._bg_thread is not None and self._bg_thread.is_alive():
-            return
-        # Pre-extend noise synchronously so bg thread is read-only on noise data
-        needed = start_floor_num + self._MAX_FLOORS - 2
-        while needed >= self.world_noise.shape[1] and self._noise_rng is not None:
-            self._extend_world_noise()
-        self._bg_thread = threading.Thread(
-            target=self._generate_floor_batch,
-            args=(start_floor_num,),
-            daemon=True,
-        )
-        self._bg_thread.start()
-        self.engine.debug_log(f"Background: generating floors {start_floor_num}\u2013{start_floor_num + self._MAX_FLOORS - 1}", handler=type(self).__name__, event="world_noise")
+        return(t, e, v, w)
 
     def generate_world(self) -> None:
-        """Activate floor 1 immediately, then generate the rest in a background thread.
-
-        down_stack holds upcoming pre-built floors (index 0 = next floor down).
-        up_stack is a full history of every floor the player has stood on, so
-        the player can always ascend all the way back to floor 1.
-        """
+        """Generate the starting floor."""
         from procgen import generate_dungeon
 
-        self.generate_world_noise()
-        with self._stack_lock:
-            self.down_stack = []
-
-        # Floor 1: generate and activate synchronously so the player can start immediately
-        probe = _FloorProbe()
-        noise = self.get_floor_noise(0)
-        floor1_map = generate_dungeon(
+        self.engine.game_map = generate_dungeon(
             max_rooms=self.max_rooms,
             room_min_size=self.room_min_size,
             room_max_size=self.room_max_size,
             map_width=self.map_width,
             map_height=self.map_height,
             engine=self.engine,
-            noise_map=noise,
-            player_proxy=probe,
             floor_num=1,
+            noise_vals = (self.generate_noise(1))
         )
-        floor1_map.entities.discard(probe)
-        probe.parent = None
-        self._activate_floor((floor1_map, (probe.x, probe.y), 1))
-
-        # Floors 2 onward: generate in background
-        self._next_batch_floor = self._MAX_FLOORS + 2
-        self._spawn_bg_batch(2)
-
-    def _activate_floor(self, floor_entry: tuple) -> None:
-        """Set the given floor entry as the active map and place the player."""
-        new_map, start_pos, floor_num = floor_entry
-        self.current_floor = floor_num
-        self.engine.game_map = new_map
-        new_map.entities.add(self.engine.player)
-        px, py = start_pos
-        self.engine.player.place(px, py, new_map)
-        self.engine.debug_log(f"Activated floor {floor_num}, player at ({px}, {py})", handler=type(self).__name__, event="activate_floor")
-
-
-
+        self.current_floor = 1
 
 
     def generate_floor(self) -> None:
@@ -756,147 +639,43 @@ class GameWorld:
             )
         else:
             # Generate dungeon (counter continues to accumulate)
-            self.engine.game_map = generate_dungeon(
-                max_rooms=self.max_rooms,
-                room_min_size=self.room_min_size,
-                room_max_size=self.room_max_size,
-                map_width=self.map_width,
-                map_height=self.map_height,
-                engine=self.engine,
-            )
-
+            self.descend()  # Use the same generation method as normal descents
     def descend(self) -> None:
-        """Descend one level.
-
-        The current map is pushed onto up_stack so the player can ascend all the
-        way back.  The next floor is popped from down_stack; when the queue drops
-        to a low watermark a background batch is spawned automatically.
-        """
+        """Descend one level."""
+        from procgen import generate_dungeon
+        
+        # Save current floor
         current_map = self.engine.game_map
         player_pos = (self.engine.player.x, self.engine.player.y)
-        self.engine.is_transitioning_level = True
-
-        # Save current floor so the player can ascend back to it
         self.up_stack.append((current_map, player_pos, self.current_floor))
-
-        # If queue is empty and bg thread is still running, wait for it
-        with self._stack_lock:
-            queue_len = len(self.down_stack)
-
-        if queue_len == 0:
-            if self._bg_thread is not None and self._bg_thread.is_alive():
-                self.engine.debug_log("Waiting for background generation to finish...", handler=type(self).__name__, event="descend")
-                self._bg_thread.join()
-            else:
-                # Fallback: generate synchronously
-                self.engine.debug_log("Queue empty — generating synchronously...", handler=type(self).__name__, event="descend")
-                self._generate_floor_batch(self._next_batch_floor)
-                self._next_batch_floor += self._MAX_FLOORS
-
-        # Spawn next background batch when queue is getting low
-        with self._stack_lock:
-            queue_len = len(self.down_stack)
-        if queue_len <= 2:
-            self._spawn_bg_batch(self._next_batch_floor)
-            self._next_batch_floor += self._MAX_FLOORS
-
-        # Clear pending animations before map swap
-        try:
-            if hasattr(self.engine, "animation_queue"):
-                self.engine.animation_queue.clear()
-        except Exception:
-            pass
-
-        # Activate the next floor
-        with self._stack_lock:
-            next_entry = self.down_stack.pop(0)
-        self._activate_floor(next_entry)
-
-        # Place up_stairs at the landing spot so the player can ascend back
-        try:
-            px, py = self.engine.player.x, self.engine.player.y
-            self.engine.game_map.tiles[px, py] = tile_types.up_stairs
-            self.engine.game_map.upstairs_location = (px, py)
-        except Exception:
-            pass
-
-        with self._stack_lock:
-            q = len(self.down_stack)
-        self.engine.debug_log(f"Floor {self.current_floor} ({q} ahead, {len(self.up_stack)} above)", handler=type(self).__name__, event="descend")
-
-        try:
-            import sounds
-            sounds.refresh_all_ambient_sounds(self.engine.player, self.engine.game_map.entities, self.engine.game_map)
-        except Exception:
-            pass
-
-        self.engine.is_transitioning_level = False
+        
+        # Generate next floor
+        self.current_floor += 1
+        
+        new_map = generate_dungeon(
+            max_rooms=self.max_rooms,
+            room_min_size=self.room_min_size,
+            room_max_size=self.room_max_size,
+            map_width=self.map_width,
+            map_height=self.map_height,
+            engine=self.engine,
+            noise_vals = self.generate_noise(self.current_floor),
+            floor_num=self.current_floor,
+        )
+        
+        self.engine.game_map = new_map
 
     def ascend(self) -> None:
-        """Ascend one level.
-
-        Behavior:
-        - Push the current map onto down_stack so it can be returned to by descending.
-        - Pop the most recent map from up_stack and restore it as the active map.
-        - Restore player position and floor number from the popped entry.
-        """
-        # If nothing to ascend to, do nothing
+        """Ascend one level."""
         if len(self.up_stack) == 0:
             return
             
-        # Set level transition flag to suppress equipment sounds
-        self.engine.is_transitioning_level = True
-
-        current_map = self.engine.game_map
-        current_player_pos = (self.engine.player.x, self.engine.player.y)
-
-        # Insert current map at the front of down_stack so re-descending returns here
-        with self._stack_lock:
-            self.down_stack.insert(0, (current_map, current_player_pos, self.current_floor))
-
-        # Pop the map above us and restore it
+        # Restore previous floor
         prev_map, prev_player_pos, prev_floor = self.up_stack.pop()
-
-        # Clear animations before map swap
-        try:
-            if hasattr(self.engine, "animation_queue"):
-                try:
-                    self.engine.animation_queue.clear()
-                except Exception:
-                    try:
-                        while self.engine.animation_queue:
-                            self.engine.animation_queue.popleft()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        # Restore previous map and player position
         self.engine.game_map = prev_map
-        try:
-            px, py = prev_player_pos
-            self.engine.player.place(px, py, prev_map)
-        except Exception:
-            try:
-                px = max(0, min(prev_map.width - 1, px))
-                py = max(0, min(prev_map.height - 1, py))
-                self.engine.player.place(px, py, prev_map)
-            except Exception:
-                pass
-
-        # Restore recorded floor number
-        try:
-            self.current_floor = prev_floor
-        except Exception:
-            pass
-
-        # Refresh ambient sounds for the restored map
-        try:
-            import sounds
-            sounds.refresh_all_ambient_sounds(self.engine.player, prev_map.entities, prev_map)
-        except Exception:
-            pass
-            
-        # Clear level transition flag after restoration is complete
-        self.engine.is_transitioning_level = False
+        self.current_floor = prev_floor
+        
+        # Restore player position  
+        px, py = prev_player_pos
+        self.engine.player.place(px, py, prev_map)
 

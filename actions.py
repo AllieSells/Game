@@ -282,11 +282,7 @@ class TakeStairsAction(Action):
         # Descend if on the downstairs tile
         if 1 == 1: #pos == self.engine.game_map.downstairs_location:
             # Use GameWorld.descend helper if available, otherwise fall back
-            try:
-                self.engine.game_world.descend()
-            except Exception:
-                # Fallback to previous behavior
-                self.engine.game_world.generate_floor()
+            self.engine.game_world.descend()
             sounds.stairs_sound.play()
             self.engine.message_log.add_message("You descend the staircase.", color.descend)
             return
@@ -1122,10 +1118,10 @@ class MovementAction(ActionWithDirection):
         if not self.engine.game_map.visible[dest_x, dest_y]:
             # Use different color for enemy footsteps vs other sounds
             if self.entity != self.engine.player:
-                color = (150, 150, 150)  # Gray for footsteps
+                color = (255, 255, 255)  # Gray for footsteps
             else:
                 color = (255, 255, 0)  # Yellow for other sounds
-            self.engine.animation_queue.append(HeardSoundAnimation((dest_x, dest_y), self.engine.player, color))
+            self.engine.animation_queue.append(HeardSoundAnimation((dest_x, dest_y), self.engine.player, color, (self.dx, self.dy)))
         
         # Only play walk sound for player if not moving rapidly or holding key
         if self.entity == self.engine.player and self.engine.should_play_movement_sound():

@@ -267,6 +267,13 @@ class Equipment(BaseComponent):
                 if target_part:
                     self.body_part_coverage[target_part.name] = item
 
+        # Rebuild composite sprite
+        try:
+            import sprite_manager
+            sprite_manager.refresh_actor_sprite(self.parent)
+        except Exception:
+            pass
+
     def unequip_item(self, item: Item, add_message: bool = True) -> None:
         """Unequip an item using the modular system."""
         if not item.equippable:
@@ -288,7 +295,14 @@ class Equipment(BaseComponent):
         
         # Play unequip sound
         self._play_unequip_sound(item)
-    
+
+        # Rebuild composite sprite
+        try:
+            import sprite_manager
+            sprite_manager.refresh_actor_sprite(self.parent)
+        except Exception:
+            pass
+
     def is_item_equipped(self, item: Item) -> bool:
         """Check if an item is currently equipped (optimized)."""
         return (item in self.grasped_items.values() or 
@@ -383,6 +397,12 @@ class Equipment(BaseComponent):
         # Play equip sound
         self._play_equip_sound(item)
 
+        try:
+            import sprite_manager
+            sprite_manager.refresh_actor_sprite(self.parent)
+        except Exception:
+            pass
+
     def unequip_from_specific_hand(self, hand_name: str, add_message: bool = True) -> None:
         """Directly unequip item from a specific hand.
         If the item has equip_all_matching, unequips from ALL matching parts instead."""
@@ -417,6 +437,12 @@ class Equipment(BaseComponent):
                 self.unequip_message(item_to_unequip.name)
             
             self._play_unequip_sound(item_to_unequip)
+
+            try:
+                import sprite_manager
+                sprite_manager.refresh_actor_sprite(self.parent)
+            except Exception:
+                pass
 
     def _play_equip_sound(self, item: Item) -> None:
         """Play equipment sound for an item."""

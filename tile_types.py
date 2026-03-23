@@ -41,7 +41,7 @@ SHROUD = np.array((ord(" "), (255, 255, 255), (10, 10, 10)), dtype=graphic_dt)
 
 def random_floor_char() -> int:
     # Don't re-seed here as it can break generation flow
-    return ord(random.choice([" ", " ", " ", " ", " ", " ", ".", ",", " "]))
+    return ord(random.choice([" ", " ", " ", " ", " ", " ", chr(0xE009), chr(0xE00A), chr(0xE00B), chr(0xE00C)]))
 
 
 def fill_random_grasses() -> np.ndarray:
@@ -247,30 +247,30 @@ down_stairs = new_tile(
     name="<purple>Down Stairs</purple>",
     walkable=True,
     transparent=True,
-    dark=(ord(">"), (100, 100, 100), (25, 25, 25)),
-    light=(ord(">"), (255, 255, 255), (50, 50, 50)),
+    dark=((0xE00D), (100, 100, 100), (25, 25, 25)),
+    light=((0xE00D), (255, 255, 255), (50, 50, 50)),
 )
 
 up_stairs = new_tile(
     name="<purple>Up Stairs</purple>",
     walkable=True,
     transparent=True,
-    dark=(ord("<"), (100, 100, 100), (25, 25, 25)),
-    light=(ord("<"), (255, 255, 255), (50, 50, 50)),
+    dark=((0xE00E), (100, 100, 100), (25, 25, 25)),
+    light=((0xE00E), (255, 255, 255), (50, 50, 50)),
 )
 closed_door = new_tile(
     name="Door",
     walkable=False,
     transparent=False,
-    dark=(ord("•"), (60, 60, 60), (15, 15, 15)),
-    light=(ord("•"), (255, 212, 0), (89, 52, 28)),
+    dark=(0xE000, (60, 60, 60), (15, 15, 15)),
+    light=(0xE000, (255, 255, 255), (0, 0, 0)),
     interactable=True
 )
 open_door = new_tile(
     name="Open Door",
     walkable=True,
     transparent=True,
-    dark=(ord("/"), (60, 60, 60), (15, 15, 15)),
-    light=(ord("/"), (255, 212, 0), (89, 52, 28)),
+    dark=(0xE001, (60, 60, 60), (15, 15, 15)),
+    light=(0xE001, (255, 255, 255), (0, 0, 0)),
     interactable=True
 )

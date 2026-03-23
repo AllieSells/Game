@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import os
 import json
+import textwrap
 from typing import Callable, Tuple, Optional, TYPE_CHECKING, Union
 
+import numpy as np
 import tcod.event
 import random
 import traceback
 
+from tcod.console import Console
 
 import actions
 from actions import (
@@ -33,6 +36,37 @@ if TYPE_CHECKING:
     from engine import Engine
     from entity import Item, Actor
     from components.container import Container
+
+
+def _fade_console_background(
+    console: tcod.Console,
+    menu_x: int = None,
+    menu_y: int = None,
+    menu_width: int = None,
+    menu_height: int = None,
+) -> None:
+    """Fade the console background except for an optional menu rectangle."""
+    fade_alpha = 0.4
+    fade_color = np.array((20, 20, 30), dtype=np.float32)
+
+    original_bg = console.bg.copy()
+    blended_bg = (
+        original_bg.astype(np.float32) * (1.0 - fade_alpha)
+        + fade_color * fade_alpha
+    ).astype(np.uint8)
+
+    console.bg[:] = blended_bg
+
+    if (
+        menu_x is not None
+        and menu_y is not None
+        and menu_width is not None
+        and menu_height is not None
+    ):
+        menu_x2 = min(console.width, menu_x + menu_width)
+        menu_y2 = min(console.height, menu_y + menu_height)
+        if menu_x < menu_x2 and menu_y < menu_y2:
+            console.bg[menu_x:menu_x2, menu_y:menu_y2] = original_bg[menu_x:menu_x2, menu_y:menu_y2]
 
 
 
@@ -92,14 +126,30 @@ class BaseEventHandler(tcod.event.EventDispatch[ActionOrHandler]):
     def ev_mousemotion(self, event: tcod.event.MouseMotion) -> Optional[ActionOrHandler]:
         """Handle mouse movement - update engine mouse location."""
 
-        mouse_pos_x = event.tile.x
-        mouse_pos_y = event.tile.y
-        self.engine.mouse_x = int(mouse_pos_x)
-        self.engine.mouse_y = int(mouse_pos_y)
+        def _as_tile(position):
+            if position is None:
+                return None
+            if hasattr(position, "x") and hasattr(position, "y"):
+                return int(position.x), int(position.y)
+            return int(position[0]), int(position[1])
 
-        if self.engine.mouse_y == 40 and 36 <= self.engine.mouse_x <= 50:
+        ui_tile = _as_tile(getattr(event, "ui_tile", getattr(event, "tile", None)))
+        world_tile = _as_tile(getattr(event, "world_tile", ui_tile))
+        use_world_space = isinstance(self, (MainGameEventHandler, SelectIndexHandler))
+
+        if ui_tile is not None:
+            self.engine.mouse_ui_x = int(ui_tile[0])
+            self.engine.mouse_ui_y = int(ui_tile[1])
+
+        active_tile = world_tile if use_world_space and world_tile is not None else ui_tile
+
+        if active_tile is not None:
+            self.engine.mouse_x = int(active_tile[0])
+            self.engine.mouse_y = int(active_tile[1])
+
+        if self.engine.mouse_ui_y == 40 and 36 <= self.engine.mouse_ui_x <= 50:
             self.engine.hovered_inventory_button = "inventory"
-        elif self.engine.mouse_y == 40 and 52 <= self.engine.mouse_x <= 64:
+        elif self.engine.mouse_ui_y == 40 and 52 <= self.engine.mouse_ui_x <= 64:
             self.engine.hovered_inventory_button = "equipment"
         else:
             self.engine.hovered_inventory_button = None
@@ -198,31 +248,18 @@ class EventHandler(BaseEventHandler):
         return True
 
     def on_render(self, console: tcod.Console) -> None:
-        self.engine.render(console)
+        game_map = getattr(self.engine, "game_map", None)
+        if (
+            game_map is not None
+            and console.width == game_map.width
+            and console.height == game_map.height
+        ):
+            self.engine.render_game(console)
+        else:
+            self.engine.render_ui(console)
 
     def render_faded(self, console: tcod.Console, menu_x: int = None, menu_y: int = None, menu_width: int = None, menu_height: int = None) -> None:
-        # Fades the current console to create a dimmed background effect for menus
-        # Excludes the menu area from fading if menu bounds are provided
-        fade_alpha = 0.4  # Fade strength (0.0 = no fade, 1.0 = completely faded)
-        fade_color = (20, 20, 30)  # Dark blue-gray tint
-        
-        for x in range(console.width):
-            for y in range(console.height):
-                # Skip fading pixels that are within the menu bounds
-                if (menu_x is not None and menu_y is not None and 
-                    menu_width is not None and menu_height is not None):
-                    if (menu_x <= x < menu_x + menu_width and 
-                        menu_y <= y < menu_y + menu_height):
-                        continue
-                
-                existing_color = console.bg[x, y]
-                # Safe color blending using floating point math
-                blended_color = (
-                    int(existing_color[0] * (1 - fade_alpha) + fade_color[0] * fade_alpha),
-                    int(existing_color[1] * (1 - fade_alpha) + fade_color[1] * fade_alpha),
-                    int(existing_color[2] * (1 - fade_alpha) + fade_color[2] * fade_alpha),
-                )
-                console.bg[x, y] = blended_color
+        _fade_console_background(console, menu_x, menu_y, menu_width, menu_height)
     
 class AskUserEventHandler(EventHandler):
     # Handles user input for actions with special input
@@ -1275,6 +1312,12 @@ class ContainerEventHandler(AskUserEventHandler):
                         self.engine.debug_log(f"No pickup sound for {item}", handler=type(self).__name__, event="trade")
 
                     self.engine.message_log.add_message(f"You take the {item.name}.")
+
+                    # If corpse is now empty, switch to a picked-clean tile
+                    is_corpse = getattr(self.container.parent, 'type', None) == 'Dead'
+                    if is_corpse and not self.container.items:
+                        import random as _random
+                        self.container.parent.char = _random.choice([chr(0xE010), chr(0xE011), chr(0xE012)])
             except Exception:
                 self.engine.debug_log(traceback.format_exc(), handler=type(self).__name__, event="trade")
                 self.engine.message_log.add_message(f"Could not transfer {item.name} to {self.container.name}.", color.error)
@@ -2183,37 +2226,26 @@ class SelectIndexHandler(AskUserEventHandler):
         AskUserEventHandler.ev_mousemotion(self, event)
         self.engine.mouse_location = int(self.engine.mouse_x), int(self.engine.mouse_y)
 
-    def on_render(self, console: tcod.Console) -> None:
-        # Highlights tile underneath cursor
-        super().on_render(console)
-
+    def render_game_overlay(self, console: tcod.Console) -> None:
         x, y = self.engine.mouse_location
         x, y = int(x), int(y)
-        console.rgb["bg"][x, y] = color.white
-        console.rgb["fg"][x, y] = color.black
-        # Draw a small framed box next to the cursor showing the name(s)
-        try:
-            from render_functions import get_names_at_location
+        screen_position = self.engine.world_to_screen(x, y, console.width, console.height)
+        if screen_position is None:
+            return
+        screen_x, screen_y = screen_position
+        console.rgb["bg"][screen_x, screen_y] = color.white
+        console.rgb["fg"][screen_x, screen_y] = color.black
 
+    def render_ui_overlay(self, console: tcod.Console) -> None:
+        return None
 
-            names = get_names_at_location(x, y, self.engine.game_map)
-            if names:
-                # Decide where to place the box: prefer to the right of cursor
-                width = max(10, len(names) + 2)
-                box_x = x + 1
-                box_y = y
-                # If box would overflow to the right, place it to the left
-                if box_x + width > console.width:
-                    box_x = x - width - 1
-                if box_x < 0:
-                    box_x = 0
+    def on_render(self, console: tcod.Console) -> None:
+        # In hybrid rendering this handler is drawn on the game console.
+        # Render the game layer explicitly, then draw targeting overlays.
+        self.engine.render_game(console)
 
-                # Draw frame and text
-                console.draw_frame(x=box_x, y=box_y, width=width, height=3, title=None, clear=True, fg=(255,255,255), bg=(0,0,0))
-                console.print(x=box_x + 1, y=box_y + 1, string=names)
-        except Exception:
-            # If anything goes wrong, skip drawing the look box
-            pass
+        self.render_game_overlay(console)
+        self.render_ui_overlay(console)
     
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         # check for key motion or confimration keys
@@ -2244,10 +2276,23 @@ class SelectIndexHandler(AskUserEventHandler):
     def ev_mousebuttondown(
             self, event: tcod.event.MouseButtonDown
             ) -> Optional[ActionOrHandler]:
-        #left click confirms selection
-        tile_x, tile_y = int(event.tile.x), int(event.tile.y)
-        if self.engine.game_map.in_bounds(tile_x, tile_y):
-            if event.button == 1:
+        # Left click confirms selection. Accept tuple or object tile formats.
+        def _as_tile(position):
+            if position is None:
+                return None
+            if hasattr(position, "x") and hasattr(position, "y"):
+                return int(position.x), int(position.y)
+            return int(position[0]), int(position[1])
+
+        if event.button == 1:
+            tile = _as_tile(getattr(event, "world_tile", None))
+            if tile is None:
+                tile = _as_tile(getattr(event, "tile", None))
+            if tile is None:
+                tile = (int(self.engine.mouse_x), int(self.engine.mouse_y))
+
+            tile_x, tile_y = tile
+            if self.engine.game_map.in_bounds(tile_x, tile_y):
                 return self.on_index_selected(tile_x, tile_y)
         return super().ev_mousebuttondown(event)
     
@@ -2265,7 +2310,12 @@ class ThrowTargetHandler(SelectIndexHandler):
     def on_render(self, console: tcod.Console) -> None:
         super().on_render(console)
         # Draw range on top of player location
-        x, y = self.engine.player.x, self.engine.player.y
+        screen_position = self.engine.world_to_screen(
+            self.engine.player.x, self.engine.player.y, console.width, console.height
+        )
+        if screen_position is None:
+            return
+        x, y = screen_position
         console.draw_frame(
         x=x - self.radius - 1,
         y=y - self.radius - 1,
@@ -3279,18 +3329,25 @@ class LookHandler(SelectIndexHandler):
         return result
 
     def on_render(self, console: tcod.Console) -> None:
-        # Highlight tile underneath cursor
-        super(SelectIndexHandler, self).on_render(console)
-        
-        # Fade the entire background for the look interface
-        super().render_faded(console)
+        super().on_render(console)
 
-        x, y = self.engine.mouse_location
-        x, y = int(x), int(y)
-        console.rgb["bg"][x, y] = color.white
-        console.rgb["fg"][x, y] = color.black
-        
+    def render_game_overlay(self, console: tcod.Console) -> None:
+        super().render_game_overlay(console)
+
+    def render_ui_overlay(self, console: tcod.Console) -> None:
+        self.render_faded(console)
         self.render_detailed_sidebar(console)
+
+    def get_displayed_cursor_position(self, console: tcod.Console) -> tuple[int, int]:
+        """Return the cursor position in UI-layer tile space for the zoomed game view."""
+        cursor_x, cursor_y = self.engine.mouse_location
+        screen_position = self.engine.world_to_screen(cursor_x, cursor_y, 40, 20)
+        if screen_position is None:
+            return 0, 0
+        screen_x, screen_y = screen_position
+        display_x = min(console.width - 1, max(0, screen_x * 2))
+        display_y = min(console.height - 1, max(0, screen_y * 2))
+        return display_x, display_y
 
     def render_detailed_sidebar(self, console: tcod.Console) -> None:
         """Render detailed information sidebar."""
@@ -3308,7 +3365,7 @@ class LookHandler(SelectIndexHandler):
         current_item = items_and_entities[self.detail_index]
         
         # Determine sidebar position based on cursor location to avoid blocking it
-        cursor_x, cursor_y = self.engine.mouse_location
+        cursor_x, cursor_y = self.get_displayed_cursor_position(console)
         sidebar_width = 35  # Increased width to accommodate both text and preview
         sidebar_height = 30
         
@@ -3320,13 +3377,16 @@ class LookHandler(SelectIndexHandler):
             # Cursor on right side, put sidebar on left
             sidebar_x = 0
             
-        # Position vertically to avoid cursor as well
-        if cursor_y < console.height // 2:
-            # Cursor in top half, prefer bottom positioning
-            sidebar_y = max(2, console.height - sidebar_height - 2)
+        # Position vertically with a gap so the panel stays clear of the cursor.
+        below_cursor_y = cursor_y + 2
+        above_cursor_y = cursor_y - sidebar_height - 2
+        max_sidebar_y = max(2, console.height - sidebar_height - 2)
+        if below_cursor_y <= max_sidebar_y:
+            sidebar_y = below_cursor_y
+        elif above_cursor_y >= 2:
+            sidebar_y = above_cursor_y
         else:
-            # Cursor in bottom half, prefer top positioning
-            sidebar_y = 2
+            sidebar_y = max(2, min(max_sidebar_y, cursor_y - sidebar_height // 2))
         
         # Draw sidebar frame with parchment styling
         MenuRenderer.draw_parchment_background(console, sidebar_x, sidebar_y, sidebar_width, sidebar_height)
@@ -4208,6 +4268,10 @@ class AreaRangedAttackHandler(SelectIndexHandler):
         super().on_render(console)
 
         x, y = self.engine.mouse_location 
+        screen_position = self.engine.world_to_screen(x, y, console.width, console.height)
+        if screen_position is None:
+            return
+        x, y = screen_position
 
         #draw rectangle around area
         console.draw_frame(
@@ -4247,9 +4311,9 @@ class MainGameEventHandler(EventHandler):
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
         if event.button == tcod.event.MouseButton.LEFT:
 
-            if self.engine.mouse_y == 40 and 36 <= self.engine.mouse_x <= 50:
+            if self.engine.mouse_ui_y == 40 and 36 <= self.engine.mouse_ui_x <= 50:
                 return InventoryActivateHandler(self.engine)
-            elif self.engine.mouse_y == 40 and 52 <= self.engine.mouse_x <= 64:
+            elif self.engine.mouse_ui_y == 40 and 52 <= self.engine.mouse_ui_x <= 64:
                 from equipment_ui import EquipmentUI
                 return EquipmentUI(self.engine)
 
@@ -4257,7 +4321,7 @@ class MainGameEventHandler(EventHandler):
             dx = max(-1, min(1, self.engine.mouse_x - self.engine.player.x))
             dy = max(-1, min(1, self.engine.mouse_y - self.engine.player.y))
 
-            if self.engine.mouse_y > 38:
+            if self.engine.mouse_ui_y > 38:
                 return None
 
             # Get the target actor at the attack location
@@ -4362,6 +4426,16 @@ class MainGameEventHandler(EventHandler):
         ):            
             # TODO HELP MENU
             return HelpMenuHandler()
+        elif key == tcod.event.K_F4:
+            self.engine.player.fighter.hp = 99999999999
+            self.engine.player.fighter.power = 99999999999
+            self.engine.player.fighter.defense = 99999999999
+
+            for entity in self.engine.game_map.entities:
+                if entity is not self.engine.player and hasattr(entity, 'fighter') and entity.fighter and hasattr(entity.fighter, 'hp'):
+                    entity.fighter.hp = 0
+
+            self.engine.message_log.add_message("GOD MODE BABY!!!!!!!!", color.purple)
         # F2 toggles debug mode
         elif key == tcod.event.K_F2:
             self.engine.debug = not self.engine.debug
@@ -4369,7 +4443,8 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.K_F11:
             from __main__ import toggle_fullscreen, _game_context
             toggle_fullscreen(context=_game_context)
-
+        elif key == tcod.event.K_F10:
+            return DebugConsoleHandler(self.engine)
         # F3 shows limb stats debug
         elif key == tcod.event.K_F3:
             return EntityDebugHandler(self.engine)
@@ -4644,28 +4719,7 @@ class TextInputHandler(BaseEventHandler):
         return key_map.get(key, "")
         
     def render_faded(self, console: tcod.Console, menu_x: int = None, menu_y: int = None, menu_width: int = None, menu_height: int = None) -> None:
-        # Fades the current console to create a dimmed background effect for menus
-        # Excludes the menu area from fading if menu bounds are provided
-        fade_alpha = 0.4  # Fade strength (0.0 = no fade, 1.0 = completely faded)
-        fade_color = (20, 20, 30)  # Dark blue-gray tint
-        
-        for x in range(console.width):
-            for y in range(console.height):
-                # Skip fading pixels that are within the menu bounds
-                if (menu_x is not None and menu_y is not None and 
-                    menu_width is not None and menu_height is not None):
-                    if (menu_x <= x < menu_x + menu_width and 
-                        menu_y <= y < menu_y + menu_height):
-                        continue
-                
-                existing_color = console.bg[x, y]
-                # Safe color blending using floating point math
-                blended_color = (
-                    int(existing_color[0] * (1 - fade_alpha) + fade_color[0] * fade_alpha),
-                    int(existing_color[1] * (1 - fade_alpha) + fade_color[1] * fade_alpha),
-                    int(existing_color[2] * (1 - fade_alpha) + fade_color[2] * fade_alpha),
-                )
-                console.bg[x, y] = blended_color
+        _fade_console_background(console, menu_x, menu_y, menu_width, menu_height)
         
     def on_exit(self) -> Optional[ActionOrHandler]:
         """Handle exiting the text input - return to main game if we have engine."""
@@ -4676,8 +4730,8 @@ class TextInputHandler(BaseEventHandler):
     def on_render(self, console: tcod.Console) -> None:
         # Render background appropriately based on context
         if self.engine is not None:
-            # In-game: render the game world
-            self.engine.render(console)
+            # In-game: render the HUD and overlays above the scaled game texture.
+            self.engine.render_ui(console)
         elif self.parent_handler is not None:
             # Setup screen: let parent render its background first
             self.parent_handler.on_render(console)
@@ -4791,6 +4845,130 @@ class TextInputHandler(BaseEventHandler):
         return None
 
 
+class DebugConsoleHandler(TextInputHandler):
+    """Debug console opened with F10. Type commands and press Enter."""
+
+    def __init__(self, engine: Engine):
+        super().__init__(
+            engine=engine,
+            title="Debug Console",
+            prompt=">>>",
+            max_length=180,
+            callback=None,
+        )
+        self.output_lines: list[str] = []
+        self.history: list[str] = []
+        self.history_index: int = 0
+
+    def _set_buffer(self, value: str) -> None:
+        self.text = value
+        self.cursor_pos = len(self.text)
+
+    def push_output(self, message: str) -> None:
+        """Add a string (may contain \\n) to the output panel."""
+        for line in str(message).splitlines():
+            self.output_lines.append(line)
+        self.output_lines = self.output_lines[-200:]
+
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        key = event.sym
+
+        if key == tcod.event.KeySym.ESCAPE:
+            return MainGameEventHandler(self.engine)
+
+        if key == tcod.event.KeySym.UP:
+            if self.history and self.history_index > 0:
+                self.history_index -= 1
+                self._set_buffer(self.history[self.history_index])
+            return None
+
+        if key == tcod.event.KeySym.DOWN:
+            if self.history_index < len(self.history) - 1:
+                self.history_index += 1
+                self._set_buffer(self.history[self.history_index])
+            else:
+                self.history_index = len(self.history)
+                self._set_buffer("")
+            return None
+
+        if key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.KP_ENTER:
+            command = self.text.strip()
+            self._set_buffer("")
+            if not command:
+                return None
+            if command in {"exit", "quit"}:
+                return MainGameEventHandler(self.engine)
+            self.history.append(command)
+            self.history_index = len(self.history)
+            self.push_output(f">>> {command}")
+            command = command.lower()
+
+            if command == "help":
+                self.push_output("""
+Player Commands:
+apply_effect(EFFECT) - Ex. apply_effect(darkvision)                
+give(ITEM) - Ex. give(sigil_stone)                 
+                
+"""
+                )
+            elif command == "apply_effect(darkvision)":
+                from components.effect import DarkvisionEffect
+                self.engine.player.effects.append(DarkvisionEffect(duration=100))
+                self.push_output("Darkvision applied for 100 turns")
+            elif command == "give(sigil_stone)":
+                import entity_factories
+                self.engine.player.inventory.items.append(entity_factories.generate_sigil_stone())
+                self.push_output("Generated sigil stone added to inventory")
+
+            # ----------------------------------------------------------------
+            # ADD YOUR COMMAND HANDLING CODE HERE
+            # Use self.push_output("some text") to write to the console panel.
+            # self.engine, self.engine.player, self.engine.game_map available.
+            # Example:
+            #   if command == "heal":
+            #       self.engine.player.fighter.hp = self.engine.player.fighter.max_hp
+            #       self.push_output("Player fully healed.")
+            #   else:
+            #       self.push_output(f"Unknown command: {command}")
+            # ----------------------------------------------------------------
+
+            return None
+
+        return super().ev_keydown(event)
+
+    def on_render(self, console: tcod.Console) -> None:
+        self.engine.render_ui(console)
+
+        width = max(56, console.width - 6)
+        height = max(16, console.height - 8)
+        x = (console.width - width) // 2
+        y = (console.height - height) // 2
+
+        self.render_faded(console, x, y, width, height)
+        MenuRenderer.draw_parchment_background(console, x, y, width, height)
+        MenuRenderer.draw_ornate_border(console, x, y, width, height, "Debug Console")
+
+        hint = "F10 open  |  ESC close  |  Enter run  |  Up/Down history"
+        console.print(x + 2, y + 2, hint, fg=color.bronze_text)
+
+        body_top = y + 4
+        body_bottom = y + height - 4
+        max_lines = max(1, body_bottom - body_top + 1)
+        max_width = width - 4
+        display_lines: list[str] = []
+        for line in self.output_lines:
+            wrapped = textwrap.wrap(line, max_width) if line.strip() else [""]
+            display_lines.extend(wrapped)
+        for i, line in enumerate(display_lines[-max_lines:]):
+            console.print(x + 2, body_top + i, line, fg=color.fantasy_text)
+
+        prompt_line = f">>> {self.text}"
+        console.print(x + 2, y + height - 2, prompt_line[: width - 5], fg=color.white, bg=(60, 40, 25))
+
+        import time
+        if int(time.time() * 2) % 2:
+            cursor_x = min(x + 2 + len(">>> ") + self.cursor_pos, x + width - 3)
+            console.print(cursor_x, y + height - 2, "_", fg=color.gold_accent, bg=(60, 40, 25))
 
 
 class GameOverEventHandler(EventHandler):
@@ -4857,7 +5035,7 @@ class PauseHandler(AskUserEventHandler):
 
     """Open pause menu, settings, save and exit, etc"""
     def on_render(self, console):
-        self.engine.render(console)  # Draw the main state as the background.
+        self.engine.render_ui(console)  # Draw the HUD state above the scaled game.
         window_width = 34
         window_height = 11
         x = (console.width - window_width) // 2
@@ -5063,10 +5241,14 @@ class EntityDebugHandler(SelectIndexHandler):
         # Get cursor position and find entity to debug
         cursor_x, cursor_y = self.engine.mouse_location
         cursor_x, cursor_y = int(cursor_x), int(cursor_y)
+        screen_position = self.engine.world_to_screen(cursor_x, cursor_y, console.width, console.height)
+        if screen_position is None:
+            return
+        screen_x, screen_y = screen_position
         
         # Highlight cursor position
-        console.rgb["bg"][cursor_x, cursor_y] = color.white
-        console.rgb["fg"][cursor_x, cursor_y] = color.black
+        console.rgb["bg"][screen_x, screen_y] = color.white
+        console.rgb["fg"][screen_x, screen_y] = color.black
         
         # Find entity to inspect at cursor location
         target_entity = None
@@ -5083,14 +5265,14 @@ class EntityDebugHandler(SelectIndexHandler):
         window_height = 30
         
         # Position window to avoid cursor
-        if cursor_x < console.width // 2:
+        if screen_x < console.width // 2:
             # Cursor on left, put window on right
             debug_x = console.width - window_width - 1
         else:
             # Cursor on right, put window on left  
             debug_x = 1
             
-        if cursor_y < console.height // 2:
+        if screen_y < console.height // 2:
             # Cursor in top half, put window in bottom
             debug_y = console.height - window_height - 1
         else:
@@ -5339,6 +5521,7 @@ UI:
 DEBUG:
     F2: Player Debug
     F3: Entity/Tile Debug
+    F10: Debug Console
         """
 
         width = len(max(text.splitlines(), key=len)) + 4
@@ -5386,7 +5569,7 @@ class CheatMaxLevel(EventHandler):
     
     def on_render(self, console: tcod.Console) -> None:
         """Render the main game in the background"""
-        self.engine.render(console)
+        self.engine.render_ui(console)
 
 
 class Settings(BaseEventHandler):
@@ -5417,7 +5600,7 @@ class Settings(BaseEventHandler):
             },
             "Graphics:": {
                 "Options": ["High", "Medium", "Low"],
-                "SelectedIndex": ["high", "medium", "low"].index(self.settings_data.get("graphics", "high").lower()),
+                "SelectedIndex": ["high", "medium", "low"].index(self.settings_data.get("graphics", "high").lower()) if self.settings_data.get("graphics", "high").lower() in ["high", "medium", "low"] else 0,
                 "json_key": "graphics"
             },
             "Light Flicker:": {
@@ -5519,27 +5702,7 @@ class Settings(BaseEventHandler):
         return self
 
     def render_faded(self, console: tcod.Console, menu_x: int = None, menu_y: int = None, menu_width: int = None, menu_height: int = None) -> None:
-        """Fade the console background except for the menu area."""
-        fade_alpha = 0.4  # Fade strength (0.0 = no fade, 1.0 = completely faded)
-        fade_color = (20, 20, 30)  # Dark blue-gray tint
-        
-        for x in range(console.width):
-            for y in range(console.height):
-                # Skip fading pixels that are within the menu bounds
-                if (menu_x is not None and menu_y is not None and 
-                    menu_width is not None and menu_height is not None):
-                    if (menu_x <= x < menu_x + menu_width and 
-                        menu_y <= y < menu_y + menu_height):
-                        continue
-                
-                existing_color = console.bg[x, y]
-                # Safe color blending using floating point math
-                blended_color = (
-                    int(existing_color[0] * (1 - fade_alpha) + fade_color[0] * fade_alpha),
-                    int(existing_color[1] * (1 - fade_alpha) + fade_color[1] * fade_alpha),
-                    int(existing_color[2] * (1 - fade_alpha) + fade_color[2] * fade_alpha),
-                )
-                console.bg[x, y] = blended_color
+        _fade_console_background(console, menu_x, menu_y, menu_width, menu_height)
 
     def _load_settings(self) -> dict:
         """Load settings from JSON file."""
@@ -5608,7 +5771,7 @@ class Settings(BaseEventHandler):
                 f.write("}\n")
         except Exception as e:
             # If saving fails, just continue - don't crash the game
-            self.engine.debug_log(f"Warning: Could not save settings: {e}", handler=type(self).__name__, event="settings")
+            pass
 
     def _handle_back(self) -> Optional[ActionOrHandler]:
         """Handle returning to previous handler (main menu)."""
@@ -5696,6 +5859,4 @@ class Settings(BaseEventHandler):
                         pass  # Silently handle any import/call errors
                 
         return None  # Stay in settings menu
-
-
 

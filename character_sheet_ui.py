@@ -6,6 +6,7 @@ import color
 from equipment_types import EquipmentType
 from input_handlers import AskUserEventHandler
 from render_functions import MenuRenderer
+from tcod.console import Console
 import actions
 
 if TYPE_CHECKING:
@@ -72,7 +73,7 @@ class CharacterScreen(AskUserEventHandler):
         from components.level import Level
         return Level.TRAIT_ABBREVIATIONS.get(stat_name, self._format_stat_name(stat_name))
         
-    def on_render(self, console: tcod.Console) -> None:
+    def on_render(self, console: Console) -> None:
         super().on_render(console)
 
         # Calculate window size and position
@@ -273,7 +274,7 @@ class CharacterScreen(AskUserEventHandler):
                 current_line += 1  # Extra space after category
         return None
 
-    def render_stats(self, console: tcod.Console, x: int, y: int) -> None:
+    def render_stats(self, console: Console, x: int, y: int) -> None:
         
         player = self.engine.player
         current_line = y
@@ -394,10 +395,10 @@ class CharacterScreen(AskUserEventHandler):
         # Fallback for unknown stats
         return {'value': '?'}
 
-    def render_bar(self, console: tcod.Console, x: int, y: int, total_width: int, fg_color: Tuple[int, int, int], bg_color: Tuple[int, int, int]) -> None:
+    def render_bar(self, console: Console, x: int, y: int, total_width: int, fg_color: Tuple[int, int, int], bg_color: Tuple[int, int, int]) -> None:
         console.draw_rect(x=x, y=y, width=total_width, height=1, ch=1, fg=fg_color, bg=bg_color)
     
-    def render_xp_bar(self, console: tcod.Console, x: int, y: int, current_xp: int, max_xp: int, bar_width: int = 8) -> None:
+    def render_xp_bar(self, console: Console, x: int, y: int, current_xp: int, max_xp: int, bar_width: int = 8) -> None:
         """Render a small XP progress bar."""
         if max_xp <= 0:
             filled_width = 0
@@ -421,7 +422,7 @@ class CharacterScreen(AskUserEventHandler):
 
 
 
-    def render_portrait(self, console: tcod.Console, preview_x: int, preview_y: int) -> None:
+    def render_portrait(self, console: Console, preview_x: int, preview_y: int) -> None:
         preview_size = 3
         frame_x = preview_x
         frame_y = preview_y

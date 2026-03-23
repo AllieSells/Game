@@ -27,6 +27,9 @@ light_green = (0x80, 0xFF, 0x80)
 dark_purple = (0x80, 0x0, 0x80)
 light_blue = (0x80, 0x80, 0xFF)
 
+# Entity colors
+sprite_sheet = (255, 255, 255)
+
 
 # rarity colors
 common = gray

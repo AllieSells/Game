@@ -104,7 +104,10 @@ class TurnManager:
             for effect in list(actor.effects):
                 try:
                     expired = effect.tick(actor)
-                    message = effect.get_message()
+                    message = None
+                    get_message = getattr(effect, "get_message", None)
+                    if callable(get_message):
+                        message = get_message()
                     if message:
                         message_text = message[0]
                         message_color = message[1]
@@ -365,9 +368,11 @@ class TurnManager:
     
     def _handle_status_effects(self) -> None:
         """Handle darkness, lucidity, and other environmental effects."""
+        from components.effect import Darkness
+
         # Handle darkness and lucidity system
         player_effects = getattr(self.engine.player, "effects", [])
-        has_darkness = "Darkness" in [getattr(e, "name", "") for e in player_effects]
+        has_darkness = any(isinstance(e, Darkness) for e in player_effects)
 
         if random.random() < 0.10:
             # 10% chance to recover 10% of max mana

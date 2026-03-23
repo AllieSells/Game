@@ -159,6 +159,7 @@ class Actor(Entity):
         speed: int = 100,  # Higher = faster, 100 = normal speed
         manipulation: int = 100, # Higher = better at using items, opening doors, etc. 100 = normal manipulation
         dodge_chance: float = 0.0,  # Chance to dodge attacks (0.0 to 1.0)
+        equipment_scale: float = 1.0,
         preferred_dodge_direction: Optional[str] = random.choice(["north", "south", "east", "west"]), 
         verb_base: Optional[str] = None,
         verb_present: Optional[str] = None,
@@ -178,6 +179,11 @@ class Actor(Entity):
             blocks_movement=True,
             render_order=RenderOrder.ACTOR
         )
+
+        # Sprite compositing: base_char never changes; char is rebuilt on equip
+        self.base_char: str = char
+        self.sprite_layers: list = []  # list of equip_sprite_cp ints currently active
+        self.equipment_scale: float = equipment_scale
 
         # Initialize AI if provided
         self.ai: Optional[BaseAI] = ai_cls(self) if ai_cls is not None else None
@@ -757,6 +763,7 @@ class Item(Entity):
             weight: Optional[float] = None,
             identification_level: int = 0,  # Required skill level to see true description
             identification_skill: str = "lore",  # Which skill is used for identification
+            equip_sprite_cp: int | None = None,
 
 
 
@@ -804,6 +811,7 @@ class Item(Entity):
         self.identification_skill = identification_skill
         self.enchantment_level = 0
         self.enchantments = []
+        self.equip_sprite_cp = equip_sprite_cp  # Sprite sheet cell index for equipped appearance
         
     def get_description(self, observer=None) -> str:
         """Get the item description, potentially distorted based on observer's skill level."""

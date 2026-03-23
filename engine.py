@@ -70,6 +70,8 @@ class Engine:
 
         self.mouse_x = 0
         self.mouse_y = 0
+        self.mouse_ui_x = 0
+        self.mouse_ui_y = 0
 
         # Auto-movement (pathfind-to-click)
         self.auto_move_path = []  # List of (x, y) tuples remaining in the queued path
@@ -87,6 +89,38 @@ class Engine:
         # libtcod demo's fov_torchx.  Used to derive per-source wobble (dx, dy)
         # and intensity delta (di) for torch/fire flicker.
         self._torch_t: float = 0.0
+
+    def get_camera_origin(self, view_width: int, view_height: int) -> tuple[int, int]:
+        """Return the top-left world tile of the current viewport."""
+        if not self.game_map or not self.player:
+            return 0, 0
+
+        max_x = max(0, self.game_map.width - view_width)
+        max_y = max(0, self.game_map.height - view_height)
+        origin_x = min(max(0, self.player.x - view_width // 2), max_x)
+        origin_y = min(max(0, self.player.y - view_height // 2), max_y)
+        return origin_x, origin_y
+
+    def world_to_screen(self, x: int, y: int, view_width: int, view_height: int) -> Optional[tuple[int, int]]:
+        """Convert a world-space tile into viewport-relative console coordinates."""
+        origin_x, origin_y = self.get_camera_origin(view_width, view_height)
+        screen_x = int(x) - origin_x
+        screen_y = int(y) - origin_y
+        if 0 <= screen_x < view_width and 0 <= screen_y < view_height:
+            return screen_x, screen_y
+        return None
+
+    def screen_to_world(self, x: int, y: int, view_width: int, view_height: int) -> Optional[tuple[int, int]]:
+        """Convert viewport-relative console coordinates into world-space tile coordinates."""
+        if not self.game_map:
+            return None
+
+        origin_x, origin_y = self.get_camera_origin(view_width, view_height)
+        world_x = origin_x + int(x)
+        world_y = origin_y + int(y)
+        if self.game_map.in_bounds(world_x, world_y):
+            return world_x, world_y
+        return None
 
     def get_adjacent_tiles(self, x: int, y: int) -> list[tuple[int, int]]:
         # Returns adjacent (including diagonals) tiles
@@ -126,6 +160,28 @@ class Engine:
         else:
             with open(log_path, "a") as log_file:
                 log_file.write(f" {time.ctime()}: Handler: {handler}, Event: {event}, Message: {message}\n")
+
+    def _effect_list(self, target) -> list:
+        effects = getattr(target, "effects", None)
+        if effects is None:
+            effects = []
+            setattr(target, "effects", effects)
+        return effects
+
+    def has_effect(self, target, effect_cls) -> bool:
+        return any(isinstance(effect, effect_cls) for effect in self._effect_list(target))
+
+    def add_or_refresh_effect(self, target, effect):
+        effects = self._effect_list(target)
+        for existing in effects:
+            if isinstance(existing, effect.__class__):
+                if existing.duration is None or effect.duration is None:
+                    existing.duration = None
+                else:
+                    existing.duration = max(existing.duration, effect.duration)
+                return existing
+        effects.append(effect)
+        return effect
 
     def tutorial_ticking(self, console: Console):
         """Special tick method used during the tutorial"""
@@ -372,6 +428,17 @@ class Engine:
         
         try:
             for entity in list(self.game_map.entities):
+                # Update corpse sprite based on whether it still has loot
+                if getattr(entity, 'type', None) == 'Dead' and hasattr(entity, 'container') and entity.container:
+                    has_loot = bool(entity.container.items)
+                    current_cp = ord(entity.char) if isinstance(entity.char, str) else entity.char
+                    in_loot_range = 0xE013 <= current_cp <= 0xE015
+                    in_empty_range = 0xE010 <= current_cp <= 0xE012
+                    if has_loot and not in_loot_range:
+                        entity.char = random.choice([chr(0xE013), chr(0xE014), chr(0xE015)])
+                    elif not has_loot and not in_empty_range:
+                        entity.char = random.choice([chr(0xE010), chr(0xE011), chr(0xE012)])
+
                 # Get Quest Givers on map
                 if hasattr(entity, "type"):
                     if entity.type == "Quest Giver":
@@ -389,10 +456,9 @@ class Engine:
                 # Get liquid system - check for fire coatings on tiles
                 for coating in self.game_map.liquid_system.coatings.values():
                     if coating.liquid_type == LiquidType.FIRE:
-                        # Add flicker animation to animation queue
-                        self.animation_queue.append(
-                            FireFlicker(coating.get_pos())
-                        )
+                        pos = coating.get_pos()
+                        if not any(isinstance(a, FireFlicker) and a.position == pos for a in self.animation_queue):
+                            self.animation_queue.append(FireFlicker(pos))
                         
                 # Check entities for fire coatings on body parts
                 if hasattr(entity, 'body_parts') and entity.body_parts:
@@ -425,15 +491,15 @@ class Engine:
                         try:
                             
 
-                            # Bonfire has more frequent and intense animations
-                            flicker_chance = 0.35 if entity.name == "Bonfire" else 0.20
+                            # Flicker: always keep one running per position
+                            pos = (entity.x, entity.y)
                             smoke_chance = 0.08 if entity.name == "Bonfire" else 0.01
-
-                            # Flicker: frequent, short blips
-                            if random.random() < flicker_chance and entity.name == "Campfire":
-                                self.animation_queue.append(FireFlicker((entity.x, entity.y)))
-                            elif random.random() < flicker_chance and entity.name == "Bonfire":
-                                self.animation_queue.append(BonefireFlicker((entity.x, entity.y)))
+                            if entity.name == "Campfire":
+                                if not any(isinstance(a, FireFlicker) and a.position == pos for a in self.animation_queue):
+                                    self.animation_queue.append(FireFlicker(pos))
+                            elif entity.name == "Bonfire":
+                                if not any(isinstance(a, BonefireFlicker) and a.position == pos for a in self.animation_queue):
+                                    self.animation_queue.append(BonefireFlicker(pos))
 
                             # Smoke: rarer, longer lasting
                             if random.random() < smoke_chance:
@@ -476,7 +542,7 @@ class Engine:
             self.cursor_hint = "walk"
             import color as _color
             now_am = time.monotonic()
-            if now_am - self._last_auto_move_time >= 0.15:
+            if now_am - self._last_auto_move_time >= 0.05:
                 # Cancel if an enemy is visible
                 enemy_visible = any(
                     actor is not self.player and self.game_map.visible[actor.x, actor.y]
@@ -617,14 +683,15 @@ class Engine:
         """
         import random
         import copy
+        from components.effect import Darkness
 
         player = getattr(self, "player", None)
         gm = getattr(self, "game_map", None)
         if player is None or gm is None:
             return
 
-        # Is the player in darkness? (case-insensitive name check)
-        in_dark = any(getattr(e, "name", "").lower() == "darkness" for e in getattr(player, "effects", []))
+        # Is the player currently affected by Darkness?
+        in_dark = self.has_effect(player, Darkness)
         if not in_dark:
             # ensure cooldown exists but do nothing
             self._dark_spawn_cooldown = getattr(self, "_dark_spawn_cooldown", 0)
@@ -811,6 +878,8 @@ class Engine:
 
 
     def update_fov(self) -> None:
+        from components.effect import Darkness, DarkvisionEffect
+
         # Check if player has a torch equipped using optimized helper
         has_torch = False
         try:
@@ -832,7 +901,7 @@ class Engine:
 
         # Torch increases FOV radius; campfires only affect Darkness (lighting), not FOV
         radius = 6 if has_torch else 3
-        if any(getattr(effect, "name", "") == "Darkvision" for effect in self.player.effects):
+        if self.has_effect(self.player, DarkvisionEffect):
             radius = 10
 
         if self.game_map.sunlit:
@@ -852,10 +921,7 @@ class Engine:
 
         # Apply or remove the persistent Darkness effect based on tile light level
         try:
-            # Deferred import to avoid circular imports at module load time
-            from components.effect import Effect
-
-            has_darkness = any(getattr(e, "name", "") == "Darkness" for e in self.player.effects)
+            has_darkness = self.has_effect(self.player, Darkness)
             
             # Check current tile's light level
             current_light_level = 0.0
@@ -867,28 +933,19 @@ class Engine:
             if current_light_level <= 0.2:
                 # Player is in darkness (no real light sources): ensure they have the Darkness effect
                 if not has_darkness:
-                    try:
-                        # duration=None => persistent until removed
-                        self.player.add_effect(Effect(name="Darkness", duration=None, description="You are in darkness", type="Darkness"))
-                    except Exception:
-                        pass
+                    self.add_or_refresh_effect(self.player, Darkness(duration=None))
             else:
                 # Player has actual light sources: remove any Darkness effects
                 if has_darkness:
-                    for e in list(self.player.effects):
-                        try:
-                            if getattr(e, "type", "") == "Darkness":
-                                self.player.remove_effect(e.type)
-                        except Exception:
-                            pass
+                    self.player.effects = [e for e in self.player.effects if not isinstance(e, Darkness)]
         except Exception:
             # If anything goes wrong, don't break FOV update
             pass
             
-    def render(self, console: Console) -> None:
+    def render_game(self, console: Console) -> None:
         self.game_map.render(console)
 
-
+    def render_ui(self, console: Console) -> None:
         # Render damage indicator if active - render above all HUD elements
         if self.damage_indicator_timer > 0:
             self.render_damage_indicator(console)
@@ -940,33 +997,48 @@ class Engine:
             player=self.player,
         )
 
-
-        render_functions.render_effects(
+        render_functions.render_status_hover_panel(
             console=console,
-            effects=self.player.effects
+            mouse_ui_x=self.mouse_ui_x,
+            mouse_ui_y=self.mouse_ui_y,
+            player=self.player,
         )
+
+        if getattr(self, 'auto_move_path', None):
+            self.cursor_hint = "walk"
+            render_functions.render_names_at_mouse_location(
+                console=console, x=1, y=42, engine=self
+            )
+            if self.debug:
+                render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities), self)
+            return
+
         tile = self.mouse_x, self.mouse_y
         # Only recompute cursor_hint when the mouse tile changes
-        if getattr(self, '_last_cursor_tile', None) != tile:
-            self._last_cursor_tile = tile
+        if getattr(self, '_last_cursor_tile', None) != (tile, self.mouse_ui_y):
+            self._last_cursor_tile = (tile, self.mouse_ui_y)
             interactable = False
             fightable = False
             self.cursor_hint = None
-            if self.game_map.in_bounds(*tile):
+            if self.mouse_ui_y > 38:
+                interactable = False
+                fightable = False
+            elif self.game_map.in_bounds(*tile):
                 if self.game_map.tiles[tile]['interactable']:
                     interactable = True
-            # Get entities at mouse location
-            for ent in self.game_map.entities:
-                # Check if interactable
-                if hasattr(ent, "container") and ent.container and (
-                    ent.x == self.mouse_x and ent.y == self.mouse_y
-                ):
-                    interactable = True
-                # Check if enemy, has hp, and NOT player
-                if hasattr(ent, "fighter") and ent.fighter and ent.fighter.hp > 0 and ent.fighter != self.player.fighter and (
-                    ent.x == self.mouse_x and ent.y == self.mouse_y
-                ):
-                    fightable = True
+            if self.mouse_ui_y <= 38:
+                # Get entities at mouse location
+                for ent in self.game_map.entities:
+                    # Check if interactable
+                    if hasattr(ent, "container") and ent.container and (
+                        ent.x == self.mouse_x and ent.y == self.mouse_y
+                    ):
+                        interactable = True
+                    # Check if enemy, has hp, and NOT player
+                    if hasattr(ent, "fighter") and ent.fighter and ent.fighter.hp > 0 and ent.fighter != self.player.fighter and (
+                        ent.x == self.mouse_x and ent.y == self.mouse_y
+                    ):
+                        fightable = True
             if interactable:
                 self.cursor_hint = "interact"
             elif fightable:
@@ -977,6 +1049,10 @@ class Engine:
         
         if self.debug:
             render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities), self)
+
+    def render(self, console: Console) -> None:
+        self.render_game(console)
+        self.render_ui(console)
 
     def trigger_damage_indicator(self):
         """Trigger the damage indicator visual effect"""

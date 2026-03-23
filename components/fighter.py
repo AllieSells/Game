@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from entity import Actor
 
 import sounds
+import random
 
 
 class Fighter(BaseComponent):
@@ -35,20 +36,28 @@ class Fighter(BaseComponent):
     def hp(self) -> int:
         return self._hp
     
+    @property
+    def power(self) -> int:
+        return self.base_power
+    
+    @property
+    def defense(self) -> int:
+        return self.base_defense
+
+    @power.setter
+    def power(self, value: int) -> None:
+        self.base_power = max(0, value)  # Ensure power doesn't go negative
+    
+    @defense.setter
+    def defense(self, value: int) -> None:
+        self.base_defense = max(0, value)  # Ensure defense doesn't go negative
+    
     @hp.setter
     def hp(self, value: int) -> None:
         self._hp = max(0, min(value, self.max_hp))  # Clamp the value between 0 and max_hp
         if self._hp == 0 and self.parent.ai:
             self.engine.debug_log(f"{self.parent.name} has 0 HP. Triggering death.", handler=self.__class__.__name__, event="DeathTrigger")
             self.die()
-
-    @property
-    def defense(self) -> int:
-        return self.base_defense + self.defense_bonus
-    
-    @property
-    def power(self) -> int:
-        return self.base_power + self.power_bonus
 
     @property
     def defense_bonus(self) -> int:
@@ -113,8 +122,13 @@ class Fighter(BaseComponent):
             return
 
         # Default death behavior: leave a corpse
-        self.parent.char = "%"
-        self.parent.color = (191, 0, 0)
+        # Check if inventory has items
+        if self.parent.inventory and self.parent.inventory.items:
+            
+            self.parent.char = random.choice([chr(0xE013), chr(0xE014), chr(0xE015)])
+        else:
+            self.parent.char = random.choice([chr(0xE010), chr(0xE011), chr(0xE012)])
+        self.parent.color = (255, 255, 255)
         self.parent.blocks_movement = False
         self.parent.ai = None
         import text_utils

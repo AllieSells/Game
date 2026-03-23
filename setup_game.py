@@ -447,7 +447,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
         self.generation_complete = False
         self.completion_delay = 0  # Frames to show completion before transitioning
     
-    def on_render(self, console: tcod.Console) -> None:
+    def on_render(self, console: tcod.console.Console) -> None:
         try:
             """Render the loading screen with parchment styling."""
             # Use animated background
@@ -708,7 +708,7 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
                 return False, f"Failed to delete '{display_name}': {e}"
         return False, "Invalid save selection."
     
-    def on_render(self, console: tcod.Console) -> None:
+    def on_render(self, console: tcod.console.Console) -> None:
         """Render the save game selection menu."""
         current_bg = animated_bg.get_current_frame()
         if current_bg is not None:
@@ -871,7 +871,7 @@ class ConfirmationDialog(input_handlers.BaseEventHandler):
         self.selected_option = 1  # Default to "No" for safety
         self.options = ["Yes", "No"]
     
-    def on_render(self, console: tcod.Console) -> None:
+    def on_render(self, console: tcod.console.Console) -> None:
         """Render the confirmation dialog."""
         # Render parent in background
         if hasattr(self.parent_handler, 'on_render'):
@@ -954,7 +954,7 @@ class DebugLevelScreen(input_handlers.BaseEventHandler):
         from input_handlers import MainGameEventHandler
         return MainGameEventHandler(self.engine)
     
-    def on_render(self, console: tcod.Console) -> None:
+    def on_render(self, console: tcod.console.Console) -> None:
         """This shouldn't be called since we transition immediately."""
         console.clear()
         console.print(
@@ -989,7 +989,7 @@ class MainMenu(input_handlers.BaseEventHandler):
         self.menu_start_y = 0
         self.menu_x = 0 
 
-    def on_render(self, console: tcod.Console) -> None:
+    def on_render(self, console: tcod.console.Console) -> None:
         """Render the main menu with parchment styling and arrow key selection."""
         current_bg = animated_bg.get_current_frame()
         if current_bg is not None:
