@@ -111,8 +111,8 @@ class BurningEffect(Effect):
     def tick(self, target):
         if self.duration is None:
             return False
-        self.duration -=1
-        sounds.play_fire_burn_sound()
+        self.duration -= 1
+        sounds.play_poison_burn_sound()
         return self.duration <= 0
 
 

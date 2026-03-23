@@ -1,150 +1,551 @@
 Log file cleared at startup.
-Sun Mar 22 21:13:28 2026: Game started.
+Sun Mar 22 23:47:58 2026: Game started.
 Loaded exceptions module in 0.00 seconds
-Loaded input_handlers module in 3.01 seconds
+Loaded input_handlers module in 2.67 seconds
 Loaded 240 frames for animated background.
-Loaded setup_game module in 0.38 seconds
+Loaded setup_game module in 0.39 seconds
 Loaded tcod.sdl.video and traceback modules in 0.00 seconds
- Sun Mar 22 21:13:31 2026: Handler: MainMenu, Event: menu_init, Message: Menu Engine init
-Finished loading in 4.44 seconds
+ Sun Mar 22 23:48:01 2026: Handler: MainMenu, Event: menu_init, Message: Menu Engine init
+Finished loading in 4.08 seconds
 Settings loaded: {'fullscreen': False, 'audio': 100, 'graphics': 'high', 'light_flicker': True}
 =========================================================================================================================================================================================================================
- Sun Mar 22 21:13:35 2026: Handler: Engine, Event: game_start, Message: Starting new game with seed: 1644092346
- Sun Mar 22 21:13:35 2026: Handler: Engine, Event: game_start, Message: Engine: <engine.Engine object at 0x000002705CE42330>
- Sun Mar 22 21:13:35 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Silentspore
- Sun Mar 22 21:13:35 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Glowcup
- Sun Mar 22 21:13:35 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Oakcup
- Sun Mar 22 21:13:35 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Pineroot
- Sun Mar 22 21:13:35 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Silvercap
- Sun Mar 22 21:13:35 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Capbloom
- Sun Mar 22 21:13:35 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Darkspore
- Sun Mar 22 21:13:35 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Purplepuff
- Sun Mar 22 21:13:35 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Capbloom
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Dagger: equip_all_matching=False, required_tags={'hand', 'grasp'}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'cranium', 'head', 'armor'}, <BodyPartType.NECK: 2>: {'cranium', 'neck', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'torso', 'armor'}, <BodyPartType.LEFT_ARM: 4>: {'arm', 'upper_limbs', 'left_arm', 'left', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right', 'arm', 'upper_limbs', 'right_arm', 'armor'}, <BodyPartType.LEFT_HAND: 6>: {'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'}, <BodyPartType.RIGHT_HAND: 7>: {'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'}, <BodyPartType.LEFT_LEG: 8>: {'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'}, <BodyPartType.RIGHT_LEG: 9>: {'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'}, <BodyPartType.LEFT_FOOT: 10>: {'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'}, <BodyPartType.RIGHT_FOOT: 11>: {'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'}}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Boots +I: equip_all_matching=True, required_tags={'foot'}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'cranium', 'head', 'armor'}, <BodyPartType.NECK: 2>: {'cranium', 'neck', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'torso', 'armor'}, <BodyPartType.LEFT_ARM: 4>: {'arm', 'upper_limbs', 'left_arm', 'left', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right', 'arm', 'upper_limbs', 'right_arm', 'armor'}, <BodyPartType.LEFT_HAND: 6>: {'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'}, <BodyPartType.RIGHT_HAND: 7>: {'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'}, <BodyPartType.LEFT_LEG: 8>: {'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'}, <BodyPartType.RIGHT_LEG: 9>: {'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'}, <BodyPartType.LEFT_FOOT: 10>: {'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'}, <BodyPartType.RIGHT_FOOT: 11>: {'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'}}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'cranium', 'head', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'cranium', 'neck', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'torso', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'arm', 'upper_limbs', 'left_arm', 'left', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right', 'arm', 'upper_limbs', 'right_arm', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'} -> match=True
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'} -> match=True
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['left foot', 'right foot']
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Cap +I: equip_all_matching=True, required_tags={'head', 'neck'}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'cranium', 'head', 'armor'}, <BodyPartType.NECK: 2>: {'cranium', 'neck', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'torso', 'armor'}, <BodyPartType.LEFT_ARM: 4>: {'arm', 'upper_limbs', 'left_arm', 'left', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right', 'arm', 'upper_limbs', 'right_arm', 'armor'}, <BodyPartType.LEFT_HAND: 6>: {'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'}, <BodyPartType.RIGHT_HAND: 7>: {'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'}, <BodyPartType.LEFT_LEG: 8>: {'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'}, <BodyPartType.RIGHT_LEG: 9>: {'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'}, <BodyPartType.LEFT_FOOT: 10>: {'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'}, <BodyPartType.RIGHT_FOOT: 11>: {'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'}}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'cranium', 'head', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'cranium', 'neck', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'torso', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'arm', 'upper_limbs', 'left_arm', 'left', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right', 'arm', 'upper_limbs', 'right_arm', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: []
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Leggings: equip_all_matching=True, required_tags={'leg'}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'cranium', 'head', 'armor'}, <BodyPartType.NECK: 2>: {'cranium', 'neck', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'torso', 'armor'}, <BodyPartType.LEFT_ARM: 4>: {'arm', 'upper_limbs', 'left_arm', 'left', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right', 'arm', 'upper_limbs', 'right_arm', 'armor'}, <BodyPartType.LEFT_HAND: 6>: {'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'}, <BodyPartType.RIGHT_HAND: 7>: {'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'}, <BodyPartType.LEFT_LEG: 8>: {'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'}, <BodyPartType.RIGHT_LEG: 9>: {'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'}, <BodyPartType.LEFT_FOOT: 10>: {'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'}, <BodyPartType.RIGHT_FOOT: 11>: {'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'}}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'cranium', 'head', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'cranium', 'neck', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'torso', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'arm', 'upper_limbs', 'left_arm', 'left', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right', 'arm', 'upper_limbs', 'right_arm', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'} -> match=True
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'} -> match=True
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['left leg', 'right leg']
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Dagger: equip_all_matching=False, required_tags={'hand', 'grasp'}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'cranium', 'head', 'armor'}, <BodyPartType.NECK: 2>: {'cranium', 'neck', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'torso', 'armor'}, <BodyPartType.LEFT_ARM: 4>: {'arm', 'upper_limbs', 'left_arm', 'left', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right', 'arm', 'upper_limbs', 'right_arm', 'armor'}, <BodyPartType.LEFT_HAND: 6>: {'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'}, <BodyPartType.RIGHT_HAND: 7>: {'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'}, <BodyPartType.LEFT_LEG: 8>: {'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'}, <BodyPartType.RIGHT_LEG: 9>: {'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'}, <BodyPartType.LEFT_FOOT: 10>: {'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'}, <BodyPartType.RIGHT_FOOT: 11>: {'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'}}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Armor +I: equip_all_matching=True, required_tags={'torso'}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'cranium', 'head', 'armor'}, <BodyPartType.NECK: 2>: {'cranium', 'neck', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'torso', 'armor'}, <BodyPartType.LEFT_ARM: 4>: {'arm', 'upper_limbs', 'left_arm', 'left', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right', 'arm', 'upper_limbs', 'right_arm', 'armor'}, <BodyPartType.LEFT_HAND: 6>: {'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'}, <BodyPartType.RIGHT_HAND: 7>: {'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'}, <BodyPartType.LEFT_LEG: 8>: {'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'}, <BodyPartType.RIGHT_LEG: 9>: {'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'}, <BodyPartType.LEFT_FOOT: 10>: {'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'}, <BodyPartType.RIGHT_FOOT: 11>: {'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'}}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'cranium', 'head', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'cranium', 'neck', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'torso', 'armor'} -> match=True
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'arm', 'upper_limbs', 'left_arm', 'left', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right', 'arm', 'upper_limbs', 'right_arm', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['right hand', 'torso']
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Boots: equip_all_matching=True, required_tags={'foot'}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'cranium', 'head', 'armor'}, <BodyPartType.NECK: 2>: {'cranium', 'neck', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'torso', 'armor'}, <BodyPartType.LEFT_ARM: 4>: {'arm', 'upper_limbs', 'left_arm', 'left', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right', 'arm', 'upper_limbs', 'right_arm', 'armor'}, <BodyPartType.LEFT_HAND: 6>: {'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'}, <BodyPartType.RIGHT_HAND: 7>: {'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'}, <BodyPartType.LEFT_LEG: 8>: {'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'}, <BodyPartType.RIGHT_LEG: 9>: {'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'}, <BodyPartType.LEFT_FOOT: 10>: {'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'}, <BodyPartType.RIGHT_FOOT: 11>: {'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'}}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'cranium', 'head', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'cranium', 'neck', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'torso', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'arm', 'upper_limbs', 'left_arm', 'left', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right', 'arm', 'upper_limbs', 'right_arm', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'} -> match=True
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'} -> match=True
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['right hand', 'torso', 'left foot', 'right foot']
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Dagger: equip_all_matching=False, required_tags={'hand', 'grasp'}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'cranium', 'head', 'armor'}, <BodyPartType.NECK: 2>: {'cranium', 'neck', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'torso', 'armor'}, <BodyPartType.LEFT_ARM: 4>: {'arm', 'upper_limbs', 'left_arm', 'left', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right', 'arm', 'upper_limbs', 'right_arm', 'armor'}, <BodyPartType.LEFT_HAND: 6>: {'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'}, <BodyPartType.RIGHT_HAND: 7>: {'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'}, <BodyPartType.LEFT_LEG: 8>: {'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'}, <BodyPartType.RIGHT_LEG: 9>: {'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'}, <BodyPartType.LEFT_FOOT: 10>: {'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'}, <BodyPartType.RIGHT_FOOT: 11>: {'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'}}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Armor +I: equip_all_matching=True, required_tags={'torso'}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'cranium', 'head', 'armor'}, <BodyPartType.NECK: 2>: {'cranium', 'neck', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'torso', 'armor'}, <BodyPartType.LEFT_ARM: 4>: {'arm', 'upper_limbs', 'left_arm', 'left', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right', 'arm', 'upper_limbs', 'right_arm', 'armor'}, <BodyPartType.LEFT_HAND: 6>: {'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'}, <BodyPartType.RIGHT_HAND: 7>: {'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'}, <BodyPartType.LEFT_LEG: 8>: {'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'}, <BodyPartType.RIGHT_LEG: 9>: {'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'}, <BodyPartType.LEFT_FOOT: 10>: {'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'}, <BodyPartType.RIGHT_FOOT: 11>: {'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'}}
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'cranium', 'head', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'cranium', 'neck', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'torso', 'armor'} -> match=True
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'arm', 'upper_limbs', 'left_arm', 'left', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right', 'arm', 'upper_limbs', 'right_arm', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'} -> match=False
- Sun Mar 22 21:13:35 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['right hand', 'torso']
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Boots: equip_all_matching=True, required_tags={'foot'}
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'cranium', 'head', 'armor'}, <BodyPartType.NECK: 2>: {'cranium', 'neck', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'torso', 'armor'}, <BodyPartType.LEFT_ARM: 4>: {'arm', 'upper_limbs', 'left_arm', 'left', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right', 'arm', 'upper_limbs', 'right_arm', 'armor'}, <BodyPartType.LEFT_HAND: 6>: {'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'}, <BodyPartType.RIGHT_HAND: 7>: {'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'}, <BodyPartType.LEFT_LEG: 8>: {'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'}, <BodyPartType.RIGHT_LEG: 9>: {'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'}, <BodyPartType.LEFT_FOOT: 10>: {'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'}, <BodyPartType.RIGHT_FOOT: 11>: {'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'}}
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'cranium', 'head', 'armor'} -> match=False
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'cranium', 'neck', 'armor'} -> match=False
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'torso', 'armor'} -> match=False
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'arm', 'upper_limbs', 'left_arm', 'left', 'armor'} -> match=False
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right', 'arm', 'upper_limbs', 'right_arm', 'armor'} -> match=False
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'left', 'left_hand', 'use'} -> match=False
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'right', 'manipulate', 'upper_limbs', 'grasp', 'hold', 'hand', 'use', 'right_hand'} -> match=False
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'lower_limbs', 'left_leg', 'left', 'leg', 'locomotion'} -> match=False
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right', 'lower_limbs', 'right_leg', 'leg', 'locomotion'} -> match=False
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'lower_limbs', 'foot', 'left', 'left_foot', 'locomotion', 'armor'} -> match=True
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'right', 'lower_limbs', 'foot', 'right_foot', 'locomotion', 'armor'} -> match=True
- Sun Mar 22 21:13:36 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['left foot', 'right foot']
- Sun Mar 22 21:13:38 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Sun Mar 22 21:13:38 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Sun Mar 22 21:13:38 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Sun Mar 22 21:13:39 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741885 (modifiers: 36864)
- Sun Mar 22 21:13:57 2026: Handler: Fighter, Event: DeathTrigger, Message: Player has 0 HP. Triggering death.
-DEBUG: Gave 10 XP to evocation and 8.0 XP to arcana for casting Fireball.
- Sun Mar 22 21:13:57 2026: Handler: LiquidSystem, Event: combat, Message: Applied FIRE effect to Corpse of Goblin for 2 damage.
- Sun Mar 22 21:13:57 2026: Handler: LiquidSystem, Event: combat, Message: Applied FIRE effect to Corpse of Player for 2 damage.
- Sun Mar 22 21:13:57 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 1
- Sun Mar 22 21:14:01 2026: Handler: MainMenu, Event: menu_init, Message: Menu Engine init
+ Sun Mar 22 23:48:04 2026: Handler: Engine, Event: game_start, Message: Starting new game with seed: 1573921284
+ Sun Mar 22 23:48:04 2026: Handler: Engine, Event: game_start, Message: Engine: <engine.Engine object at 0x0000019EC5D7EC30>
+ Sun Mar 22 23:48:04 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Maple-agaric
+ Sun Mar 22 23:48:04 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Blackshroom
+ Sun Mar 22 23:48:04 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Golden-agaric
+ Sun Mar 22 23:48:04 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Silentspore
+ Sun Mar 22 23:48:04 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Ironspore
+ Sun Mar 22 23:48:04 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Bluecup
+ Sun Mar 22 23:48:04 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Birchpuff
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Dagger +I: equip_all_matching=False, required_tags={'hand', 'grasp'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Dagger: equip_all_matching=False, required_tags={'hand', 'grasp'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Cap: equip_all_matching=True, required_tags={'neck', 'head'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['right hand']
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Leggings: equip_all_matching=True, required_tags={'leg'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['left leg', 'right leg']
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Boots: equip_all_matching=True, required_tags={'foot'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['left leg', 'right leg', 'left foot', 'right foot']
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Leggings: equip_all_matching=True, required_tags={'leg'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['left leg', 'right leg']
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Boots: equip_all_matching=True, required_tags={'foot'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['left leg', 'right leg', 'left foot', 'right foot']
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Cap: equip_all_matching=True, required_tags={'neck', 'head'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: []
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Leggings: equip_all_matching=True, required_tags={'leg'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['left leg', 'right leg']
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Dagger: equip_all_matching=False, required_tags={'hand', 'grasp'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Armor: equip_all_matching=True, required_tags={'torso'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['right hand', 'torso']
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Boots: equip_all_matching=True, required_tags={'foot'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=True
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['right hand', 'torso', 'left foot', 'right foot']
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Cap: equip_all_matching=True, required_tags={'neck', 'head'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: []
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Cap: equip_all_matching=True, required_tags={'neck', 'head'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: []
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Dagger +I: equip_all_matching=False, required_tags={'hand', 'grasp'}
+ Sun Mar 22 23:48:04 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'use', 'manipulate', 'grasp'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'use', 'manipulate', 'right', 'grasp'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Giant Spider has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Sun Mar 22 23:48:07 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:08 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:08 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:08 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:08 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:08 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:08 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:08 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:08 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:08 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Sun Mar 22 23:48:08 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Sun Mar 22 23:48:08 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741885 (modifiers: 36864)
+ Sun Mar 22 23:48:10 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:48:10 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 1
+ Sun Mar 22 23:48:10 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:48:10 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 2
+ Sun Mar 22 23:48:11 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:48:11 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 3
+ Sun Mar 22 23:48:11 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:48:11 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 4
+ Sun Mar 22 23:48:11 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:48:11 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 5
+ Sun Mar 22 23:48:12 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Sun Mar 22 23:48:12 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 6
+ Sun Mar 22 23:48:15 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:48:15 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 7
+ Sun Mar 22 23:48:15 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:48:15 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 8
+ Sun Mar 22 23:48:15 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Sun Mar 22 23:48:15 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 9
+ Sun Mar 22 23:48:16 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:48:16 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 10
+ Sun Mar 22 23:48:25 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741883 (modifiers: 36864)
+ Sun Mar 22 23:48:29 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:48:29 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 11
+ Sun Mar 22 23:48:30 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:48:30 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 12
+ Sun Mar 22 23:48:30 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:48:30 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 13
+ Sun Mar 22 23:48:33 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741883 (modifiers: 36864)
+ Sun Mar 22 23:48:35 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741883 (modifiers: 36864)
+ Sun Mar 22 23:48:40 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741883 (modifiers: 36864)
+ Sun Mar 22 23:48:40 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741883 (modifiers: 36864)
+ Sun Mar 22 23:48:55 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741883 (modifiers: 36864)
+ Sun Mar 22 23:49:03 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741883 (modifiers: 36864)
+ Sun Mar 22 23:49:07 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741883 (modifiers: 36864)
+ Sun Mar 22 23:49:56 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Sun Mar 22 23:49:56 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 14
+ Sun Mar 22 23:49:56 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Sun Mar 22 23:49:56 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 15
+ Sun Mar 22 23:50:02 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Sun Mar 22 23:50:02 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 16
+ Sun Mar 22 23:50:02 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Sun Mar 22 23:50:02 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 17
+ Sun Mar 22 23:50:02 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:03 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Sun Mar 22 23:50:03 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 18
+ Sun Mar 22 23:50:03 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Sun Mar 22 23:50:03 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 19
+ Sun Mar 22 23:50:03 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:03 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 20
+ Sun Mar 22 23:50:03 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:03 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 21
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Longsword: equip_all_matching=True, required_tags={'hand', 'grasp'}
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'grasp', 'use', 'manipulate'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'grasp', 'use', 'right', 'manipulate'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=False
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'grasp', 'use', 'manipulate'} -> match=True
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'grasp', 'use', 'right', 'manipulate'} -> match=True
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:50:05 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['left hand', 'right hand']
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: Leather Cap: equip_all_matching=True, required_tags={'neck', 'head'}
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: All parts: {<BodyPartType.HEAD: 1>: {'head', 'cranium', 'armor'}, <BodyPartType.NECK: 2>: {'neck', 'cranium', 'armor'}, <BodyPartType.TORSO: 3>: {'core', 'armor', 'torso'}, <BodyPartType.LEFT_ARM: 4>: {'left', 'upper_limbs', 'arm', 'left_arm', 'armor'}, <BodyPartType.RIGHT_ARM: 5>: {'right_arm', 'upper_limbs', 'arm', 'armor', 'right'}, <BodyPartType.LEFT_HAND: 6>: {'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'grasp', 'use', 'manipulate'}, <BodyPartType.RIGHT_HAND: 7>: {'hold', 'right_hand', 'hand', 'upper_limbs', 'grasp', 'use', 'right', 'manipulate'}, <BodyPartType.LEFT_LEG: 8>: {'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'}, <BodyPartType.RIGHT_LEG: 9>: {'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'}, <BodyPartType.LEFT_FOOT: 10>: {'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'}, <BodyPartType.RIGHT_FOOT: 11>: {'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'}}
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'head' tags={'head', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'neck' tags={'neck', 'cranium', 'armor'} -> match=False
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'torso' tags={'core', 'armor', 'torso'} -> match=False
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left arm' tags={'left', 'upper_limbs', 'arm', 'left_arm', 'armor'} -> match=False
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right arm' tags={'right_arm', 'upper_limbs', 'arm', 'armor', 'right'} -> match=False
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left hand' tags={'left', 'hold', 'hand', 'upper_limbs', 'left_hand', 'grasp', 'use', 'manipulate'} -> match=False
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right hand' tags={'hold', 'right_hand', 'hand', 'upper_limbs', 'grasp', 'use', 'right', 'manipulate'} -> match=False
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left leg' tags={'left', 'left_leg', 'leg', 'locomotion', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right leg' tags={'right_leg', 'leg', 'locomotion', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'left foot' tags={'left', 'foot', 'left_foot', 'locomotion', 'armor', 'lower_limbs'} -> match=False
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item:   Part 'right foot' tags={'foot', 'right_foot', 'locomotion', 'armor', 'lower_limbs', 'right'} -> match=False
+ Sun Mar 22 23:50:10 2026: Handler: Equipment, Event: EquipDebug, Message: DEBUG: Equipping item: body_part_coverage after equip: ['left hand', 'right hand']
+ Sun Mar 22 23:50:11 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:11 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 22
+ Sun Mar 22 23:50:11 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:11 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 23
+ Sun Mar 22 23:50:11 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:11 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 24
+ Sun Mar 22 23:50:12 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:12 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 25
+ Sun Mar 22 23:50:12 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 26
+ Sun Mar 22 23:50:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 27
+ Sun Mar 22 23:50:13 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 28
+ Sun Mar 22 23:50:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 29
+ Sun Mar 22 23:50:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 30
+ Sun Mar 22 23:50:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 31
+ Sun Mar 22 23:50:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 32
+Processing text fragment 0: 'Birchpuff' with color (128, 128, 255)
+Processing text fragment 0: 'Birchpuff' with color (128, 128, 255)
+Processing text fragment 0: 'Birchpuff' with color (128, 128, 255)
+Processing text fragment 0: 'Birchpuff' with color (128, 128, 255)
+Processing text fragment 0: 'Birchpuff' with color (128, 128, 255)
+Processing text fragment 0: 'Birchpuff' with color (128, 128, 255)
+Processing text fragment 0: 'Birchpuff' with color (128, 128, 255)
+Processing text fragment 0: 'Birchpuff' with color (128, 128, 255)
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Floor.' with color (255, 255, 255)
+Processing text fragment 0: 'You can walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You can see through this.' with color (255, 255, 255)
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Floor.' with color (255, 255, 255)
+Processing text fragment 0: 'You can walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You can see through this.' with color (255, 255, 255)
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Floor.' with color (255, 255, 255)
+Processing text fragment 0: 'You can walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You can see through this.' with color (255, 255, 255)
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Floor.' with color (255, 255, 255)
+Processing text fragment 0: 'You can walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You can see through this.' with color (255, 255, 255)
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Floor.' with color (255, 255, 255)
+Processing text fragment 0: 'You can walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You can see through this.' with color (255, 255, 255)
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Floor.' with color (255, 255, 255)
+Processing text fragment 0: 'You can walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You can see through this.' with color (255, 255, 255)
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Floor.' with color (255, 255, 255)
+Processing text fragment 0: 'You can walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You can see through this.' with color (255, 255, 255)
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Floor.' with color (255, 255, 255)
+Processing text fragment 0: 'You can walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You can see through this.' with color (255, 255, 255)
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Floor.' with color (255, 255, 255)
+Processing text fragment 0: 'You can walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You can see through this.' with color (255, 255, 255)
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Floor.' with color (255, 255, 255)
+Processing text fragment 0: 'You can walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You can see through this.' with color (255, 255, 255)
+ Sun Mar 22 23:50:17 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:17 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 33
+ Sun Mar 22 23:50:17 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:17 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 34
+ Sun Mar 22 23:50:18 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:18 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:18 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 35
+ Sun Mar 22 23:50:18 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:18 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 36
+ Sun Mar 22 23:50:20 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:20 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 37
+ Sun Mar 22 23:50:20 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:20 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:20 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 38
+ Sun Mar 22 23:50:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 39
+ Sun Mar 22 23:50:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 40
+ Sun Mar 22 23:50:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 41
+ Sun Mar 22 23:50:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 42
+ Sun Mar 22 23:50:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 43
+ Sun Mar 22 23:50:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 44
+ Sun Mar 22 23:50:22 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 45
+ Sun Mar 22 23:50:23 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 46
+ Sun Mar 22 23:50:23 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 47
+ Sun Mar 22 23:50:23 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 48
+ Sun Mar 22 23:50:23 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 49
+ Sun Mar 22 23:50:23 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 50
+ Sun Mar 22 23:50:23 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 51
+ Sun Mar 22 23:50:23 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 52
+ Sun Mar 22 23:50:23 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 53
+ Sun Mar 22 23:50:23 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 54
+ Sun Mar 22 23:50:23 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Sun Mar 22 23:50:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 55
+ Sun Mar 22 23:50:23 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 56
+ Sun Mar 22 23:50:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 57
+ Sun Mar 22 23:50:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 58
+ Sun Mar 22 23:50:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 59
+ Sun Mar 22 23:50:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 60
+ Sun Mar 22 23:50:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 61
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 62
+ Sun Mar 22 23:50:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 63
+ Sun Mar 22 23:50:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 64
+ Sun Mar 22 23:50:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 65
+ Sun Mar 22 23:50:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 66
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Sun Mar 22 23:50:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 67
+ Sun Mar 22 23:50:25 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Sun Mar 22 23:50:25 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 68
+ Sun Mar 22 23:50:25 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:27 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:27 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 69
+ Sun Mar 22 23:50:30 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:30 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 70
+ Sun Mar 22 23:50:30 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:30 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 71
+ Sun Mar 22 23:50:30 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:30 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 72
+ Sun Mar 22 23:50:31 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 73
+ Sun Mar 22 23:50:31 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 74
+ Sun Mar 22 23:50:31 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 75
+ Sun Mar 22 23:50:31 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 76
+ Sun Mar 22 23:50:31 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 77
+ Sun Mar 22 23:50:31 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 78
+ Sun Mar 22 23:50:31 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 79
+ Sun Mar 22 23:50:31 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:31 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 80
+ Sun Mar 22 23:50:32 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:32 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 81
+ Sun Mar 22 23:50:32 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:32 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 82
+ Sun Mar 22 23:50:32 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Sun Mar 22 23:50:32 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 83
+ Sun Mar 22 23:50:32 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:34 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:34 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 84
+ Sun Mar 22 23:50:34 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:34 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:34 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 85
+ Sun Mar 22 23:50:34 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:34 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 86
+ Sun Mar 22 23:50:35 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 87
+ Sun Mar 22 23:50:35 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 88
+ Sun Mar 22 23:50:35 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 89
+ Sun Mar 22 23:50:35 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 90
+ Sun Mar 22 23:50:35 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 91
+ Sun Mar 22 23:50:35 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 92
+ Sun Mar 22 23:50:35 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 93
+ Sun Mar 22 23:50:35 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 94
+ Sun Mar 22 23:50:35 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 95
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 96
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 97
+ Sun Mar 22 23:50:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 98
+ Sun Mar 22 23:50:36 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 99
+ Sun Mar 22 23:50:36 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 100
+ Sun Mar 22 23:50:36 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Sun Mar 22 23:50:36 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 101
+ Sun Mar 22 23:50:36 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 102
+ Sun Mar 22 23:50:36 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 103
+ Sun Mar 22 23:50:36 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Sun Mar 22 23:50:37 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 104
+ Sun Mar 22 23:50:37 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 105
+ Sun Mar 22 23:50:37 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 106
+ Sun Mar 22 23:50:37 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Sun Mar 22 23:50:37 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 107

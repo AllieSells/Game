@@ -509,6 +509,24 @@ class DarkBoltAnimation:
 
         self.frames -= 1
 
+class FlameAnimation:
+    def __init__(self, position):
+        self.position = position
+        self.frames = 10
+        self.render_priority = 1
+    
+    def tick(self, console, game_map):
+        x, y = self.position
+        if not game_map.in_bounds(x, y):
+            self.frames -= 1
+            return
+        if game_map.visible[x, y]:
+            chars = [chr(0xE110), chr(0xE111), chr(0xE112), chr(0xE113), chr(0xE114), chr(0xE115)]
+            char = chars[(10 - self.frames) // 2 % len(chars)]
+            game_map.screen_print(console, x, y, char, fg=(255, 255, 255))
+        self.frames -= 1
+
+
 class FireFlicker:
     def __init__(self, position):
         self.position = position
@@ -589,14 +607,14 @@ class BonefireFlicker:
 class FireSmoke:
     def __init__(self, position):
         self.position = position
-        self.frames = 15  # duration in frames
+        self.frames = 12  # duration in frames
         # Smoke should render between items and actors so it appears to rise above the campfire
         self.render_priority = 1
 
     def tick(self, console, game_map):
         x0, y0 = self.position
         # Drift upward slowly as smoke rises
-        y = y0 - (15 - self.frames) // 3
+        y = y0 - (12 - self.frames) // 3
         x = x0 + random.choice([-1, 0, 1])  # slight horizontal jitter
 
         if not game_map.in_bounds(int(x), int(y)):
@@ -606,7 +624,7 @@ class FireSmoke:
         # Use shadowcasting FOV from the smoke origin so smoke doesn't draw through walls
         try:
             origin = (int(x0), int(y0))
-            radius = max(3, min(5, (15 - self.frames) + 2))
+            radius = max(3, min(5, (12 - self.frames) + 2))
             fov_map = compute_fov(game_map.tiles["transparent"], origin, radius=radius, algorithm=tcod.FOV_SHADOW)
         except Exception:
             fov_map = game_map.visible
@@ -618,8 +636,10 @@ class FireSmoke:
             and game_map.visible[xi, yi]
             and game_map.tiles["transparent"][xi, yi]
         ):
-            gray_value = random.randint(100, 200)
-            game_map.screen_print(console, xi, yi, "+", fg=(gray_value, gray_value, gray_value))  # gray smoke
+            chars = [chr(0xE116), chr(0xE117), chr(0xE118), chr(0xE119), chr(0xE11A), chr(0xE11B)]
+            char = chars[(12 - self.frames) // 2 % len(chars)]
+            game_map.screen_print(console, x, y, char, fg=(255, 255, 255))
+            game_map.screen_print(console, xi, yi, char, fg=(255, 255, 255))
 
         self.frames -= 1
 

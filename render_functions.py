@@ -320,6 +320,28 @@ def _collect_effect_display_entries(player) -> list:
 
     effects = list(getattr(player, "effects", []) or [])
 
+    # Keep only one effect per name for HUD display.
+    unique_by_name = {}
+    order = []
+    for effect in effects:
+        name = getattr(effect, "name", effect.__class__.__name__)
+        if name not in unique_by_name:
+            unique_by_name[name] = effect
+            order.append(name)
+            continue
+
+        existing = unique_by_name[name]
+        existing_duration = getattr(existing, "duration", None)
+        new_duration = getattr(effect, "duration", None)
+
+        # Prefer non-expiring effects; otherwise keep the one with longer duration.
+        if existing_duration is None:
+            continue
+        if new_duration is None or (isinstance(new_duration, int) and new_duration > existing_duration):
+            unique_by_name[name] = effect
+
+    effects = [unique_by_name[name] for name in order]
+
     # Display-only grouping: represent blood coating as a real effect object.
     has_bloody_effect = any(getattr(effect, "name", "") == "Bloody" for effect in effects)
     if _player_has_bloody_coating(player) and not has_bloody_effect:
@@ -485,6 +507,16 @@ def render_status_hover_panel(console: 'Console', mouse_ui_x: int, mouse_ui_y: i
             lines.append(title)
             desc = getattr(hovered_effect, "description", "") or "No description."
             lines.append(f"{desc}")
+            effect_type = getattr(hovered_effect, "type", None)
+            print(effect_type)
+            if effect_type == "debuff":
+                frame_color = color.red
+            elif effect_type == "buff":
+                frame_color = color.green
+            elif effect_type == "status":
+                frame_color = color.blue
+            else:
+                frame_color = color.bronze_border
         except Exception:
             lines.append("Unknown")
 
@@ -514,7 +546,7 @@ def render_status_hover_panel(console: 'Console', mouse_ui_x: int, mouse_ui_y: i
     y = max(hud_top, min(mouse_ui_y - height, hud_bottom - height + 1))
 
     console.draw_rect(x=x, y=y, width=width, height=height, ch=ord(" "), bg=color.parchment_bg)
-    console.draw_frame(x=x, y=y, width=width, height=height, fg=color.bronze_border, bg=color.parchment_bg)
+    console.draw_frame(x=x, y=y, width=width, height=height, fg=frame_color, bg=color.parchment_bg)
 
     for idx, line in enumerate(draw_lines, start=1):
         fg = color.fantasy_text if idx == 1 else color.bronze_text

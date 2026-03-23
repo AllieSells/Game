@@ -204,8 +204,8 @@ class TurnManager:
                                     body_part.coating = liquid_coating.liquid_type
                                     body_part.coating_age = 0  # Reset age when newly coated
                                     
-                                    # Apply immediate stepping effect for harmful liquids
-                                    if not was_coated_before and liquid_coating.liquid_type == LiquidType.POISON:
+                                    # Apply immediate stepping effect for harmful liquids.
+                                    if not was_coated_before and liquid_coating.liquid_type in {LiquidType.POISON, LiquidType.FIRE}:
                                         self.engine.game_map.liquid_system._apply_liquid_effect(
                                             entity, liquid_coating.liquid_type, 
                                             max(1, liquid_coating.depth - 1),  # Reduced effect for stepping vs splashing

@@ -159,9 +159,10 @@ bonfire = Item(
 )
 
 torch = Item(
-    char="!",
+    char=chr(0xE0A3),
+    equip_sprite_cp=0xE0A2,
     value = 1,
-    color=(255, 200, 50),
+    color=(color.sprite_sheet),
     name="Torch",
     equippable=equippable.Torch(),
     burn_duration=600,
@@ -182,7 +183,7 @@ torch = Item(
 # Weapons
 
 dagger = Item(
-    char="/", color=(0, 191, 255), name="Dagger",
+    char=chr(0xE0A1), color=(color.sprite_sheet), name="Dagger",
     value = 5,
     equippable=equippable.Dagger(),
     description="A small sharp blade.",
@@ -201,7 +202,10 @@ dagger = Item(
 )
 
 shortsword = Item(
-    char="/", color=(192, 192, 192), name="Shortsword",
+    char=chr(0xE0A5),
+    equip_sprite_cp=0xE0A4,
+    color=(color.sprite_sheet),
+    name="Shortsword",
     value = 15, 
     equippable=equippable.Shortsword(),
     description="A short, single-handed sword.",
@@ -415,12 +419,12 @@ import roman
 def generate_sigil_stone() -> Item:
     # Use current random state - no individual seeding needed
     unlocks_and_descriptions = {
-        'Teleport' : "Distort space around you",
-        "Darkvision": "Sight persists in darkness",
-        'Poison Spray': "Summon corrosive elements at your will",
+        #'Teleport' : "Distort space around you",
+        #"Darkvision": "Sight persists in darkness",
+        #'Poison Spray': "Summon corrosive elements at your will",
         'Fireball': 'Unleash flames upon your foes',
-        'Healing Word': 'Soothing light mends wounds',
-        'Inflict Wounds': 'Invoke necrotic forces upon your foes',
+        #'Healing Word': 'Soothing light mends wounds',
+        #'Inflict Wounds': 'Invoke necrotic forces upon your foes',
     }
     
     # Get a random key-value pair from the dictionary

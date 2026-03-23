@@ -78,7 +78,7 @@ class LiquidType(Enum):
             LiquidType.SLIME: color.green,
             LiquidType.HEALTHPOTION: color.light_red,
             LiquidType.POISON: color.light_green,
-            LiquidType.FIRE: (random.randint(200, 255), random.randint(50, 100), 0)
+            LiquidType.FIRE: color.sprite_sheet
         }
         return colors.get(self, color.white)
     
@@ -423,7 +423,15 @@ class LiquidSystem:
             effect_verb = "burns" if liquid_type == LiquidType.POISON or liquid_type == LiquidType.FIRE else "affects"
             effect_type = "damage"
             target.fighter.take_damage(actual_damage)
-            target.effects.append(BurningEffect(amount=actual_damage, duration=1)) if liquid_type == LiquidType.FIRE else target.effects.append(PoisonEffect(amount=actual_damage, duration=5))
+            if liquid_type in {LiquidType.FIRE, LiquidType.POISON}:
+                effect = BurningEffect(amount=actual_damage, duration=1) if liquid_type == LiquidType.FIRE else PoisonEffect(amount=actual_damage, duration=5)
+                # Refresh existing status of the same class instead of stacking duplicates.
+                if hasattr(self.game_map.engine, "add_or_refresh_effect"):
+                    self.game_map.engine.add_or_refresh_effect(target, effect)
+                else:
+                    has_same_effect = any(isinstance(existing, effect.__class__) for existing in getattr(target, "effects", []))
+                    if not has_same_effect:
+                        target.effects.append(effect)
             self.game_map.engine.debug_log(f"Applied {liquid_type.name} effect to {target.name} for {actual_damage} damage.", handler=type(self).__name__, event="combat")
         # Generate appropriate message
         liquid_name = liquid_type.get_display_name().capitalize()

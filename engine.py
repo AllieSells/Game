@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from game_map import GameMap, GameWorld
 
 import time
-from animations import FireFlicker, BonefireFlicker, FireSmoke
+from animations import FireFlicker, BonefireFlicker, FireSmoke, FlameAnimation
 
 
 
@@ -457,8 +457,8 @@ class Engine:
                 for coating in self.game_map.liquid_system.coatings.values():
                     if coating.liquid_type == LiquidType.FIRE:
                         pos = coating.get_pos()
-                        if not any(isinstance(a, FireFlicker) and a.position == pos for a in self.animation_queue):
-                            self.animation_queue.append(FireFlicker(pos))
+                        if not any(isinstance(a, FlameAnimation) and a.position == pos for a in self.animation_queue):
+                            self.animation_queue.append(FlameAnimation(pos))
                         
                 # Check entities for fire coatings on body parts
                 if hasattr(entity, 'body_parts') and entity.body_parts:
