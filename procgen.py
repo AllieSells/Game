@@ -697,7 +697,7 @@ def ensure_room_walls(dungeon: GameMap, rooms: list) -> None:
             for y in range(room.y1 - 1, room.y2 + 2):
                 # Check if this tile is on the border of the room
                 if (x == room.x1 - 1 or x == room.x2 + 1 or y == room.y1 - 1 or y == room.y2 + 1):
-                    print(f"Ensuring wall at ({x}, {y}) for room at ({room.x1}, {room.y1}, {room.x2}, {room.y2})")
+                    #print(f"Ensuring wall at ({x}, {y}) for room at ({room.x1}, {room.y1}, {room.x2}, {room.y2})")
                     # Check if in bounds
                     if dungeon.in_bounds(x,y):
                         # If it's currently a floor, 40% chance to turn it into a wall
@@ -1115,7 +1115,9 @@ def generate_dungeon(
     rooms: List[RectangularRoom] = []
     center_of_last_room = (0, 0)
 
+    # Cavern Type
     if erosion > 2.0 or (erosion <= 2.0 and erosion >= -2.0):
+        print("Generating cavern map with noise erosion value:", erosion)
         # Seed map: 40% floor, 60% wall
         for x in range(1, dungeon.width - 1):
             for y in range(1, dungeon.height - 1):
@@ -1127,6 +1129,7 @@ def generate_dungeon(
         # Cellular automata smoothing — 4 passes, double-buffered so each pass
         # reads cleanly from the previous iteration without in-place bias.
         for _pass in range(4):
+            print("Cavern smoothing pass", _pass + 1)
             new_tiles = dungeon.tiles.copy()
             for x in range(1, dungeon.width - 1):
                 for y in range(1, dungeon.height - 1):
@@ -1225,7 +1228,7 @@ def generate_dungeon(
                 break
 
     
-    # Become dungeon of rooms if erosion is very low (more negative)
+    # Dungeon Type
     if erosion < -2.0 or (-2.0 <= erosion <= 2.0):
         if rooms:
             rooms = [] # Clear cave generated rooms for ruins type
@@ -1322,9 +1325,9 @@ def generate_dungeon(
                         neighbor_tile = dungeon.tiles[x + dx, y + dy]
                         if not neighbor_tile["walkable"] and not neighbor_tile["interactable"]:
                             wall_count += 1
-            if wall_count == 0:        
-                # Convert door to floor if no adjacent walls
-                dungeon.tiles[x,y] = tile_types.random_floor_tile()
+                if wall_count == 0:        
+                    # Convert door to floor if no adjacent walls
+                    dungeon.tiles[x,y] = tile_types.random_floor_tile()
 
     # Seal the border: overwrite the 1-tile inset ring with walls so the world
     # border is never directly reachable regardless of map type or generation.

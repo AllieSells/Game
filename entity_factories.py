@@ -419,12 +419,12 @@ import roman
 def generate_sigil_stone() -> Item:
     # Use current random state - no individual seeding needed
     unlocks_and_descriptions = {
-        #'Teleport' : "Distort space around you",
-        #"Darkvision": "Sight persists in darkness",
-        #'Poison Spray': "Summon corrosive elements at your will",
+        'Teleport' : "Distort space around you",
+        "Darkvision": "Sight persists in darkness",
+        'Poison Spray': "Summon corrosive elements at your will",
         'Fireball': 'Unleash flames upon your foes',
-        #'Healing Word': 'Soothing light mends wounds',
-        #'Inflict Wounds': 'Invoke necrotic forces upon your foes',
+        'Healing Word': 'Soothing light mends wounds',
+        'Inflict Wounds': 'Invoke necrotic forces upon your foes',
     }
     
     # Get a random key-value pair from the dictionary
@@ -489,7 +489,7 @@ def get_random_fungus() -> Item:
     elif "Purple" in prefix:
         color = (255, max(color[1]-100, 75), 255)
     elif "Black" in prefix:
-        color = (0, 0, 0)
+        color = (60, 60, 60)
     elif "White" in prefix:
         color = (255, 255, 255)
 

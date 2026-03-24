@@ -227,18 +227,18 @@ class Equipment(BaseComponent):
         # Update body part coverage for all items
         if hasattr(self.parent, "body_parts"):
             equip_all = getattr(item.equippable, 'equip_all_matching', False)
-            self.engine.debug_log(f"DEBUG: Equipping item: {item.name}: equip_all_matching={equip_all}, required_tags={item.equippable.required_tags}", handler=self.__class__.__name__, event="EquipDebug")
+            #self.engine.debug_log(f"DEBUG: Equipping item: {item.name}: equip_all_matching={equip_all}, required_tags={item.equippable.required_tags}", handler=self.__class__.__name__, event="EquipDebug")
             all_parts = self.parent.body_parts.get_all_parts()
-            self.engine.debug_log(f"DEBUG: Equipping item: All parts: { {name: part.tags for name, part in all_parts.items()} }", handler=self.__class__.__name__, event="EquipDebug")
+            #self.engine.debug_log(f"DEBUG: Equipping item: All parts: { {name: part.tags for name, part in all_parts.items()} }", handler=self.__class__.__name__, event="EquipDebug")
 
             if equip_all:
                 # Cover all matching body parts (like leggings on both legs)
                 for part in all_parts.values():
                     match = item.equippable.required_tags.issubset(part.tags)
-                    self.engine.debug_log(f"DEBUG: Equipping item:   Part '{part.name}' tags={part.tags} -> match={match}", handler=self.__class__.__name__, event="EquipDebug")
+                    #self.engine.debug_log(f"DEBUG: Equipping item:   Part '{part.name}' tags={part.tags} -> match={match}", handler=self.__class__.__name__, event="EquipDebug")
                     if match:
                         self.body_part_coverage[part.name] = item
-                self.engine.debug_log(f"DEBUG: Equipping item: body_part_coverage after equip: {list(self.body_part_coverage.keys())}", handler=self.__class__.__name__, event="EquipDebug")
+                #self.engine.debug_log(f"DEBUG: Equipping item: body_part_coverage after equip: {list(self.body_part_coverage.keys())}", handler=self.__class__.__name__, event="EquipDebug")
             else:
                 # Cover only one matching body part - prefer right hand over left hand for weapons
                 target_part = None

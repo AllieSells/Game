@@ -185,7 +185,7 @@ class AudioMixer:
             
         with self.lock:
             self.playing_sounds.append({
-                'data': audio_data.copy(),
+                'data': audio_data,
                 'position': 0,
                 'volume': final_volume
             })
@@ -216,7 +216,7 @@ class AudioMixer:
             # Add new loop
             self.loop_sounds.append({
                 'id': loop_id,
-                'data': audio_data.copy(),
+                'data': audio_data,
                 'position': 0,
                 'volume': final_volume,
                 'active': True
@@ -454,17 +454,10 @@ class Sound:
         try:
             # Calculate new length
             new_length = int(len(audio_data) * to_sr / from_sr)
-            
-            if len(audio_data.shape) == 1:
-                # Mono
-                resampled = signal.resample(audio_data, new_length)
-            else:
-                # Stereo - resample each channel
-                resampled = np.zeros((new_length, audio_data.shape[1]), dtype=np.float32)
-                for channel in range(audio_data.shape[1]):
-                    resampled[:, channel] = signal.resample(audio_data[:, channel], new_length)
-            
-            return resampled.astype(np.float32)
+
+            # Resample all channels in one pass to reduce temporary allocations.
+            resampled = signal.resample(audio_data, new_length, axis=0)
+            return resampled.astype(np.float32, copy=False)
         except Exception as e:
             with open(get_data_path('logs/log.txt'), 'a') as log_file:
                 log_file.write(f"Error resampling audio: {e}\n")
@@ -477,9 +470,7 @@ class Sound:
         
         try:
             audio_path = get_data_path(filename)
-            data, samplerate = sf.read(audio_path)
-            # Ensure audio is in float32 format
-            data = data.astype(np.float32)
+            data, samplerate = sf.read(audio_path, dtype='float32')
             _audio_cache[filename] = (data, samplerate)
             return data, samplerate
         except Exception as e:
@@ -497,12 +488,13 @@ class Sound:
     def play(self, fade_ms: int = 0):
         """Play the sound using the global mixer."""
         try:
-            audio_data = self.data.copy()
+            audio_data = self.data
             
             # Apply fade if specified
             if fade_ms > 0:
                 fade_samples = int(fade_ms * self.samplerate / 1000)
                 if fade_samples > 0 and fade_samples < len(audio_data):
+                    audio_data = audio_data.copy()
                     # Create fade-in envelope
                     fade_in = np.linspace(0, 1, fade_samples)
                     if len(audio_data.shape) == 1:
@@ -521,7 +513,7 @@ class Sound:
         """Create a copy of this sound."""
         new_sound = Sound.__new__(Sound)
         new_sound.filename = self.filename  
-        new_sound.data = self.data.copy()
+        new_sound.data = self.data
         new_sound.samplerate = self.samplerate
         new_sound.original_samplerate = getattr(self, 'original_samplerate', self.samplerate)
         new_sound.volume = self.volume
@@ -547,23 +539,16 @@ def play_sound_with_pitch_variation(sound: Sound, pitch_range=(0.85, 1.15), volu
             return
         
         # Get the audio data
-        audio_data = modified_sound.data.copy()
+        audio_data = modified_sound.data
         
         # Apply pitch shift via resampling
         # Higher pitch = shorter sound = fewer samples
         new_length = int(len(audio_data) / pitch)
         
-        if len(audio_data.shape) == 1:
-            # Mono
-            pitched_audio = signal.resample(audio_data, new_length)
-        else:
-            # Stereo - resample each channel
-            pitched_audio = np.zeros((new_length, audio_data.shape[1]), dtype=np.float32)
-            for channel in range(audio_data.shape[1]):
-                pitched_audio[:, channel] = signal.resample(audio_data[:, channel], new_length)
+        pitched_audio = signal.resample(audio_data, new_length, axis=0)
         
         # Update the sound data
-        modified_sound.data = pitched_audio.astype(np.float32)
+        modified_sound.data = pitched_audio.astype(np.float32, copy=False)
         modified_sound.set_volume(volume)
         modified_sound.play(fade_ms=fade_ms)
         

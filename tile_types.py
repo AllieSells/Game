@@ -3,6 +3,8 @@ from typing import Tuple, Optional
 import numpy as np
 import random
 
+import color
+
 graphic_dt = np.dtype(
     [
         ("ch", np.int32),  
@@ -91,46 +93,9 @@ def random_wall_tile():
     # Don't re-seed to avoid breaking main generation flow
     
     # Chance to be mossy
-    if random.random() < 0.05:
-        base = mossy_wall
-    else:
-        base = wall
+    base = wall
 
-    # Extract base values as plain Python ints/tuples
-    base_name = str(base["name"])
-    base_walkable = bool(base["walkable"])
-    base_transparent = bool(base["transparent"])
-
-    base_dark_ch = int(base["dark"]["ch"])
-    base_dark_fg = tuple(int(x) for x in base["dark"]["fg"])
-    base_dark_bg = tuple(int(x) for x in base["dark"]["bg"])
-
-    base_light_ch = int(base["light"]["ch"])
-    base_light_fg = tuple(int(x) for x in base["light"]["fg"])
-    base_light_bg = tuple(int(x) for x in base["light"]["bg"])
-
-    # Small random variation helper with clamping
-    def vary_channel(base_tuple, delta):
-        return (
-            max(0, min(255, base_tuple[0] + 0)),
-            max(0, min(255, base_tuple[1] + 0)),
-            max(0, min(255, base_tuple[2] + 0))
-        )
-
-    dark_fg = vary_channel(base_dark_fg, 8)
-    dark_bg = vary_channel(base_dark_bg, 6)
-    light_fg = vary_channel(base_light_fg, 8)
-    light_bg = vary_channel(base_light_bg, 6)
-
-    glyph = base_dark_ch
-
-    return new_tile(
-        name=base_name,
-        walkable=base_walkable,
-        transparent=base_transparent,
-        dark=(glyph, dark_fg, dark_bg),
-        light=(glyph, light_fg, light_bg),
-    )
+    return wall
 
 
     
@@ -156,12 +121,12 @@ wooden_floor = new_tile(
 
 
 
-mossy_wall = new_tile(
-    name="<green>Lichenous Wall</green>",
+cave_wall = new_tile(
+    name="Cavern Wall",
     walkable=False,
     transparent=False,
-    dark=(ord("▓"), (60, 60, 60), (15, 15, 15)),
-    light=(ord("▓"), (100, 200, 100), (60, 60, 60)),
+    dark=(0xE135, (60, 60, 60), (15, 15, 15)),
+    light =(0xE135, (color.sprite_sheet), (80,80,80)),
 )
     
 wall = new_tile(
@@ -169,9 +134,9 @@ wall = new_tile(
     walkable=False,
     transparent=False,
     # Use darker greys for wall glyph foreground so the wall glyph appears less bright
-    dark=(ord(" "), (60, 60, 60), (15, 15, 15)),
+    dark=(0xE125, (60, 60, 60), (25, 25, 25)),
     # Make wall foreground/background a bit whiter when lit to increase contrast
-    light=(ord(" "), (200, 200, 200), (60, 60, 60)),
+    light=(0xE125, (color.sprite_sheet), (80,80,80)),
 )
 
 # Box drawing wall tile generator function
@@ -191,38 +156,60 @@ def create_wall_tile(character: str, base_tile=None):
     )
 
 # Wall tile variants - generated on demand
-def get_wall_horizontal():
-    return create_wall_tile("═")
+def get_wall_horizontal(type: Optional[str] = None):
+    if type == "cave":
+        return create_wall_tile(chr(0xE135))
+    return create_wall_tile(chr(0xE125))
 
-def get_wall_vertical():
-    return create_wall_tile("║")
+def get_wall_vertical(type: Optional[str] = None):
+    if type == "cave":
+        return create_wall_tile(chr(0xE138))
+    return create_wall_tile(chr(0xE128))
 
-def get_wall_top_left():
-    return create_wall_tile("╚")
+def get_wall_top_left(type: Optional[str] = None):
+    if type == "cave":
+        return create_wall_tile(chr(0xE130))
+    return create_wall_tile(chr(0xE120))
 
-def get_wall_top_right():
-    return create_wall_tile("╝")
+def get_wall_top_right(type: Optional[str] = None):
+    if type == "cave":
+        return create_wall_tile(chr(0xE13A))
+    return create_wall_tile(chr(0xE12A))
 
-def get_wall_bottom_left():
-    return create_wall_tile("╔")
+def get_wall_bottom_left(type: Optional[str] = None):
+    if type == "cave":
+        return create_wall_tile(chr(0xE131))
+    return create_wall_tile(chr(0xE121))
 
-def get_wall_bottom_right():
-    return create_wall_tile("╗")
+def get_wall_bottom_right(type: Optional[str] = None):
+    if type == "cave":
+        return create_wall_tile(chr(0xE139))
+    return create_wall_tile(chr(0xE129))
 
-def get_wall_cross():
-    return create_wall_tile("╬")
+def get_wall_cross(type: Optional[str] = None):
+    if type == "cave":
+        return create_wall_tile(chr(0xE136))
+    return create_wall_tile(chr(0xE126))
 
-def get_wall_t_up():
-    return create_wall_tile("╦")
+def get_wall_t_up(type: Optional[str] = None):
+    if type == "cave":
+        return create_wall_tile(chr(0xE133))
+    return create_wall_tile(chr(0xE123))
 
-def get_wall_t_down():
-    return create_wall_tile("╩")
+def get_wall_t_down(type: Optional[str] = None):
+    if type == "cave":
+        return create_wall_tile(chr(0xE132))
+    return create_wall_tile(chr(0xE122))
 
-def get_wall_t_left():
-    return create_wall_tile("╠")
+def get_wall_t_left(type: Optional[str] = None):
+    if type == "cave":
+        return create_wall_tile(chr(0xE134))
+    return create_wall_tile(chr(0xE124))
 
-def get_wall_t_right():
-    return create_wall_tile("╣")
+def get_wall_t_right(type: Optional[str] = None):
+    if type == "cave":
+        return create_wall_tile(chr(0xE137))
+    return create_wall_tile(chr(0xE127))
 
 debug_wall = new_tile(
     name="Stone Wall",

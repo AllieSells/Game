@@ -105,7 +105,7 @@ ui_console = tcod.console.Console(screen_width, screen_height, order="F")
 
 def render_console_with_transparency(console: tcod.console.Console) -> np.ndarray:
     """Render a console to RGBA pixels and make untouched blank cells transparent."""
-    pixels = tileset.render(console).copy()
+    pixels = tileset.render(console)
     blank_mask = (console.ch == ord(" ")) & np.all(console.bg == 0, axis=2)
     fade_mask = (
         (console.ch == ord(" "))
@@ -118,8 +118,10 @@ def render_console_with_transparency(console: tcod.console.Console) -> np.ndarra
     cell_alpha[blank_mask] = 0
     cell_alpha[fade_mask] = 144
 
-    alpha_mask = np.repeat(np.repeat(cell_alpha.T, tile_h, axis=0), tile_w, axis=1)
-    pixels[:, :, 3] = alpha_mask
+    alpha_channel = pixels[:, :, 3]
+    x_idx = np.arange(alpha_channel.shape[0]) // tile_h
+    y_idx = np.arange(alpha_channel.shape[1]) // tile_w
+    alpha_channel[:, :] = cell_alpha.T[x_idx[:, None], y_idx[None, :]]
 
     return pixels
 

@@ -468,6 +468,18 @@ def render_combat_stats(
 
 def render_status_hover_panel(console: 'Console', mouse_ui_x: int, mouse_ui_y: int, player=None) -> None:
     """Show effect details when hovering over individual effect glyphs in the HUD."""
+
+    # --- Optimization: cache last hovered effect and mouse position ---
+    if not hasattr(render_status_hover_panel, "_cache"):
+        render_status_hover_panel._cache = {
+            "last_mouse": None,
+            "last_effect": None,
+            "last_lines": None,
+            "last_frame_color": None,
+            "last_draw": None,
+        }
+    cache = render_status_hover_panel._cache
+
     if player is None:
         return
 
@@ -491,14 +503,22 @@ def render_status_hover_panel(console: 'Console', mouse_ui_x: int, mouse_ui_y: i
                 break
             icon_x += 2
 
-    hover_effects = hovered_effect is not None
-
-    if not hover_effects:
-        return
-
-    lines = []
-
-    if hover_effects:
+    # Only recompute if mouse or effect changed
+    mouse_key = (mouse_ui_x, mouse_ui_y)
+    if (
+        cache["last_mouse"] == mouse_key
+        and cache["last_effect"] == hovered_effect
+        and cache["last_draw"] is not None
+    ):
+        # Redraw from cache
+        x, y, width, height, draw_lines, frame_color = cache["last_draw"]
+    else:
+        cache["last_mouse"] = mouse_key
+        cache["last_effect"] = hovered_effect
+        if hovered_effect is None:
+            cache["last_draw"] = None
+            return
+        lines = []
         try:
             display = hovered_effect.get_display() if hasattr(hovered_effect, "get_display") else None
             duration = getattr(hovered_effect, "duration", None)
@@ -508,7 +528,6 @@ def render_status_hover_panel(console: 'Console', mouse_ui_x: int, mouse_ui_y: i
             desc = getattr(hovered_effect, "description", "") or "No description."
             lines.append(f"{desc}")
             effect_type = getattr(hovered_effect, "type", None)
-            print(effect_type)
             if effect_type == "debuff":
                 frame_color = color.red
             elif effect_type == "buff":
@@ -519,35 +538,33 @@ def render_status_hover_panel(console: 'Console', mouse_ui_x: int, mouse_ui_y: i
                 frame_color = color.bronze_border
         except Exception:
             lines.append("Unknown")
+            frame_color = color.bronze_border
 
-    if not lines:
+        if not lines:
+            cache["last_draw"] = None
+            return
+
+        max_width = max(24, min(console.width - 4, max(len(line) for line in lines) + 2))
+        max_body_lines = min(len(lines), 8)
+        draw_lines = [line[: max_width - 2] for line in lines[:max_body_lines]]
+        width = max_width
+        height = len(draw_lines) + 2
+        x = max(1, min(mouse_ui_x + 1, console.width - width - 1))
+        hud_top = 39
+        hud_bottom = console.height - 1
+        max_height_in_hud = max(3, hud_bottom - hud_top + 1)
+        if height > max_height_in_hud:
+            height = max_height_in_hud
+            draw_lines = draw_lines[: max(1, height - 2)]
+        y = max(hud_top, min(mouse_ui_y - height, hud_bottom - height + 1))
+        cache["last_draw"] = (x, y, width, height, draw_lines, frame_color)
+
+    # Draw the cached or computed tooltip
+    if cache["last_draw"] is None:
         return
-
-    max_width = max(24, min(console.width - 4, max(len(line) for line in lines) + 2))
-    # Main game view only blits HUD rows (y >= 39), so keep tooltip compact.
-    max_body_lines = min(len(lines), 8)
-    draw_lines = []
-    for line in lines[:max_body_lines]:
-        draw_lines.append(line[: max_width - 2])
-
-    width = max_width
-    height = len(draw_lines) + 2
-
-    x = max(1, min(mouse_ui_x + 1, console.width - width - 1))
-
-    # Restrict tooltip entirely to HUD strip so it remains visible after HUD-only blit.
-    hud_top = 39
-    hud_bottom = console.height - 1
-    max_height_in_hud = max(3, hud_bottom - hud_top + 1)
-    if height > max_height_in_hud:
-        height = max_height_in_hud
-        draw_lines = draw_lines[: max(1, height - 2)]
-
-    y = max(hud_top, min(mouse_ui_y - height, hud_bottom - height + 1))
-
+    x, y, width, height, draw_lines, frame_color = cache["last_draw"]
     console.draw_rect(x=x, y=y, width=width, height=height, ch=ord(" "), bg=color.parchment_bg)
     console.draw_frame(x=x, y=y, width=width, height=height, fg=frame_color, bg=color.parchment_bg)
-
     for idx, line in enumerate(draw_lines, start=1):
         fg = color.fantasy_text if idx == 1 else color.bronze_text
         console.print(x=x + 1, y=y + idx, string=line, fg=fg, bg=color.parchment_bg)
