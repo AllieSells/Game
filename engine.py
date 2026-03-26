@@ -18,7 +18,7 @@ from liquid_system import LiquidType
 from message_log import MessageLog
 import render_functions
 import sounds
-from animations import TextPopupAnimation
+from animations import TextPopupAnimation, WaterMoveAnimation, GlobalWaterAnimation
 
 
 if TYPE_CHECKING:
@@ -424,6 +424,10 @@ class Engine:
 
         # Body part coating system moved to turn_manager.py
 
+        # Keep a single persistent GlobalWaterAnimation instead of per-tile spawns
+        if not any(type(a).__name__ == 'GlobalWaterAnimation' for a in self.animation_queue):
+            from animations import GlobalWaterAnimation
+            self.animation_queue.appendleft(GlobalWaterAnimation())
 
         
         try:

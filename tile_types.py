@@ -202,6 +202,40 @@ wall = new_tile(
     type = "dungeon"
 )
 
+foliage = new_tile(
+    name="Foliage",
+    walkable=True,
+    transparent=True,
+    dark=(0xE13C, (30, 30, 30), (25, 25, 25)),
+    light=(0xE13C, (255, 255, 255), (80, 80, 80)),
+)
+
+
+water = new_tile(
+    name="Water",
+    walkable=False,
+    transparent=True,
+    dark=(0xE140, (10, 28, 32), (10, 10, 30)),
+    light=(0xE140, (60, 160, 185), (30, 110, 135)),
+)
+
+
+def generate_foliage_tile():
+    char = random.choice([0xE13C, 0xE13D, 0xE13E, 0xE13F])
+    red = 150
+    blue = 150
+    green = 255
+    rb_color_mod = random.randint(0, 100)
+    g_color_mod = random.randint(0, 100)
+
+    return new_tile(
+        name="Foliage",
+        walkable=True,
+        transparent=True,
+        dark=(char, (30, 30, 30), (25, 25, 25)),
+        light=(char, (red-rb_color_mod, green-g_color_mod, blue-rb_color_mod), (80, 80, 80)),
+    )
+
 # Box drawing wall tile generator function
 def create_wall_tile(character: str, base_tile=None, direction: Optional[str] = None):
     """Create a wall tile with the specified character using the stone wall as template, and store directionality."""

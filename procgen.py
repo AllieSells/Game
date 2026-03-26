@@ -1350,4 +1350,33 @@ def generate_dungeon(
                     if random.random() < (vegetation/6)**2:
                         dungeon.tiles[x, y] = tile_types.random_mossy_floor_tile()
 
+    # Water pool post-processing
+    if -4 < temperature < 4:
+        water_pool_count = random.randint(1, 3)
+        print(f"Generating {water_pool_count} water pools with noise temperature value: {temperature}")
+        for _ in range(water_pool_count):
+            # Generate random pool shape using random walk
+            pool_size = random.randint(5, 15)
+            pool_tiles = set()
+            start_x = random.randint(2, dungeon.width - 3)
+            start_y = random.randint(2, dungeon.height - 3)
+            pool_tiles.add((start_x, start_y))
+            for _ in range(pool_size):
+                current_x, current_y = random.choice(list(pool_tiles))
+                dx, dy = random.choice([(1,0), (-1,0), (0,1), (0,-1)])
+                new_x, new_y = current_x + dx, current_y + dy
+                if 2 <= new_x < dungeon.width - 2 and 2 <= new_y < dungeon.height - 2:
+                    pool_tiles.add((new_x, new_y))
+            # Carve out the pool
+            for x, y in pool_tiles:
+                if dungeon.tiles[x, y]["walkable"]:
+                    dungeon.tiles[x, y] = tile_types.water
+    # Foliage post processing
+    if vegetation > 0:
+        for x in range(dungeon.width):
+            for y in range(dungeon.height):
+                tile = dungeon.tiles[x, y]
+                if tile["walkable"] and random.random() < (2**(vegetation/20)-1) and random.randint(1,3) == 1:
+                    dungeon.tiles[x, y] = tile_types.generate_foliage_tile()
+
     return dungeon

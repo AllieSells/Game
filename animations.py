@@ -2,6 +2,7 @@ import random
 from tcod.map import compute_fov
 import tcod
 from tcod import libtcodpy
+import color
 
 class ThrowAnimation:
     def __init__(self, path, item_char="|", item_color=(255, 255, 0)):
@@ -27,7 +28,7 @@ class ThrowAnimation:
             
             if game_map.in_bounds(x, y) and game_map.visible[x, y]:
                 # Show item character with motion trail
-                game_map.screen_print(console, x, y, self.item_char, fg=self.item_color)
+                game_map.screen_print_lit(console, x, y, self.item_char, fg=self.item_color)
                 
                 # Add trail effect - show previous positions fading
                 for i in range(1, min(3, current_index + 1)):
@@ -41,7 +42,7 @@ class ThrowAnimation:
                                 max(50, self.item_color[1] - i * 60), 
                                 max(50, self.item_color[2] - i * 60)
                             )
-                            game_map.screen_print(console, trail_x, trail_y, "·", fg=fade_color)
+                            game_map.screen_print_lit(console, trail_x, trail_y, "·", fg=fade_color)
 
         self.current_frame += 1
         self.frames -= 1
@@ -98,7 +99,7 @@ class TeleportAnimation:
             if random.random() < 0.3:
                 y += random.choice([-1, 0, 1])
             if game_map.in_bounds(x, y) and game_map.visible[x, y]:
-                game_map.screen_print(console, x, y, "`", fg=color)
+                game_map.screen_print_lit(console, x, y, "`", fg=color)
 
         self.frames -= 1
 
@@ -128,9 +129,9 @@ class ExplosionAnimation:
                         sx, sy = x + dx, y + dy
                         if game_map.in_bounds(sx, sy) and game_map.visible[sx, sy]:
                             if random.random() < 0.5:
-                                game_map.screen_print(console, sx, sy, "*", fg=self.color)
+                                game_map.screen_print_lit(console, sx, sy, "*", fg=self.color)
                             else:
-                                game_map.screen_print(console, sx, sy, "o", fg=self.color)
+                                game_map.screen_print_lit(console, sx, sy, "o", fg=self.color)
 
         self.frames -= 1
         
@@ -161,9 +162,9 @@ class SplashAnimation:
                         sx, sy = x + dx, y + dy
                         if game_map.in_bounds(sx, sy) and game_map.visible[sx, sy]:
                             if random.random() < 0.5:
-                                game_map.screen_print(console, sx, sy, ".", fg=self.color)
+                                game_map.screen_print_lit(console, sx, sy, ".", fg=self.color)
                             else:
-                                game_map.screen_print(console, sx, sy, "*", fg=self.color)
+                                game_map.screen_print_lit(console, sx, sy, "*", fg=self.color)
 
         self.frames -= 1
 
@@ -212,7 +213,7 @@ class SigilStoneAnimation:
                 int(base_color[1] * pulse_cycle),
                 int(base_color[2] * pulse_cycle)
             )
-            game_map.screen_print(console, x, y, chr(0xE01F), fg=color)
+            game_map.screen_print_lit(console, x, y, chr(0xE01F), fg=color)
 
         self.frames -= 1
         
@@ -263,7 +264,7 @@ class GrassRustleAnimation:
         sequence_index = max(0, min(len(sequence) - 1, sequence_index))  # Clamp to valid range
         char = sequence[sequence_index]
 
-        game_map.screen_print(console, x, y, char, fg=color)
+        game_map.screen_print_lit(console, x, y, char, fg=color)
 
         self.frames -= 1
 
@@ -471,7 +472,7 @@ class HealAnimation:
                     progress = (10 - self.frames) / 10.0  # 0.0 to 1.0 progress through animation
                     pulse_cycle = math.sin(progress * math.pi) * 0.5 + 0.5  # Oscillates between 0.5 and 1.0
                     color_intensity = int(255 * pulse_cycle)
-                    game_map.screen_print(console, particle_x, particle_y, "+", fg=(0, color_intensity, 0))  # green pulse
+                    game_map.screen_print_lit(console, particle_x, particle_y, "+", fg=(0, color_intensity, 0))  # green pulse
                     self.frames -= 1
             
 
@@ -659,15 +660,15 @@ class GivingQuestAnimation():
         if game_map.visible[x, y]:
             # Play animation in order
             if self.frames == 10:
-                game_map.screen_print(console, x, y, ".", fg=(255, 215, 0))  # Gold
+                game_map.screen_print_lit(console, x, y, ".", fg=(255, 215, 0))  # Gold
             elif self.frames == 9:
-                game_map.screen_print(console, x, y, "o", fg=(255, 255, 0))  # Yellow
+                game_map.screen_print_lit(console, x, y, "o", fg=(255, 255, 0))  # Yellow
             elif self.frames == 8:
-                game_map.screen_print(console, x, y, "O", fg=(173, 255, 47))  # GreenYellow
+                game_map.screen_print_lit(console, x, y, "O", fg=(173, 255, 47))  # GreenYellow
             elif self.frames == 7:
-                game_map.screen_print(console, x, y, "0", fg=(0, 255, 127))  # SpringGreen
+                game_map.screen_print_lit(console, x, y, "0", fg=(0, 255, 127))  # SpringGreen
             elif self.frames <= 6:
-                game_map.screen_print(console, x, y, "!", fg=(0, 191, 255))  # DeepSkyBlue
+                game_map.screen_print_lit(console, x, y, "!", fg=(0, 191, 255))  # DeepSkyBlue
 
         self.frames -= 1
 
@@ -687,18 +688,18 @@ class EnchantedSlashAnimation:
         if game_map.visible[x, y]:
             # Curved slash effect with enchanted color
             if self.frames == 5:
-                game_map.screen_print(console, x, y, "_", fg=self.color)  # Base color
+                game_map.screen_print_lit(console, x, y, "_", fg=self.color)  # Base color
             elif self.frames == 4:
-                game_map.screen_print(console, x, y, "~", fg=(min(255, self.color[0] + 50), min(255, self.color[1] + 50), min(255, self.color[2] + 50)))  # Brighter
+                game_map.screen_print_lit(console, x, y, "~", fg=(min(255, self.color[0] + 50), min(255, self.color[1] + 50), min(255, self.color[2] + 50)))  # Brighter
             elif self.frames <= 3:
-                game_map.screen_print(console, x, y, ")", fg=(min(255, self.color[0] + 100), min(255, self.color[1] + 100), min(255, self.color[2] + 100)))  # Even brighter
+                game_map.screen_print_lit(console, x, y, ")", fg=(min(255, self.color[0] + 100), min(255, self.color[1] + 100), min(255, self.color[2] + 100)))  # Even brighter
             
             # Random spark with enchanted color
             if random.random() < 0.3:
                 spark_x = x + random.choice([-1, 0, 1])
                 spark_y = y + random.choice([-1, 0, 1])
                 if game_map.in_bounds(spark_x, spark_y) and game_map.visible[spark_x, spark_y]:
-                    game_map.screen_print(console, spark_x, spark_y, "`", fg=(min(255, self.color[0] + 150), min(255, self.color[1] + 150), min(255, self.color[2] + 150)))  # Bright spark
+                    game_map.screen_print_lit(console, spark_x, spark_y, "`", fg=(min(255, self.color[0] + 150), min(255, self.color[1] + 150), min(255, self.color[2] + 150)))  # Bright spark
 
         self.frames -= 1
 
@@ -724,18 +725,18 @@ class SlashAnimation:
         if game_map.visible[x, y]:
             # Curved slash effect
             if self.frames == 3:
-                game_map.screen_print(console, x, y, "_", fg=(255, 0, 0))  # Red
+                game_map.screen_print_lit(console, x, y, "_", fg=(255, 0, 0))  # Red
             elif self.frames == 2:
-                game_map.screen_print(console, x, y, "~", fg=(255, 255, 0))  # Yellow
+                game_map.screen_print_lit(console, x, y, "~", fg=(255, 255, 0))  # Yellow
             elif self.frames == 1:
-                game_map.screen_print(console, x, y, ")", fg=(255, 255, 244))  # Yellow White
+                game_map.screen_print_lit(console, x, y, ")", fg=(255, 255, 244))  # Yellow White
             
             # Random spark
             if random.random() < 0.3:
                 spark_x = x + random.choice([-1, 0, 1])
                 spark_y = y + random.choice([-1, 0, 1])
                 if game_map.in_bounds(spark_x, spark_y) and game_map.visible[spark_x, spark_y]:
-                    game_map.screen_print(console, spark_x, spark_y, "`", fg=(255, 50, 0))  # Gold spark
+                    game_map.screen_print_lit(console, spark_x, spark_y, "`", fg=(255, 50, 0))  # Gold spark
 
         self.frames -= 1
         
@@ -754,12 +755,57 @@ class WaterDropAnimation:
         if game_map.visible[x, y]:
             # Animate water drop with a brief blue sparkle
             if self.frames == 10:
-                game_map.screen_print(console, x, y, "|", fg=(0, 191, 255))  # DeepSkyBlue
+                game_map.screen_print_lit(console, x, y, "|", fg=(0, 191, 255))  # DeepSkyBlue
             elif self.frames == 9:
-                game_map.screen_print(console, x, y, ";", fg=(30, 144, 255))  # DodgerBlue
+                game_map.screen_print_lit(console, x, y, ";", fg=(30, 144, 255))  # DodgerBlue
             elif self.frames == 8:
-                game_map.screen_print(console, x, y, ".", fg=(0, 0, 255))  # Pale Blue
+                game_map.screen_print_lit(console, x, y, ".", fg=(0, 0, 255))  # Pale Blue
             elif self.frames == 5:
-                game_map.screen_print(console, x, y, ".", fg=(0, 0, 0))  # Darkgrey
+                game_map.screen_print_lit(console, x, y, ".", fg=(0, 0, 0))  # Darkgrey
 
         self.frames -= 1
+
+class WaterMoveAnimation:
+    def __init__(self, position):
+        self.position = position
+        self.frames = 10 # duration in frames
+        self.render_priority = 0  # Render below everything else for subtlety
+    def tick(self, console, game_map):
+        x, y = self.position
+        self.frames -= 1
+        if not game_map.in_bounds(x, y):
+            return
+        if game_map.visible[x, y]:
+            if self.frames > 5:
+                game_map.screen_print_lit(console, x, y, chr(0xE141), fg=color.shallow_water)
+            else:
+                game_map.screen_print_lit(console, x, y, chr(0xE142), fg=color.shallow_water)
+
+
+class GlobalWaterAnimation:
+    """Single persistent animation that oscillates all visible water tiles
+    back and forth: 0→1→2→1→0→1→2→...
+    """
+    CHARS = [chr(0xE140), chr(0xE141), chr(0xE142)]
+    # How many ticks each frame is held before advancing
+    FRAME_DURATION = 5
+
+    def __init__(self):
+        self.render_priority = 0
+        self.frames = 10 ** 9  # never expires
+        self._tick = 0
+
+    def tick(self, console, game_map):
+        self._tick += 1
+        # Ping-pong sequence: 0,1,2,1 repeating (length 4)
+        sequence = [0, 1, 2, 1]
+        idx = (self._tick // self.FRAME_DURATION) % len(sequence)
+        char = self.CHARS[sequence[idx]]
+        try:
+            import numpy as np
+            water_mask = (game_map.tiles["name"] == "Water") & game_map.visible
+            positions = np.argwhere(water_mask)
+            for xi, yi in positions:
+                game_map.screen_print_lit(console, int(xi), int(yi), char, fg=color.shallow_water)
+        except Exception:
+            pass

@@ -39,7 +39,7 @@ epic = purple
 legendary = orange
 coins = (163, 140, 69)
 
-
+shallow_water = (60, 160, 185)
 player_atk = (0xE0, 0xE0, 0xE0)
 enemy_atk = (0xFF, 0xC0, 0xC0)
 needs_target = (0x3F, 0xFF, 0xFF)

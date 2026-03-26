@@ -180,23 +180,30 @@ class GameMap:
         try:
             # Get light level at entity position (0.0 = dark, 1.0 = full light)
             light_level = self.tiles["light_level"][x, y]
-            light_level = float(light_level)  # Ensure it's a regular float
-            light_level = max(0.0, min(1.0, light_level))  # Clamp between 0 and 1
-            
+            light_level = float(light_level)
+            light_level = max(0.0, min(1.0, light_level))
+
             # Apply lighting: dark multiplier increases with light level
             # 0.2 = very dark (20% brightness), 1.0 = full brightness
             brightness = 0.2 + (0.8 * light_level)
-            
-            # Apply brightness to entity color
+
             r, g, b = entity_color
-            lit_color = (
-                int(r * brightness),
-                int(g * brightness), 
-                int(b * brightness)
-            )
-            return lit_color
+            r = r * brightness
+            g = g * brightness
+            b = b * brightness
+
+            # Match the warm amber tint applied to tiles on non-sunlit maps.
+            # Tint strength scales with light_level so dark areas stay neutral.
+            if not getattr(self, "sunlit", False):
+                # warm_tint matches _render_tiles_with_gradient: [1.0, 0.88, 0.60]
+                r = r * (1.0 + light_level * (1.0 - 1.0))   # R unchanged
+                g = g * (1.0 + light_level * (0.88 - 1.0))  # G slightly dimmed
+                b = b * (1.0 + light_level * (0.60 - 1.0))  # B noticeably cut
+
+            return (int(max(0, min(255, r))),
+                    int(max(0, min(255, g))),
+                    int(max(0, min(255, b))))
         except Exception:
-            # Fallback to original color if anything fails
             return entity_color
     
     def get_viewport(self, console: Console) -> tuple[int, int, int, int]:
@@ -226,6 +233,20 @@ class GameMap:
             return
         screen_x, screen_y = screen_position
         console.print(x=screen_x, y=screen_y, string=string, fg=fg, bg=bg)
+
+    def screen_print_lit(
+        self,
+        console: Console,
+        x: int,
+        y: int,
+        string: str,
+        fg: tuple[int, int, int] | None = None,
+        bg: tuple[int, int, int] | None = None,
+    ) -> None:
+        """Like screen_print but multiplies fg by the tile's dynamic light level."""
+        if fg is not None:
+            fg = self._apply_lighting_to_entity_color(fg, x, y)
+        self.screen_print(console, x, y, string, fg=fg, bg=bg)
 
     def _render_tiles_with_gradient(self, console: Console) -> None:
         """Render tiles with gradient interpolation between dark and light based on light levels."""
@@ -279,23 +300,27 @@ class GameMap:
             
             # Interpolate between dark and light tiles based on light level
             vis_light_levels = light_levels[visible_mask].clip(0, 1)
-            
+
+            # Apply a power curve so that low ambient light stays near the dark
+            # tile colors and bright 'light' tile colors don't bleed through at
+            # low light levels (e.g. the cyan of water glowing in darkness).
+            interp_vis_light = np.power(vis_light_levels, 1.5)
+
             # Extract dark and light graphics for visible tiles
             vis_dark = dark_tiles[visible_mask]
-            vis_light = light_tiles[visible_mask] 
-            
+            vis_light = light_tiles[visible_mask]
+
             # Interpolate character (use light char if light level > 0.5, dark otherwise)
             result_chars = np.where(vis_light_levels > 0.5, vis_light['ch'], vis_dark['ch'])
-            
-            # Interpolate foreground and background colors
+
+            # Interpolate foreground and background colors using curved light level
             dark_fg = vis_dark['fg'].astype(float)
             light_fg = vis_light['fg'].astype(float)
-            dark_bg = vis_dark['bg'].astype(float)  
+            dark_bg = vis_dark['bg'].astype(float)
             light_bg = vis_light['bg'].astype(float)
-            
-            # Linear interpolation: dark + light_level * (light - dark)
-            interp_fg = (dark_fg + vis_light_levels[:, np.newaxis] * (light_fg - dark_fg))
-            interp_bg = (dark_bg + vis_light_levels[:, np.newaxis] * (light_bg - dark_bg))
+
+            interp_fg = (dark_fg + interp_vis_light[:, np.newaxis] * (light_fg - dark_fg))
+            interp_bg = (dark_bg + interp_vis_light[:, np.newaxis] * (light_bg - dark_bg))
 
             # Warm torch/fire tint: lit tiles shift toward amber on non-sunlit maps.
             # warm_tint = [R_mul, G_mul, B_mul] at full brightness — keep red,
@@ -306,6 +331,11 @@ class GameMap:
                 tint_mul = 1.0 + vis_light_levels[:, np.newaxis] * (warm_tint - 1.0)
                 interp_fg = interp_fg * tint_mul
                 interp_bg = interp_bg * tint_mul
+
+            # Clamp: never go below the dark tile color (the warm tint can push
+            # blue-channel values below the dark tile floor).
+            interp_fg = np.maximum(interp_fg, dark_fg)
+            interp_bg = np.maximum(interp_bg, dark_bg)
 
             interp_fg = interp_fg.clip(0, 255).astype(np.uint8)
             interp_bg = interp_bg.clip(0, 255).astype(np.uint8)
