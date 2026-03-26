@@ -31,8 +31,12 @@ datas = []
 datas += [(f, '.') for f in glob.glob(os.path.join(project_folder, '*.png'))]
 # JSON files (loot tables)
 datas += [(f, '.') for f in glob.glob(os.path.join(project_folder, '*.json'))]
-# RP folder (sounds, sprites, etc.)
-datas += [('RP', 'RP')]
+# RP folder (sounds, sprites, etc.) - recursively include all files and subfolders
+for root, dirs, files in os.walk(os.path.join(project_folder, 'RP')):
+    for file in files:
+        file_path = os.path.join(root, file)
+        rel_path = os.path.relpath(file_path, project_folder)
+        datas.append((file_path, os.path.dirname(rel_path)))
 # Markdown documentation
 datas += [(f, '.') for f in glob.glob(os.path.join(project_folder, '*.md'))]
 

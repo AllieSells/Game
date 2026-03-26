@@ -945,7 +945,7 @@ class Engine:
     def render_game(self, console: Console) -> None:
         self.game_map.render(console)
 
-    def render_ui(self, console: Console) -> None:
+    def render_ui(self, console: Console, skip_debug: bool = False) -> None:
         # Render damage indicator if active - render above all HUD elements
         if self.damage_indicator_timer > 0:
             self.render_damage_indicator(console)
@@ -1010,7 +1010,8 @@ class Engine:
                 console=console, x=1, y=42, engine=self
             )
             if self.debug:
-                render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities), self)
+                if not skip_debug:
+                    render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities), self)
             return
 
         tile = self.mouse_x, self.mouse_y
@@ -1047,7 +1048,7 @@ class Engine:
             console=console, x=1, y=42, engine=self  # MOUSE_LOCATION coordinates
             )
         
-        if self.debug:
+        if self.debug and not skip_debug:
             render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities), self)
 
     def render(self, console: Console) -> None:

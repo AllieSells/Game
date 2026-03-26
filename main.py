@@ -103,6 +103,8 @@ game_view_height = game_height // 2
 game_console = tcod.console.Console(game_view_width, game_view_height, order="F")
 ui_console = tcod.console.Console(screen_width, screen_height, order="F")
 
+_transparency_idx_cache: dict = {}  # (h, w, tile_h, tile_w) -> (x_idx, y_idx)
+
 def render_console_with_transparency(console: tcod.console.Console) -> np.ndarray:
     """Render a console to RGBA pixels and make untouched blank cells transparent."""
     pixels = tileset.render(console)
@@ -119,8 +121,13 @@ def render_console_with_transparency(console: tcod.console.Console) -> np.ndarra
     cell_alpha[fade_mask] = 144
 
     alpha_channel = pixels[:, :, 3]
-    x_idx = np.arange(alpha_channel.shape[0]) // tile_h
-    y_idx = np.arange(alpha_channel.shape[1]) // tile_w
+    cache_key = (alpha_channel.shape[0], alpha_channel.shape[1], tile_h, tile_w)
+    if cache_key not in _transparency_idx_cache:
+        _transparency_idx_cache[cache_key] = (
+            np.arange(alpha_channel.shape[0]) // tile_h,
+            np.arange(alpha_channel.shape[1]) // tile_w,
+        )
+    x_idx, y_idx = _transparency_idx_cache[cache_key]
     alpha_channel[:, :] = cell_alpha.T[x_idx[:, None], y_idx[None, :]]
 
     return pixels
@@ -317,32 +324,33 @@ def main() -> None:
     time.sleep(0.3)
     
     # Load custom cursors after tcod context is fully initialized
-    cursor_point = Image.open("RP/cursors/cursor_point.png").convert("RGBA")
+    cursor_point = Image.open(get_data_path("RP/cursors/cursor_point.png")).convert("RGBA")
     pixels_cursor_point = np.array(cursor_point, dtype=np.uint8)
     cursor = tcod.sdl.mouse.new_color_cursor(pixels_cursor_point, (0, 0))   
 
-    cursor_click_img = Image.open("RP/cursors/cursor_click.png").convert("RGBA")
+    cursor_click_img = Image.open(get_data_path("RP/cursors/cursor_click.png")).convert("RGBA")
     pixels_cursor_click = np.array(cursor_click_img, dtype=np.uint8)
     cursor_click = tcod.sdl.mouse.new_color_cursor(pixels_cursor_click, (0, 0))
 
-    cursor_bag_img = Image.open("RP/cursors/cursor_bag.png").convert("RGBA")
+    cursor_bag_img = Image.open(get_data_path("RP/cursors/cursor_bag.png")).convert("RGBA")
     pixels_cursor_bag = np.array(cursor_bag_img, dtype=np.uint8)
     cursor_bag = tcod.sdl.mouse.new_color_cursor(pixels_cursor_bag, (0, 0))
 
-    cursor_interact_img =  Image.open("RP/cursors/cursor_open.png").convert("RGBA")
+    cursor_interact_img =  Image.open(get_data_path("RP/cursors/cursor_open.png")).convert("RGBA")
     pixels_cursor_interact = np.array(cursor_interact_img, dtype=np.uint8)
     cursor_interact = tcod.sdl.mouse.new_color_cursor(pixels_cursor_interact, (0, 0))
 
-    cursor_sword_img = Image.open("RP/cursors/cursor_sword.png").convert("RGBA")
+    cursor_sword_img = Image.open(get_data_path("RP/cursors/cursor_sword.png")).convert("RGBA")
     pixels_cursor_sword = np.array(cursor_sword_img, dtype=np.uint8)
     cursor_sword = tcod.sdl.mouse.new_color_cursor(pixels_cursor_sword, (0, 0))
     
-    cursor_walk_img = Image.open("RP/cursors/cursor_walk.png").convert("RGBA")
+    cursor_walk_img = Image.open(get_data_path("RP/cursors/cursor_walk.png")).convert("RGBA")
     pixels_cursor_walk = np.array(cursor_walk_img, dtype=np.uint8)
     cursor_walk = tcod.sdl.mouse.new_color_cursor(pixels_cursor_walk, (0, 0))
 
 
     # Start the main game loop
+    import render_functions
     target_fps = 30
     frame_time = 1.0 / target_fps
     last_time = time.time()
@@ -350,10 +358,18 @@ def main() -> None:
     tileset_atlas = tcod.render.SDLTilesetAtlas(renderer, tileset)
     game_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
     ui_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
+    debug_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
+    debug_console = tcod.console.Console(40, 9, order="F")
+    # 1×1 dim texture stretched over full screen for overlay fade (GPU-only, no CPU pixel work)
+    dim_pixels = np.array([[[20, 20, 30, 100]]], dtype=np.uint8)
+    dim_tex = renderer.upload_texture(dim_pixels)
+    dim_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
     game_tex = None
     ui_tex = None
+    _overlay_menu_bounds = None  # cached (x1,y1,x2,y2) of menu content, above HUD
     cached_overlay_handler = None
     overlay_dirty = True
+    _last_dirty_ui_tile = None  # track tile under cursor to avoid per-pixel dirty
 
     # Set initial cursor (cursors were already loaded at top of file)
     tcod.sdl.mouse.set_cursor(cursor)
@@ -402,10 +418,7 @@ def main() -> None:
                 has_game_view
                 and isinstance(handler, input_handlers.MainGameEventHandler)
             )
-            fast_main_view = (
-                main_game_view
-                and not getattr(active_engine, "debug", False)
-            )
+            fast_main_view = main_game_view  # debug overlay uses dirty-tracking, no need to exclude
             needs_live_game_frame = main_game_view or game_tex is None
 
             if main_game_view:
@@ -416,8 +429,6 @@ def main() -> None:
                 active_engine.render_game(game_console)
 
             if fast_main_view:
-                cached_overlay_handler = None
-                overlay_dirty = True
                 renderer.clear()
                 game_tex = game_console_renderer.render(game_console)
                 renderer.copy(
@@ -425,13 +436,43 @@ def main() -> None:
                     dest=(0, 0, game_dest_w, game_dest_h),
                 )
 
-                active_engine.render_ui(ui_console)
-                hud_tex = ui_console_renderer.render(ui_console)
-                renderer.copy(
-                    hud_tex,
-                    source=(0, hud_source_y, screen_width * tileset.tile_width, hud_source_h),
-                    dest=(0, window_h - hud_dest_h, window_w, hud_dest_h),
-                )
+                if getattr(active_engine, "debug", False):
+                    # Debug mode: cheap HUD strip + small dedicated opaque debug console.
+                    # Avoids the expensive render_console_with_transparency() path entirely.
+                    cached_overlay_handler = None
+                    overlay_dirty = True
+                    ui_console.clear()
+                    active_engine.render_ui(ui_console, skip_debug=True)
+                    hud_tex = ui_console_renderer.render(ui_console)
+                    renderer.copy(
+                        hud_tex,
+                        source=(0, hud_source_y, screen_width * tileset.tile_width, hud_source_h),
+                        dest=(0, window_h - hud_dest_h, window_w, hud_dest_h),
+                    )
+                    # Render debug text to a small 40×9 opaque console (GPU, no transparency)
+                    debug_console.clear()
+                    render_functions.render_debug_overlay(
+                        debug_console,
+                        active_engine.tick_rate,
+                        (active_engine.player.x, active_engine.player.y),
+                        type(handler).__name__,
+                        len(active_engine.game_map.entities),
+                        active_engine,
+                    )
+                    dbg_tex = debug_console_renderer.render(debug_console)
+                    renderer.copy(dbg_tex, dest=(0, 0, int(40 * base_tile_w), int(9 * base_tile_h)))
+                else:
+                    # Normal play: only copy the bottom HUD strip (cheap path)
+                    cached_overlay_handler = None
+                    overlay_dirty = True
+                    ui_console.clear()
+                    active_engine.render_ui(ui_console)
+                    hud_tex = ui_console_renderer.render(ui_console)
+                    renderer.copy(
+                        hud_tex,
+                        source=(0, hud_source_y, screen_width * tileset.tile_width, hud_source_h),
+                        dest=(0, window_h - hud_dest_h, window_w, hud_dest_h),
+                    )
                 renderer.present()
             elif map_overlay_view:
                 cached_overlay_handler = None
@@ -460,7 +501,7 @@ def main() -> None:
                         ui_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
                     else:
                         ui_tex.update(ui_pixels)
-                    renderer.copy(ui_tex, dest=(0, 0, window_w, window_h))
+                        renderer.copy(ui_tex, dest=(0, 0, window_w, window_h))
                 else:
                     hud_tex = ui_console_renderer.render(ui_console)
                     renderer.copy(
@@ -478,19 +519,49 @@ def main() -> None:
                     dest=(0, 0, game_dest_w, game_dest_h),
                 )
 
-                if overlay_dirty or cached_overlay_handler is not handler or getattr(active_engine, "debug", False):
+                # Dim the game underneath the overlay (1×1 GPU pixel stretched to full screen)
+                renderer.copy(dim_tex, dest=(0, 0, window_w, window_h))
+
+                # Re-render UI console only when content changes (dirty-tracked)
+                if overlay_dirty or cached_overlay_handler is not handler:
                     ui_console.clear()
                     handler.on_render(console=ui_console)
-                    ui_pixels = render_console_with_transparency(ui_console)
-                    if ui_tex is None:
-                        ui_tex = renderer.upload_texture(ui_pixels)
-                        ui_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                    # Cache the bounding box of menu content (non-background, above HUD)
+                    _ch = ui_console.ch[:, :hud_top_row]
+                    _bg = ui_console.bg[:, :hud_top_row, :]
+                    _content = (_ch != ord(' ')) | np.any(_bg > 16, axis=2)
+                    _cells = np.where(_content)
+                    if _cells[0].size > 0:
+                        _overlay_menu_bounds = (
+                            int(_cells[0].min()), int(_cells[1].min()),
+                            int(_cells[0].max()) + 1, int(_cells[1].max()) + 1,
+                        )
                     else:
-                        ui_tex.update(ui_pixels)
+                        _overlay_menu_bounds = None
                     cached_overlay_handler = handler
                     overlay_dirty = False
 
-                renderer.copy(ui_tex, dest=(0, 0, window_w, window_h))
+                # GPU render of full UI console (no CPU tileset.render, no texture upload)
+                overlay_ui_tex = ui_console_renderer.render(ui_console)
+                _tw, _th = tileset.tile_width, tileset.tile_height
+
+                # Draw only the detected menu region (skips full-screen blank cells)
+                if _overlay_menu_bounds:
+                    _mx1, _my1, _mx2, _my2 = _overlay_menu_bounds
+                    renderer.copy(
+                        overlay_ui_tex,
+                        source=(_mx1 * _tw, _my1 * _th,
+                                (_mx2 - _mx1) * _tw, (_my2 - _my1) * _th),
+                        dest=(int(_mx1 * base_tile_w), int(_my1 * base_tile_h),
+                              int((_mx2 - _mx1) * base_tile_w), int((_my2 - _my1) * base_tile_h)),
+                    )
+
+                # HUD strip (same cheap GPU copy as fast_main_view)
+                renderer.copy(
+                    overlay_ui_tex,
+                    source=(0, hud_source_y, screen_width * _tw, hud_source_h),
+                    dest=(0, window_h - hud_dest_h, window_w, hud_dest_h),
+                )
                 renderer.present()
             else:
                 cached_overlay_handler = None
@@ -541,7 +612,15 @@ def main() -> None:
                     elif isinstance(event, tcod.event.MouseButtonUp) and event.button == tcod.event.BUTTON_LEFT:
                         _mouse_held = False
                     handler = handler.handle_events(event)
-                    overlay_dirty = True
+                    if isinstance(event, tcod.event.MouseMotion) and has_game_view:
+                        # Only invalidate overlay when the cursor moves to a new tile,
+                        # not on every sub-pixel mouse-motion event.
+                        current_ui_tile = getattr(event, 'ui_tile', None)
+                        if current_ui_tile != _last_dirty_ui_tile:
+                            _last_dirty_ui_tile = current_ui_tile
+                            overlay_dirty = True
+                    else:
+                        overlay_dirty = True
             except Exception: # handles game exceptions
                 traceback.print_exc() #prints error to stderr
                 if isinstance(handler, input_handlers.EventHandler):

@@ -28,6 +28,32 @@ _composite_next: int = COMPOSITE_START_CP
 _tileset = None               # Set by load_extras; used by compose/refresh
 
 
+def _offset_overlay_tile(tile_pixels: np.ndarray, x_offset: int, y_offset: int) -> np.ndarray:
+    """Shift an overlay tile by the given pixel offsets, filling empty space with transparency."""
+    if x_offset == 0 and y_offset == 0:
+        return tile_pixels
+
+    height, width = tile_pixels.shape[:2]
+    canvas = np.zeros_like(tile_pixels)
+
+    src_x0 = max(0, -x_offset)
+    src_x1 = min(width, width - x_offset)
+    src_y0 = max(0, -y_offset)
+    src_y1 = min(height, height - y_offset)
+
+    dest_x0 = max(0, x_offset)
+    dest_x1 = min(width, width + x_offset)
+    dest_y0 = max(0, y_offset)
+    dest_y1 = min(height, height + y_offset)
+
+    copy_width = dest_x1 - dest_x0
+    copy_height = dest_y1 - dest_y0
+    if copy_width <= 0 or copy_height <= 0:
+        return canvas
+
+    canvas[dest_y0:dest_y1, dest_x0:dest_x1, :] = tile_pixels[src_y0:src_y1, src_x0:src_x1, :]
+    return canvas
+
 def _scale_overlay_tile(tile_pixels: np.ndarray, scale: float) -> np.ndarray:
     """Compress an overlay tile vertically and anchor it to the bottom of the cell."""
     if scale == 1.0:
@@ -99,7 +125,7 @@ def load_extras(tileset, path: str = "RP/extras.png") -> int:
     return count
 
 
-def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0) -> str:
+def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_offset: int = 0, y_offset: int = 0) -> str:
     """Alpha-composite multiple tile layers into a new tileset slot.
 
     Blends codepoints bottom-up (first = base, last = top layer).
@@ -120,6 +146,8 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0) -> s
         overlay_pixels = _tileset.get_tile(cp)
         if normalized_scale != 1.0:
             overlay_pixels = _scale_overlay_tile(overlay_pixels, normalized_scale)
+        if x_offset != 0 or y_offset != 0:
+            overlay_pixels = _offset_overlay_tile(overlay_pixels, x_offset, y_offset)
         overlay = overlay_pixels.astype(np.float32)
         alpha = overlay[..., 3:4] / 255.0
         base[..., :3] = overlay[..., :3] * alpha + base[..., :3] * (1.0 - alpha)
@@ -130,8 +158,10 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0) -> s
     _tileset.set_tile(cp, result)
     _composite_cache[key] = cp
     _composite_next += 1
-    print(f"[sprite_manager] Composed sprite 0x{cp:04X} from layers {[hex(c) for c in layer_codepoints]}")
+    #print(f"[sprite_manager] Composed sprite 0x{cp:04X} from layers {[hex(c) for c in layer_codepoints]}")
     return chr(cp)
+
+
 
 
 def refresh_actor_sprite(actor) -> None:

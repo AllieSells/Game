@@ -792,7 +792,7 @@ def get_wall_connections(dungeon: GameMap, x: int, y: int) -> Dict[str, bool]:
     
     return connections
 
-def determine_wall_tile(connections: Dict[str, bool]):
+def determine_wall_tile(connections: Dict[str, bool], tile_type: Optional[str] = None):
     """Determine the appropriate wall tile based on connection pattern."""
     # Extract main directions for easier checking
     n = connections['north']
@@ -804,58 +804,54 @@ def determine_wall_tile(connections: Dict[str, bool]):
     se = connections['southeast']
     sw = connections['southwest']
 
+    #print(tile_type, connections)
+
     if n and s and e and w and nw and sw and not ne and not se:
-        return tile_types.get_wall_top_left()
+        return tile_types.get_wall_top_left(tile_type)
     
     # Double wall reduction - vertical
     if n and s and e and w:
-        return tile_types.get_wall_cross()
+        return tile_types.get_wall_cross(tile_type)
     
     if n and nw and w and s and sw:
         # Return vertical
-        return tile_types.get_wall_vertical()
+        return tile_types.get_wall_vertical(tile_type)
     if n and ne and e and s and se:
         # Return vertical
-        return tile_types.get_wall_vertical()
+        return tile_types.get_wall_vertical(tile_type)
     
     # Double wall reduction - horizontal
     if e and se and s and w and sw:
         # Return horizontal
-        return tile_types.get_wall_horizontal()
+        return tile_types.get_wall_horizontal(tile_type)
     if w and nw and n and e and ne:
         # Return horizontal
-        return tile_types.get_wall_horizontal()
-    
-
-    
-    
-    
-    
+        return tile_types.get_wall_horizontal(tile_type)
     # T-junctions (3 directions)
     if n and s and w and not e:  # T facing right (╣) - connects up, down, left
-        return tile_types.get_wall_t_right()
+        return tile_types.get_wall_t_right(tile_type)
     if n and s and e and not w:  # T facing left (╠) - connects up, down, right
-        return tile_types.get_wall_t_left()
+        return tile_types.get_wall_t_left(tile_type)
     if e and w and s and not n:  # T facing up (╦) - connects left, right, down
-        return tile_types.get_wall_t_up()
+        return tile_types.get_wall_t_up(tile_type)
     if e and w and n and not s:  # T facing down (╩) - connects left, right, up
-        return tile_types.get_wall_t_down()
+        return tile_types.get_wall_t_down(tile_type)
     
     # Corners (2 perpendicular directions)
     if n and e and not s and not w:  # Top-left corner
-        return tile_types.get_wall_top_left()
+        return tile_types.get_wall_top_left(tile_type)
     if n and w and not s and not e:  # Top-right corner
-        return tile_types.get_wall_top_right()
+        return tile_types.get_wall_top_right(tile_type)
     if s and e and not n and not w:  # Bottom-left corner
-        return tile_types.get_wall_bottom_left()
+        return tile_types.get_wall_bottom_left(tile_type)
     if s and w and not n and not e:  # Bottom-right corner
-        return tile_types.get_wall_bottom_right()
+        return tile_types.get_wall_bottom_right(tile_type)
     
     # Straight lines (2 opposite directions or single direction)
     if (n and s) or (n and not s and not e and not w) or (s and not n and not e and not w):
-        return tile_types.get_wall_vertical()
+        return tile_types.get_wall_vertical(tile_type)
     if (e and w) or (e and not w and not n and not s) or (w and not e and not n and not s):
-        return tile_types.get_wall_horizontal()
+        return tile_types.get_wall_horizontal(tile_type)
     
     # Fallback to basic wall for complex or unhandled patterns
     return tile_types.wall
@@ -877,7 +873,7 @@ def apply_wall_merging(dungeon: GameMap) -> None:
                 connections = get_wall_connections(dungeon, x, y)
                 
                 # Determine appropriate wall tile
-                new_wall_tile = determine_wall_tile(connections)
+                new_wall_tile = determine_wall_tile(connections, tile["type"])
                 
                 # Store the update for later application
                 walls_to_update.append((x, y, new_wall_tile))
@@ -1124,7 +1120,7 @@ def generate_dungeon(
                 if random.random() < 0.4:
                     dungeon.tiles[x, y] = tile_types.random_floor_tile()
                 else:
-                    dungeon.tiles[x, y] = tile_types.wall
+                    dungeon.tiles[x, y] = tile_types.cave_wall
 
         # Cellular automata smoothing — 4 passes, double-buffered so each pass
         # reads cleanly from the previous iteration without in-place bias.
@@ -1142,7 +1138,7 @@ def generate_dungeon(
                             if not neighbor_tile["walkable"] and not neighbor_tile["interactable"]:
                                 wall_count += 1
                     if wall_count > 5:
-                        new_tiles[x, y] = tile_types.wall
+                        new_tiles[x, y] = tile_types.cave_wall
                     elif wall_count < 5:
                         new_tiles[x, y] = tile_types.random_floor_tile()
                     # else: keep same (already copied)
@@ -1340,5 +1336,18 @@ def generate_dungeon(
 
     # Apply wall merging system to create connected wall appearances
     apply_wall_merging(dungeon)
+    if vegetation > 0:
+        # Mossification
+        print(f" Moss val: {(vegetation/4)**2}")
+        for x in range(dungeon.width):
+            for y in range(dungeon.height):
+                tile = dungeon.tiles[x, y]
+                if not tile["walkable"] and not tile["interactable"]:
+                    if random.random() < (vegetation/4)**2:
+                        
+                        dungeon.tiles[x, y] = tile_types.mossify_wall_tile(tile)
+                elif tile["walkable"]:
+                    if random.random() < (vegetation/6)**2:
+                        dungeon.tiles[x, y] = tile_types.random_mossy_floor_tile()
 
     return dungeon

@@ -279,7 +279,9 @@ class LiquidSystem:
             current_tile["transparent"],
             np.array((orig_char, orig_fg_dark, liquid_bg_dark), dtype=current_tile["dark"].dtype),
             np.array((orig_char, orig_fg_light, liquid_bg_light), dtype=current_tile["light"].dtype),
-            current_tile["interactable"]
+            current_tile["interactable"],
+            current_tile["type"],
+            current_tile["direction"]
         )
         
         self.game_map.tiles[x, y] = new_tile

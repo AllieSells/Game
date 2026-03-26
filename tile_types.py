@@ -1,3 +1,39 @@
+CAN_BE_MOSSY = {
+    "horizontal",
+    "t_down",
+    "top_left",
+    "top_right",
+}
+import sprite_manager
+def mossify_wall_tile(tile):
+    # Merge allowable wall types with moss texture
+    if tile["direction"] not in CAN_BE_MOSSY:
+        return tile
+    # Copy the tile to avoid mutating the original
+    new_tile = tile.copy()
+    for variant in ("dark", "light"):
+        ch = tile[variant]["ch"]
+        if isinstance(ch, str):
+            base_cp = ord(ch)
+        else:
+            base_cp = int(ch)
+        moss_cp = 0xE12B
+        # compose_sprite returns a character
+        if tile["direction"] == "horizontal":
+            x_offset = 2
+        elif tile["direction"] == "t_down":
+            x_offset = 2
+        elif tile["direction"] == "top_left":
+            x_offset = 4
+        elif tile["direction"] == "top_right":
+            x_offset = 0
+        new_ch = sprite_manager.compose_sprite([base_cp, moss_cp], x_offset=x_offset, y_offset=0)
+        # Match the type of the original field
+        if isinstance(ch, str):
+            new_tile[variant]["ch"] = new_ch
+        else:
+            new_tile[variant]["ch"] = ord(new_ch)
+    return new_tile
 from typing import Tuple, Optional
 
 import numpy as np
@@ -22,6 +58,9 @@ tile_dt = np.dtype(
         ("dark", graphic_dt),  
         ("light", graphic_dt),
         ("interactable", np.bool_),
+        ("type", "U16"),
+        ("direction", "U16"),
+
     ]
 )
 
@@ -33,11 +72,13 @@ def new_tile(
         transparent: int,
         dark: Tuple[int, Tuple[int, int, int], Tuple[int, int, int]],
         light: Tuple[int, Tuple[int, int, int], Tuple[int, int, int]],
-        interactable: bool = False
+        interactable: bool = False,
+        type: Optional[str] = None,
+        direction: Optional[str] = None
 
 
 ) -> np.ndarray:
-    return np.array((light_level, name, walkable, transparent, dark, light, interactable), dtype=tile_dt)
+    return np.array((light_level, name, walkable, transparent, dark, light, interactable, type, direction), dtype=tile_dt, )
 
 SHROUD = np.array((ord(" "), (255, 255, 255), (10, 10, 10)), dtype=graphic_dt)
 
@@ -98,7 +139,27 @@ def random_wall_tile():
     return wall
 
 
+
+
     
+moss_floor = new_tile(
+    name="Mossy Floor",
+    walkable=True,
+    transparent=True,
+    dark=(0xE12C, (40, 40, 40), (25, 25, 25)),
+    light=(0xE12C, (255, 255, 255), (80, 80, 80)),
+)
+
+def random_mossy_floor_tile():
+    char = random.choice([0xE12C, 0xE12D, 0xE12E, 0xE12F])
+    color_mod = random.randint(-10, 10)
+    return new_tile(
+        name="Mossy Floor",
+        walkable=True,
+        transparent=True,
+        dark=(char, (40 + color_mod, 40 + color_mod, 40 + color_mod), (25, 25, 25)),
+        light=(char, (245 + color_mod, 245 + color_mod, 245 + color_mod), (80, 80, 80)),
+    )
 
 
 floor = new_tile(
@@ -127,6 +188,7 @@ cave_wall = new_tile(
     transparent=False,
     dark=(0xE135, (60, 60, 60), (15, 15, 15)),
     light =(0xE135, (color.sprite_sheet), (80,80,80)),
+    type = "cave"
 )
     
 wall = new_tile(
@@ -137,79 +199,81 @@ wall = new_tile(
     dark=(0xE125, (60, 60, 60), (25, 25, 25)),
     # Make wall foreground/background a bit whiter when lit to increase contrast
     light=(0xE125, (color.sprite_sheet), (80,80,80)),
+    type = "dungeon"
 )
 
 # Box drawing wall tile generator function
-def create_wall_tile(character: str, base_tile=None):
-    """Create a wall tile with the specified character using the stone wall as template."""
+def create_wall_tile(character: str, base_tile=None, direction: Optional[str] = None):
+    """Create a wall tile with the specified character using the stone wall as template, and store directionality."""
     if base_tile is None:
         base_tile = wall
-    
-    # Create a copy of the base tile with the new character
-    return new_tile(
+    tile = new_tile(
         name=base_tile["name"],
         walkable=base_tile["walkable"],
         transparent=base_tile["transparent"],
         dark=(ord(character), base_tile["dark"]["fg"], base_tile["dark"]["bg"]),
         light=(ord(character), base_tile["light"]["fg"], base_tile["light"]["bg"]),
         interactable=base_tile["interactable"],
+        type = base_tile["type"],
+        direction=direction
     )
+    return tile
 
 # Wall tile variants - generated on demand
 def get_wall_horizontal(type: Optional[str] = None):
     if type == "cave":
-        return create_wall_tile(chr(0xE135))
-    return create_wall_tile(chr(0xE125))
+        return create_wall_tile(chr(0xE135), direction="horizontal")
+    return create_wall_tile(chr(0xE125), direction="horizontal")
 
 def get_wall_vertical(type: Optional[str] = None):
     if type == "cave":
-        return create_wall_tile(chr(0xE138))
-    return create_wall_tile(chr(0xE128))
+        return create_wall_tile(chr(0xE138), direction="vertical")
+    return create_wall_tile(chr(0xE128), direction="vertical")
 
 def get_wall_top_left(type: Optional[str] = None):
     if type == "cave":
-        return create_wall_tile(chr(0xE130))
-    return create_wall_tile(chr(0xE120))
+        return create_wall_tile(chr(0xE130), direction="top_left")
+    return create_wall_tile(chr(0xE120), direction="top_left")
 
 def get_wall_top_right(type: Optional[str] = None):
     if type == "cave":
-        return create_wall_tile(chr(0xE13A))
-    return create_wall_tile(chr(0xE12A))
+        return create_wall_tile(chr(0xE13A), direction="top_right")
+    return create_wall_tile(chr(0xE12A), direction="top_right")
 
 def get_wall_bottom_left(type: Optional[str] = None):
     if type == "cave":
-        return create_wall_tile(chr(0xE131))
-    return create_wall_tile(chr(0xE121))
+        return create_wall_tile(chr(0xE131), direction="bottom_left")
+    return create_wall_tile(chr(0xE121), direction="bottom_left")
 
 def get_wall_bottom_right(type: Optional[str] = None):
     if type == "cave":
-        return create_wall_tile(chr(0xE139))
-    return create_wall_tile(chr(0xE129))
+        return create_wall_tile(chr(0xE139), direction="bottom_right")
+    return create_wall_tile(chr(0xE129), direction="bottom_right")
 
 def get_wall_cross(type: Optional[str] = None):
     if type == "cave":
-        return create_wall_tile(chr(0xE136))
-    return create_wall_tile(chr(0xE126))
+        return create_wall_tile(chr(0xE136), direction="cross")
+    return create_wall_tile(chr(0xE126), direction="cross")
 
 def get_wall_t_up(type: Optional[str] = None):
     if type == "cave":
-        return create_wall_tile(chr(0xE133))
-    return create_wall_tile(chr(0xE123))
+        return create_wall_tile(chr(0xE133), direction="t_up")
+    return create_wall_tile(chr(0xE123), direction="t_up")
 
 def get_wall_t_down(type: Optional[str] = None):
     if type == "cave":
-        return create_wall_tile(chr(0xE132))
-    return create_wall_tile(chr(0xE122))
+        return create_wall_tile(chr(0xE132), direction="t_down")
+    return create_wall_tile(chr(0xE122), direction="t_down")
 
 def get_wall_t_left(type: Optional[str] = None):
     if type == "cave":
-        return create_wall_tile(chr(0xE134))
-    return create_wall_tile(chr(0xE124))
+        return create_wall_tile(chr(0xE134), direction="t_left")
+    return create_wall_tile(chr(0xE124), direction="t_left")
 
 def get_wall_t_right(type: Optional[str] = None):
     if type == "cave":
-        return create_wall_tile(chr(0xE137))
-    return create_wall_tile(chr(0xE127))
+        return create_wall_tile(chr(0xE137), direction="t_right")
+    return create_wall_tile(chr(0xE127), direction="t_right")
 
 debug_wall = new_tile(
     name="Stone Wall",
@@ -219,6 +283,7 @@ debug_wall = new_tile(
     dark=(ord(" "), (60, 60, 60), (15, 15, 15)),
     # Make wall foreground/background a bit whiter when lit to increase contrast
     light=(ord(" "), (255, 10, 10), (255, 60, 60)),
+    type="dungeon"
 )
 
 world_border = new_tile(

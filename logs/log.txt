@@ -1,345 +1,150 @@
 Log file cleared at startup.
-Tue Mar 24 00:13:02 2026: Game started.
+Wed Mar 25 21:09:53 2026: Game started.
 Loaded exceptions module in 0.00 seconds
-Loaded input_handlers module in 2.48 seconds
+Loaded input_handlers module in 2.34 seconds
 Loaded 240 frames for animated background.
-Loaded setup_game module in 0.32 seconds
+Loaded setup_game module in 0.33 seconds
 Loaded tcod.sdl.video and traceback modules in 0.00 seconds
- Tue Mar 24 00:13:05 2026: Handler: MainMenu, Event: menu_init, Message: Menu Engine init
-Finished loading in 3.62 seconds
+ Wed Mar 25 21:09:56 2026: Handler: MainMenu, Event: menu_init, Message: Menu Engine init
+Finished loading in 3.41 seconds
 Settings loaded: {'fullscreen': False, 'audio': 100, 'graphics': 'high', 'light_flicker': True}
 =========================================================================================================================================================================================================================
- Tue Mar 24 00:13:07 2026: Handler: Engine, Event: game_start, Message: Starting new game with seed: 1203475314
- Tue Mar 24 00:13:07 2026: Handler: Engine, Event: game_start, Message: Engine: <engine.Engine object at 0x0000024A55D32960>
- Tue Mar 24 00:13:07 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Maplestem
- Tue Mar 24 00:13:07 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Redroot
- Tue Mar 24 00:13:07 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Purpleshroom
- Tue Mar 24 00:13:07 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Greencap
- Tue Mar 24 00:13:07 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Blackspore
- Tue Mar 24 00:13:07 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Blackcap
- Tue Mar 24 00:13:07 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Ironcap
- Tue Mar 24 00:13:07 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Dustroot
- Tue Mar 24 00:13:07 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Silentbloom
- Tue Mar 24 00:13:09 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Giant Spider has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Giant Spider has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Tue Mar 24 00:13:10 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:11 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:11 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:11 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:11 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:11 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
- Tue Mar 24 00:13:11 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
- Tue Mar 24 00:13:11 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741885 (modifiers: 36864)
- Tue Mar 24 00:13:11 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 1
- Tue Mar 24 00:13:11 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
- Tue Mar 24 00:13:12 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:12 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 2
- Tue Mar 24 00:13:12 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:12 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 3
- Tue Mar 24 00:13:12 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
- Tue Mar 24 00:13:12 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 4
- Tue Mar 24 00:13:12 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
- Tue Mar 24 00:13:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
- Tue Mar 24 00:13:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 5
- Tue Mar 24 00:13:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
- Tue Mar 24 00:13:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 6
- Tue Mar 24 00:13:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 7
- Tue Mar 24 00:13:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 103 (modifiers: 36864)
- Tue Mar 24 00:13:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 8
- Tue Mar 24 00:13:14 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
- Tue Mar 24 00:13:14 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 9
- Tue Mar 24 00:13:14 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:14 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 10
- Tue Mar 24 00:13:14 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
- Tue Mar 24 00:13:14 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 11
- Tue Mar 24 00:13:14 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
- Tue Mar 24 00:13:14 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
- Tue Mar 24 00:13:14 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 12
- Tue Mar 24 00:13:15 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:15 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 13
- Tue Mar 24 00:13:15 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
- Tue Mar 24 00:13:15 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 14
- Tue Mar 24 00:13:15 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
- Tue Mar 24 00:13:15 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
- Tue Mar 24 00:13:15 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 15
- Tue Mar 24 00:13:32 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 16
- Tue Mar 24 00:13:32 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 17
- Tue Mar 24 00:13:32 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 18
- Tue Mar 24 00:13:33 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 19
- Tue Mar 24 00:13:33 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 20
- Tue Mar 24 00:13:34 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 21
- Tue Mar 24 00:13:34 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 22
- Tue Mar 24 00:13:34 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 23
- Tue Mar 24 00:13:34 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 24
- Tue Mar 24 00:13:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 25
- Tue Mar 24 00:13:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 26
- Tue Mar 24 00:13:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 27
- Tue Mar 24 00:13:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 28
- Tue Mar 24 00:13:35 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
- Tue Mar 24 00:13:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 29
- Tue Mar 24 00:13:35 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 30
- Tue Mar 24 00:13:36 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 31
- Tue Mar 24 00:13:36 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 32
- Tue Mar 24 00:13:36 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
- Tue Mar 24 00:13:36 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 33
- Tue Mar 24 00:13:36 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 34
- Tue Mar 24 00:13:38 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 35
- Tue Mar 24 00:13:38 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 36
- Tue Mar 24 00:13:38 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 37
- Tue Mar 24 00:13:39 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 38
- Tue Mar 24 00:13:40 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 39
- Tue Mar 24 00:13:40 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 40
- Tue Mar 24 00:13:40 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 41
- Tue Mar 24 00:13:41 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 42
- Tue Mar 24 00:13:41 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
- Tue Mar 24 00:13:41 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 43
- Tue Mar 24 00:13:41 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 44
- Tue Mar 24 00:13:41 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 45
- Tue Mar 24 00:13:41 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 46
- Tue Mar 24 00:13:41 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 47
- Tue Mar 24 00:13:41 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 48
- Tue Mar 24 00:13:41 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 49
- Tue Mar 24 00:13:41 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 50
- Tue Mar 24 00:13:42 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 51
- Tue Mar 24 00:13:42 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 52
- Tue Mar 24 00:13:42 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
- Tue Mar 24 00:13:42 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 53
- Tue Mar 24 00:13:42 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 54
- Tue Mar 24 00:13:42 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 55
- Tue Mar 24 00:13:42 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 56
- Tue Mar 24 00:13:42 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 57
- Tue Mar 24 00:13:43 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 58
- Tue Mar 24 00:13:43 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 59
- Tue Mar 24 00:13:43 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 60
- Tue Mar 24 00:13:43 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:43 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 61
- Tue Mar 24 00:13:43 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
- Tue Mar 24 00:13:44 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:44 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 62
- Tue Mar 24 00:13:44 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:44 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 63
- Tue Mar 24 00:13:44 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:44 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 64
- Tue Mar 24 00:13:44 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:44 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 65
- Tue Mar 24 00:13:44 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:44 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 66
- Tue Mar 24 00:13:45 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:45 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 67
- Tue Mar 24 00:13:45 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:45 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 68
- Tue Mar 24 00:13:46 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
- Tue Mar 24 00:13:46 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 69
- Tue Mar 24 00:13:46 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
- Tue Mar 24 00:13:46 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 70
- Tue Mar 24 00:13:46 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 71
- Tue Mar 24 00:13:46 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 72
- Tue Mar 24 00:13:46 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 73
- Tue Mar 24 00:13:46 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 74
- Tue Mar 24 00:13:46 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 75
- Tue Mar 24 00:13:47 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 76
- Tue Mar 24 00:13:47 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 77
- Tue Mar 24 00:13:47 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 78
- Tue Mar 24 00:13:47 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
- Tue Mar 24 00:13:49 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:49 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 79
- Tue Mar 24 00:13:49 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
- Tue Mar 24 00:13:49 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 80
- Tue Mar 24 00:13:49 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:49 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 81
- Tue Mar 24 00:13:49 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:49 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 82
- Tue Mar 24 00:13:49 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
- Tue Mar 24 00:13:50 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:50 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 83
- Tue Mar 24 00:13:50 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:50 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 84
- Tue Mar 24 00:13:50 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:50 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 85
- Tue Mar 24 00:13:51 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:51 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 86
- Tue Mar 24 00:13:51 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
- Tue Mar 24 00:13:51 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 87
- Tue Mar 24 00:13:53 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:53 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 88
- Tue Mar 24 00:13:54 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:54 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 89
- Tue Mar 24 00:13:54 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:13:54 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 90
- Tue Mar 24 00:13:54 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:54 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 91
- Tue Mar 24 00:13:54 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:54 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 92
- Tue Mar 24 00:13:54 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:54 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 93
- Tue Mar 24 00:13:55 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:55 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 94
- Tue Mar 24 00:13:55 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:13:55 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 95
- Tue Mar 24 00:13:57 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 96
- Tue Mar 24 00:13:57 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 97
- Tue Mar 24 00:13:57 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 98
- Tue Mar 24 00:13:57 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 99
- Tue Mar 24 00:13:57 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 100
- Tue Mar 24 00:13:58 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 101
- Tue Mar 24 00:13:58 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 102
- Tue Mar 24 00:13:58 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 103
- Tue Mar 24 00:13:59 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 104
- Tue Mar 24 00:13:59 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 105
- Tue Mar 24 00:13:59 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 106
- Tue Mar 24 00:13:59 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 107
- Tue Mar 24 00:14:00 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:14:00 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 108
- Tue Mar 24 00:14:01 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:14:01 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 109
- Tue Mar 24 00:14:01 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
- Tue Mar 24 00:14:01 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 110
- Tue Mar 24 00:14:01 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:14:01 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 111
- Tue Mar 24 00:14:02 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 112
- Tue Mar 24 00:14:02 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 113
- Tue Mar 24 00:14:04 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 114
- Tue Mar 24 00:14:04 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 115
- Tue Mar 24 00:14:04 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 116
- Tue Mar 24 00:14:04 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 117
- Tue Mar 24 00:14:07 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:14:07 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 118
- Tue Mar 24 00:14:08 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
- Tue Mar 24 00:14:08 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 119
-Processing text fragment 0: 'Player' with color (128, 128, 255)
-Processing text fragment 0: 'It ' with color (255, 255, 255)
-Processing text fragment 1: 'wears ' with color (255, 255, 255)
-Processing text fragment 2: 'Torch' with color (128, 128, 128)
-Processing text fragment 3: ' on its ' with color (255, 255, 255)
-Processing text fragment 4: 'right hand' with color (255, 255, 255)
-Processing text fragment 5: '.' with color (255, 255, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Corpse of Kobold' with color (128, 128, 255)
-Processing text fragment 0: 'Healthy.' with color (0, 255, 0)
-Processing text fragment 0: 'Healthy.' with color (0, 255, 0)
-Processing text fragment 0: 'Healthy.' with color (0, 255, 0)
-Processing text fragment 0: 'Healthy.' with color (0, 255, 0)
-Processing text fragment 0: 'Healthy.' with color (0, 255, 0)
-Processing text fragment 0: 'Healthy.' with color (0, 255, 0)
-Processing text fragment 0: 'Healthy.' with color (0, 255, 0)
-Processing text fragment 0: 'Healthy.' with color (0, 255, 0)
-Processing text fragment 0: 'Healthy.' with color (0, 255, 0)
-Processing text fragment 0: 'Clean.' with color (255, 255, 255)
-Processing text fragment 0: 'Clean.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
-Processing text fragment 0: 'A small reptillian humanoid,' with color (255, 255, 255)
-Processing text fragment 0: 'commonly found in caves.' with color (255, 255, 255)
+ Wed Mar 25 21:09:58 2026: Handler: Engine, Event: game_start, Message: Starting new game with seed: 405653732
+ Wed Mar 25 21:09:58 2026: Handler: Engine, Event: game_start, Message: Engine: <engine.Engine object at 0x0000017319D20FE0>
+ Wed Mar 25 21:09:58 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Greenstalk
+ Wed Mar 25 21:09:58 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Blackshroom
+ Wed Mar 25 21:09:58 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Gillspore
+ Wed Mar 25 21:09:58 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Spotcap
+ Wed Mar 25 21:09:58 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Bluecup
+ Wed Mar 25 21:09:58 2026: Handler: Engine, Event: world_gen, Message: Generated fungus: Purplebloom
+ Wed Mar 25 21:10:01 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Wed Mar 25 21:10:01 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 1
+ Wed Mar 25 21:10:02 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 103 (modifiers: 36864)
+ Wed Mar 25 21:10:02 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 2
+ Wed Mar 25 21:10:03 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 115 (modifiers: 36864)
+ Wed Mar 25 21:10:03 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 3
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Giant Spider has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Giant Spider has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:04 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: Fighter, Event: DeathTrigger, Message: Kobold has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: Fighter, Event: DeathTrigger, Message: Goblin has 0 HP. Triggering death.
+ Wed Mar 25 21:10:05 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741885 (modifiers: 36864)
+ Wed Mar 25 21:10:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 4
+ Wed Mar 25 21:10:13 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:13 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 5
+ Wed Mar 25 21:10:17 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 1073741883 (modifiers: 36864)
+ Wed Mar 25 21:10:19 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:19 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 6
+ Wed Mar 25 21:10:19 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:19 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 7
+ Wed Mar 25 21:10:19 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:19 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 8
+ Wed Mar 25 21:10:20 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:20 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 9
+ Wed Mar 25 21:10:20 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:20 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 10
+ Wed Mar 25 21:10:20 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:20 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 11
+ Wed Mar 25 21:10:20 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:20 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 12
+ Wed Mar 25 21:10:20 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:20 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 13
+ Wed Mar 25 21:10:20 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:20 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 14
+ Wed Mar 25 21:10:20 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:20 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 15
+ Wed Mar 25 21:10:20 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:20 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 16
+ Wed Mar 25 21:10:20 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:20 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 17
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 18
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 19
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 20
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 21
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 22
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 23
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 24
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 25
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 26
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 27
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 28
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 29
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 30
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 31
+ Wed Mar 25 21:10:21 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:21 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 32
+ Wed Mar 25 21:10:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 33
+ Wed Mar 25 21:10:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 34
+ Wed Mar 25 21:10:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 35
+ Wed Mar 25 21:10:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 36
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Wed Mar 25 21:10:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 37
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: ManaRecovery, Message: DEBUG: Recovered 0 mana due to natural regeneration.
+ Wed Mar 25 21:10:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 38
+ Wed Mar 25 21:10:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 39
+ Wed Mar 25 21:10:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 40
+ Wed Mar 25 21:10:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 41
+ Wed Mar 25 21:10:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 42
+ Wed Mar 25 21:10:22 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 97 (modifiers: 36864)
+ Wed Mar 25 21:10:22 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 43
+ Wed Mar 25 21:10:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 44
+ Wed Mar 25 21:10:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 45
+ Wed Mar 25 21:10:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 46
+ Wed Mar 25 21:10:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 47
+ Wed Mar 25 21:10:23 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 48
+ Wed Mar 25 21:10:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 49
+ Wed Mar 25 21:10:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 50
+ Wed Mar 25 21:10:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 100 (modifiers: 36864)
+ Wed Mar 25 21:10:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 51
+ Wed Mar 25 21:10:24 2026: Handler: MainGameEventHandler, Event: input, Message: Unbound key pressed: 119 (modifiers: 36864)
+ Wed Mar 25 21:10:24 2026: Handler: TurnManager, Event: PlayerTurnEnd, Message: TOTAL PLAYER MOVES: 52
