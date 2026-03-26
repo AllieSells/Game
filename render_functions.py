@@ -466,6 +466,40 @@ def render_combat_stats(
         ammo_x = max(1, console.width - len(ammo_text) - WEAPON_TEXT_OFFSET_FROM_RIGHT)
         console.print(x=ammo_x, y=PANEL_Y + 2, string=ammo_text, fg=color.bronze_text)
 
+def render_speech_bubble(console: 'Console', engine: 'Engine') -> None:
+    """Render all active speech bubbles for entities that have called engine.say()."""
+    GAME_VIEW_W = 40
+    GAME_VIEW_H = 20
+
+    engine.speech_bubble_ui_rect = None
+    if not engine.speech_bubbles:
+        return
+
+    for entity_id, bubble in engine.speech_bubbles.items():
+        entity = bubble["entity"]
+        text = bubble["text"]
+
+        game_pos = engine.world_to_screen(entity.x, entity.y, GAME_VIEW_W, GAME_VIEW_H)
+        if game_pos is None:
+            continue
+
+        cx, cy = game_pos
+        ux = cx * 2
+        uy = cy * 2
+
+        # Progressive reveal: one character every 3 frames
+        chars_to_show = min(len(text), bubble["reveal_frame"] // 3 + 1)
+        bubble["reveal_frame"] += 1
+        displayed = text[:chars_to_show]
+
+        bubble_w = len(text)  # reserve full width so position doesn't shift
+        bx = max(0, min(ux - bubble_w // 2, console.width - bubble_w))
+        by = max(0, min(uy - 1, 37))
+
+        console.print(x=bx, y=by, string=displayed, fg=color.fantasy_text, bg=color.parchment_bg)
+        # Store the last-rendered bubble rect for main.py to copy
+        engine.speech_bubble_ui_rect = (bx, by, bubble_w, 1)
+
 def render_status_hover_panel(console: 'Console', mouse_ui_x: int, mouse_ui_y: int, player=None) -> None:
     """Show effect details when hovering over individual effect glyphs in the HUD."""
 

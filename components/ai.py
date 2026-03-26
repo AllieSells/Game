@@ -218,6 +218,7 @@ class BaseAI(Action):
             #    radius = max(1, radius - 2)  # Self in darkness also reduces sight
 
             fov = tcod.map.compute_fov(gm.tiles["transparent"], (self.entity.x, self.entity.y), radius)
+            
             return bool(fov[actor.x, actor.y])
         except Exception:
             return False
@@ -273,6 +274,7 @@ class HostileEnemy(BaseAI):
         # Normal speed
         self.movement_speed = 1
         self.movement_counter = 0
+        self.last_saw_player = -99999999999999 # Tracks turns since last saw player
 
     def perform(self) -> None:
         # Move every turn
@@ -293,14 +295,21 @@ class HostileEnemy(BaseAI):
         
         # Chase player if visible
         if self.can_see_actor(target):
+            if self.last_saw_player < 0:
+                print(self.last_saw_player)
+                if self.last_saw_player < -99999:
+                    self.entity.gamemap.engine.say(self.entity, "I see you...", 3)
+
             self.wander_wait_turns = 0
             self.path = []
+            self.last_saw_player = 0
             
             if distance <= 1:
                 return MeleeAction(self.entity, dx, dy).perform()
             
             self.path = self.get_path_with_doors(target.x, target.y)
         else:
+            self.last_saw_player += 1
             # Wander when player not visible
             if self.wander_wait_turns > 0:
                 self.wander_wait_turns -= 1

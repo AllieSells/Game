@@ -461,6 +461,16 @@ def main() -> None:
                     )
                     dbg_tex = debug_console_renderer.render(debug_console)
                     renderer.copy(dbg_tex, dest=(0, 0, int(40 * base_tile_w), int(9 * base_tile_h)))
+                    _sb = getattr(active_engine, 'speech_bubble_ui_rect', None)
+                    if _sb:
+                        _sb_x, _sb_y, _sb_w, _sb_h = _sb
+                        _tw, _th = tileset.tile_width, tileset.tile_height
+                        renderer.copy(
+                            hud_tex,
+                            source=(_sb_x * _tw, _sb_y * _th, _sb_w * _tw, _sb_h * _th),
+                            dest=(int(_sb_x * base_tile_w), int(_sb_y * base_tile_h),
+                                  int(_sb_w * base_tile_w), int(_sb_h * base_tile_h)),
+                        )
                 else:
                     # Normal play: only copy the bottom HUD strip (cheap path)
                     cached_overlay_handler = None
@@ -473,6 +483,16 @@ def main() -> None:
                         source=(0, hud_source_y, screen_width * tileset.tile_width, hud_source_h),
                         dest=(0, window_h - hud_dest_h, window_w, hud_dest_h),
                     )
+                    _sb = getattr(active_engine, 'speech_bubble_ui_rect', None)
+                    if _sb:
+                        _sb_x, _sb_y, _sb_w, _sb_h = _sb
+                        _tw, _th = tileset.tile_width, tileset.tile_height
+                        renderer.copy(
+                            hud_tex,
+                            source=(_sb_x * _tw, _sb_y * _th, _sb_w * _tw, _sb_h * _th),
+                            dest=(int(_sb_x * base_tile_w), int(_sb_y * base_tile_h),
+                                  int(_sb_w * base_tile_w), int(_sb_h * base_tile_h)),
+                        )
                 renderer.present()
             elif map_overlay_view:
                 cached_overlay_handler = None

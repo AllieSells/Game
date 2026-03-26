@@ -67,6 +67,9 @@ class Engine:
         self.grass_wave_cooldown = 180  # Ticks between waves (about 3 seconds at 60fps)
         self.active_grass_waves = []
         self.dropped_stone_dummy_var = False
+        # speech_bubbles: maps entity id -> {text, turns_remaining, reveal_frame}
+        self.speech_bubbles: dict = {}
+        self.speech_bubble_ui_rect = None  # rect of the most-recently rendered bubble
 
         self.mouse_x = 0
         self.mouse_y = 0
@@ -146,6 +149,19 @@ class Engine:
             return True
         else:
             return False
+    def say(self, entity, text: str, turns: int = 3) -> None:
+        """Make an entity display a speech bubble for `turns` player turns."""
+        entity_id = id(entity)
+        existing = self.speech_bubbles.get(entity_id)
+        # Reset reveal only if text changed
+        reveal = 0 if (existing is None or existing["text"] != text) else existing["reveal_frame"]
+        self.speech_bubbles[entity_id] = {
+            "entity": entity,
+            "text": text,
+            "turns_remaining": turns,
+            "reveal_frame": reveal,
+        }
+
     def debug_log(self, message: str, handler: Optional[str] = None, event: Optional[str] = None) -> None:
         """Log a debug message if debug mode is enabled."""
         if self.debug:
@@ -960,6 +976,11 @@ class Engine:
             console=console
         )
 
+        render_functions.render_speech_bubble(
+            console=console,
+            engine=self,
+        )
+
         self.message_log.render(console=console, x=21, y=43, width=58, height=3)  # MESSAGE_LOG coordinates
         render_functions.render_bar(
             console=console,
@@ -1000,6 +1021,8 @@ class Engine:
             attack_type=getattr(self.player, "current_attack_type", "None"),
             player=self.player,
         )
+
+
 
         render_functions.render_status_hover_panel(
             console=console,
