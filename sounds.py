@@ -1106,6 +1106,14 @@ AMBIENT_TYPES = {
         proximity_threshold=999,  # Always play in dungeons
         base_volume=0.5
     ),
+    'lush': AmbientSoundType(
+        name='lush',
+        sound_file='RP/sfx/loops/dungeon/lushcave_loop.wav',
+        entity_names=[None],
+        map_type="lush",
+        proximity_threshold=999,  # Always play in lush areas
+        base_volume=1.0
+    ),
     'menu': AmbientSoundType(
         name='menu',
         sound_file='RP/sfx/loops/fire/fire_loop.wav',
@@ -1253,7 +1261,7 @@ class AmbientSoundManager:
             # Handle map-based ambiance (entity_names=[None])
             if config.entity_names == [None]:
                 # Check map type filter
-                if config.map_type is None or (hasattr(game_map, 'type') and game_map.type == config.map_type):
+                if config.map_type is None or (hasattr(game_map, 'biome') and game_map.biome == config.map_type):
                     player_near_source = True
                     max_sound_strength = 1.0  # Full strength for map-based ambiance
             else:

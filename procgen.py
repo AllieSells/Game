@@ -1378,5 +1378,7 @@ def generate_dungeon(
                 tile = dungeon.tiles[x, y]
                 if tile["walkable"] and random.random() < (2**(vegetation/20)-1) and random.randint(1,3) == 1:
                     dungeon.tiles[x, y] = tile_types.generate_foliage_tile()
+    if vegetation > 4:
+        dungeon.biome = "lush"
 
     return dungeon

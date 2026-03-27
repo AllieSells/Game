@@ -19,7 +19,7 @@ from message_log import MessageLog
 import render_functions
 import sounds
 from animations import TextPopupAnimation, WaterMoveAnimation, GlobalWaterAnimation
-
+import color
 
 if TYPE_CHECKING:
     from entity import Actor
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 import time
 from animations import FireFlicker, BonefireFlicker, FireSmoke, FlameAnimation
+import sprite_manager
 
 
 
@@ -49,6 +50,7 @@ class Engine:
         
         # Initialize turn manager for centralized turn processing
         self.turn_manager = None  # Will be set after import to avoid circular imports
+        self.tick_count = 0
         
         # Damage indicator system
         self.damage_indicator_timer = 0
@@ -67,9 +69,8 @@ class Engine:
         self.grass_wave_cooldown = 180  # Ticks between waves (about 3 seconds at 60fps)
         self.active_grass_waves = []
         self.dropped_stone_dummy_var = False
-        # speech_bubbles: maps entity id -> {text, turns_remaining, reveal_frame}
-        self.speech_bubbles: dict = {}
-        self.speech_bubble_ui_rect = None  # rect of the most-recently rendered bubble
+        # Store speech bubble anims
+        self.speech_bubbles: list = []
 
         self.mouse_x = 0
         self.mouse_y = 0
@@ -149,18 +150,6 @@ class Engine:
             return True
         else:
             return False
-    def say(self, entity, text: str, turns: int = 3) -> None:
-        """Make an entity display a speech bubble for `turns` player turns."""
-        entity_id = id(entity)
-        existing = self.speech_bubbles.get(entity_id)
-        # Reset reveal only if text changed
-        reveal = 0 if (existing is None or existing["text"] != text) else existing["reveal_frame"]
-        self.speech_bubbles[entity_id] = {
-            "entity": entity,
-            "text": text,
-            "turns_remaining": turns,
-            "reveal_frame": reveal,
-        }
 
     def debug_log(self, message: str, handler: Optional[str] = None, event: Optional[str] = None) -> None:
         """Log a debug message if debug mode is enabled."""
@@ -552,6 +541,7 @@ class Engine:
             import sounds
 
             sounds.update_all_ambient_sounds(self.player, self.game_map.entities, self.game_map)
+            #print(self.game_map.biome)
         except Exception:
             traceback.print_exc()
             pass
@@ -964,6 +954,13 @@ class Engine:
             
     def render_game(self, console: Console) -> None:
         self.game_map.render(console)
+        
+        for bubble in self.speech_bubbles[:]:
+            if bubble.tick():
+                self.speech_bubbles.remove(bubble)
+
+
+
 
     def render_ui(self, console: Console, skip_debug: bool = False) -> None:
         # Render damage indicator if active - render above all HUD elements
@@ -976,10 +973,7 @@ class Engine:
             console=console
         )
 
-        render_functions.render_speech_bubble(
-            console=console,
-            engine=self,
-        )
+
 
         self.message_log.render(console=console, x=21, y=43, width=58, height=3)  # MESSAGE_LOG coordinates
         render_functions.render_bar(

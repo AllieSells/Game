@@ -13,7 +13,7 @@ import color
 import sounds
 
 import tile_functions
-
+from languages import generate_sentence
 
 
 if TYPE_CHECKING:
@@ -298,8 +298,12 @@ class HostileEnemy(BaseAI):
             if self.last_saw_player < 0:
                 print(self.last_saw_player)
                 if self.last_saw_player < -99999:
-                    self.entity.gamemap.engine.say(self.entity, "I see you...", 3)
-
+                    if (self.entity.name == "Goblin" or self.entity.name == "Orc") and random.random() < 0.75:  # 75% chance to say something 
+                        say = generate_sentence("observe", "goblin", known=False)
+                        from render_functions import SpeechBubble
+                        self.engine.speech_bubbles.append(SpeechBubble(self.entity, 180))
+                        self.engine.message_log.add_message(f"{self.entity.name}: '{say}'", color.green)
+ 
             self.wander_wait_turns = 0
             self.path = []
             self.last_saw_player = 0

@@ -1,0 +1,10 @@
+arcade==3.3.3
+numpy==2.4.3
+Pillow==12.1.1
+pygltflib==1.16.5
+PyInstaller==6.19.0
+scipy==1.17.1
+sounddevice==0.5.5
+soundfile==0.13.1
+tcod==20.1.0
+trimesh==4.11.3

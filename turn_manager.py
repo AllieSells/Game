@@ -154,13 +154,6 @@ class TurnManager:
 
         self.engine.debug_log(f"TOTAL PLAYER MOVES: {self.total_player_moves}", handler=self.__class__.__name__, event="PlayerTurnEnd")
 
-        # Tick down speech bubbles; remove expired ones
-        expired_bubbles = [eid for eid, b in self.engine.speech_bubbles.items()
-                           if b["turns_remaining"] <= 1]
-        for eid in expired_bubbles:
-            del self.engine.speech_bubbles[eid]
-        for b in self.engine.speech_bubbles.values():
-            b["turns_remaining"] -= 1
 
         # Process any remaining actor turns after player acted
         self._process_remaining_turns()

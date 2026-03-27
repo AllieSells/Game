@@ -7,6 +7,7 @@ import tcod
 import color
 import text_utils
 import time
+import sprite_manager
 
 # Try to import animation helpers if they exist; fall back gracefully.
 try:
@@ -27,6 +28,34 @@ BODY_PART_ABBREV = {
     "upper_limbs": "Arm",   # Arms/Hands region
     "lower_limbs": "Leg",   # Legs/Feet region
 }
+
+
+class SpeechBubble:
+    def __init__(self, entity, duration: int = 120):
+        self.entity = entity
+        self.duration = duration
+        self._tick_count = 0
+    
+    def tick(self):
+        if self.entity.fighter.hp <= 0:
+            return True
+        """Called every game tick"""
+        if self.duration > 0:
+            self.duration -= 1
+        self._tick_count += 1
+
+        if self._tick_count % 30 == 0:
+            self.entity.char = sprite_manager.compose_sprite([ord(self.entity.char), 0xE0F0])
+        elif self._tick_count % 15 == 0:
+            self.entity.char = sprite_manager.compose_sprite([ord(self.entity.char), 0xE0F1])
+        elif self._tick_count % 5 == 0:
+            self.entity.char = sprite_manager.compose_sprite([ord(self.entity.char), 0xE0F2])
+
+        if self.duration <= 0:
+            sprite_manager.refresh_actor_sprite(self.entity)  # Reset to base sprite
+            return True
+        return False
+
 
 class MenuRenderer:
     """Provides reusable rendering utilities for menus and UIs."""
@@ -466,39 +495,11 @@ def render_combat_stats(
         ammo_x = max(1, console.width - len(ammo_text) - WEAPON_TEXT_OFFSET_FROM_RIGHT)
         console.print(x=ammo_x, y=PANEL_Y + 2, string=ammo_text, fg=color.bronze_text)
 
-def render_speech_bubble(console: 'Console', engine: 'Engine') -> None:
-    """Render all active speech bubbles for entities that have called engine.say()."""
-    GAME_VIEW_W = 40
-    GAME_VIEW_H = 20
 
-    engine.speech_bubble_ui_rect = None
-    if not engine.speech_bubbles:
-        return
 
-    for entity_id, bubble in engine.speech_bubbles.items():
-        entity = bubble["entity"]
-        text = bubble["text"]
 
-        game_pos = engine.world_to_screen(entity.x, entity.y, GAME_VIEW_W, GAME_VIEW_H)
-        if game_pos is None:
-            continue
 
-        cx, cy = game_pos
-        ux = cx * 2
-        uy = cy * 2
 
-        # Progressive reveal: one character every 3 frames
-        chars_to_show = min(len(text), bubble["reveal_frame"] // 3 + 1)
-        bubble["reveal_frame"] += 1
-        displayed = text[:chars_to_show]
-
-        bubble_w = len(text)  # reserve full width so position doesn't shift
-        bx = max(0, min(ux - bubble_w // 2, console.width - bubble_w))
-        by = max(0, min(uy - 1, 37))
-
-        console.print(x=bx, y=by, string=displayed, fg=color.fantasy_text, bg=color.parchment_bg)
-        # Store the last-rendered bubble rect for main.py to copy
-        engine.speech_bubble_ui_rect = (bx, by, bubble_w, 1)
 
 def render_status_hover_panel(console: 'Console', mouse_ui_x: int, mouse_ui_y: int, player=None) -> None:
     """Show effect details when hovering over individual effect glyphs in the HUD."""

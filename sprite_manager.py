@@ -132,6 +132,8 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
     Caches results so identical combos reuse the same slot.
     Returns the chr() of the resulting codepoint.
     """
+
+    print(f"[sprite_manager] Composing sprite from layers {[hex(c) for c in layer_codepoints]} with scale {overlay_scale} and offset ({x_offset}, {y_offset})")
     global _composite_next, _tileset
     if _tileset is None:
         raise RuntimeError("[sprite_manager] compose_sprite called before load_extras set the tileset.")

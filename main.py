@@ -13,6 +13,7 @@ from PIL import Image
 import numpy as np
 import tcod.sdl.mouse
 
+
 # Cursor variables will be initialized after tcod context is created
 cursor = None
 cursor_click = None
@@ -366,7 +367,9 @@ def main() -> None:
     dim_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
     game_tex = None
     ui_tex = None
-    _overlay_menu_bounds = None  # cached (x1,y1,x2,y2) of menu content, above HUD
+    overlay_popup_console = None   # small console sized to menu bounding box
+    overlay_popup_tex     = None   # GPU texture for popup (BLEND mode)
+    overlay_popup_dest    = None   # screen dest rect for popup
     cached_overlay_handler = None
     overlay_dirty = True
     _last_dirty_ui_tile = None  # track tile under cursor to avoid per-pixel dirty
@@ -461,16 +464,16 @@ def main() -> None:
                     )
                     dbg_tex = debug_console_renderer.render(debug_console)
                     renderer.copy(dbg_tex, dest=(0, 0, int(40 * base_tile_w), int(9 * base_tile_h)))
-                    _sb = getattr(active_engine, 'speech_bubble_ui_rect', None)
-                    if _sb:
-                        _sb_x, _sb_y, _sb_w, _sb_h = _sb
-                        _tw, _th = tileset.tile_width, tileset.tile_height
-                        renderer.copy(
-                            hud_tex,
-                            source=(_sb_x * _tw, _sb_y * _th, _sb_w * _tw, _sb_h * _th),
-                            dest=(int(_sb_x * base_tile_w), int(_sb_y * base_tile_h),
-                                  int(_sb_w * base_tile_w), int(_sb_h * base_tile_h)),
-                        )
+#                    _sb = getattr(active_engine, 'speech_bubble_ui_rect', None)
+#                    if _sb:
+#                        _sb_x, _sb_y, _sb_w, _sb_h = _sb
+#                        _tw, _th = tileset.tile_width, tileset.tile_height
+#                        renderer.copy(
+#                            hud_tex,
+#                            source=(_sb_x * _tw, _sb_y * _th, _sb_w * _tw, _sb_h * _th),
+#                            dest=(int(_sb_x * base_tile_w), int(_sb_y * base_tile_h),
+#                                  int(_sb_w * base_tile_w), int(_sb_h * base_tile_h)),
+#                        )
                 else:
                     # Normal play: only copy the bottom HUD strip (cheap path)
                     cached_overlay_handler = None
@@ -542,44 +545,60 @@ def main() -> None:
                 # Dim the game underneath the overlay (1×1 GPU pixel stretched to full screen)
                 renderer.copy(dim_tex, dest=(0, 0, window_w, window_h))
 
-                # Re-render UI console only when content changes (dirty-tracked)
                 if overlay_dirty or cached_overlay_handler is not handler:
                     ui_console.clear()
                     handler.on_render(console=ui_console)
-                    # Cache the bounding box of menu content (non-background, above HUD)
-                    _ch = ui_console.ch[:, :hud_top_row]
-                    _bg = ui_console.bg[:, :hud_top_row, :]
-                    _content = (_ch != ord(' ')) | np.any(_bg > 16, axis=2)
-                    _cells = np.where(_content)
-                    if _cells[0].size > 0:
-                        _overlay_menu_bounds = (
-                            int(_cells[0].min()), int(_cells[1].min()),
-                            int(_cells[0].max()) + 1, int(_cells[1].max()) + 1,
-                        )
-                    else:
-                        _overlay_menu_bounds = None
                     cached_overlay_handler = handler
                     overlay_dirty = False
 
-                # GPU render of full UI console (no CPU tileset.render, no texture upload)
-                overlay_ui_tex = ui_console_renderer.render(ui_console)
-                _tw, _th = tileset.tile_width, tileset.tile_height
+                    # Find the bounding box of non-blank popup content (above HUD)
+                    _ch  = ui_console.ch[:, :hud_top_row]
+                    _bg  = ui_console.bg[:, :hud_top_row, :]
+                    _content = (_ch != ord(' ')) | np.any(_bg > 16, axis=2)
+                    _cells = np.where(_content)
 
-                # Draw only the detected menu region (skips full-screen blank cells)
-                if _overlay_menu_bounds:
-                    _mx1, _my1, _mx2, _my2 = _overlay_menu_bounds
-                    renderer.copy(
-                        overlay_ui_tex,
-                        source=(_mx1 * _tw, _my1 * _th,
-                                (_mx2 - _mx1) * _tw, (_my2 - _my1) * _th),
-                        dest=(int(_mx1 * base_tile_w), int(_my1 * base_tile_h),
-                              int((_mx2 - _mx1) * base_tile_w), int((_my2 - _my1) * base_tile_h)),
-                    )
+                    if _cells[0].size > 0:
+                        _mx1 = int(_cells[0].min())
+                        _my1 = int(_cells[1].min())
+                        _mx2 = int(_cells[0].max()) + 1
+                        _my2 = int(_cells[1].max()) + 1
+                        _sw, _sh = _mx2 - _mx1, _my2 - _my1
 
-                # HUD strip (same cheap GPU copy as fast_main_view)
+                        # Reuse sub-console when size is unchanged (avoids allocation)
+                        if (overlay_popup_console is None
+                                or overlay_popup_console.width  != _sw
+                                or overlay_popup_console.height != _sh):
+                            overlay_popup_console = tcod.console.Console(_sw, _sh, order="F")
+                            overlay_popup_tex = None  # texture size changed — must recreate
+
+                        # Blit only the menu region — tiny CPU transparency render
+                        ui_console.blit(overlay_popup_console,
+                                        dest_x=0, dest_y=0,
+                                        src_x=_mx1, src_y=_my1,
+                                        width=_sw, height=_sh)
+                        _popup_pixels = render_console_with_transparency(overlay_popup_console)
+                        if overlay_popup_tex is None:
+                            overlay_popup_tex = renderer.upload_texture(_popup_pixels)
+                            overlay_popup_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                        else:
+                            overlay_popup_tex.update(_popup_pixels)
+                        overlay_popup_dest = (
+                            int(_mx1 * base_tile_w), int(_my1 * base_tile_h),
+                            int(_sw  * base_tile_w), int(_sh  * base_tile_h),
+                        )
+                    else:
+                        overlay_popup_tex  = None
+                        overlay_popup_dest = None
+
+                # Draw cached popup (BLEND — transparent cells show game behind)
+                if overlay_popup_tex is not None and overlay_popup_dest is not None:
+                    renderer.copy(overlay_popup_tex, dest=overlay_popup_dest)
+
+                # HUD strip — fast GPU path, no CPU pixel work
+                _ov_hud_tex = ui_console_renderer.render(ui_console)
                 renderer.copy(
-                    overlay_ui_tex,
-                    source=(0, hud_source_y, screen_width * _tw, hud_source_h),
+                    _ov_hud_tex,
+                    source=(0, hud_source_y, screen_width * tileset.tile_width, hud_source_h),
                     dest=(0, window_h - hud_dest_h, window_w, hud_dest_h),
                 )
                 renderer.present()

@@ -46,6 +46,7 @@ class GameMap:
         self.type = type
         self.sunlit = sunlit
         self.temperature = 20
+        self.biome = "dungeon"
         
         # Initialize tiles. For dungeon maps, populate per-tile using
         # tile_types.random_wall_tile() so we get variation (mossy walls etc.).
