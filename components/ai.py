@@ -276,6 +276,13 @@ class HostileEnemy(BaseAI):
         self.movement_counter = 0
         self.last_saw_player = -99999999999999 # Tracks turns since last saw player
 
+    def say(self, context: str = "idle") -> None:
+        if (self.entity.name == "Goblin" or self.entity.name == "Troll"):
+            say = generate_sentence(context , "goblin", known=False)
+            from render_functions import SpeechBubble
+            self.engine.speech_bubbles.append(SpeechBubble(self.entity, 90))
+            self.engine.message_log.add_message(f"{self.entity.name}: '{say}'", color.green)
+
     def perform(self) -> None:
         # Move every turn
         if not self.should_move_this_turn():
@@ -298,11 +305,9 @@ class HostileEnemy(BaseAI):
             if self.last_saw_player < 0:
                 print(self.last_saw_player)
                 if self.last_saw_player < -99999:
-                    if (self.entity.name == "Goblin" or self.entity.name == "Orc") and random.random() < 0.75:  # 75% chance to say something 
-                        say = generate_sentence("observe", "goblin", known=False)
-                        from render_functions import SpeechBubble
-                        self.engine.speech_bubbles.append(SpeechBubble(self.entity, 180))
-                        self.engine.message_log.add_message(f"{self.entity.name}: '{say}'", color.green)
+                    if random.random() < 0.5:
+                        self.say("observe")
+
  
             self.wander_wait_turns = 0
             self.path = []

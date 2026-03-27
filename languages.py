@@ -1,108 +1,144 @@
 import random
 import re
 
+# Words grouped by semantic concept.
+# Fixed-form slots (pronouns) are strings; open-class slots are lists to pick from.
+# "goblin" = native goblin tongue  (SVO word order)
+# "common" = the common trade tongue (SVO word order, like English)
 VOCABULARY = {
     "goblin": {
-        "verbs": {
-            "observe": ["kukg", "kukg", "ug"],
-            "threat":  ["gehikh", "kide", "ked", "kutu"],
-        },
-        "verbs_common": {
-            "observe": ["see", "notice", "spot"],
-            "threat":  ["guts", "bite", "slash", "kill"],
-        },
-        "subjects":        ["Gra", "Ke"],
-        "subjects_common": ["I",   "we"],
-        "targets":         ["dedou", "grupekker dedou", "u"],
-        "targets_common":  ["meat",   "fresh meat", "you"],
-        "life":            ["gegretou",  "gri gehikh",     "gri rurek gepig"],
-        "life_common":     ["bones",  "your insides", "your bits"],
-        "openers":         ["U ikg!", "", "", "", "", ""],
-        "openers_common":  ["You there!",     "",    "",     "", "",     ""],
-    }
+        # Pronouns — fixed forms
+        "1sg":      "Gra",          # I
+        "1pl":      "Ke",           # we
+        "2sg":      "u",            # you
+        # Observation verbs - prsent tense
+        "v_obs_present":    ["kukg", "ug"],
+        # Aggression verbs - future tense
+        "v_agg_future":    ["gehikh", "kide", "ked", "kutu", "gatakud", "gatep ewtidid"],
+
+        # Interjections
+        "interj":   ["U ikg!", "", "", ""],
+        # Prey
+        "prey":     ["dedou", "grupekker dedou"],
+        # Remains
+        "remains":  ["gegretou", "gri gehikh", "gri rurek gepig"],
+        # Future fear
+        "will_fear": ["tag kata", "kuwarde"],
+        # Progressive hurt
+        "hurting": ["putakud", "putep did gru", "poutktigeptud"]
+
+    },
+    "common": {
+        # Pronouns
+        ""
+        "1sg":      "Me",
+        "1pl":      "we",
+        "2sg":      "you",
+        # Observation verbs - present
+        "v_obs_present":    ["see", "spot", "notice"],
+        # Aggression verbs - future tense
+        "v_agg_future":    ["gut", "bite", "slash", "kill", "hurt", "break the skin of"],
+        # Interjections
+        "interj":   ["You there!", "", "", ""],
+
+        # Prey
+        "prey":     ["meat", "fresh meat"],
+        # Remains
+        "remains":  ["bones", "your insides", "your bits"],
+        # Future fear
+        "will_fear": ["will regret", "will fear"],
+        # Progressive hurt
+        "hurting": ["hurting", "breaking the skin of", "bleeding"],
+
+    },
 }
 
-# Per-language templates — adverbials are baked into specific templates
-# so every combination is grammatically natural.
+# Templates enforce SVO word order for both languages.
+# Slots referencing lists are resolved randomly at generation time.
 TEMPLATES = {
     "goblin": {
         "observe": [
-            "{opener} {subject} {verb} {target}!",
-            "{opener} {subject} {verb} {target} kadek ikg!",
-            "{subject} {verb} {target}, gra tag ak u!",
-            "{opener} gre gekit gugk {target}!",
-            "{subject} kede tikg {target} pe gred!",
-        ],
-        "observe_common": [
-            "{opener} {subject} {verb} {target}!",
-            "{opener} {subject} {verb} {target} over there!",
-            "{subject} {verb} {target}!",
-            "{opener} My eyes on {target}!",
-            "{subject} can smell {target} from here!",
+            "{interj} {1sg} {v_obs_present} {2sg}!",
+            "{interj} {1sg} {v_obs_present} {prey} kadek ikg!",
+            "{1sg} {v_obs_present} {prey}, gra tag ak u!",
+            "{interj} gre gekit gugk {prey}!",
+            "{1sg} kede tikg {prey} pe gred!",
         ],
         "threat": [
-            "{opener} {subject} tag {verb} {target} tet reragre!",
-            "{opener} {subject} tag {verb} {life}!",
-            "{target} ki rouk gred!",
-            "{opener} {life} tag kout gra!",
+            "{interj} {1sg} tag {v_agg_future} {2sg} tet reragre!",
+            "{interj} {1sg} tag {v_agg_future} {remains}!",
+            "{2sg} ki rouk gred!",
+            "{interj} {remains} tag kout gra!",
             "u kede ki gidak pe ke!",
-            "{opener} {subject} tag {verb} {target}. Ha!",
+            "{interj} {1sg} tag {v_agg_future} {2sg}. Grah!",
         ],
-        "threat_common": [
-            "{opener} {subject} will {verb} {target} real good!",
-            "{opener} {subject} will {verb} {life}.",
-            "{target} not leave here.",
-            "{opener} {life} will be mine.",
-            "You cannot run from us!",
-            "{opener} {subject} will {verb} {target}. Ha!",
+        "hurt": [
+            "{2sg} {will_fear} {hurting} {1sg}!",
+            "{interj} {2sg} {will_fear} {1sg}.",
+            ""
+        ]
+    },
+    "common": {
+        "observe": [
+            "{interj} {1sg} {v_obs_present} {2sg}!",
+            "{interj} {1sg} {v_obs_present} {prey} over there!",
+            "{1sg} {v_obs_present} {prey}!",
+            "{interj} {1sg} have eyes on {prey}!",
+            "{1sg} can {v_obs_present} {prey} from here!",
         ],
+        "threat": [
+            "{interj} {1sg} will {v_agg_future} {2sg} real good!",
+            "{interj} {1sg} will {v_agg_future} {remains}.",
+            "{2sg} will not leave here.",
+            "{interj} {remains} will be mine.",
+            "{2sg} cannot run from us!",
+            "{interj} {1sg} will {v_agg_future} {2sg}. Ha!",
+        ],
+        "hurt": [
+            "{2sg} {will_fear} {hurting} {1sg}!",
+            "{interj} {2sg} {will_fear} {1sg}.",
+        ]
     },
 }
 
 
-def build_reverse_lookup(language: str) -> list[tuple[str, str]]:
-    """
-    Build a list of (native_phrase, english_word) pairs from VOCABULARY,
-    sorted longest-first so multi-word phrases match before their parts.
-    English is represented by the first word in each vocab list.
-    """
-    vocab = VOCABULARY[language]
-    en_vocab = VOCABULARY["english"]
+class _VocabMap:
+    """Wraps a vocab dict so that list-valued slots resolve to a random choice."""
+    def __init__(self, vocab: dict):
+        self._vocab = vocab
+
+    def __getitem__(self, key: str) -> str:
+        val = self._vocab[key]
+        return random.choice(val) if isinstance(val, list) else val
+
+
+def build_reverse_lookup(from_lang: str, to_lang: str) -> list[tuple[str, str]]:
+    """Build (source_word, translation) pairs sorted longest-first."""
+    src = VOCABULARY[from_lang]
+    dst = VOCABULARY[to_lang]
     pairs: list[tuple[str, str]] = []
-
-    slot_map = [
-        ("verbs.observe", vocab["verbs"]["observe"], en_vocab["verbs"]["observe"]),
-        ("verbs.threat",  vocab["verbs"]["threat"],  en_vocab["verbs"]["threat"]),
-        ("subjects",      vocab["subjects"],         en_vocab["subjects"]),
-        ("targets",       vocab["targets"],          en_vocab["targets"]),
-        ("life",          vocab["life"],             en_vocab["life"]),
-        ("openers",       vocab["openers"],          en_vocab["openers"]),
-    ]
-
-    for _slot, native_words, english_words in slot_map:
-        for native, english in zip(native_words, english_words):
-            if native and english:
-                pairs.append((native.lower(), english.lower()))
-
-    # Longest native phrase first so "yer bones" beats "yer"
+    for key in src:
+        sv, dv = src.get(key), dst.get(key)
+        if sv is None or dv is None:
+            continue
+        if isinstance(sv, list) and isinstance(dv, list):
+            for s, d in zip(sv, dv):
+                if s and d:
+                    pairs.append((s.lower(), d.lower()))
+        elif isinstance(sv, str) and isinstance(dv, str) and sv and dv:
+            pairs.append((sv.lower(), dv.lower()))
     pairs.sort(key=lambda p: len(p[0]), reverse=True)
     return pairs
 
 
-def reverse_translate(sentence: str, language: str) -> str:
-    """
-    Partially translate a native-language sentence back to English using
-    the vocabulary slots. Template structure words stay native — giving a
-    disjointed, half-understood feel even to someone who knows the language.
-    """
-    pairs = build_reverse_lookup(language)
+def reverse_translate(sentence: str, from_lang: str = "goblin", to_lang: str = "common") -> str:
+    """Partially translate a sentence word-by-word. Grammar structure stays native."""
+    pairs = build_reverse_lookup(from_lang, to_lang)
     result = sentence
-    for native, english in pairs:
-        # Match whole words/phrases only, case-insensitive, with word boundaries
+    for native, translation in pairs:
         pattern = re.compile(r'\b' + re.escape(native) + r'\b', re.IGNORECASE)
-        def _replace(m: re.Match, eng=english) -> str:
-            # Preserve capitalisation of the original token
-            return eng[0].upper() + eng[1:] if m.group(0)[0].isupper() else eng
+        def _replace(m: re.Match, t=translation) -> str:
+            return t[0].upper() + t[1:] if m.group(0)[0].isupper() else t
         result = pattern.sub(_replace, result)
     return result
 
@@ -114,40 +150,24 @@ def _clean(s: str) -> str:
     return s
 
 
-def generate_sentence(intent: str, language: str = "english", known: bool = False) -> str:
-    vocab = VOCABULARY[language]
+def generate_sentence(intent: str, language: str = "goblin", known: bool = False) -> str:
+    """Generate a sentence in the given language.
 
-    # Pick a shared index for each slot so native[i] and _common[i] stay paired
-    def pick(key):
-        native_list  = vocab[key] if not isinstance(vocab[key], dict) else vocab[key][intent]
-        common_key   = key + "_common"
-        common_list  = vocab.get(common_key, native_list)
-        if isinstance(common_list, dict):
-            common_list = common_list[intent]
-        i = random.randrange(len(native_list))
-        word = common_list[i % len(common_list)] if known else native_list[i]
-        return word
-
-    template = random.choice(TEMPLATES[language][intent + ("_common" if known else "")])
-
-    sentence = template.format(
-        opener=pick("openers"),
-        subject=pick("subjects"),
-        verb=pick("verbs"),
-        target=pick("targets"),
-        life=pick("life"),
-    )
-
+    known=False  →  native tongue (goblin)
+    known=True   →  common tongue
+    """
+    lang_key = "common" if known else language
+    vocab_map = _VocabMap(VOCABULARY[lang_key])
+    template = random.choice(TEMPLATES[lang_key][intent])
+    sentence = template.format_map(vocab_map)
     sentence = _clean(sentence)
     return sentence[0].upper() + sentence[1:] if sentence else sentence
 
 
-# Demo: print 5 sentences per intent per language, with reverse translation
-
+# Demo
 for lang in ["goblin"]:
     print(f"\n--- {lang.upper()} ---")
     for intent in ("observe", "threat"):
-        #print(f"  [{intent}]")
         for _ in range(3):
             native = generate_sentence(intent, lang, known=False)
             common = generate_sentence(intent, lang, known=True)

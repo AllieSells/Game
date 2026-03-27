@@ -248,6 +248,12 @@ class Fighter(BaseComponent):
     def take_damage(self, amount: int, targeted_part=None, causes_bleeding: bool = True) -> None:
         # Capture the entity name before it potentially dies/changes
         entity_name = self.parent.name
+
+
+        if (entity_name == "Goblin" or entity_name == "Troll"):
+            if random.random() < 0.1:
+                self.parent.ai.say("hurt")
+
         
         # Always reduce overall HP first
         self.hp -= amount

@@ -30,11 +30,17 @@ BODY_PART_ABBREV = {
 }
 
 
+SPEECH_BUBBLE_ANIMATIONS = {
+    "speech_bubble": [0xE0F0, 0xE0F1, 0xE0F2],  # Standard speech bubble with subtle flicker
+}
+
+
 class SpeechBubble:
-    def __init__(self, entity, duration: int = 120):
+    def __init__(self, entity, duration: int = 120, type: str = "speech_bubble"):
         self.entity = entity
         self.duration = duration
         self._tick_count = 0
+        self.type = type
     
     def tick(self):
         if self.entity.fighter.hp <= 0:
@@ -44,12 +50,10 @@ class SpeechBubble:
             self.duration -= 1
         self._tick_count += 1
 
-        if self._tick_count % 30 == 0:
-            self.entity.char = sprite_manager.compose_sprite([ord(self.entity.char), 0xE0F0])
-        elif self._tick_count % 15 == 0:
-            self.entity.char = sprite_manager.compose_sprite([ord(self.entity.char), 0xE0F1])
-        elif self._tick_count % 5 == 0:
-            self.entity.char = sprite_manager.compose_sprite([ord(self.entity.char), 0xE0F2])
+        if self.type in SPEECH_BUBBLE_ANIMATIONS:
+            frames = SPEECH_BUBBLE_ANIMATIONS[self.type]
+            frame_index = (self._tick_count // 10) % len(frames)
+            self.entity.char = sprite_manager.compose_sprite([ord(self.entity.char), frames[frame_index]])
 
         if self.duration <= 0:
             sprite_manager.refresh_actor_sprite(self.entity)  # Reset to base sprite
