@@ -71,6 +71,8 @@ class Engine:
         self.dropped_stone_dummy_var = False
         # Store speech bubble anims
         self.speech_bubbles: list = []
+        # Store swimming anims
+        self.swimming_entities: list = []
 
         self.mouse_x = 0
         self.mouse_y = 0
@@ -447,6 +449,7 @@ class Engine:
                         entity.char = random.choice([chr(0xE013), chr(0xE014), chr(0xE015)])
                     elif not has_loot and not in_empty_range:
                         entity.char = random.choice([chr(0xE010), chr(0xE011), chr(0xE012)])
+                # Update actor sprite if swimming state changed
 
                 # Get Quest Givers on map
                 if hasattr(entity, "type"):
@@ -958,6 +961,10 @@ class Engine:
         for bubble in self.speech_bubbles[:]:
             if bubble.tick():
                 self.speech_bubbles.remove(bubble)
+
+        for swim in self.swimming_entities[:]:
+            if swim.tick():
+                self.swimming_entities.remove(swim)
 
 
 

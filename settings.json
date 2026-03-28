@@ -2,6 +2,11 @@
     // Display settings
     "fullscreen": false,
     "audio": 100,
-    "graphics": "high",
+    // CRT filter settings
+    "crt_scanlines": true,
+    "crt_vignette": true,
+    "crt_bloom": true,
+    "crt_ca": true,
+    "crt_curvature": true,
     "light_flicker": true
 }

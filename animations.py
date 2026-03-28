@@ -786,7 +786,7 @@ class GlobalWaterAnimation:
     """Single persistent animation that oscillates all visible water tiles
     back and forth: 0→1→2→1→0→1→2→...
     """
-    CHARS = [chr(0xE140), chr(0xE141), chr(0xE142)]
+    CHARS = [chr(0xE140), chr(0xE141), chr(0xE142), chr(0xE143), chr(0xE144)]
     # How many ticks each frame is held before advancing
     FRAME_DURATION = 5
 

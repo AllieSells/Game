@@ -213,10 +213,10 @@ foliage = new_tile(
 
 water = new_tile(
     name="Water",
-    walkable=False,
+    walkable=True,
     transparent=True,
     dark=(0xE140, (10, 28, 32), (10, 10, 30)),
-    light=(0xE140, (60, 160, 185), (30, 110, 135)),
+    light=(0xE140, (255, 255, 255), (30, 110, 135)),
 )
 
 

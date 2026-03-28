@@ -25,6 +25,7 @@ import enchants
 import sounds
 import animations
 import components.level
+import sprite_manager
 # Body part targeting modifiers (damage_modifier, hit_difficulty_modifier)
 # hit_difficulty_modifier: Positive = easier to hit, negative = harder to hit
 
@@ -1059,6 +1060,25 @@ class MeleeAction(ActionWithDirection):
 
 class MovementAction(ActionWithDirection):
 
+    def _update_swim_state(self, dest_x: int, dest_y: int) -> None:
+        """Switch swimming state only on transition, not every frame."""
+        tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
+        is_water = tile_name == "Water"
+        was_swimming = getattr(self.entity, "is_swimming", False)
+
+        if is_water and not was_swimming:
+            self.entity.is_swimming = True
+            if hasattr(self.entity, "ai") and self.entity.ai is not None:
+                self.entity.ai.swim()
+
+        elif not is_water and was_swimming:
+            self.entity.is_swimming = False
+            # Restore the normal sprite once when leaving water.
+            sprite_manager.refresh_actor_sprite(self.entity)
+
+        else:
+            self.entity.is_swimming = is_water
+
     def perform(self) -> None:
         dest_x, dest_y = self.dest_xy
 
@@ -1110,8 +1130,15 @@ class MovementAction(ActionWithDirection):
                     tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
                     if tile_name == "Grass":
                         sounds.play_movement_sound_at(sounds.play_grass_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
+                    elif tile_name == "Water":
+                        self._update_swim_state(dest_x, dest_y)
+                        sounds.play_movement_sound_at(sounds.play_liquid_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
                     else:
+                        self._update_swim_state(dest_x, dest_y)
                         sounds.play_movement_sound_at(sounds.play_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
+
+        # Track swimming state transitions based on tile content. This avoids per-frame sprite resets.
+        self._update_swim_state(dest_x, dest_y)
 
         # If not in view, display sound tile animation (for all entities)
         from animations import HeardSoundAnimation
@@ -1143,7 +1170,11 @@ class MovementAction(ActionWithDirection):
                     tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
                     if tile_name == "Grass":
                         sounds.play_grass_walk_sound()
+                    elif tile_name == "Water":
+                        self._update_swim_state(dest_x, dest_y)
+                        sounds.play_liquid_walk_sound(dest_x, dest_y)
                     elif tile_name == "Floor":
+                        self._update_swim_state(dest_x, dest_y)
                         sounds.play_walk_sound()
 
 

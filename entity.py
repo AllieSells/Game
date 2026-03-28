@@ -149,6 +149,7 @@ class Actor(Entity):
         description: str = "",
         unknown_name: Optional[str] = None,
         is_known : bool = True,
+        is_swimming: bool = False,
         opinion: int = 50,
         sentient: bool = False,
         sight_radius: int = 6,

@@ -54,6 +54,44 @@ def _offset_overlay_tile(tile_pixels: np.ndarray, x_offset: int, y_offset: int) 
     canvas[dest_y0:dest_y1, dest_x0:dest_x1, :] = tile_pixels[src_y0:src_y1, src_x0:src_x1, :]
     return canvas
 
+
+def _crop_overlay_tile(tile_pixels: np.ndarray, x_crop: int, y_crop: int) -> np.ndarray:
+    """Crop an overlay tile by the given pixel amounts on each side, filling empty space with transparency."""
+    if x_crop == 0 and y_crop == 0:
+        return tile_pixels
+
+    height, width = tile_pixels.shape[:2]
+    canvas = np.zeros_like(tile_pixels)
+
+    # x_crop > 0 removes right columns, x_crop < 0 removes left columns.
+    if x_crop >= 0:
+        src_x0 = 0
+        src_x1 = max(0, width - x_crop)
+    else:
+        src_x0 = min(width, -x_crop)
+        src_x1 = width
+
+    # y_crop > 0 removes bottom rows, y_crop < 0 removes top rows.
+    if y_crop >= 0:
+        src_y0 = 0
+        src_y1 = max(0, height - y_crop)
+    else:
+        src_y0 = min(height, -y_crop)
+        src_y1 = height
+
+    dest_x0 = 0
+    dest_x1 = src_x1 - src_x0
+    dest_y0 = 0
+    dest_y1 = src_y1 - src_y0
+
+    copy_width = dest_x1 - dest_x0
+    copy_height = dest_y1 - dest_y0
+    if copy_width <= 0 or copy_height <= 0:
+        return canvas
+
+    canvas[dest_y0:dest_y1, dest_x0:dest_x1, :] = tile_pixels[src_y0:src_y1, src_x0:src_x1, :]
+    return canvas
+
 def _scale_overlay_tile(tile_pixels: np.ndarray, scale: float) -> np.ndarray:
     """Compress an overlay tile vertically and anchor it to the bottom of the cell."""
     if scale == 1.0:
@@ -125,44 +163,92 @@ def load_extras(tileset, path: str = "RP/extras.png") -> int:
     return count
 
 
-def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_offset: int = 0, y_offset: int = 0) -> str:
+def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_offset: int = 0, y_offset: int = 0, x_crop: int = 0, y_crop: int = 0, top_first_layer: bool = True) -> str:
     """Alpha-composite multiple tile layers into a new tileset slot.
 
-    Blends codepoints bottom-up (first = base, last = top layer).
+    Blends codepoints bottom-up (first = base, last = top layer) by default.
+    If top_first_layer=False, the first layer is treated as the top, and all following
+    layers are composed behind it.
+
     Caches results so identical combos reuse the same slot.
     Returns the chr() of the resulting codepoint.
+
+    Note: x_crop/y_crop apply to the first layer only.
     """
+    try:
+        print(f"[sprite_manager] Composing sprite from layers {[hex(c) for c in layer_codepoints]} with scale {overlay_scale} and offset ({x_offset}, {y_offset})")
+        global _composite_next, _tileset
+        if _tileset is None:
+            raise RuntimeError("[sprite_manager] compose_sprite called before load_extras set the tileset.")
 
-    print(f"[sprite_manager] Composing sprite from layers {[hex(c) for c in layer_codepoints]} with scale {overlay_scale} and offset ({x_offset}, {y_offset})")
-    global _composite_next, _tileset
-    if _tileset is None:
-        raise RuntimeError("[sprite_manager] compose_sprite called before load_extras set the tileset.")
+        normalized_scale = max(0.05, float(overlay_scale))
+        key = (tuple(layer_codepoints), round(normalized_scale, 4), x_offset, y_offset, x_crop, y_crop, top_first_layer)
+        if key in _composite_cache:
+            return chr(_composite_cache[key])
 
-    normalized_scale = max(0.05, float(overlay_scale))
-    key = (tuple(layer_codepoints), round(normalized_scale, 4))
-    if key in _composite_cache:
-        return chr(_composite_cache[key])
+        # First layer (entity) is special: cropped and/or preserved as top if requested.
+        first = _tileset.get_tile(layer_codepoints[0]).astype(np.float32).copy()
+        if x_crop != 0 or y_crop != 0:
+            first = _crop_overlay_tile(first, x_crop, y_crop).astype(np.float32)
 
-    base = _tileset.get_tile(layer_codepoints[0]).astype(np.float32).copy()
-    for cp in layer_codepoints[1:]:
-        overlay_pixels = _tileset.get_tile(cp)
-        if normalized_scale != 1.0:
-            overlay_pixels = _scale_overlay_tile(overlay_pixels, normalized_scale)
-        if x_offset != 0 or y_offset != 0:
-            overlay_pixels = _offset_overlay_tile(overlay_pixels, x_offset, y_offset)
-        overlay = overlay_pixels.astype(np.float32)
-        alpha = overlay[..., 3:4] / 255.0
-        base[..., :3] = overlay[..., :3] * alpha + base[..., :3] * (1.0 - alpha)
-        base[..., 3] = np.maximum(base[..., 3], overlay[..., 3])
+        if top_first_layer:
+            base = first
+            overlay_layers = layer_codepoints[1:]
+        else:
+            # Compose all background layers (the rest) first, then draw first on top.
+            if len(layer_codepoints) > 1:
+                base = _tileset.get_tile(layer_codepoints[1]).astype(np.float32).copy()
+                for cp in layer_codepoints[2:]:
+                    overlay_pixels = _tileset.get_tile(cp)
+                    if normalized_scale != 1.0:
+                        overlay_pixels = _scale_overlay_tile(overlay_pixels, normalized_scale)
+                    if x_offset != 0 or y_offset != 0:
+                        overlay_pixels = _offset_overlay_tile(overlay_pixels, x_offset, y_offset)
+                    overlay = overlay_pixels.astype(np.float32)
+                    alpha = overlay[..., 3:4] / 255.0
+                    base[..., :3] = overlay[..., :3] * alpha + base[..., :3] * (1.0 - alpha)
+                    base[..., 3] = np.maximum(base[..., 3], overlay[..., 3])
+            else:
+                base = np.zeros_like(first)
+            overlay_layers = []
 
-    result = base.astype(np.uint8)
-    cp = _composite_next
-    _tileset.set_tile(cp, result)
-    _composite_cache[key] = cp
-    _composite_next += 1
-    #print(f"[sprite_manager] Composed sprite 0x{cp:04X} from layers {[hex(c) for c in layer_codepoints]}")
-    return chr(cp)
+        if top_first_layer:
+            target_layers = overlay_layers
+        else:
+            # after building background from remaining layers, overlay first on top
+            target_layers = [layer_codepoints[0]]
 
+        if not top_first_layer:
+            # if first is top, we already have background base; now overlay first last.
+            overlay_layers = []
+            for cp in [layer_codepoints[0]]:
+                overlay_pixels = first
+                # first already has crop and no transforms applied
+                alpha = (overlay_pixels[..., 3:4] / 255.0)
+                base[..., :3] = overlay_pixels[..., :3] * alpha + base[..., :3] * (1.0 - alpha)
+                base[..., 3] = np.maximum(base[..., 3], overlay_pixels[..., 3])
+        else:
+            for cp in overlay_layers:
+                overlay_pixels = _tileset.get_tile(cp)
+                if normalized_scale != 1.0:
+                    overlay_pixels = _scale_overlay_tile(overlay_pixels, normalized_scale)
+                if x_offset != 0 or y_offset != 0:
+                    overlay_pixels = _offset_overlay_tile(overlay_pixels, x_offset, y_offset)
+                overlay = overlay_pixels.astype(np.float32)
+                alpha = overlay[..., 3:4] / 255.0
+                base[..., :3] = overlay[..., :3] * alpha + base[..., :3] * (1.0 - alpha)
+                base[..., 3] = np.maximum(base[..., 3], overlay[..., 3])
+
+        result = base.astype(np.uint8)
+        cp = _composite_next
+        _tileset.set_tile(cp, result)
+        _composite_cache[key] = cp
+        _composite_next += 1
+        #print(f"[sprite_manager] Composed sprite 0x{cp:04X} from layers {[hex(c) for c in layer_codepoints]}")
+        return chr(cp)
+    except Exception as e:
+        print(f"[sprite_manager] Error composing sprite from layers {[hex(c) for c in layer_codepoints]}: {e}")
+        return chr(layer_codepoints[0])  # fallback to base layer if composition fails
 
 
 

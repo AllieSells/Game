@@ -435,6 +435,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             "Adding campfires...",
             "Spawning entities...",
             "Feeding critters...",
+            "Freezing graphics temporarily...",
             "Finalizing world...",
             "World generation complete!"
         ]

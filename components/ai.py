@@ -36,6 +36,11 @@ class BaseAI(Action):
     def perform(self) -> None:
         raise NotImplementedError(
         )
+
+    def swim(self):
+        from render_functions import SwimmingAnimation
+        self.engine.swimming_entities.append(SwimmingAnimation(self.entity))
+
     
     def should_move_this_turn(self) -> bool:
         """Check if this AI should move this turn based on movement speed."""
@@ -282,6 +287,8 @@ class HostileEnemy(BaseAI):
             from render_functions import SpeechBubble
             self.engine.speech_bubbles.append(SpeechBubble(self.entity, 90))
             self.engine.message_log.add_message(f"{self.entity.name}: '{say}'", color.green)
+
+    
 
     def perform(self) -> None:
         # Move every turn

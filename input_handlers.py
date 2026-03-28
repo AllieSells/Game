@@ -4527,7 +4527,8 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.KeySym.T:
             return ThrowSelectionHandler(self.engine)
         elif key == tcod.event.KeySym.F1:
-            return CheatMaxLevel(self.engine)
+            pass
+            #return CheatMaxLevel(self.engine)
         elif key == tcod.event.KeySym.E:
             # Visual equipment interface
             from equipment_ui import EquipmentUI
@@ -5598,15 +5599,40 @@ class Settings(BaseEventHandler):
                 "SelectedIndex": self._get_audio_index(),
                 "json_key": "audio"
             },
-            "Graphics:": {
-                "Options": ["High", "Medium", "Low"],
-                "SelectedIndex": ["high", "medium", "low"].index(self.settings_data.get("graphics", "high").lower()) if self.settings_data.get("graphics", "high").lower() in ["high", "medium", "low"] else 0,
-                "json_key": "graphics"
-            },
             "Light Flicker:": {
                 "Options": ["On", "Off"],
                 "SelectedIndex": 0 if self.settings_data.get("light_flicker", True) else 1,
                 "json_key": "light_flicker"
+            },
+            "------ Restart Required ------": {
+                "Options": [''],
+                "SelectedIndex": 0,
+                "json_key": None
+            },
+            "Scanlines:": {
+                "Options": ["On", "Off"],
+                "SelectedIndex": 0 if self.settings_data.get("crt_scanlines", True) else 1,
+                "json_key": "crt_scanlines"
+            },
+            "Vignette:": {
+                "Options": ["On", "Off"],
+                "SelectedIndex": 0 if self.settings_data.get("crt_vignette", True) else 1,
+                "json_key": "crt_vignette"
+            },
+            "Bloom:": {
+                "Options": ["On", "Off"],
+                "SelectedIndex": 0 if self.settings_data.get("crt_bloom", True) else 1,
+                "json_key": "crt_bloom"
+            },
+            "Chromatic Aberration:": {
+                "Options": ["On", "Off"],
+                "SelectedIndex": 0 if self.settings_data.get("crt_ca", True) else 1,
+                "json_key": "crt_ca"
+            },
+            "Barrel Curvature:": {
+                "Options": ["On", "Off"],
+                "SelectedIndex": 0 if self.settings_data.get("crt_curvature", True) else 1,
+                "json_key": "crt_curvature"
             }
         }
         # Convert to list for easier navigation
@@ -5754,10 +5780,9 @@ class Settings(BaseEventHandler):
                     elif category_key == "Audio:":
                         audio_options = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
                         self.settings_data[json_key] = audio_options[selected_index]  # 0-100 volume
-                    elif category_key == "Graphics:":
-                        options = ["high", "medium", "low"]
-                        self.settings_data[json_key] = options[selected_index]
                     elif category_key == "Light Flicker:":
+                        self.settings_data[json_key] = (selected_index == 0)  # True for On
+                    elif json_key and json_key.startswith("crt_"):
                         self.settings_data[json_key] = (selected_index == 0)  # True for On
             
             # Write to file with proper JSON format
@@ -5766,7 +5791,12 @@ class Settings(BaseEventHandler):
                 f.write("    // Display settings\n")
                 f.write(f'    "fullscreen": {json.dumps(self.settings_data.get("fullscreen", False))},\n')
                 f.write(f'    "audio": {json.dumps(self.settings_data.get("audio", 50))},\n')
-                f.write(f'    "graphics": {json.dumps(self.settings_data.get("graphics", "high"))},\n')
+                f.write("    // CRT filter settings\n")
+                f.write(f'    "crt_scanlines": {json.dumps(self.settings_data.get("crt_scanlines", True))},\n')
+                f.write(f'    "crt_vignette": {json.dumps(self.settings_data.get("crt_vignette", True))},\n')
+                f.write(f'    "crt_bloom": {json.dumps(self.settings_data.get("crt_bloom", True))},\n')
+                f.write(f'    "crt_ca": {json.dumps(self.settings_data.get("crt_ca", True))},\n')
+                f.write(f'    "crt_curvature": {json.dumps(self.settings_data.get("crt_curvature", True))},\n')
                 f.write(f'    "light_flicker": {json.dumps(self.settings_data.get("light_flicker", True))}\n')
                 f.write("}\n")
         except Exception as e:
@@ -5822,6 +5852,14 @@ class Settings(BaseEventHandler):
                         update_all_loop_volumes_from_settings()
                     except Exception:
                         pass  # Silently handle any import/call errors
+                
+                # Update CRT filter toggles live
+                if category_data.get("json_key", "").startswith("crt_"):
+                    try:
+                        from __main__ import reload_crt_settings
+                        reload_crt_settings()
+                    except Exception:
+                        pass
             
         # Handle selection (Enter/Space)
         elif key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.SPACE:
@@ -5857,6 +5895,14 @@ class Settings(BaseEventHandler):
                         update_all_loop_volumes_from_settings()
                     except Exception:
                         pass  # Silently handle any import/call errors
+                
+                # Update CRT filter toggles live
+                if category_data.get("json_key", "").startswith("crt_"):
+                    try:
+                        from __main__ import reload_crt_settings
+                        reload_crt_settings()
+                    except Exception:
+                        pass
                 
         return None  # Stay in settings menu
 

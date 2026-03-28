@@ -59,6 +59,44 @@ class SpeechBubble:
             sprite_manager.refresh_actor_sprite(self.entity)  # Reset to base sprite
             return True
         return False
+    
+class SwimmingAnimation:
+    
+    CHARS = [0xE145, 0xE146, 0xE147, 0xE148, 0xE149]  # Water splash animation frames
+    FRAME_DURATION = 5  # Ticks per frame
+
+    def __init__(self, entity):
+        self.entity = entity
+        self._tick_count = 0
+        
+
+    def tick(self):
+        """Called every game tick"""
+        if self.entity.fighter.hp <= 0:
+            return True
+        if not getattr(self.entity, 'is_swimming', False):
+            sprite_manager.refresh_actor_sprite(self.entity)  # Reset to base sprite
+            return True
+        
+        sequence = [0, 1, 2, 3, 4, 3, 2, 1]
+
+        idx = (self._tick_count // self.FRAME_DURATION) % len(sequence)
+        print(idx)
+        frame_index = self.CHARS[sequence[idx]]
+
+        # Refresh base render (keeps equipped layers) before applying water splash.
+        sprite_manager.refresh_actor_sprite(self.entity)
+
+        # Crop the first entry (the entity sprite) so only top half appears,
+        # then draw the water animation behind the entity.
+        self.entity.char = sprite_manager.compose_sprite(
+            [ord(self.entity.char), frame_index],
+            y_crop=16,
+            top_first_layer=False,
+        )
+
+        self._tick_count += 1
+        return False
 
 
 class MenuRenderer:
