@@ -181,6 +181,13 @@ class TeleportSpell(Spell):
         action.engine.message_log.add_message(
             f"Space distorts around you!", color.ascend
         )
+        try:
+            import sys
+            _main = sys.modules.get("__main__")
+            if _main is not None and hasattr(_main, "_active_degauss"):
+                _main._active_degauss = _main.DegaussAnimation(_main.renderer, mode="teleport")
+        except Exception:
+            pass
 
 class PoisonSpraySpell(Spell):
     def __init__(self):

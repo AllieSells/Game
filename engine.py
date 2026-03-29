@@ -83,6 +83,7 @@ class Engine:
         self.auto_move_path = []  # List of (x, y) tuples remaining in the queued path
         self._last_auto_move_time = 0.0
         self._pending_handler = None  # Handler change queued by auto-move (e.g. GameOver)
+        self._pending_handler_ready = False  # Delay until one final sprite-update frame completes before switching handler
 
         # Persistent Simplex noise generator for torch/fire flicker.
         # Stored on the engine (not per-map) so the animation is continuous

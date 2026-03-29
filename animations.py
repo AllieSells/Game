@@ -88,7 +88,7 @@ class TeleportAnimation:
             import math
             
             progress = (10 - self.frames) / 10.0  # 0.0 to 1.0 progress through animation
-            pulse_cycle = math.sin(progress * math.pi) * 0.5 + 0.5  # Oscillates between 0.5 and 1.0
+            pulse_cycle = math.sin(progress * math.pi) * 0.25 + 0.75  # Oscillates between 0.75 and 1.0
             color = (
                 int(255 * pulse_cycle),
                 int(0 * pulse_cycle),
@@ -99,7 +99,8 @@ class TeleportAnimation:
             if random.random() < 0.3:
                 y += random.choice([-1, 0, 1])
             if game_map.in_bounds(x, y) and game_map.visible[x, y]:
-                game_map.screen_print_lit(console, x, y, "`", fg=color)
+                options = [0xE0F3, 0xE0F4, 0xE0F5]
+                game_map.screen_print_lit(console, x, y, chr(random.choice(options)), fg=color)
 
         self.frames -= 1
 

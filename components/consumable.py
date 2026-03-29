@@ -120,7 +120,7 @@ class SigilStoneConsumable(Consumable):
         # Spell lookup table: spell_key -> (spell_class, school, sound_function)
         spell_lut = {
             "Teleport": (TeleportSpell, 'conjuration', None),  # sounds.play_teleport_sound commented out
-            "Darkvision": (DarkvisionSpell, 'transmutation', sounds.play_darkvision_sound),
+            "Darkvision": (DarkvisionSpell, 'transmutation', None),
             "Poison Spray": (PoisonSpraySpell, 'conjuration', None),
             "Fireball": (FireballSpell, 'evocation', None),
             "Healing Word": (HealingWordSpell, 'evocation', None),

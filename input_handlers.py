@@ -197,6 +197,16 @@ class EventHandler(BaseEventHandler):
         self.mouse_pos = (0, 0)
 
     def handle_events(self, event: tcod.event.Event) -> BaseEventHandler:
+        # Defer immediate handler switch until one final frame update has been rendered.
+        pending = getattr(self.engine, '_pending_handler', None)
+        pending_ready = getattr(self.engine, '_pending_handler_ready', False)
+        if pending is not None:
+            if pending_ready:
+                self.engine._pending_handler = None
+                self.engine._pending_handler_ready = False
+                return pending
+            return self
+
         # handles events for input handlers with an engine
         action_or_state = self.dispatch(event)
         if isinstance(action_or_state, BaseEventHandler):
@@ -4291,11 +4301,17 @@ class AreaRangedAttackHandler(SelectIndexHandler):
 class MainGameEventHandler(EventHandler):
 
     def handle_events(self, event: tcod.event.Event) -> BaseEventHandler:
-        # Return any handler change that was queued by auto-move in engine.tick()
+        # Return any handler change that was queued by auto-move in engine.tick(),
+        # but only once we've shown one final pre-transition frame.
         pending = getattr(self.engine, '_pending_handler', None)
+        pending_ready = getattr(self.engine, '_pending_handler_ready', False)
         if pending is not None:
-            self.engine._pending_handler = None
-            return pending
+            if pending_ready:
+                self.engine._pending_handler = None
+                self.engine._pending_handler_ready = False
+                return pending
+            # During the deferred frame, ignore extra input and keep this handler active.
+            return self
 
         # Cancel auto-move on any deliberate keyboard or mouse input
         if isinstance(event, (tcod.event.KeyDown, tcod.event.MouseButtonDown)):
@@ -4987,9 +5003,9 @@ class GameOverEventHandler(EventHandler):
         MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
         MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Death")
         
-        console.print(x + 2, y + 2, "Your adventure ends here.", fg=(color.red))
+        console.print(x + 2, y + 2, "Your adventure ends here.", fg=(color.light_red))
         console.print(x + 2, y + 3, "You fade into obscurity...", fg=(color.light_gray))
-
+    
     def on_quit(self) -> None:
         """Handle exiting out of a finished game."""
         import setup_game  # Local import to avoid circular dependency

@@ -65,10 +65,7 @@ class TurnManager:
                 except Exception:
                     actor.initiative_counter -= 100  # Still consume turn
                     
-                # Check if player died
-                if not self.engine.player.is_alive:
-                    from input_handlers import GameOverEventHandler
-                    return GameOverEventHandler(self.engine)
+
         
         return None
     
@@ -321,25 +318,6 @@ class TurnManager:
                 sounds.torch_burns_out_sound.play()
                 self.engine.message_log.add_message(f"Your {item.name} burns out.", color.error)
             
-            # Also check legacy slots for backward compatibility
-            for slot in ("weapon", "offhand"):
-                item = getattr(player.equipment, slot)
-                if item is not None and getattr(item, "burn_duration", None) is not None:
-                    try:
-                        item.burn_duration -= 1
-                        if item.burn_duration <= 0:
-                            # Use new unequip method which handles both systems
-                            player.equipment.unequip_item(item, add_message=False)
-                            try:
-                                # Remove from inventory if present
-                                if item in player.inventory.items:
-                                    player.inventory.items.remove(item)
-                            except Exception:
-                                pass
-                            sounds.torch_burns_out_sound.play()
-                            self.engine.message_log.add_message(f"Your {item.name} burns out.", color.error)
-                    except Exception:
-                        pass
         except Exception:
             pass
         return None
@@ -418,6 +396,10 @@ class TurnManager:
         from input_handlers import GameOverEventHandler, LevelUpEventHandler
         
         if not self.engine.player.is_alive:
-            return GameOverEventHandler(self.engine)
-        
+            # Defer game-over overlay until one more engine sprite-update cycle has run.
+            if getattr(self.engine, '_pending_handler', None) is None:
+                self.engine._pending_handler = GameOverEventHandler(self.engine)
+                self.engine._pending_handler_ready = False
+            return None
+
         return None

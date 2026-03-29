@@ -1132,7 +1132,7 @@ class MovementAction(ActionWithDirection):
                         sounds.play_movement_sound_at(sounds.play_grass_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
                     elif tile_name == "Water":
                         self._update_swim_state(dest_x, dest_y)
-                        sounds.play_movement_sound_at(sounds.play_liquid_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
+                        sounds.play_movement_sound_at(sounds.play_swim_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
                     else:
                         self._update_swim_state(dest_x, dest_y)
                         sounds.play_movement_sound_at(sounds.play_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
@@ -1172,7 +1172,7 @@ class MovementAction(ActionWithDirection):
                         sounds.play_grass_walk_sound()
                     elif tile_name == "Water":
                         self._update_swim_state(dest_x, dest_y)
-                        sounds.play_liquid_walk_sound(dest_x, dest_y)
+                        sounds.play_swim_sound()
                     elif tile_name == "Floor":
                         self._update_swim_state(dest_x, dest_y)
                         sounds.play_walk_sound()

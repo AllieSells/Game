@@ -762,6 +762,16 @@ def _delayed_liquid_walk_sound():
     sound = random.choice(liquid_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.2)
 
+def play_swim_sound():
+    swim_sounds = [
+        Sound("RP/sfx/walk/swim/swim1.mp3"),
+        Sound("RP/sfx/walk/swim/swim2.mp3"),
+        Sound("RP/sfx/walk/swim/swim3.mp3")
+    ]
+    sound = random.choice(swim_sounds)
+    print("Playing swim sound with pitch variation")
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.3)
+
 def play_walk_sound(entity_x=0, entity_y=0):
     if random.random() < 0.3:
         return  # 30% chance to not play a sound for variety
@@ -1302,6 +1312,7 @@ def _ray_cast_sound(start_x, start_y, end_x, end_y, game_map):
     sound_strength = 1.0  # Starting sound strength
     distance = 0
     obstacles_encountered = []  # Track what we hit for debugging
+    distance_attenuation = 1.0  # Initialize distance attenuation
     
     while True:
         # Check if we've reached the target
@@ -1359,7 +1370,6 @@ def _ray_cast_sound(start_x, start_y, end_x, end_y, game_map):
         if e2 < dx:
             error += dx
             y += y_inc
-    
     final_strength = sound_strength * distance_attenuation
 
     return final_strength
@@ -1734,7 +1744,7 @@ def play_combat_sound_at(sound_func, x, y, player, game_map):
 def play_movement_sound_at(sound_func, x, y, player, game_map):
     """Play movement sound with positional muffling and entity-specific timing."""
     # Pass coordinates to sound function for unique entity timing
-    if sound_func.__name__ in ['play_walk_sound', 'play_grass_walk_sound', 'play_liquid_walk_sound']:
+    if sound_func.__name__ in ['play_walk_sound', 'play_grass_walk_sound', 'play_liquid_walk_sound', 'play_swim_sound']:
         # First check if sound should be played at all (distance check)
         if not should_play_sound(x, y, player, game_map):
             return  # Don't play sounds beyond 10 tiles
@@ -1775,6 +1785,15 @@ def play_muffled_sound_with_coords(sound_func, cutoff=800, entity_x=0, entity_y=
             Sound("RP/sfx/quaff.wav"),
         ]
         sound = random.choice(liquid_walk_sounds)
+        sound.set_volume(0.4)  # Match original volume
+
+    elif sound_func.__name__ == 'play_swim_sound':
+        swim_sounds = [
+            Sound("RP/sfx/walk/swim/swim1.mp3"),
+            Sound("RP/sfx/walk/swim/swim2.mp3"),
+            Sound("RP/sfx/walk/swim/swim3.mp3"),
+        ]
+        sound = random.choice(swim_sounds)
         sound.set_volume(0.4)  # Match original volume
         
     elif sound_func.__name__ == 'play_walk_sound':

@@ -4,14 +4,12 @@ from __future__ import annotations
 import copy
 import lzma
 import pickle
-from tempfile import TemporaryFile
 import traceback
 from typing import Optional
 
 import tcod
 
 import color
-from components import equipment
 from engine import Engine
 import entity_factories
 from game_map import GameWorld
@@ -58,7 +56,7 @@ def get_save_path(filename=""):
 
 # Simple animated background
 class SimpleAnimatedBackground:
-    def __init__(self, frame_pattern="RP/background/frame_{:03d}_delay-0.03s.png", frame_count=240, fps=20):
+    def __init__(self, frame_pattern="RP/background/frame_{:03d}.png", frame_count=240, fps=20):
         self.frames = []
         self.current_frame = 0
         self.frame_time = 1.0 / fps
@@ -448,6 +446,11 @@ class LoadingScreen(input_handlers.BaseEventHandler):
         self.generation_complete = False
         self.completion_delay = 0  # Frames to show completion before transitioning
     
+    def cleanup_resources(self):
+        """Release any resources used during the loading screen."""
+        animated_bg.release_resources()
+        print("Loading screen resources cleaned up.")
+
     def on_render(self, console: tcod.console.Console) -> None:
         try:
             """Render the loading screen with parchment styling."""

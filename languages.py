@@ -65,12 +65,12 @@ TEMPLATES = {
             "{1sg} kede tikg {prey} pe gred!",
         ],
         "threat": [
-            "{interj} {1sg} tag {v_agg_future} {2sg} tet reragre!",
-            "{interj} {1sg} tag {v_agg_future} {remains}!",
+            "{interj} {1sg} {v_agg_future} {2sg} tet reragre!",
+            "{interj} {1sg} {v_agg_future} {remains}!",
             "{2sg} ki rouk gred!",
             "{interj} {remains} tag kout gra!",
             "u kede ki gidak pe ke!",
-            "{interj} {1sg} tag {v_agg_future} {2sg}. Grah!",
+            "{interj} {1sg} {v_agg_future} {2sg}. Grah!",
         ],
         "hurt": [
             "{2sg} {will_fear} {hurting} {1sg}!",
