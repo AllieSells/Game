@@ -215,7 +215,7 @@ water = new_tile(
     name="Water",
     walkable=True,
     transparent=True,
-    dark=(0xE140, (10, 28, 32), (10, 10, 30)),
+    dark=(0xE140, (0, 0, 0), (10, 10, 10)),
     light=(0xE140, (255, 255, 255), (30, 110, 135)),
 )
 

@@ -4441,7 +4441,7 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.K_SLASH and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT
         ):            
             # TODO HELP MENU
-            return HelpMenuHandler()
+            return HelpMenuHandler(parent_handler=self)
         elif key == tcod.event.K_F4:
             self.engine.player.fighter.hp = 99999999999
             self.engine.player.fighter.power = 99999999999
@@ -5514,8 +5514,9 @@ class HelpMenuHandler(BaseEventHandler):
 
 
         text = f"""Movement:
-    ↑↓←→: Move Cardinally
+    WASD: Move Cardinally
     Numpad: Move Ordinally
+    R Click: Auto-move to destination
 
 Inventory:
     E: Equipment Menu

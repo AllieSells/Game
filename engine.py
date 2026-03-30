@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from game_map import GameMap, GameWorld
 
 import time
-from animations import FireFlicker, BonefireFlicker, FireSmoke, FlameAnimation
+from animations import FireFlicker, BonefireFlicker, SmokeCloudParticle, FlameAnimation, EmberParticle, DripParticle
 import sprite_manager
 
 
@@ -156,18 +156,13 @@ class Engine:
 
     def debug_log(self, message: str, handler: Optional[str] = None, event: Optional[str] = None) -> None:
         """Log a debug message if debug mode is enabled."""
-        if self.debug:
-            print(f"[DEBUG] {message}")
-        # If log file doesn't exist, create it and write header
+        if not self.debug:
+            return
+        print(f"[DEBUG] {message}")
         log_path = "logs/log.txt"
-        if not os.path.exists(log_path):
-            mkdir_path = os.path.dirname(log_path)
-            if not os.path.exists(mkdir_path):
-                os.makedirs(mkdir_path)
-
-        else:
-            with open(log_path, "a") as log_file:
-                log_file.write(f" {time.ctime()}: Handler: {handler}, Event: {event}, Message: {message}\n")
+        os.makedirs("logs", exist_ok=True)
+        with open(log_path, "a") as log_file:
+            log_file.write(f" {time.ctime()}: Handler: {handler}, Event: {event}, Message: {message}\n")
 
     def _effect_list(self, target) -> list:
         effects = getattr(target, "effects", None)
@@ -492,6 +487,25 @@ class Engine:
                         if not entity_has_fire_animation:
                             from animations import EntityFireFlicker
                             self.animation_queue.append(EntityFireFlicker(entity))
+
+                    # Spawn drip particles for blood/water body-part coatings
+                    if self.animations_enabled and getattr(entity, 'ai', True) is not None:
+                        drip_coatings = [
+                            part.coating for part in entity.body_parts.body_parts.values()
+                            if part.coating in (LiquidType.BLOOD, LiquidType.WATER)
+                        ]
+                        if drip_coatings:
+                            drip_cap = 3
+                            current_drips = sum(
+                                1 for a in self.animation_queue
+                                if isinstance(a, DripParticle)
+                                and int(round(a.fx)) == entity.x
+                                and int(round(a.fy)) == entity.y
+                            )
+                            if current_drips < drip_cap and random.random() < 0.15:
+                                coating = drip_coatings[0]
+                                drip_color = (180, 20, 20) if coating == LiquidType.BLOOD else (80, 140, 220)
+                                self.animation_queue.append(DripParticle((entity.x, entity.y), drip_color))
                 
                 
                 # Periodically spawn fire animations for campfire and bonfire items on the map.
@@ -506,17 +520,31 @@ class Engine:
 
                             # Flicker: always keep one running per position
                             pos = (entity.x, entity.y)
-                            smoke_chance = 0.08 if entity.name == "Bonfire" else 0.01
+                            is_bonfire = entity.name == "Bonfire"
+                            smoke_chance = 0.08 if is_bonfire else 0.05
                             if entity.name == "Campfire":
                                 if not any(isinstance(a, FireFlicker) and a.position == pos for a in self.animation_queue):
                                     self.animation_queue.append(FireFlicker(pos))
-                            elif entity.name == "Bonfire":
+                            elif is_bonfire:
                                 if not any(isinstance(a, BonefireFlicker) and a.position == pos for a in self.animation_queue):
                                     self.animation_queue.append(BonefireFlicker(pos))
 
                             # Smoke: rarer, longer lasting
                             if random.random() < smoke_chance:
-                                self.animation_queue.append(FireSmoke((entity.x, entity.y)))
+                                self.animation_queue.append(SmokeCloudParticle((entity.x, entity.y-0.5)))
+
+                            # Embers: bright single-pixel sparks for heavy bloom
+                            ember_chance = 0.20 if is_bonfire else 0.10
+                            ember_cap = 8 if is_bonfire else 4
+                            if random.random() < ember_chance:
+                                current_embers = sum(
+                                    1 for a in self.animation_queue
+                                    if isinstance(a, EmberParticle)
+                                    and int(round(a.fx)) == entity.x
+                                    and int(round(a.fy)) == entity.y
+                                )
+                                if current_embers < ember_cap:
+                                    self.animation_queue.append(EmberParticle(pos))
                         except Exception:
                             pass
                 
@@ -541,6 +569,27 @@ class Engine:
                         except Exception:
                             pass
         
+            # Torch ember sparks for the player when a torch is equipped
+            if self.animations_enabled:
+                try:
+                    has_torch_equipped = (
+                        self.player.equipment
+                        and self.player.equipment.has_item_equipped("Torch")
+                    )
+                    if has_torch_equipped and random.random() < 0.06:
+                        torch_pos = (self.player.x, self.player.y)
+                        torch_ember_count = sum(
+                            1 for a in self.animation_queue
+                            if isinstance(a, EmberParticle)
+                            and int(round(a.fx)) == float(self.player.x + 0.75)
+                            and int(round(a.fy)) == self.player.y
+                        )
+                        if torch_ember_count < 3:
+                            #self.animation_queue.append(EmberParticle(torch_pos))
+                            pass
+                except Exception:
+                    pass
+
             # Update ambient sounds based on player proximity
             import sounds
 

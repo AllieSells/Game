@@ -810,3 +810,11 @@ class GlobalWaterAnimation:
                 game_map.screen_print_lit(console, int(xi), int(yi), char, fg=color.shallow_water)
         except Exception:
             pass
+
+# ------------------------------- #
+# GPU ANIMS AND GPU PARTICLES
+# --------------------------------- #
+# Physics classes now live in gpu_stack.py alongside their render passes.
+# Re-exported here so existing code that imports from animations still works.
+
+from gpu_stack import DripParticle, SmokeCloudParticle, EmberParticle

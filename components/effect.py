@@ -117,7 +117,7 @@ class BurningEffect(Effect):
 
 
 class BloodyEffect(Effect):
-    """Display-only status for blood coating grouping in the effects UI."""
+    """Display-only status for blood coating in the effects UI."""
 
     def __init__(self, duration: Optional[int] = None):
         super().__init__(
@@ -126,4 +126,43 @@ class BloodyEffect(Effect):
             description="Covered in blood.",
             type="status",
             display=EffectDisplay(glyph=chr(0xE021), fg=color.sprite_sheet, label="Bloody"),
+        )
+
+
+class WetEffect(Effect):
+    """Display-only status for water coating in the effects UI."""
+
+    def __init__(self, duration: Optional[int] = None):
+        super().__init__(
+            name="Wet",
+            duration=duration,
+            description="Soaked in water.",
+            type="status",
+            display=EffectDisplay(glyph=chr(0xE024), fg=color.light_blue, label="Wet"),
+        )
+
+
+class OilyEffect(Effect):
+    """Display-only status for oil coating in the effects UI."""
+
+    def __init__(self, duration: Optional[int] = None):
+        super().__init__(
+            name="Oily",
+            duration=duration,
+            description="Covered in oil.",
+            type="status",
+            display=EffectDisplay(glyph="\u2022", fg=(200, 200, 80), label="Oily"),
+        )
+
+
+class SlimyEffect(Effect):
+    """Display-only status for slime coating in the effects UI."""
+
+    def __init__(self, duration: Optional[int] = None):
+        super().__init__(
+            name="Slimy",
+            duration=duration,
+            description="Covered in slime.",
+            type="status",
+            display=EffectDisplay(glyph="\u223f", fg=(80, 200, 80), label="Slimy"),
         )

@@ -644,31 +644,27 @@ class LoadingScreen(input_handlers.BaseEventHandler):
 
     
     def handle_events(self, event: tcod.event.Event) -> input_handlers.BaseEventHandler:
-        """Handle events during loading."""
-        # Auto-transition to game when generation is complete (after brief delay)
-        if self.generation_complete and self.engine is not None:
-            self.completion_delay += 1
-            if self.completion_delay > 60:  # Wait about 1 second at 60 FPS
-                from input_handlers import MainGameEventHandler
-                # Start dungeon music when entering the game
-                sounds.start_dungeon_music()
-                return MainGameEventHandler(self.engine)
-        
+        """Handle events during loading.
+
+        The CRT screen-off/on animation and the transition to MainGameEventHandler
+        are driven by the main render loop (main.py) once generation_complete is True.
+        handle_events only needs to handle ESC-to-cancel; everything else is a no-op
+        so the main loop stays in control of the timing.
+        """
         # Allow ESC to cancel and return to main menu at any time
         if isinstance(event, tcod.event.KeyDown) and event.sym == tcod.event.K_ESCAPE:
             return self.parent_menu
-        
-        # Allow any key to skip waiting and go directly to game if generation is done
-        if self.generation_complete and isinstance(event, tcod.event.KeyDown):
-            if self.engine is not None:
+
+        # Once generation is complete the main loop will play the screen-on animation
+        # and then call handle_events with a synthetic event to trigger the transition.
+        if self.generation_complete and self.engine is not None:
+            if getattr(event, '_crt_transition', False):
                 from input_handlers import MainGameEventHandler
-                # Start dungeon music when entering the game
                 sounds.start_dungeon_music()
                 return MainGameEventHandler(self.engine)
-            else:
-                # Generation failed, return to main menu
+            if self.engine is None:
                 return self.parent_menu
-            
+
         return self
 
 
@@ -978,7 +974,7 @@ class MainMenu(input_handlers.BaseEventHandler):
         self.menu_options = [
             ("Enter New Dungeon", "start_new"),
             ("Reenter Saved Dungeon", "load_game"), 
-            ("Tutorial", "tutorial"),
+            #("Tutorial", "tutorial"),
             ("Settings", "settings"),
             ("Debug Level", "debug_level"),
             ("Quit", "quit")
@@ -1000,14 +996,14 @@ class MainMenu(input_handlers.BaseEventHandler):
             console.draw_semigraphics(current_bg, 0, 0) 
 
         # Calculate menu window dimensions and position
-        window_width = 40
+        window_width = 45
         window_height = 16
         x = (console.width - window_width) // 2
         y = (console.height - window_height) // 2 - 2
 
         # Draw parchment background and ornate border
         MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
-        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "WORK IN PROGRESS TITLE?")
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Dungeons of Ærrok: The Divine Stone", title_fg=(182, 255, 245))
 
         # Draw menu options with selection highlighting
         # Set menu_start_y here so it can be used for mouse hover calculations in ev_mousemotion

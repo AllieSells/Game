@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from engine import Engine
     from input_handlers import BaseEventHandler
 
+from animations import DripParticle
+
 
 class TurnManager:
     """Supreme Turn Manager - Manages initiative-based turn order for all actors."""
@@ -190,7 +192,19 @@ class TurnManager:
                     # Get the liquid at the entity's position
                     liquid_coating = self.engine.game_map.liquid_system.get_coating(entity.x, entity.y)
 
-                    
+                    # Swimming: entity is on a Water tile — coat every body part with water
+                    if getattr(entity, 'is_swimming', False):
+                        for body_part in entity.body_parts.body_parts.values():
+                            if body_part.coating != LiquidType.WATER:
+                                body_part.coating = LiquidType.WATER
+                                body_part.coating_age = 0
+                                if entity == self.engine.player:
+                                    self.engine.debug_log(
+                                        f"SWIMMING COATED: {body_part.name} with water",
+                                        handler=self.__class__.__name__, event="BodyPartCoating"
+                                    )
+                        continue  # skip foot-only logic below while swimming
+
                     # Find all limbs tagged with "foot"
                     for body_part in entity.body_parts.body_parts.values():
                         if "foot" in body_part.tags:
@@ -215,6 +229,7 @@ class TurnManager:
                             else:
                                 # Clear coating if not in deep liquid (but only occasionally to simulate gradual removal)
                                 if body_part.coating != LiquidType.NONE:
+                                    self.engine.animation_queue.append(DripParticle((entity.x, entity.y), body_part.coating.get_display_color()))
                                     # Only clear coating with some delay (not instantly when stepping out)
                                     if body_part.coating_age > 5:  # Wait at least 5 turns before clearing
                                         body_part.coating = LiquidType.NONE

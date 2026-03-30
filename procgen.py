@@ -1006,6 +1006,7 @@ def join_caverns(dungeon: GameMap, width: int, height: int) -> None:
             break
 
     if center_ref is None:
+        print("[GEN] join_caverns: no floor tiles found, skipping")
         return  # No floor tiles — nothing to connect
 
     # Collect one representative point per distinct cave
@@ -1016,6 +1017,8 @@ def join_caverns(dungeon: GameMap, width: int, height: int) -> None:
                 root = ds.find((x, y))
                 if root not in cave_reps:
                     cave_reps[root] = (x, y)
+
+    print(f"[GEN] join_caverns: {len(cave_reps)} disconnected cave regions to merge")
 
     def get_dir(pt1: Tuple[int, int], pt2: Tuple[int, int]) -> Tuple[int, int]:
         h = 0 if pt1[0] == pt2[0] else (1 if pt2[0] > pt1[0] else -1)
@@ -1145,9 +1148,12 @@ def generate_dungeon(
             dungeon.tiles = new_tiles
 
         # Connect all disjoint cave regions into one traversable map
+        print("[GEN] join_caverns start")
         join_caverns(dungeon, map_width, map_height)
+        print("[GEN] join_caverns done")
 
         # Place player near map centre in the main (joined) cave
+        print("[GEN] player placement start")
         for _r in range(max(map_width, map_height)):
             _placed = False
             for _dx in range(-_r, _r + 1):
@@ -1164,8 +1170,10 @@ def generate_dungeon(
                     break
             if _placed:
                 break
+        print(f"[GEN] player placed at ({_placer.x}, {_placer.y})")
 
         # Starter chest on floor 1, placed adjacent to the player
+        print("[GEN] starter chest placement start")
         if _floor == 1:
             import loot_tables
             _loot = loot_tables.generate_loot_from_table("starter_chest")
@@ -1179,6 +1187,7 @@ def generate_dungeon(
                     _start_chest.spawn(dungeon, _ccx, _ccy)
                     break
 
+        print("[GEN] cave entity spawning start")
         # Spawn entities in grid sections across the cave (skip player start section)
         _section_size = 15
         _player_sx = (_placer.x // _section_size) * _section_size
@@ -1195,7 +1204,9 @@ def generate_dungeon(
                 ]
                 place_entities_cave(_section_tiles, dungeon, _floor, max_rooms)
 
+        print("[GEN] cave entity spawning done")
         # Place stairs toward a corner of the map (far from player start)
+        print("[GEN] stair placement start")
         stair_candidates = [
             (map_width * 3 // 4, map_height * 3 // 4),
             (map_width // 4,     map_height * 3 // 4),
@@ -1222,9 +1233,11 @@ def generate_dungeon(
                     break
             if dungeon.downstairs_location != (0, 0):
                 break
+        print(f"[GEN] stairs placed at {dungeon.downstairs_location}")
 
     
     # Dungeon Type
+    print(f"[GEN] dungeon-room block check: erosion={erosion:.3f}, will_run={(erosion < -2.0 or (-2.0 <= erosion <= 2.0))}")
     if erosion < -2.0 or (-2.0 <= erosion <= 2.0):
         if rooms:
             rooms = [] # Clear cave generated rooms for ruins type
@@ -1247,18 +1260,20 @@ def generate_dungeon(
             y = random.randint(min_y, max_y)
 
             new_room = RectangularRoom(x, y, room_width, room_height)
-
+            print(f"[GEN] attempting to place room {r+1}/{max_rooms} at ({x}, {y}) with size ({room_width}x{room_height})")
             if any(new_room.intersects(other_room) for other_room in rooms):
+                print(f"[GEN] room {r+1} rejected due to intersection")
                 continue
 
             if len(rooms) == 0:
+                print(f"[GEN] placing first room at ({x}, {y}) with size ({room_width}x{room_height})")
                 # First room, where player starts
                 _placer.place(*new_room.center, dungeon)
                 # Guaranteed campfire in first room
                 place_campfires(dungeon, "dungeon_first_room", room=new_room, player_pos=new_room.center)
                 # Spawn a chest on first floor only
                 if _floor == 1:
-                    
+                    print("[GEN] starter chest placement start")
                     # Generate loot from table
                     import loot_tables
                     loot = loot_tables.generate_loot_from_table("starter_chest")
@@ -1295,6 +1310,7 @@ def generate_dungeon(
                 place_entities(new_room, dungeon, _floor)
   
     # Place stairs in the center of the last room (rectangular dungeon)
+    print(f"[GEN] rectangular stair placement: rooms={len(rooms)}")
     if rooms:
         center_of_last_room = rooms[-1].center
         dungeon.tiles[center_of_last_room] = tile_types.down_stairs
@@ -1304,11 +1320,14 @@ def generate_dungeon(
 
     # Post-processing: Remove isolated walls that have no floors touching them
     # Skip for caverns - it destroys wall masses by hollowing out their interiors
+    print(f"[GEN] post-processing: remove_isolated_walls/ensure_room_walls start (erosion={erosion:.3f})")
     if erosion < -2.0:
         remove_isolated_walls(dungeon)
     elif -2.0 <= erosion <= 2.0:
         ensure_room_walls(dungeon=dungeon, rooms=rooms)
+    print("[GEN] post-processing walls done")
     # Check if door has neighbor wall
+    print("[GEN] door-neighbor check start")
     wall_count = 0
     for x in range(1, dungeon.width - 1):
         for y in range(1, dungeon.height - 1):
@@ -1325,8 +1344,10 @@ def generate_dungeon(
                     # Convert door to floor if no adjacent walls
                     dungeon.tiles[x,y] = tile_types.random_floor_tile()
 
+    print("[GEN] door-neighbor check done")
     # Seal the border: overwrite the 1-tile inset ring with walls so the world
     # border is never directly reachable regardless of map type or generation.
+    print("[GEN] border seal start")
     for _bx in range(1, dungeon.width - 1):
         dungeon.tiles[_bx, 1] = tile_types.wall
         dungeon.tiles[_bx, dungeon.height - 2] = tile_types.wall
@@ -1334,8 +1355,11 @@ def generate_dungeon(
         dungeon.tiles[1, _by] = tile_types.wall
         dungeon.tiles[dungeon.width - 2, _by] = tile_types.wall
 
+    print("[GEN] border seal done")
     # Apply wall merging system to create connected wall appearances
+    print("[GEN] apply_wall_merging start")
     apply_wall_merging(dungeon)
+    print("[GEN] apply_wall_merging done")
     if vegetation > 0:
         # Mossification
         print(f" Moss val: {(vegetation/4)**2}")
@@ -1350,6 +1374,7 @@ def generate_dungeon(
                     if random.random() < (vegetation/6)**2:
                         dungeon.tiles[x, y] = tile_types.random_mossy_floor_tile()
 
+    print("[GEN] mossification done")
     # Water pool post-processing
     if -4 < temperature < 4:
         water_pool_count = random.randint(1, 3)
@@ -1371,6 +1396,7 @@ def generate_dungeon(
             for x, y in pool_tiles:
                 if dungeon.tiles[x, y]["walkable"]:
                     dungeon.tiles[x, y] = tile_types.water
+    print("[GEN] water pools done")
     # Foliage post processing
     if vegetation > 0:
         for x in range(dungeon.width):
@@ -1378,7 +1404,9 @@ def generate_dungeon(
                 tile = dungeon.tiles[x, y]
                 if tile["walkable"] and random.random() < (2**(vegetation/20)-1) and random.randint(1,3) == 1:
                     dungeon.tiles[x, y] = tile_types.generate_foliage_tile()
+    print("[GEN] foliage done")
     if vegetation > 4:
         dungeon.biome = "lush"
 
+    print("[GEN] generate_dungeon complete")
     return dungeon

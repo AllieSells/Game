@@ -1,4 +1,4 @@
-print("Starting THE Game...")
+print("Starting DoA...")
 import time
 # Package with python -m PyInstaller MyGame.spec
 initial_time = time.time() # Track total loading
@@ -11,7 +11,7 @@ import sys
 
 from PIL import Image
 import numpy as np
-
+import random
 import tcod.sdl.mouse
 
 
@@ -107,38 +107,23 @@ context = tcod.context.new(
     width=1280,
     height=800,
     tileset=tileset,
-    title="THE Game... Loading",
-    vsync=False,  # Disable vsync for faster initial loading
+    title="DoA: Dungeons of Ærrok ... Loading...",
+    vsync=False,  # Software frame limiter (time.sleep) handles fps cap.
+                  # vsync=True with D3D11 fullscreen causes Present() to block
+                  # indefinitely when 500+ GPU calls exceed the vblank window.
 )
 
-# --- Procedural scanlines: sine-wave brightness modulation ---
+from gpu_stack import (
+    generate_scanlines_texture,
+    create_vignette_texture,
+    create_glare_texture,
+    DegaussAnimation,
+    CRTSwitchAnimation,
+)
+
+# --- Procedural scanlines ---
 renderer = context.sdl_renderer
 
-def generate_scanlines_texture(line_density=3.0, intensity=0.35):
-    """Generate a seamlessly tileable scanline overlay texture.
-
-    *line_density* – controls how many scanlines per pixel (higher = thinner lines).
-    *intensity*    – 0.0 = no effect, 1.0 = fully black troughs.
-    The texture is 1 pixel wide (SDL stretches it horizontally) and its
-    height is many exact sine periods so scrolling by 1px is smooth.
-    """
-    # Use many periods so each 1px scroll is a tiny fraction of the pattern
-    period = 2.0 * np.pi / line_density
-    single_h = max(int(np.round(period)), 2)
-    # Make texture at least ~1024px tall for smooth sub-period scrolling
-    repeats = max(1024 // single_h, 1)
-    tile_h = single_h * repeats
-    y = np.arange(tile_h, dtype=np.float32)
-    scanline = 0.5 + 0.5 * np.sin(y * line_density)
-    brightness = (1.0 - intensity * (1.0 - scanline))
-    brightness_u8 = (np.clip(brightness, 0.0, 1.0) * 255).astype(np.uint8)
-    # 1px wide RGBA texture
-    tex_np = np.empty((tile_h, 1, 4), dtype=np.uint8)
-    tex_np[..., 0] = brightness_u8[:, np.newaxis]
-    tex_np[..., 1] = brightness_u8[:, np.newaxis]
-    tex_np[..., 2] = brightness_u8[:, np.newaxis]
-    tex_np[..., 3] = 255
-    return tex_np
 
 # Scanline parameters (tweak these)
 scanline_density = 2.0    # higher = more scanlines (thinner)
@@ -157,257 +142,10 @@ except Exception:
     scanlines_scroll = 0.0
     scanlines_speed = 10.0
 
-# --- CRT EFFECT: VIGNETTE ONLY ---
-def create_vignette_texture(renderer, w=512, h=512):
-    import numpy as np
-    y, x = np.ogrid[:h, :w]
-    cx, cy = w / 2, h / 2
-    dist = ((x - cx)**2 + (y - cy)**2) / (cx*cx + cy*cy)
-    vignette = np.clip(dist, 0, 1)
-    alpha = (vignette * 50).astype(np.uint8)
-    tex = np.zeros((h, w, 4), dtype=np.uint8)
-    tex[..., 3] = alpha  # black with alpha only
-    texture = renderer.upload_texture(tex)
-    texture.blend_mode = tcod.sdl.render.BlendMode.BLEND
-    return texture
-
-vignette_tex = create_vignette_texture(renderer)
-
-# ---------------------------------------------------------------------------
-# CRT EFFECT: DEGAUSS ANIMATION
-# ---------------------------------------------------------------------------
-# This class is intentionally self-contained so it can be triggered both at
-# startup (loading screen) and later as a visual spell/ability effect.
-#
-# Usage:
-#   anim = DegaussAnimation(renderer)
-#   while not anim.done:
-#       anim.tick(dt)          # advance by dt seconds
-#       anim.draw(window_w, window_h)  # blit overlays onto current frame
-#
-# The animation has three phases:
-#   1. Power-on flash  – brief bright white bloom (0.0 – 0.12 s)
-#   2. Colour sweep    – saturated RGB fringe sweeps top→bottom (0.12 – 0.55 s)
-#   3. Settle          – colour and brightness decay back to neutral (0.55 – 0.90 s)
-#
-# During the colour sweep the caller should modulate color_mod on whatever
-# texture is being blitted; the helper `color_mod_at(t)` returns the
-# (r, g, b) multiplier tuple for the current normalised phase time so it can
-# also be applied from outside (e.g. a spell renderer).
-
-class DegaussAnimation:
-    DURATION   = 5.0   # seconds — long enough for oscillation to fully settle
-    _AMPLITUDE = 60.0  # max chromatic pixel shift at peak
-    _DECAY     = 3.0   # damping rate (e-folding)
-    _FREQ      = 6.0   # oscillation frequency in Hz
-    _FLASH_END = 0.12  # seconds: initial white flash window
-
-    # Spatial scramble constants (mode="teleport")
-    _SCRAMBLE_BANDS = 16     # horizontal strips for per-row chromatic shift
-
-    def __init__(self, renderer, mode="degauss"):
-        self._renderer = renderer
-        self._t = 0.0
-        self.done = False
-        self._mode = mode
-        if mode == "teleport":
-            self.DURATION   = 2.0    # scramble + decay
-            self._AMPLITUDE = 80.0   # larger shift range for dramatic scramble
-            self._DECAY     = 3.5
-            self._FREQ      = 9.0
-        # 1x1 white RGBA texture reused for flash and hue overlays
-        _px = np.array([[[255, 255, 255, 0]]], dtype=np.uint8)
-        self._overlay_tex = renderer.upload_texture(_px)
-        self._overlay_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-
-    def _ca_shift(self) -> float:
-        """Signed pixel shift for the current elapsed time; damps toward 0."""
-        if self._t < 0.005:
-            return 0.0
-        return (self._AMPLITUDE
-                * np.exp(-self._DECAY * self._t)
-                * np.sin(self._FREQ * 2.0 * np.pi * self._t))
-
-    def _compress_scale(self) -> float:
-        """Unused stub — kept so external references don't crash."""
-        return 1.0
-
-    def tick(self, dt: float) -> None:
-        """Advance animation by *dt* seconds."""
-        self._t = min(self._t + dt, self.DURATION)
-        if self._t >= self.DURATION:
-            self.done = True
-
-    def _draw_teleport(self, window_w: int, window_h: int, scene_tex=None) -> None:
-        """Full tri-channel per-band spatial scramble for teleport degauss.
-
-        R, G, B channels each get an *independent* per-band horizontal shift
-        driven by three incommensurate sine-wave superpositions.  Edge bands
-        are amplified (corners scramble hardest, like real degauss).  The
-        global damped-oscillation envelope drives the overall intensity so the
-        effect starts at maximum chaos and decays cleanly.
-        """
-        t        = self._t
-        ca       = self._ca_shift()
-        envelope = abs(ca) / self._AMPLITUDE if self._AMPLITUDE > 0 else 0.0
-
-        if scene_tex is not None and envelope > 0.005:
-            N = 32   # finer bands for more spatial variety
-            fringe_alpha = int(min(envelope, 1.0) * 210)
-            scene_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
-            scene_tex.alpha_mod  = fringe_alpha
-
-            # Three incommensurate temporal rates — R, G, B never sync up
-            w1 = self._FREQ * 2.0 * np.pi           # R primary
-            w2 = self._FREQ * 2.0 * np.pi * 1.37    # G primary
-            w3 = self._FREQ * 2.0 * np.pi * 0.71    # B primary
-
-            for i in range(N):
-                y0 = int(window_h * i / N)
-                y1 = int(window_h * (i + 1) / N)
-                bh = max(1, y1 - y0)
-                yn = (i + 0.5) / N  # 0..1 position in frame
-
-                # Edge amplification: corners hit ~2.5× harder than center
-                edge = 1.0 + 1.8 * (abs(yn - 0.5) * 2.0) ** 1.5
-
-                # R: two spatial waves, primary temporal rate
-                r_s = (np.sin(yn * np.pi * 2.7 + t * w1)       * 0.65 +
-                       np.sin(yn * np.pi * 5.2 + t * w2 + 1.1) * 0.35)
-                # G: different spatial frequencies, G-primary temporal rate
-                g_s = (np.sin(yn * np.pi * 3.8 + t * w2 + 0.7) * 0.55 +
-                       np.sin(yn * np.pi * 1.9 + t * w1 + 2.3) * 0.45)
-                # B: mostly anti-phase to R so channels split dramatically
-                b_s = -(r_s * 0.6 + g_s * 0.4)
-
-                amp = self._AMPLITUDE * envelope * edge
-                r_shift = int(round(amp * r_s))
-                g_shift = int(round(amp * g_s * 0.6))  # G a bit tighter
-                b_shift = int(round(amp * b_s))
-
-                src = (0, y0, window_w, bh)
-                if abs(r_shift) >= 1:
-                    scene_tex.color_mod = (255, 0, 0)
-                    self._renderer.copy(scene_tex, source=src, dest=(r_shift, y0, window_w, bh))
-                if abs(g_shift) >= 1:
-                    scene_tex.color_mod = (0, 255, 0)
-                    self._renderer.copy(scene_tex, source=src, dest=(g_shift, y0, window_w, bh))
-                if abs(b_shift) >= 1:
-                    scene_tex.color_mod = (0, 0, 255)
-                    self._renderer.copy(scene_tex, source=src, dest=(b_shift, y0, window_w, bh))
-
-            scene_tex.alpha_mod  = 255
-            scene_tex.color_mod  = (255, 255, 255)
-            scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-
-            # Hue-cycling ADD wash — colour temperature shifts with oscillation
-            hue_alpha = int(min(envelope, 1.0) * 65)
-            if hue_alpha > 0:
-                phase = t * self._FREQ * 2.0 * np.pi
-                r = int(255 * max(0.0, np.sin(phase)         ** 2))
-                g = int(255 * max(0.0, np.sin(phase + 2.094) ** 2))
-                b = int(255 * max(0.0, np.sin(phase + 4.189) ** 2))
-                self._overlay_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
-                self._overlay_tex.alpha_mod  = hue_alpha
-                self._overlay_tex.color_mod  = (max(1, r), max(1, g), max(1, b))
-                self._renderer.copy(self._overlay_tex, dest=(0, 0, window_w, window_h))
-                self._overlay_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-
-        # White flash at cast moment (first ~0.12 s)
-        if t < self._FLASH_END:
-            t_n   = t / self._FLASH_END
-            alpha = int((min(t_n / 0.2, 1.0) - max((t_n - 0.2) / 0.8, 0.0)) * 210)
-            alpha = max(0, min(255, alpha))
-            if alpha > 0:
-                self._overlay_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-                self._overlay_tex.alpha_mod  = alpha
-                self._overlay_tex.color_mod  = (255, 255, 255)
-                self._renderer.copy(self._overlay_tex, dest=(0, 0, window_w, window_h))
-
-    def draw(self, window_w: int, window_h: int, scene_tex=None) -> None:
-        """Draw degauss overlays on top of the already-blitted scene.
-
-        scene_tex — the post-CRT scene texture.  When provided, R and B
-        ADD fringe passes are layered on top of the existing framebuffer
-        content to produce oscillating chromatic separation.
-        The caller must have already blitted scene_tex normally (BLEND)
-        before calling this method.
-        """
-        if self._mode == "teleport":
-            self._draw_teleport(window_w, window_h, scene_tex)
-            return
-
-        ca       = self._ca_shift()
-        ca_i     = int(round(ca))
-        envelope = abs(ca) / self._AMPLITUDE  # 0..1, drives overlay intensities
-
-        # --- Chromatic fringe: ADD shifted R and B channels on top of scene ---
-        if scene_tex is not None and abs(ca_i) >= 1:
-            fringe_alpha = int(min(envelope, 1.0) * 215)
-            scene_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
-            scene_tex.alpha_mod  = fringe_alpha
-            # Red shifts in the + direction
-            scene_tex.color_mod = (255, 0, 0)
-            self._renderer.copy(scene_tex, dest=(ca_i, 0, window_w, window_h))
-            # Blue shifts in the - direction
-            scene_tex.color_mod = (0, 0, 255)
-            self._renderer.copy(scene_tex, dest=(-ca_i, 0, window_w, window_h))
-            # Restore texture state
-            scene_tex.alpha_mod  = 255
-            scene_tex.color_mod  = (255, 255, 255)
-            scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-
-        # --- Initial white flash (phosphors momentarily overdriven) ---
-        if self._t < self._FLASH_END:
-            t_n   = self._t / self._FLASH_END
-            alpha = int((min(t_n / 0.2, 1.0) - max((t_n - 0.2) / 0.8, 0.0)) * 230)
-            alpha = max(0, min(255, alpha))
-            self._overlay_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-            self._overlay_tex.alpha_mod  = alpha
-            self._overlay_tex.color_mod  = (255, 255, 255)
-            self._renderer.copy(self._overlay_tex, dest=(0, 0, window_w, window_h))
-
-        # --- Hue cycling overlay (ADD, fades with the CA envelope) ---
-        if abs(ca_i) >= 1:
-            hue_alpha = int(min(envelope, 1.0) * 50)
-            if hue_alpha > 0:
-                phase = self._t * self._FREQ * 2.0 * np.pi
-                r = int(255 * max(0.0, np.sin(phase) ** 2))
-                g = int(255 * max(0.0, np.sin(phase + 2.094) ** 2))
-                b = int(255 * max(0.0, np.sin(phase + 4.189) ** 2))
-                self._overlay_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
-                self._overlay_tex.alpha_mod  = hue_alpha
-                self._overlay_tex.color_mod  = (max(1, r), max(1, g), max(1, b))
-                self._renderer.copy(self._overlay_tex, dest=(0, 0, window_w, window_h))
-                self._overlay_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-
-    def draw_color_mod(self) -> tuple:
-        """Legacy helper — colour effects are now handled inside draw()."""
-        return (255, 255, 255)
-
-
 # Active degauss instance — set to a DegaussAnimation to run it; None = idle.
-# Spell code can assign a new DegaussAnimation here to trigger the effect.
 _active_degauss: "DegaussAnimation | None" = None
 
-# --- CRT EFFECT: SCREEN GLARE ---
-def create_glare_texture(renderer, w=512, h=512):
-    """Create a subtle screen-glare overlay — soft bright highlight offset toward
-    the upper-left, simulating ambient light reflecting off the CRT glass."""
-    y_idx, x_idx = np.ogrid[:h, :w]
-    cx, cy = w * 0.35, h * 0.22
-    dist = np.sqrt(((x_idx - cx) / (w * 0.55)) ** 2 + ((y_idx - cy) / (h * 0.42)) ** 2)
-    glare = np.clip(1.0 - dist, 0.0, 1.0) ** 2.5
-    alpha = (glare * 28).astype(np.uint8)
-    tex = np.zeros((h, w, 4), dtype=np.uint8)
-    tex[..., 0] = 255
-    tex[..., 1] = 255
-    tex[..., 2] = 255
-    tex[..., 3] = alpha
-    texture = renderer.upload_texture(tex)
-    texture.blend_mode = tcod.sdl.render.BlendMode.BLEND
-    return texture
-
+vignette_tex = create_vignette_texture(renderer)
 glare_tex = create_glare_texture(renderer)
 
 game_width = 80
@@ -473,6 +211,11 @@ def get_game_screen_tile(position: tuple[float, float], window_w: float, window_
 
 def show_loading_screen(context, console, progress: float, status: str) -> None:
     """Display a loading screen with progress bar."""
+    # Pump the SDL event queue so the OS doesn't mark the window as
+    # non-responsive during heavy loading pauses.  Events are discarded
+    # because no input is processed on the loading screen.
+    for _ in tcod.event.get():
+        pass
     console.clear()
     # Center the loading screen
     screen_center_x = console.width // 2
@@ -492,20 +235,11 @@ def show_loading_screen(context, console, progress: float, status: str) -> None:
     percentage = f"{int(progress * 100)}%"
     console.print(screen_center_x - len(percentage) // 2, bar_y + 2, percentage, fg=color.gold_accent)
     console.print(screen_center_x - len(status) // 2, bar_y + 4, status, fg=color.fantasy_text)
+    # context.present() renders the console AND calls SDL_RenderPresent internally.
+    # Do NOT call renderer.present() afterwards — that would be a second
+    # SDL_RenderPresent on an undefined backbuffer while vsync=True, which
+    # causes a GPU pipeline stall / hang on Windows DXGI backends.
     context.present(console)
-    # --- Overlay scanlines statically ---
-    try:
-        renderer = context.sdl_renderer
-        window_w, window_h = context.sdl_window.size
-        if 'scanlines_tex' in globals() and scanlines_tex is not None:
-            for _y in range(0, window_h, scanlines_h):
-                _dh = min(scanlines_h, window_h - _y)
-                renderer.copy(scanlines_tex,
-                              
-                              dest=(0, _y, window_w, _dh))
-            renderer.present()
-    except Exception:
-        pass
 
 # Show loading screen immediately
 show_loading_screen(context, ui_console, 0.05, "Starting...")
@@ -563,6 +297,8 @@ def load_settings():
 
 # Global reference for settings access
 _game_context = None
+# Global reference to the active GPUStack — set in main() so reload_crt_settings can sync it
+_gpu_instance = None
 
 # --- CRT toggle flags (loaded from settings.json) ---
 _crt_scanlines_on = True
@@ -571,8 +307,8 @@ _crt_bloom_on = True
 _crt_ca_on = True
 _crt_curvature_on = True
 
-def reload_crt_settings():
-    """Reload CRT toggle flags from settings.json."""
+def reload_crt_settings(gpu_stack=None):
+    """Reload CRT toggle flags from settings.json, optionally syncing a GPUStack object."""
     global _crt_scanlines_on, _crt_vignette_on, _crt_bloom_on, _crt_ca_on, _crt_curvature_on
     s = load_settings()
     _crt_scanlines_on = s.get("crt_scanlines", True)
@@ -580,6 +316,13 @@ def reload_crt_settings():
     _crt_bloom_on = s.get("crt_bloom", True)
     _crt_ca_on = s.get("crt_ca", True)
     _crt_curvature_on = s.get("crt_curvature", True)
+    target = gpu_stack if gpu_stack is not None else _gpu_instance
+    if target is not None:
+        target.crt_scanlines_on = _crt_scanlines_on
+        target.crt_vignette_on = _crt_vignette_on
+        target.crt_bloom_on = _crt_bloom_on
+        target.crt_ca_on = _crt_ca_on
+        target.crt_curvature_on = _crt_curvature_on
 
 
 """
@@ -645,7 +388,7 @@ def main() -> None:
     
     show_loading_screen(context, ui_console, 0.95, "Finalizing setup...")
     # Update context title
-    context.sdl_window.title = "THE Game... idk"
+    context.sdl_window.title = "DoA: Dungeons of Ærrok"
 
     # Set initial fullscreen state based on settings
     window = context.sdl_window
@@ -740,282 +483,55 @@ def main() -> None:
     _ui_tex_h = screen_height * tileset.tile_height
     _dbg_tex_w = 40 * tileset.tile_width
     _dbg_tex_h = 9 * tileset.tile_height
-    _crt_bands = 116  # smooth curvature — safe now that CRT is one global pass (96×3=288 calls total)
-    _crt_strength = 0.05  # horizontal barrel strength
-    _crt_strength_v = 0.05  # vertical barrel strength
+    _crt_bands = 116  # smooth curvature
 
-    # --- Chromatic aberration parameters ---
-    # NOTE: CA is now applied as a full-screen 3-pass post-process on _scene_tex
-    # (3 draw calls total regardless of band count), so it is safe to re-enable.
-    _ca_shift = 1.5        # pixel shift for R/B channels (0 = disabled)
+    # --- Create GPU stack (owns all render targets, particles, post-processing) ---
+    from gpu_stack import GPUStack
+    gpu = GPUStack(
+        renderer=renderer,
+        tileset=tileset,
+        game_view_width=game_view_width,
+        game_view_height=game_view_height,
+        screen_width=screen_width,
+        screen_height=screen_height,
+        get_data_path_fn=get_data_path,
+    )
+    global _gpu_instance
+    _gpu_instance = gpu
+    # Sync CRT toggles from settings into the gpu stack
+    s = load_settings()
+    gpu.crt_scanlines_on = s.get("crt_scanlines", True)
+    gpu.crt_vignette_on  = s.get("crt_vignette",  True)
+    gpu.crt_bloom_on     = s.get("crt_bloom",      True)
+    gpu.crt_ca_on        = s.get("crt_ca",         True)
+    gpu.crt_curvature_on = s.get("crt_curvature",  True)
+    gpu.crt_bands        = _crt_bands
 
-    # --- GPU bloom parameters ---
-    _bloom_intensity = 255    # alpha_mod for final bloom composite (0-255)
-    _bloom_passes = 2         # Kawase iterations (fewer = tighter glow)
-    _bloom_downsample = 2     # downsample factor for bloom targets
-    _bloom_threshold = 255    # soft threshold (0-255): lower = more glow, higher = only brights
-    _bloom_spread = 1.0       # sample offset multiplier (lower = tighter, higher = wider)
-
-    # --- GPU bloom render targets (created/resized lazily) ---
-    _scene_tex = None         # full-res render target for scene capture (pre-CRT)
-    _barrel_tex = None        # full-res render target for barrel-only pass
-    _post_crt_tex = None      # full-res render target for post-CRT image (bloom source)
-    _bloom_a = None           # small render target (ping)
-    _bloom_b = None           # small render target (pong)
-    _bloom_scene_w = 0        # cached scene dimensions for resize detection
-    _bloom_scene_h = 0
-
+    # Convenience aliases used in the loop below
     def copy_curved(tex, dest, source=None, src_size=None):
-        """Copy a texture with CRT barrel curvature.
-
-        Horizontal barrel narrows width toward top/bottom edges.
-        Vertical barrel shifts height toward left/right edges.
-        Set either strength to 0 to disable that axis.
-
-        *source*  – optional (x, y, w, h) crop rect inside the texture.
-        *src_size* – (w, h) of the full texture; needed when *source*
-                     is ``None`` so we can split it into bands.
-        """
-        # Short-circuit when curvature is disabled or we are in transition fast-path
-        if not _crt_curvature_on or _crt_force_fast_path:
-            if source is not None:
-                renderer.copy(tex, source=source, dest=dest)
-            else:
-                renderer.copy(tex, dest=dest)
-            return
-        dst_x, dst_y, dst_w, dst_h = (float(v) for v in dest)
-        have_src = source is not None or src_size is not None
-        if source is not None:
-            sx, sy, sw, sh = (float(v) for v in source)
-        elif src_size is not None:
-            sx, sy, sw, sh = 0.0, 0.0, float(src_size[0]), float(src_size[1])
-        else:
-            sx, sy, sw, sh = 0.0, 0.0, 0.0, 0.0
-
-        wh = float(window_h)
-        ww = float(window_w)
-        inv_wh = 1.0 / wh if wh > 0 else 1.0
-        inv_ww = 1.0 / ww if ww > 0 else 1.0
-        st_h = _crt_strength
-        st_v = _crt_strength_v
-
-        # Helper: compute the distorted Y for a given normalized fraction f
-        # along the destination rect.  Vertical barrel shrinks toward left/right.
-        def _distort_y(f, horz_scale_at_f):
-            """Return distorted pixel-Y for fraction f of the dest rect."""
-            base_y = dst_y + f * dst_h
-            if st_v > 0:
-                # Use the horizontal scale at this band to estimate X center
-                bw_est = dst_w * horz_scale_at_f
-                cx_est = dst_x + (dst_w - bw_est) * 0.5 + bw_est * 0.5
-                nx = (cx_est * inv_ww - 0.5) * 2.0
-                vert_scale = 1.0 - st_v * nx * nx
-                center_y = dst_y + 0.5 * dst_h
-                base_y = center_y + (base_y - center_y) * vert_scale
-            return base_y
-
-        # Pre-compute all N+1 boundary Y values using the horz_scale evaluated
-        # at each boundary fraction (not the band midpoint).  This ensures
-        # adjacent bands always share the identical rounded Y boundary and
-        # eliminates the 1-pixel stepping caused by using different midpoint
-        # estimates for the same shared edge.
-        def _horz_scale_at_f(f):
-            y = dst_y + f * dst_h
-            ny = (y * inv_wh - 0.5) * 2.0
-            return 1.0 - st_h * ny * ny
-
-        band_by = [
-            round(_distort_y(i / _crt_bands, _horz_scale_at_f(i / _crt_bands)))
-            for i in range(_crt_bands + 1)
-        ]
-
-        for i in range(_crt_bands):
-            f0 = i / _crt_bands
-            f1 = (i + 1) / _crt_bands
-
-            # Horizontal barrel at this band's centre (use round for sub-pixel accuracy)
-            f_mid = (f0 + f1) * 0.5
-            mid_y = dst_y + f_mid * dst_h
-            ny = (mid_y * inv_wh - 0.5) * 2.0
-            horz_scale = 1.0 - st_h * ny * ny
-            bw = round(dst_w * horz_scale)
-            bx = round(dst_x + (dst_w - bw) * 0.5)
-
-            # Use pre-computed consistent boundaries — no gaps / no overlaps.
-            by0 = band_by[i]
-            by1 = band_by[i + 1]
-            bh = by1 - by0
-            if bh <= 0:
-                continue
-
-            if have_src and sh > 1:
-                bsy0 = int(sy + f0 * sh)
-                bsy1 = int(sy + f1 * sh)
-                bsh = bsy1 - bsy0
-                if bsh <= 0:
-                    continue
-                renderer.copy(tex,
-                              source=(int(sx), bsy0, int(sw), bsh),
-                              dest=(bx, by0, bw, bh))
-            elif have_src:
-                renderer.copy(tex,
-                              source=(int(sx), int(sy), int(sw), max(1, int(sh))),
-                              dest=(bx, by0, bw, bh))
-            else:
-                renderer.copy(tex, dest=(bx, by0, bw, bh))
-
+        gpu.copy_curved(tex, dest, source=source, src_size=src_size)
     def undistort_mouse(px, py):
-        """Map a screen pixel back to the logical (pre-distortion) position."""
-        if not _crt_curvature_on:
-            return float(px), float(py)
-        wh = float(window_h)
-        ww = float(window_w)
-        st_h = _crt_strength
-        st_v = _crt_strength_v
-        # Invert horizontal barrel
-        ny = (py / wh - 0.5) * 2.0 if wh > 0 else 0.0
-        horz_scale = 1.0 - st_h * ny * ny
-        if horz_scale > 0:
-            center_offset = ww * (1.0 - horz_scale) * 0.5
-            logical_x = (px - center_offset) / horz_scale
-        else:
-            logical_x = px
-        # Invert vertical barrel
-        if st_v > 0:
-            nx = (logical_x / ww - 0.5) * 2.0 if ww > 0 else 0.0
-            vert_scale = 1.0 - st_v * nx * nx
-            if vert_scale > 0:
-                center_offset_y = wh * (1.0 - vert_scale) * 0.5
-                logical_y = (py - center_offset_y) / vert_scale
-            else:
-                logical_y = py
-        else:
-            logical_y = py
-        return logical_x, logical_y
+        return gpu.undistort_mouse(px, py)
 
-    def copy_curved_crt(tex, dest, source=None, src_size=None):
-        """Draw a texture with CRT barrel curvature and chromatic aberration.
 
-        CA is applied per-texture through the barrel curve so colour channels
-        diverge naturally at the edges.  At _crt_bands=32 this costs 32×3=96
-        draw calls per texture — acceptable now that the bloom out-of-bounds
-        TDR trigger is fixed.
-        """
-        ca = _ca_shift if (_crt_ca_on and not _crt_force_fast_path) else 0
-
-        # Save original texture properties
-        orig_color = tex.color_mod
-        orig_blend = tex.blend_mode
-        orig_alpha = tex.alpha_mod
-
-        if ca > 0:
-            # --- Chromatic aberration: 3 additive colour-channel passes ---
-            dx, dy, dw, dh = dest
-            tex.blend_mode = tcod.sdl.render.BlendMode.ADD
-
-            # Red channel – shifted left
-            tex.color_mod = (255, 0, 0)
-            copy_curved(tex, (dx - ca, dy, dw, dh), source=source, src_size=src_size)
-
-            # Green channel – centred
-            tex.color_mod = (0, 255, 0)
-            copy_curved(tex, dest, source=source, src_size=src_size)
-
-            # Blue channel – shifted right
-            tex.color_mod = (0, 0, 255)
-            copy_curved(tex, (dx + ca, dy, dw, dh), source=source, src_size=src_size)
-        else:
-            # No CA – single normal draw
-            tex.color_mod = orig_color
-            tex.blend_mode = orig_blend
-            copy_curved(tex, dest, source=source, src_size=src_size)
-
-        # Restore original texture properties
-        tex.color_mod = orig_color
-        tex.blend_mode = orig_blend
-        tex.alpha_mod = orig_alpha
-
-    def _ensure_bloom_targets(w, h):
-        """Create or resize GPU render targets for bloom."""
-        nonlocal _scene_tex, _barrel_tex, _post_crt_tex, _bloom_a, _bloom_b, _bloom_scene_w, _bloom_scene_h
-        if w == _bloom_scene_w and h == _bloom_scene_h:
-            return
-        _bloom_scene_w, _bloom_scene_h = w, h
-        ds = _bloom_downsample
-        bw, bh = max(1, w // ds), max(1, h // ds)
-        _TA = tcod.sdl.render.TextureAccess.TARGET
-        _scene_tex = renderer.new_texture(w, h, access=_TA)
-        _barrel_tex = renderer.new_texture(w, h, access=_TA)
-        _post_crt_tex = renderer.new_texture(w, h, access=_TA)
-        _bloom_a = renderer.new_texture(bw, bh, access=_TA)
-        _bloom_b = renderer.new_texture(bw, bh, access=_TA)
-
-    def gpu_bloom(source_tex):
-        """Run a full GPU Kawase bloom pass from source_tex.
-
-        source_tex should be the post-CRT image so bloom positions match
-        the barrel-distorted display exactly.
-        1. Downsample source into bloom_a (GPU bilinear filtering)
-        2. Ping-pong Kawase blur between bloom_a and bloom_b
-        3. Copy final result onto the default framebuffer with ADD blend
-        All GPU-side — zero CPU pixel work.
-        """
-        if source_tex is None or _bloom_intensity <= 0:
-            return
-        ds = _bloom_downsample
-        bw = max(1, _bloom_scene_w // ds)
-        bh = max(1, _bloom_scene_h // ds)
-
-        # 1. Downsample with soft threshold via color_mod
-        # color_mod dims all pixels proportionally (GPU multiply).
-        # A single pass acts as a soft brightness gate.
-        t = _bloom_threshold  # 0-255
-        tex_a, tex_b = _bloom_a, _bloom_b
-        with renderer.set_render_target(tex_a):
-            renderer.draw_color = (0, 0, 0, 255)
-            renderer.clear()
-            source_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-            source_tex.alpha_mod = 255
-            source_tex.color_mod = (t, t, t)
-            renderer.copy(source_tex, dest=(0, 0, bw, bh))
-
-        # 2. Kawase blur ping-pong — small offsets, many passes = round glow
-        # Standard Kawase sequence: offset grows slowly (i+1 texels)
-        src, dst = tex_a, tex_b
-        for i in range(_bloom_passes):
-            offset = max(1, int((i + 1) * _bloom_spread))  # controlled by _bloom_spread
-            src.blend_mode = tcod.sdl.render.BlendMode.ADD
-            src.alpha_mod = 51  # ~1/5 per tap, 5 taps ≈ 1.0
-            with renderer.set_render_target(dst):
-                renderer.draw_color = (0, 0, 0, 255)
-                renderer.clear()
-                # 5-tap Kawase: center + 4 diagonal offsets
-                # Clip each copy to valid bounds to avoid out-of-bounds dest coords
-                # that can cause GPU TDR on Windows/D3D.
-                for tap_dx, tap_dy in [(0, 0), (-offset, -offset), (offset, -offset),
-                                       (-offset, offset), (offset, offset)]:
-                    dst_x = max(0, tap_dx)
-                    dst_y = max(0, tap_dy)
-                    src_x = max(0, -tap_dx)
-                    src_y = max(0, -tap_dy)
-                    copy_w = bw - abs(tap_dx)
-                    copy_h = bh - abs(tap_dy)
-                    if copy_w > 0 and copy_h > 0:
-                        renderer.copy(src,
-                                      source=(src_x, src_y, copy_w, copy_h),
-                                      dest=(dst_x, dst_y, copy_w, copy_h))
-            src.alpha_mod = 255
-            src, dst = dst, src  # swap for next pass
-
-        # After the loop, `src` holds the final blurred result
-        # 3. Composite bloom onto the default framebuffer
-        src.blend_mode = tcod.sdl.render.BlendMode.ADD
-        src.alpha_mod = _bloom_intensity
-        renderer.copy(src, dest=(0, 0, window_w, window_h))
 
     # Set initial cursor (cursors were already loaded at top of file)
     tcod.sdl.mouse.set_cursor(cursor)
     _mouse_held = False
+
+    # CRT power-switch state for the LoadingScreen world-generation transition.
+    # _gen_scene_tex is a rolling snapshot of the last non-LoadingScreen frame
+    # (main menu / seed entry) so the screen-off shrinks the correct image.
+    _crt_off_played         = False  # True once the screen-off anim has run
+    _crt_on_played          = False  # True once the screen-on  anim has run
+    _gen_scene_tex          = None   # TARGET texture — last pre-gen post-CRT frame
+    _gen_scene_tex_size     = (0, 0) # (w, h) of _gen_scene_tex
+    _suppress_degauss_once  = False  # skip auto-degauss after CRT-switch entry
+    # CRT power-on capture: after gen, we flip to MainGameEventHandler first,
+    # then let the game render one full frame, capture it, and reveal it via play_on.
+    _crt_on_capture_pending = False  # waiting to capture the first real game frame
+    _crt_on_scene_tex       = None   # captured game frame for play_on
+    _crt_on_scene_tex_size  = (0, 0)
 
     try:
         while True:
@@ -1053,9 +569,17 @@ def main() -> None:
                 tcod.sdl.mouse.set_cursor(cursor)
 
             active_engine = getattr(handler, "engine", None)
+            # Suppress game-view detection while LoadingScreen generation is still
+            # in progress — engine.game_map exists before generation_complete=True,
+            # which would prematurely fire TRANSITION and break the CRT timing.
+            _loading_in_progress = (
+                hasattr(handler, 'generation_complete')
+                and not handler.generation_complete
+            )
             has_game_view = (
                 active_engine is not None
                 and getattr(active_engine, "game_map", None) is not None
+                and not _loading_in_progress
             )
             map_overlay_view = (
                 has_game_view
@@ -1073,21 +597,93 @@ def main() -> None:
             if has_game_view and not previous_has_game_view:
                 transition_frame_counter = 0
                 _rlog(f"TRANSITION: entering game view (handler={type(handler).__name__})")
-                # Degauss flash when the player enters the game for the first time
-                _active_degauss = DegaussAnimation(renderer)
+                _suppress_degauss_once = False
+            _gen_in_progress = _loading_in_progress
             if has_game_view and transition_frame_counter < transition_cooldown_frames:
                 transition_frame_counter += 1
                 _crt_force_fast_path = True
             else:
-                if _crt_force_fast_path:  # log the moment postprocessing re-enables
-                    _rlog(f"TRANSITION END: postprocessing re-enabled (handler={type(handler).__name__}, win={window_w if 'window_w' in dir() else '?'}x{window_h if 'window_h' in dir() else '?'})")
+                if _crt_force_fast_path:
+                    _rlog(f"TRANSITION END: postprocessing re-enabled (handler={type(handler).__name__})")
                 _crt_force_fast_path = False
             previous_has_game_view = has_game_view
             _render_frame += 1
 
             current_time = time.time()
-            # Always use context.sdl_window.size for window and mouse mapping
             window_w, window_h = context.sdl_window.size
+
+            # ------------------------------------------------------------------
+            # CRT POWER-SWITCH fast path for LoadingScreen world generation
+            # ------------------------------------------------------------------
+            # Phase 1 — screen-off: played once on the first frame _gen_in_progress
+            #           becomes True.  Runs blocking on main thread; GPU is trivially
+            #           idle, so no vsync stalls possible.
+            # Phase 2 — black hold: while gen is running, render nothing but black
+            #           + a "..." dot animation via draw_color only (zero textures).
+            # Phase 3 — screen-on: played once when generation_complete flips True.
+            #           Expands from line to full scene, then falls through normally,
+            #           allowing the main loop to transition to MainGameEventHandler.
+            _rlog(f"CRT_STATE frame={_render_frame} gen={_gen_in_progress} off={_crt_off_played} on={_crt_on_played} snap={'yes' if _gen_scene_tex is not None else 'no'} handler={type(handler).__name__} gen_complete={getattr(handler,'generation_complete',None)}")
+            if _gen_in_progress:
+                # Kick off the generation thread if on_render() hasn't done it
+                # (we bypass on_render entirely to prevent the loading screen UI
+                # from ever appearing, so we must start it ourselves).
+                if hasattr(handler, 'generation_started') and not handler.generation_started:
+                    _rlog(f"CRT: starting generation thread")
+                    handler.generation_started = True
+                    handler.start_generation()
+
+                if not _crt_off_played:
+                    if _gen_scene_tex is not None:
+                        _rlog(f"CRT: playing screen-OFF animation")
+                        _crt_off_played = True
+                        _sw_anim = CRTSwitchAnimation(renderer, window_w, window_h)
+                        _sw_anim.play_off(_gen_scene_tex, event_pump=tcod.event.get, glare_tex=glare_tex)
+                        del _sw_anim
+                        _rlog(f"CRT: screen-OFF done")
+                    else:
+                        _rlog(f"CRT: waiting for snapshot (gen in progress, no snap yet)")
+                    # else: snapshot not ready yet — drop one black frame, try next
+                renderer.draw_color = (0, 0, 0, 255)
+                renderer.clear()
+                renderer.copy(glare_tex, dest=(0, 0, window_w, window_h))
+                renderer.present()
+                for _ in tcod.event.get():
+                    pass
+                time.sleep(frame_time)
+                continue
+
+            elif _crt_off_played and not _crt_on_played:
+                # Generation finished — flip to game handler NOW so the engine
+                # renders a real frame next iteration, which we capture and
+                # reveal via the CRT power-on animation.
+                _rlog(f"CRT: gen done — transitioning to MainGameEventHandler (capture pending)")
+                _crt_on_played = True
+                _gen_scene_tex       = None
+                _gen_scene_tex_size  = (0, 0)
+                _crt_off_played      = False
+                _crt_on_played       = False
+                _suppress_degauss_once = True
+                class _CRTTransitionEvent:
+                    _crt_transition = True
+                new_handler = handler.handle_events(_CRTTransitionEvent())
+                _rlog(f"CRT: handler after transition = {type(new_handler).__name__}")
+                if new_handler is not handler:
+                    handler = new_handler
+                    overlay_dirty = True
+                # Flag the main loop to capture the next rendered game frame
+                _crt_on_capture_pending = True
+                # Render black this frame while the new handler initialises
+                renderer.draw_color = (0, 0, 0, 255)
+                renderer.clear()
+                renderer.copy(glare_tex, dest=(0, 0, window_w, window_h))
+                renderer.present()
+                for _ in tcod.event.get():
+                    pass
+                time.sleep(frame_time)
+                continue
+
+            # Always use context.sdl_window.size for window and mouse mapping
             base_tile_w = window_w / screen_width
             base_tile_h = window_h / screen_height
             game_dest_w = game_view_width * base_tile_w * 2
@@ -1105,16 +701,26 @@ def main() -> None:
             if has_game_view and needs_live_game_frame and not map_overlay_view:
                 active_engine.render_game(game_console)
 
+            # --- Update gpu object with current frame dimensions ---
+            gpu.update_frame_dims(window_w, window_h, base_tile_w, base_tile_h)
+            gpu.crt_force_fast_path = _crt_force_fast_path
+
             # --- Begin scene rendering to off-screen target for GPU bloom ---
             _rlog(f"ensure_bloom_targets({window_w},{window_h}) fast={_crt_force_fast_path}")
-            _ensure_bloom_targets(window_w, window_h)
-            _rlog("set_render_target(_scene_tex)")
-            _scene_ctx = renderer.set_render_target(_scene_tex)
+            gpu.ensure_bloom_targets(window_w, window_h)
+            _rlog("set_render_target(scene_tex)")
+            _scene_ctx = renderer.set_render_target(gpu.scene_tex)
+
+            def _apply_lightmap():
+                if _crt_force_fast_path or not has_game_view:
+                    return
+                gpu.apply_lightmap(active_engine, game_dest_w, game_dest_h, game_console)
 
             if fast_main_view:
                 renderer.clear()
                 game_tex = game_console_renderer.render(game_console)
                 renderer.copy(game_tex, dest=(0, 0, int(game_dest_w), int(game_dest_h)))
+                _apply_lightmap()
 
                 if getattr(active_engine, "debug", False):
                     cached_overlay_handler = None
@@ -1167,6 +773,7 @@ def main() -> None:
                     handler.on_render(console=game_console)
                 game_tex = game_console_renderer.render(game_console)
                 renderer.copy(game_tex, dest=(0, 0, int(game_dest_w), int(game_dest_h)))
+                _apply_lightmap()
 
                 ui_console.clear()
                 active_engine.render_ui(ui_console)
@@ -1189,6 +796,7 @@ def main() -> None:
                 if needs_live_game_frame:
                     game_tex = game_console_renderer.render(game_console)
                 renderer.copy(game_tex, dest=(0, 0, int(game_dest_w), int(game_dest_h)))
+                _apply_lightmap()
 
                 # Dim the game underneath the overlay
                 renderer.copy(dim_tex, dest=(0, 0, window_w, window_h))
@@ -1270,73 +878,136 @@ def main() -> None:
             #    match the barrel-distorted display exactly
             _rlog("copy_scene_tex")
             # Step 1: barrel distortion only — 96 calls, single colour pass
-            with renderer.set_render_target(_barrel_tex):
+            with renderer.set_render_target(gpu.barrel_tex):
                 renderer.draw_color = (0, 0, 0, 255)
                 renderer.clear()
-                _scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-                _scene_tex.alpha_mod = 255
-                _scene_tex.color_mod = (255, 255, 255)
-                copy_curved(_scene_tex, dest=(0, 0, window_w, window_h), src_size=(window_w, window_h))
+                gpu.scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                gpu.scene_tex.alpha_mod = 255
+                gpu.scene_tex.color_mod = (255, 255, 255)
+                copy_curved(gpu.scene_tex, dest=(0, 0, window_w, window_h), src_size=(window_w, window_h))
 
             # Step 2: chromatic aberration — 3 flat pixel-shifts of the barrel result
-            # Total CRT calls: 96 (barrel) + 3 (CA) = 99, down from 96×3=288
-            with renderer.set_render_target(_post_crt_tex):
+            with renderer.set_render_target(gpu.post_crt_tex):
                 renderer.draw_color = (0, 0, 0, 255)
                 renderer.clear()
-                if _crt_ca_on and not _crt_force_fast_path and _ca_shift > 0:
-                    ca = round(_ca_shift)
-                    _barrel_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
-                    _barrel_tex.alpha_mod = 255
-                    _barrel_tex.color_mod = (255, 0, 0)
-                    renderer.copy(_barrel_tex, dest=(-ca, 0, window_w, window_h))
-                    _barrel_tex.color_mod = (0, 255, 0)
-                    renderer.copy(_barrel_tex, dest=(0, 0, window_w, window_h))
-                    _barrel_tex.color_mod = (0, 0, 255)
-                    renderer.copy(_barrel_tex, dest=(ca, 0, window_w, window_h))
-                    _barrel_tex.color_mod = (255, 255, 255)
-                    _barrel_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                if gpu.crt_ca_on and not _crt_force_fast_path and gpu.ca_shift > 0:
+                    ca = round(gpu.ca_shift)
+                    gpu.barrel_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                    gpu.barrel_tex.alpha_mod = 255
+                    gpu.barrel_tex.color_mod = (255, 0, 0)
+                    renderer.copy(gpu.barrel_tex, dest=(-ca, 0, window_w, window_h))
+                    gpu.barrel_tex.color_mod = (0, 255, 0)
+                    renderer.copy(gpu.barrel_tex, dest=(0, 0, window_w, window_h))
+                    gpu.barrel_tex.color_mod = (0, 0, 255)
+                    renderer.copy(gpu.barrel_tex, dest=(ca, 0, window_w, window_h))
+                    gpu.barrel_tex.color_mod = (255, 255, 255)
+                    gpu.barrel_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
                 else:
-                    _barrel_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-                    _barrel_tex.alpha_mod = 255
-                    _barrel_tex.color_mod = (255, 255, 255)
-                    renderer.copy(_barrel_tex, dest=(0, 0, window_w, window_h))
+                    gpu.barrel_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                    gpu.barrel_tex.alpha_mod = 255
+                    gpu.barrel_tex.color_mod = (255, 255, 255)
+                    renderer.copy(gpu.barrel_tex, dest=(0, 0, window_w, window_h))
+
+            # Rolling snapshot of the last pre-gen post-CRT frame.
+            # Updated every frame where generation is NOT in progress so it always
+            # holds the most recent non-LoadingScreen image (main menu, seed entry…).
+            # Used by play_off() as the scene to shrink.
+            if not _gen_in_progress and not _crt_off_played:
+                if _gen_scene_tex_size != (window_w, window_h):
+                    _gen_scene_tex      = renderer.new_texture(
+                        window_w, window_h, access=tcod.sdl.render.TextureAccess.TARGET
+                    )
+                    _gen_scene_tex_size = (window_w, window_h)
+                with renderer.set_render_target(_gen_scene_tex):
+                    renderer.draw_color = (0, 0, 0, 255)
+                    renderer.clear()
+                    gpu.post_crt_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                    gpu.post_crt_tex.alpha_mod  = 255
+                    gpu.post_crt_tex.color_mod  = (255, 255, 255)
+                    renderer.copy(gpu.post_crt_tex, dest=(0, 0, window_w, window_h))
+                    if gpu.crt_scanlines_on and scanlines_tex is not None:
+                        for _fy in range(0, window_h, scanlines_h):
+                            _fdh = min(scanlines_h, window_h - _fy)
+                            renderer.copy(scanlines_tex,
+                                          source=(0, 0, 1, _fdh),
+                                          dest=(0, _fy, window_w, _fdh))
+                    if gpu.crt_vignette_on:
+                        renderer.copy(vignette_tex, dest=(0, 0, window_w, window_h))
+                        renderer.copy(glare_tex,    dest=(0, 0, window_w, window_h))
+
+            # CRT power-on: once the game handler has rendered its first real frame,
+            # capture it and play the reveal animation into it.
+            if _crt_on_capture_pending and has_game_view:
+                _rlog(f"CRT: capturing game frame for play_on")
+                if _crt_on_scene_tex_size != (window_w, window_h):
+                    _crt_on_scene_tex = renderer.new_texture(
+                        window_w, window_h, access=tcod.sdl.render.TextureAccess.TARGET
+                    )
+                    _crt_on_scene_tex_size = (window_w, window_h)
+                with renderer.set_render_target(_crt_on_scene_tex):
+                    renderer.draw_color = (0, 0, 0, 255)
+                    renderer.clear()
+                    gpu.post_crt_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                    gpu.post_crt_tex.alpha_mod  = 255
+                    gpu.post_crt_tex.color_mod  = (255, 255, 255)
+                    renderer.copy(gpu.post_crt_tex, dest=(0, 0, window_w, window_h))
+                    if gpu.crt_scanlines_on and scanlines_tex is not None:
+                        for _fy in range(0, window_h, scanlines_h):
+                            _fdh = min(scanlines_h, window_h - _fy)
+                            renderer.copy(scanlines_tex,
+                                          source=(0, 0, 1, _fdh),
+                                          dest=(0, _fy, window_w, _fdh))
+                    if gpu.crt_vignette_on:
+                        renderer.copy(vignette_tex, dest=(0, 0, window_w, window_h))
+                        # glare_tex intentionally excluded — play_on draws it as a
+                        # separate top layer so it stays consistent across all frames.
+                    # Bake bloom into the capture so the final play_on frame matches
+                    # the first live game frame (bloom is ADD-composited onto whatever
+                    # the current render target is, so it lands on _crt_on_scene_tex).
+                    if gpu.crt_bloom_on:
+                        gpu.gpu_bloom(gpu.post_crt_tex, window_w, window_h)
+                _crt_on_capture_pending = False
+                _rlog(f"CRT: playing screen-ON animation with real game frame")
+                _sw_anim = CRTSwitchAnimation(renderer, window_w, window_h)
+                _sw_anim.play_on(_crt_on_scene_tex, event_pump=tcod.event.get, glare_tex=glare_tex)
+                del _sw_anim
+                _rlog(f"CRT: screen-ON done")
+                _crt_on_scene_tex      = None
+                _crt_on_scene_tex_size = (0, 0)
+                continue   # skip outer present(); play_on already presented final frame
 
             # Blit post-CRT image to default framebuffer
-            # Vertical roll: if active, split the scene into two strips that
-            # wrap around so the image "rolls" without a hard cut.
-            _post_crt_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-            _post_crt_tex.alpha_mod = 255
-            _post_crt_tex.color_mod = (255, 255, 255)
+            gpu.post_crt_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+            gpu.post_crt_tex.alpha_mod = 255
+            gpu.post_crt_tex.color_mod = (255, 255, 255)
             if not _crt_force_fast_path and _vroll_offset != 0.0:
                 _vo = int(_vroll_offset) % window_h
                 if _vo < 0:
                     _vo += window_h
                 if _vo == 0:
-                    renderer.copy(_post_crt_tex, dest=(0, 0, window_w, window_h))
+                    renderer.copy(gpu.post_crt_tex, dest=(0, 0, window_w, window_h))
                 else:
                     # Bottom strip: source [0 .. window_h-_vo] → dest [_vo .. window_h]
                     _bot_h = window_h - _vo
-                    renderer.copy(_post_crt_tex,
+                    renderer.copy(gpu.post_crt_tex,
                                   source=(0, 0, window_w, _bot_h),
                                   dest=(0, _vo, window_w, _bot_h))
                     # Top strip: source [window_h-_vo .. window_h] → dest [0 .. _vo]
-                    renderer.copy(_post_crt_tex,
+                    renderer.copy(gpu.post_crt_tex,
                                   source=(0, _bot_h, window_w, _vo),
                                   dest=(0, 0, window_w, _vo))
             else:
-                renderer.copy(_post_crt_tex, dest=(0, 0, window_w, window_h))
+                renderer.copy(gpu.post_crt_tex, dest=(0, 0, window_w, window_h))
 
             # CRT scanline jitter: occasionally one thin horizontal band slips sideways
             if not _crt_force_fast_path:
                 if _jitter_frames > 0:
                     _jitter_frames -= 1
-                    # Re-draw just the jitter band with a horizontal offset.
-                    # _post_crt_tex is window_w × window_h so src/dst coords are 1:1.
                     _src_x = max(-_jitter_x, 0)
                     _dst_x = max(_jitter_x, 0)
                     _band_w = window_w - abs(_jitter_x)
                     renderer.copy(
-                        _post_crt_tex,
+                        gpu.post_crt_tex,
                         source=(_src_x, _jitter_y, _band_w, _jitter_band_h),
                         dest=(_dst_x, _jitter_y, _band_w, _jitter_band_h),
                     )
@@ -1369,13 +1040,13 @@ def main() -> None:
             # Degauss: advance and draw chromatic fringe + overlays on top of scene
             if not _crt_force_fast_path and _active_degauss is not None:
                 _active_degauss.tick(1.0 / target_fps)
-                _active_degauss.draw(window_w, window_h, scene_tex=_post_crt_tex)
+                _active_degauss.draw(window_w, window_h, scene_tex=gpu.post_crt_tex)
                 if _active_degauss.done:
                     _active_degauss = None
 
             if not _crt_force_fast_path:
                 # Scanlines (MOD — dims the barrel-distorted image)
-                if _crt_scanlines_on:
+                if gpu.crt_scanlines_on:
                     _rlog("scanlines start")
                     scanlines_scroll = (scanlines_scroll + scanlines_speed * (1.0 / target_fps)) % scanlines_h
                     y_offset = int(scanlines_scroll)
@@ -1390,21 +1061,45 @@ def main() -> None:
                                           source=(0, src_y, 1, draw_h),
                                           dest=(0, dst_y, window_w, draw_h))
                         y += scanlines_h
+
+
+# ----------------------------------------- #
+# POST PROCESSING PASSES (CRT shader effects, bloom, and GPU game-layer animations)
+# ------------------------------------------ #
+
+
+                # GPU game-layer animation passes (embers etc.)
+                # Only run when in pure main-game view (no popups, overlays, or
+                # menus). fast_main_view is False whenever an inventory, popup,
+                # look handler, or any other overlay is active, so embers never
+                # composite on top of UI layers.
+                if fast_main_view and active_engine is not None and (gpu.gpu_anim_registry or gpu.gpu_anim_nobloom_registry):
+                    gpu.ensure_gpu_anim_layer(game_dest_w, game_dest_h)
+                    gpu.run_gpu_anim_passes(active_engine, game_dest_w, game_dest_h)
+
+
                 # Vignette (BLEND — darkens edges)
-                if _crt_vignette_on:
+                if gpu.crt_vignette_on:
                     _rlog("vignette")
                     renderer.copy(vignette_tex, dest=(0, 0, window_w, window_h))
-                    # Screen glare (subtle highlight imitating ambient light on CRT glass)
                     renderer.copy(glare_tex, dest=(0, 0, window_w, window_h))
-                # Bloom last — ADD glow bleeds over scanlines and vignette,
-                # sourced from _post_crt_tex so positions match the distorted display
-                if _crt_bloom_on:
+                # Bloom last — ADD glow bleeds over scanlines and vignette
+                if gpu.crt_bloom_on:
                     _rlog("gpu_bloom start")
-                    gpu_bloom(_post_crt_tex)
+                    gpu.gpu_bloom(gpu.post_crt_tex, window_w, window_h)
                     _rlog("gpu_bloom done")
+
             _rlog("renderer.present")
-            renderer.present()
+            try:
+                renderer.present()
+            except Exception as e:
+                print(f"Error during renderer.present(): {e}")
+                raise
             _rlog("present done")
+
+# ---------------------- # 
+# MAIN GAME LOOP
+# ---------------------- #
 
             try:
                 for event in tcod.event.get():

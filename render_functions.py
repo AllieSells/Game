@@ -360,9 +360,21 @@ def render_ui_buttons(
     console.print(x=EQUIPMENT_BUTTON_X, y=BUTTON_Y, string="Equipment [E]", fg=equip_color)
 
 
-def _player_has_bloody_coating(player) -> bool:
+def _collect_coating_effects(player) -> list:
+    """Scan all body parts and return one display-only Effect per unique coating type."""
+    from components.effect import BloodyEffect, WetEffect, OilyEffect, SlimyEffect
+
+    _COATING_EFFECT_MAP = {
+        "blood": lambda: BloodyEffect(duration=None),
+        "water": lambda: WetEffect(duration=None),
+        "oil":   lambda: OilyEffect(duration=None),
+        "slime": lambda: SlimyEffect(duration=None),
+    }
+
     if player is None:
-        return False
+        return []
+    seen = set()
+    results = []
     try:
         body_parts = getattr(player, "body_parts", None)
         parts_map = getattr(body_parts, "body_parts", {}) if body_parts else {}
@@ -370,25 +382,22 @@ def _player_has_bloody_coating(player) -> bool:
             coating = getattr(body_part, "coating", None)
             if coating is None:
                 continue
-
-            # Support either LiquidType-like values or LiquidCoating-like objects.
             liquid_type = getattr(coating, "liquid_type", coating)
-            name = ""
             try:
                 name = liquid_type.get_display_name().lower()
             except Exception:
                 name = str(getattr(liquid_type, "name", "")).lower()
-
-            if name == "blood":
-                return True
+            if name and name not in ("none", "") and name not in seen:
+                seen.add(name)
+                factory = _COATING_EFFECT_MAP.get(name)
+                if factory:
+                    results.append(factory())
     except Exception:
-        return False
-    return False
+        pass
+    return results
 
 
 def _collect_effect_display_entries(player) -> list:
-    from components.effect import BloodyEffect
-
     effects = list(getattr(player, "effects", []) or [])
 
     # Keep only one effect per name for HUD display.
@@ -413,10 +422,11 @@ def _collect_effect_display_entries(player) -> list:
 
     effects = [unique_by_name[name] for name in order]
 
-    # Display-only grouping: represent blood coating as a real effect object.
-    has_bloody_effect = any(getattr(effect, "name", "") == "Bloody" for effect in effects)
-    if _player_has_bloody_coating(player) and not has_bloody_effect:
-        effects.append(BloodyEffect(duration=None))
+    # Inject display-only effects for any body-part coatings not already represented.
+    for coating_effect in _collect_coating_effects(player):
+        effect_name = getattr(coating_effect, "name", "")
+        if effect_name not in unique_by_name:
+            effects.append(coating_effect)
 
     return effects
 

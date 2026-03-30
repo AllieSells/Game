@@ -15,6 +15,30 @@ if TYPE_CHECKING:
     from engine import Engine
     from entity import Entity
 
+# ---------------------------------------------------------------------------
+# Lightmap tuning parameters
+# These control how the GPU per-tile MOD-blend lightmap looks.
+# Adjust them freely — they are read each frame from build_lightmap().
+# ---------------------------------------------------------------------------
+
+# Minimum brightness in complete darkness (0.0 = pure black, 0.2 = 20% floor).
+LIGHT_MIN_BRIGHTNESS: float = 0.2
+
+# Lightmap multiplier for explored-but-not-currently-visible tiles.
+# Set equal to LIGHT_MIN_BRIGHTNESS so explored areas match the darkest
+# visible tiles (those with zero light_level at the FOV edge).  This makes
+# the transition from lit FOV → explored fog completely seamless — bilinear
+# interpolation between identical values produces no visible border at all.
+# Range: 0.0 (black) – 1.0 (full bright).  Unexplored tiles get 0.0 (black).
+LIGHT_EXPLORED_MOD: float = LIGHT_MIN_BRIGHTNESS  # = 0.2
+
+# Warm-amber tint at full brightness on non-sunlit maps.
+# Applied as a per-channel multiplicative reduction relative to neutral white.
+# R channel is left at 1.0 (no change).
+LIGHT_WARM_G: float = 0.12   # G reduces by this fraction at full brightness → slight amber
+LIGHT_WARM_B: float = 0.40   # B reduces by this fraction at full brightness → strong warm tone
+
+
 class _FloorProbe:
     """Throwaway placement anchor used by background floor generation.
 
@@ -244,117 +268,134 @@ class GameMap:
         fg: tuple[int, int, int] | None = None,
         bg: tuple[int, int, int] | None = None,
     ) -> None:
-        """Like screen_print but multiplies fg by the tile's dynamic light level."""
-        if fg is not None:
-            fg = self._apply_lighting_to_entity_color(fg, x, y)
+        """Like screen_print but with tile lighting applied.
+
+        Lighting is now handled entirely by the GPU lightmap MOD pass in
+        main.py, so this is a direct passthrough to screen_print.  Keeping
+        the method signature intact avoids changing every call-site in
+        animations.py and elsewhere.
+        """
         self.screen_print(console, x, y, string, fg=fg, bg=bg)
 
     def _render_tiles_with_gradient(self, console: Console) -> None:
-        """Render tiles with gradient interpolation between dark and light based on light levels."""
+        """Render tiles for the visible viewport.
+
+        Visible tiles are written at full 'light' variant brightness — the GPU
+        lightmap pass in main.py (build_lightmap + MOD blend) handles per-pixel
+        tinting and dimming with bilinear sub-tile interpolation.
+        Explored-but-not-visible tiles use their 'dark' variant as before.
+        """
         import tile_types
 
         origin_x, origin_y, view_width, view_height = self.get_viewport(console)
         x_slice = slice(origin_x, origin_x + view_width)
         y_slice = slice(origin_y, origin_y + view_height)
         
-        # Get base tiles for different visibility states
         visible_mask = self.visible[x_slice, y_slice]
         explored_mask = self.explored[x_slice, y_slice]
         
-        # Initialize all tiles with SHROUD
         result_tiles = np.full(
             (view_width, view_height), 
             tile_types.SHROUD, 
             dtype=console.tiles_rgb.dtype
         )
         
-        # For explored areas, start with dark tiles
         dark_tiles = self.tiles["dark"][x_slice, y_slice]
         light_tiles = self.tiles["light"][x_slice, y_slice]
-        
-        # Get light levels only where player can see or has explored
+        # light_levels is a view into self.tiles so ambient writes propagate to build_lightmap.
         light_levels = self.tiles["light_level"][x_slice, y_slice]
         
-        # Visible areas get gradient lighting
         if np.any(visible_mask):
-            # Add configurable ambient light around player
-            px, py = self.engine.player.x, self.engine.player.y
-            if any(getattr(effect, "name", "") == "Darkvision" for effect in self.engine.player.effects):
-                ambient_radius = 9
-                ambient_intensity = 0.2
-            else:
-                ambient_radius = 1  # Default 1 for 3x3
-                ambient_intensity = 0.1  # Default 0.1
-            
-            for dx in range(-ambient_radius, ambient_radius + 1):
-                for dy in range(-ambient_radius, ambient_radius + 1):
-                    tx, ty = px + dx, py + dy
-                    if (0 <= tx < self.width and 0 <= ty < self.height 
-                        and self.tiles[tx, ty]["transparent"]):
-                        local_x = tx - origin_x
-                        local_y = ty - origin_y
-                        if 0 <= local_x < view_width and 0 <= local_y < view_height:
-                            light_levels[local_x, local_y] = max(
-                                light_levels[local_x, local_y], ambient_intensity
-                            )
-
-            
-            # Interpolate between dark and light tiles based on light level
-            vis_light_levels = light_levels[visible_mask].clip(0, 1)
-
-            # Apply a power curve so that low ambient light stays near the dark
-            # tile colors and bright 'light' tile colors don't bleed through at
-            # low light levels (e.g. the cyan of water glowing in darkness).
-            interp_vis_light = np.power(vis_light_levels, 1.5)
-
-            # Extract dark and light graphics for visible tiles
-            vis_dark = dark_tiles[visible_mask]
-            vis_light = light_tiles[visible_mask]
-
-            # Interpolate character (use light char if light level > 0.5, dark otherwise)
-            result_chars = np.where(vis_light_levels > 0.5, vis_light['ch'], vis_dark['ch'])
-
-            # Interpolate foreground and background colors using curved light level
-            dark_fg = vis_dark['fg'].astype(float)
-            light_fg = vis_light['fg'].astype(float)
-            dark_bg = vis_dark['bg'].astype(float)
-            light_bg = vis_light['bg'].astype(float)
-
-            interp_fg = (dark_fg + interp_vis_light[:, np.newaxis] * (light_fg - dark_fg))
-            interp_bg = (dark_bg + interp_vis_light[:, np.newaxis] * (light_bg - dark_bg))
-
-            # Warm torch/fire tint: lit tiles shift toward amber on non-sunlit maps.
-            # warm_tint = [R_mul, G_mul, B_mul] at full brightness — keep red,
-            # slightly dim green, noticeably cut blue.
-            if not getattr(self, "sunlit", False):
-                warm_tint = np.array([1.0, 0.88, 0.60], dtype=float)
-                # Tint strength is proportional to light level (no tint in darkness)
-                tint_mul = 1.0 + vis_light_levels[:, np.newaxis] * (warm_tint - 1.0)
-                interp_fg = interp_fg * tint_mul
-                interp_bg = interp_bg * tint_mul
-
-            # Clamp: never go below the dark tile color (the warm tint can push
-            # blue-channel values below the dark tile floor).
-            interp_fg = np.maximum(interp_fg, dark_fg)
-            interp_bg = np.maximum(interp_bg, dark_bg)
-
-            interp_fg = interp_fg.clip(0, 255).astype(np.uint8)
-            interp_bg = interp_bg.clip(0, 255).astype(np.uint8)
-
-            # Create interpolated tiles
-            result_tiles[visible_mask] = np.array(
-                list(zip(result_chars, interp_fg, interp_bg)), 
-                dtype=console.tiles_rgb.dtype
-            )
+            # All visible tiles rendered at full 'light' brightness.
+            # Dimming, warm-amber tint, and smooth falloff handled by GPU lightmap.
+            result_tiles[visible_mask] = light_tiles[visible_mask]
         
-        # For explored but not visible areas, use dark tiles
+        # Explored-but-not-visible: store light_tiles at full brightness.
+        # The GPU lightmap applies LIGHT_EXPLORED_MOD to these tiles so:
+        #   light_tile × LIGHT_EXPLORED_MOD ≈ dark_tile appearance
+        # Using light_tiles (not dark_tiles) here means the lightmap value
+        # for explored tiles (~0.35) is close to the lit-FOV boundary value
+        # (~0.28 ambient), keeping bilinear interpolation artefacts invisible.
         explored_not_visible = explored_mask & (~visible_mask)
         if np.any(explored_not_visible):
-            result_tiles[explored_not_visible] = dark_tiles[explored_not_visible]
+            result_tiles[explored_not_visible] = light_tiles[explored_not_visible]
         
-        # Apply to console
         console.tiles_rgb[:] = tile_types.SHROUD
         console.tiles_rgb[0:view_width, 0:view_height] = result_tiles
+
+    def build_lightmap(self, console: Console) -> np.ndarray:
+        """Build a per-tile RGBA lightmap for the GPU MOD blend lighting pass.
+
+        Returns a ``(view_height, view_width, 4)`` uint8 array.  SDL's bilinear
+        filtering (SDL_RENDER_SCALE_QUALITY=1) stretches this tiny texture to
+        the full game-area pixel size, giving smooth sub-tile light falloff
+        across every tile boundary without any CPU per-pixel work.
+
+        Encoding (non-sunlit maps):
+          R = brightness                      (warm tint leaves R unchanged)
+          G = brightness × (1 − 0.12 × ll)   (slight amber at high light)
+          B = brightness × (1 − 0.40 × ll)   (strong warm reduction at full light)
+        where brightness = 0.2 + 0.8 × ll and ll = clamped light_level [0..1].
+
+        Non-visible tiles are encoded as (255,255,255) so already-dim dark
+        tile colours are not multiplied down a second time.
+        Sunlit maps return a full-white array (MOD no-op).
+        """
+        origin_x, origin_y, view_width, view_height = self.get_viewport(console)
+        x_slice = slice(origin_x, origin_x + view_width)
+        y_slice = slice(origin_y, origin_y + view_height)
+
+        out = np.empty((view_height, view_width, 4), dtype=np.uint8)
+        out[..., 3] = 255
+
+        if getattr(self, "sunlit", False):
+            out[..., :3] = 255
+            return out
+
+        # self.tiles uses (width, height) F-order; transpose to (view_height, view_width).
+        ll = self.tiles["light_level"][x_slice, y_slice].T.astype(np.float32)
+        ll = np.clip(ll, 0.0, 1.0)
+
+
+        brightness = LIGHT_MIN_BRIGHTNESS + (1.0 - LIGHT_MIN_BRIGHTNESS) * ll
+        r = brightness                                    # R: no warm-tint change
+        g = brightness * (1.0 - LIGHT_WARM_G * ll)       # G: slight amber at bright
+        b = brightness * (1.0 - LIGHT_WARM_B * ll)       # B: strong warm reduction
+
+        # Lightmap encoding per tile state:
+        #   visible          → brightness formula + warm-amber tint
+        #   explored !visible → per-channel dark_bg/light_bg ratio capped at
+        #                       LIGHT_EXPLORED_MOD.  For neutral tiles (stone/walls)
+        #                       the ratio ≈ 0.31 which clamps to 0.2 — no change.
+        #                       For colourful tiles (water) the low-value channels
+        #                       (G/B ≈ 0.09/0.07) fall well below the cap, making
+        #                       explored water near-black rather than teal-coloured.
+        #                       Capping at LIGHT_EXPLORED_MOD ensures explored tiles
+        #                       are never brighter than unlit visible tiles, so there
+        #                       is no bright fringe at the FOV boundary.
+        #   unexplored shroud → 0.0 (fully black)
+        vis      = self.visible[x_slice, y_slice].T        # (view_height, view_width)
+        explored = self.explored[x_slice, y_slice].T
+        zero     = np.float32(0.0)
+
+        dark_bg  = self.tiles["dark"]["bg"][x_slice, y_slice].astype(np.float32)   # (vw, vh, 3)
+        light_bg = self.tiles["light"]["bg"][x_slice, y_slice].astype(np.float32)  # (vw, vh, 3)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            bg_ratio = np.where(light_bg > 0.0, dark_bg / light_bg, 0.0)
+        # Cap so explored tiles never exceed the brightness of unlit visible tiles.
+        bg_ratio = np.clip(bg_ratio, 0.0, float(LIGHT_EXPLORED_MOD))  # (vw, vh, 3)
+        exp_r = bg_ratio[..., 0].T  # (vh, vw)
+        exp_g = bg_ratio[..., 1].T
+        exp_b = bg_ratio[..., 2].T
+
+        r = np.where(vis, r, np.where(explored, exp_r, zero))
+        g = np.where(vis, g, np.where(explored, exp_g, zero))
+        b = np.where(vis, b, np.where(explored, exp_b, zero))
+
+        out[..., 0] = np.clip(r * 255.0, 0, 255).astype(np.uint8)
+        out[..., 1] = np.clip(g * 255.0, 0, 255).astype(np.uint8)
+        out[..., 2] = np.clip(b * 255.0, 0, 255).astype(np.uint8)
+        return out
     
     def render(self, console: Console) -> None:
         # Update tile lighting with gradient falloff based on distance to light sources  
@@ -413,6 +454,19 @@ class GameMap:
                 self._add_light_source(px, py, radius=7, max_intensity=1.0,
                                        wobble_dx=wdx, wobble_dy=wdy, di=di)
 
+            # Player always emits a subtle ambient glow so torchless players
+            # can still navigate.  Darkvision replaces this with a larger dim cone.
+            px, py = player.x, player.y
+            has_darkvision = any(
+                getattr(effect, "name", "") == "Darkvision"
+                for effect in getattr(player, "effects", [])
+            )
+            if has_darkvision:
+                self._add_light_source(px, py, radius=10, max_intensity=0.25)
+            elif not has_torch:
+                # Faint personal glow: just enough to see immediately around the player.
+                self._add_light_source(px, py, radius=3, max_intensity=0.4)
+
             # Campfire and Bonfire lighting - doesn't affect FOV, only visual lighting
             try:
                 for item in getattr(self, "items", []):
@@ -467,9 +521,8 @@ class GameMap:
                 continue
             pos = (entity.x, entity.y)
             if self.visible[entity.x, entity.y]:
-                # Apply dynamic lighting to entity color
-                lit_color = self._apply_lighting_to_entity_color(entity.color, entity.x, entity.y)
-                self.screen_print(console, entity.x, entity.y, entity.char, fg=lit_color)
+                # Render at full color — GPU lightmap MOD pass in main.py handles dimming.
+                self.screen_print(console, entity.x, entity.y, entity.char, fg=entity.color)
                 drawn_positions.add(pos)
             else:
                 # If tile has been explored but is not currently visible, show a generic marker
@@ -504,9 +557,8 @@ class GameMap:
                 continue
             pos = (entity.x, entity.y)
             if self.visible[entity.x, entity.y]:
-                # Apply dynamic lighting to entity color
-                lit_color = self._apply_lighting_to_entity_color(entity.color, entity.x, entity.y)
-                self.screen_print(console, entity.x, entity.y, entity.char, fg=lit_color)
+                # Render at full color — GPU lightmap MOD pass in main.py handles dimming.
+                self.screen_print(console, entity.x, entity.y, entity.char, fg=entity.color)
                 drawn_positions.add(pos)
             else:
                 # Do not show '*' for non-visible actors; items already handled above.
@@ -659,8 +711,8 @@ class GameWorld:
         
         self.engine.debug_log(f"Floors since village: {self.floors_since_village}, Gen Chance: {gen_chance:.2f}, < Village chance: {village_chance:.2f}", handler=type(self).__name__, event="generate_floor")
         self.engine.debug_log(f"Village chance equation: (({self.floors_since_village})^2) / 25 = {village_chance:.2f}", handler=type(self).__name__, event="generate_floor")
-        if gen_chance < village_chance:
-
+        if 1 == 1:
+            print("Generating village floor!")
             # Generate village and reset counter
             self.floors_since_village = 0  # Reset counter when village appears
             self.engine.game_map = generate_village(

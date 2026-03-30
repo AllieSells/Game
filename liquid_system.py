@@ -290,24 +290,30 @@ class LiquidSystem:
         """Get liquid coating at position."""
         return self.coatings.get((x, y))
     
+    # Liquid types that can actively affect entities (cause damage/healing/effects).
+    # Inert types (BLOOD, WATER, OIL, SLIME) skip the costly entity-coating scan.
+    _HAZARDOUS_LIQUIDS = frozenset({LiquidType.FIRE, LiquidType.POISON, LiquidType.HEALTHPOTION})
+
     def create_splash(self, center_x: int, center_y: int, liquid_type: LiquidType, 
                      radius: int = 2, max_depth: int = 2) -> None:
         """Create a splash pattern around a center point."""
+        coat_entities = liquid_type in self._HAZARDOUS_LIQUIDS
+        radius_sq = radius * radius
         for dx in range(-radius, radius + 1):
             for dy in range(-radius, radius + 1):
+                dist_sq = dx * dx + dy * dy
+                if dist_sq > radius_sq:
+                    continue
                 x, y = center_x + dx, center_y + dy
-                
                 if not self.game_map.in_bounds(x, y):
                     continue
-                
-                distance = (dx * dx + dy * dy) ** 0.5
-                if distance <= radius:
-                    # Deeper liquid closer to center
-                    depth = max(1, max_depth - int(distance))
-                    if random.random() < 0.8:  # Some randomness
-                        self.add_liquid(x, y, liquid_type, depth)
-                    
-                    # Coat random body parts on entities in splash area
+                distance = dist_sq ** 0.5
+                # Deeper liquid closer to center
+                depth = max(1, max_depth - int(distance))
+                if random.random() < 0.8:  # Some randomness
+                    self.add_liquid(x, y, liquid_type, depth)
+                # Only scan/coat entities for liquids that can harm or heal them
+                if coat_entities:
                     self._coat_entities_in_splash(x, y, liquid_type, distance, radius)
 
     def _coat_entities_in_splash(self, x: int, y: int, liquid_type: LiquidType, 
