@@ -36,7 +36,33 @@ class AudioMixer:
         self.lock = threading.Lock()
         self.stream = None
         self.running = False
-        
+        self.vhs_enabled = False
+        self.vhs_time = 0.0
+        self.vhs_decay = 1.0
+        self._vhs_wow     = 0.0
+        self._vhs_flutter = 0.0
+
+        # Ring buffer for VHS wow/flutter (allows true slow-down by reading from history)
+        _VHS_LATENCY = 1024         # ~23 ms head-start so read can lag behind write
+        self._vhs_buf_size  = 65536 # ~1.5s of history — enough for extreme sag without overrun
+        self._vhs_buffer    = np.zeros((self._vhs_buf_size, 2), dtype=np.float32)
+        self._vhs_write_idx = _VHS_LATENCY  # write pointer starts ahead of read
+        self._vhs_read_pos  = 0.0           # fractional read pointer
+        self._VHS_LATENCY   = _VHS_LATENCY
+        self._wow_freq = 0.3
+        self._wow_amp = 0.9
+        self._wow2_freq = 0.73
+        self._wow2_amp = 0.15
+        self._flutter_freq = 6.0
+        self._flutter_amp = 0.03
+        self._flutter2_freq = 19.0
+        self._flutter2_amp = 0.025
+        self._flutter_phase = 5.5
+        self._flutter2_phase = 0.0
+        self._head_switch_freq = 30.0
+        self._head_switch_phase = 0.0
+        self._vhs_dropout_rng = np.random.default_rng(42)
+
         # Sound muffling parameters
         self.muffling_enabled = False
         self.muffling_cutoff = 20000  # Hz - start with no muffling (full frequency range)
@@ -50,7 +76,154 @@ class AudioMixer:
         self.last_cutoff = 20000
         
         self.start_stream()
-    
+
+    def trigger_vhs_effect(self):
+        # Reset all state before enabling so callback never sees partial state
+        self.vhs_time        = 0.0
+        self.vhs_decay       = 1.0
+        self._vhs_wow        = 0.0
+        self._vhs_flutter    = 0.0
+        self._flutter_phase  = 0.0
+        self._vhs_buffer[:]  = 0.0
+        self._vhs_write_idx  = self._VHS_LATENCY
+        self._vhs_read_pos   = 0.0
+        self._vhs_dropout_rng = np.random.default_rng()
+        # --- Bad VHS player parameters ---
+        # Deep, slow warble — like a stretched/wrinkled tape
+        self._wow_freq = 0.18          # slow, sickly pitch roll
+        self._wow_amp  = 0.45          # very heavy pitch swing
+        # Secondary wow — irregular tape tension
+        self._wow2_freq = 0.73
+        self._wow2_amp  = 0.15
+        # Jittery flutter — worn capstan/pinch roller
+        self._flutter_freq = 7.5
+        self._flutter_amp  = 0.06
+        # Second flutter harmonic
+        self._flutter2_freq = 19.0
+        self._flutter2_amp  = 0.025
+        self._flutter_phase  = 0.0
+        self._flutter2_phase = 0.0
+        # Head-switching noise rate (~30 Hz vertical sync artifacts)
+        self._head_switch_freq = 30.0
+        self._head_switch_phase = 0.0
+        self.vhs_enabled = True  # set last — gate opens after buffer is clean
+    def _apply_vhs_effect(self, audio: np.ndarray) -> np.ndarray:
+        """Apply dramatic bad-VHS-player effect — fully vectorised."""
+        if not self.vhs_enabled or len(audio) == 0:
+            return audio
+
+        # Normalise to stereo 2-D
+        if audio.ndim == 1:
+            audio_2d = np.stack([audio, audio], axis=1).astype(np.float32)
+        elif audio.shape[1] == 1:
+            audio_2d = np.repeat(audio, 2, axis=1).astype(np.float32)
+        else:
+            audio_2d = audio
+
+        N        = audio_2d.shape[0]
+        buf_size = self._vhs_buf_size
+
+        # --- 1. Write block into ring buffer (vectorised) ---
+        t_vec    = self.vhs_time + np.arange(N, dtype=np.float64) / self.samplerate
+        indices  = (self._vhs_write_idx + np.arange(N)) % buf_size
+        self._vhs_buffer[indices] = audio_2d
+        self._vhs_write_idx      += N
+
+        # --- 2. Build per-sample speed curve ---
+        # Slower decay = effect lasts longer (~4 seconds audible)
+        decay = np.exp(-t_vec / 1.8).astype(np.float32)
+
+        # PRIMARY WOW: deep sickly warble
+        wow1 = (self._wow_amp * np.sin(2 * np.pi * self._wow_freq * t_vec)).astype(np.float32)
+        # SECONDARY WOW: irregular tape-tension wobble
+        wow2 = (self._wow2_amp * np.sin(2 * np.pi * self._wow2_freq * t_vec)).astype(np.float32)
+        wow = wow1 + wow2
+
+        # PRIMARY FLUTTER: worn capstan jitter
+        fl_phases = self._flutter_phase + 2 * np.pi * self._flutter_freq * np.arange(N) / self.samplerate
+        flutter1 = (self._flutter_amp * np.sin(fl_phases)).astype(np.float32)
+        self._flutter_phase = float(fl_phases[-1]) % (2 * np.pi)
+
+        # SECONDARY FLUTTER: higher-frequency mechanical rattle
+        fl2_phases = self._flutter2_phase + 2 * np.pi * self._flutter2_freq * np.arange(N) / self.samplerate
+        flutter2 = (self._flutter2_amp * np.sin(fl2_phases)).astype(np.float32)
+        self._flutter2_phase = float(fl2_phases[-1]) % (2 * np.pi)
+
+        flutter = flutter1 + flutter2
+
+        # --- Startup motor sag: tape struggles to reach speed ---
+        startup_duration = 2.5
+        sag = np.ones(N, dtype=np.float32)
+        mask = t_vec < startup_duration
+        if mask.any():
+            # Start at 0.72 (way too slow), crawl up to 1.0 with a slight overshoot
+            progress = (t_vec[mask] / startup_duration).astype(np.float32)
+            # Ease-out with a small overshoot bump around 80%
+            base_sag = 0.72 + 0.28 * progress
+            overshoot = 0.04 * np.sin(np.pi * progress) * (1.0 - progress)
+            sag[mask] = base_sag + overshoot
+
+        # Wider speed range — allow really dramatic pitch swings
+        speed = np.clip((1.0 + (wow + flutter) * decay) * sag, 0.55, 1.45)
+
+        # --- 3. Integrate speed → fractional read positions ---
+        read_positions = self._vhs_read_pos + np.cumsum(speed) - speed[0]
+        self._vhs_read_pos = float(read_positions[-1]) + float(speed[-1])
+
+        # Safety: clamp read so it never falls more than (buf_size - margin) behind write,
+        # and never overtakes write. This prevents reading overwritten or unwritten data.
+        write_end = self._vhs_write_idx
+        min_read = write_end - buf_size + 256   # don't read overwritten data
+        max_read = write_end - 2                 # don't read ahead of write
+        read_positions = np.clip(read_positions, min_read, max_read)
+        self._vhs_read_pos = np.clip(self._vhs_read_pos, min_read, max_read)
+
+        # Keep both pointers from overflowing
+        if self._vhs_read_pos >= buf_size * 4:
+            self._vhs_read_pos  -= buf_size
+            self._vhs_write_idx -= buf_size
+            read_positions      -= buf_size
+
+        # --- 4. Linear interpolation from ring buffer ---
+        r0   = np.floor(read_positions).astype(np.int64) % buf_size
+        r1   = (r0 + 1) % buf_size
+        frac = (read_positions - np.floor(read_positions)).astype(np.float32)[:, np.newaxis]
+
+        processed = self._vhs_buffer[r0] * (1.0 - frac) + self._vhs_buffer[r1] * frac
+
+        # --- 5. Treble loss: bad VHS eats high frequencies ---
+        # Simple single-pole low-pass approximation (vectorised via EMA)
+        if self.vhs_time < startup_duration:
+            # Cutoff ramps from ~2kHz up to ~8kHz during startup
+            progress = min(self.vhs_time / startup_duration, 1.0)
+            cutoff = 2000.0 + 6000.0 * progress
+        else:
+            # After startup, still slightly muffled
+            cutoff = 8000.0 + 4000.0 * min((self.vhs_time - startup_duration) / 2.0, 1.0)
+        rc = 1.0 / (2.0 * np.pi * cutoff)
+        dt = 1.0 / self.samplerate
+        alpha = np.float32(dt / (rc + dt))
+        # Apply simple EMA low-pass per channel (fast enough for 256 samples)
+        for ch in range(processed.shape[1]):
+            for i in range(1, N):
+                processed[i, ch] = processed[i-1, ch] + alpha * (processed[i, ch] - processed[i-1, ch])
+
+        # --- 9. Stereo azimuth error: offset one channel slightly ---
+        if self.vhs_time < startup_duration and N > 8:
+            shift = max(1, int(4 * (1.0 - self.vhs_time / startup_duration)))
+            processed[shift:, 1] = processed[:-shift, 1]
+
+        # --- 10. Soft clip with saturation ---
+        processed = np.tanh(processed * 1.8).astype(np.float32)
+
+        # Update persistent state
+        self.vhs_time  = float(t_vec[-1]) + 1.0 / self.samplerate
+        self.vhs_decay = float(decay[-1])
+
+        if self.vhs_decay < 0.03:
+            self.vhs_enabled = False
+
+        return processed[:, 0] if audio.ndim == 1 else processed
     def start_stream(self):
         """Start the audio output stream."""
         try:
@@ -160,7 +333,13 @@ class AudioMixer:
             except Exception as e:
                 with open(get_data_path('logs/log.txt'), 'a') as log_file:
                     log_file.write(f"Error applying muffling filter: {e}\n")
-        
+
+        try:
+            outdata[:] = self._apply_vhs_effect(outdata)
+        except Exception as e:
+            with open(get_data_path('logs/log.txt'), 'a') as log_file:
+                log_file.write(f"Error applying VHS effect: {e}\n")
+
         # Prevent clipping
         np.clip(outdata, -1.0, 1.0, out=outdata)
     
@@ -182,13 +361,9 @@ class AudioMixer:
         except Exception as e:
             # Fallback if settings can't be loaded
             final_volume = volume
-            
+
         with self.lock:
-            self.playing_sounds.append({
-                'data': audio_data,
-                'position': 0,
-                'volume': final_volume
-            })
+            self.playing_sounds.append({'data': audio_data, 'position': 0, 'volume': final_volume})
     
     def start_loop(self, audio_data: np.ndarray, loop_id: str, volume: float = 1.0):
         """Start a looping sound."""
@@ -212,8 +387,8 @@ class AudioMixer:
         with self.lock:
             # Remove any existing loop with this ID
             self.loop_sounds = [s for s in self.loop_sounds if s.get('id') != loop_id]
-            
-            # Add new loop
+
+            # Add new loop — always active; VHS effect warps it in the callback
             self.loop_sounds.append({
                 'id': loop_id,
                 'data': audio_data,
@@ -562,11 +737,32 @@ def play_sound_with_pitch_variation(sound: Sound, pitch_range=(0.85, 1.15), volu
         except:
             sound.play()
 
+
+def play_boot_sound():
+    play_sound_with_pitch_variation(Sound("RP/sfx/boot.mp3"), pitch_range=(0.9, 1.1), volume=0.5)
+
 quaff_sound = Sound("RP/sfx/quaff.wav")
 
 # Helper functions for global sounds with pitch variation
 def play_quaff_sound():
     play_sound_with_pitch_variation(quaff_sound, pitch_range=(0.9, 1.3), volume=0.5)
+
+def play_crt_off_sound():
+    sound = Sound("RP/sfx/crtoff.mp3")
+    play_sound_with_pitch_variation(sound, pitch_range=(0.75, 0.75), volume=1.0)
+
+def play_crt_load_sound():
+    sound = Sound("RP/sfx/crtload.mp3")
+    play_sound_with_pitch_variation(sound, pitch_range=(1.0, 1.0), volume=0.5)
+
+def trigger_vhs_audio_effect():
+    """Trigger the VHS wow/flutter effect on the mixer for the CRT power-on animation."""
+    _mixer.trigger_vhs_effect()
+
+def play_crt_on_sound():
+    sound = Sound("RP/sfx/crton.mp3")
+    play_sound_with_pitch_variation(sound, pitch_range=(1.0, 1.0), volume=0.5)
+
 
 def play_stairs_sound():
     play_sound_with_pitch_variation(stairs_sound, pitch_range=(0.95, 1.05), fade_ms=1000)

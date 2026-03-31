@@ -5250,52 +5250,54 @@ class EntityDebugHandler(SelectIndexHandler):
     def on_index_selected(self, x: int, y: int) -> Optional[ActionOrHandler]:
         """Return to main handler when location is selected."""
         return MainGameEventHandler(self.engine)
-    
+
     def on_render(self, console: tcod.Console) -> None:
-        # First render the game world and highlight cursor position
+        # Fallback path (not used when inspect_overlay_view is active).
+        # Render game + cursor on the same console then draw the debug panel.
         super().on_render(console)
-        
-        # Get cursor position and find entity to debug
+        self.render_ui_overlay(console)
+
+    def render_game_overlay(self, console: tcod.Console) -> None:
+        # Cursor tile highlight on the game (map) layer — inherited behaviour is correct.
+        super().render_game_overlay(console)
+
+    def render_ui_overlay(self, console: tcod.Console) -> None:
+        """Draw the debug info panel on the UI layer (full-screen resolution)."""
         cursor_x, cursor_y = self.engine.mouse_location
         cursor_x, cursor_y = int(cursor_x), int(cursor_y)
-        screen_position = self.engine.world_to_screen(cursor_x, cursor_y, console.width, console.height)
+
+        # Map world position to UI-console tile space (game view is zoomed 2×).
+        screen_position = self.engine.world_to_screen(cursor_x, cursor_y, 40, 20)
         if screen_position is None:
             return
         screen_x, screen_y = screen_position
-        
-        # Highlight cursor position
-        console.rgb["bg"][screen_x, screen_y] = color.white
-        console.rgb["fg"][screen_x, screen_y] = color.black
-        
+        # UI console uses 2× tile scale to cover the game view area
+        ui_x = min(console.width  - 1, screen_x * 2)
+        ui_y = min(console.height - 1, screen_y * 2)
+
         # Find entity to inspect at cursor location
         target_entity = None
         if self.engine.game_map.in_bounds(cursor_x, cursor_y):
-            # Look for actors first, then items
             for entity in self.engine.game_map.entities:
                 if entity.x == cursor_x and entity.y == cursor_y:
                     if (hasattr(entity, 'fighter') and entity.fighter) or (hasattr(entity, 'body_parts') and entity.body_parts):
                         target_entity = entity
                         break
-        
+
         # Determine debug window position to avoid cursor
         window_width = 55
         window_height = 30
-        
-        # Position window to avoid cursor
-        if screen_x < console.width // 2:
-            # Cursor on left, put window on right
+
+        if ui_x < console.width // 2:
             debug_x = console.width - window_width - 1
         else:
-            # Cursor on right, put window on left  
             debug_x = 1
-            
-        if screen_y < console.height // 2:
-            # Cursor in top half, put window in bottom
+
+        if ui_y < console.height // 2:
             debug_y = console.height - window_height - 1
         else:
-            # Cursor in bottom half, put window in top
             debug_y = 1
-        
+
         # Draw debug window frame
         title = "DEBUG: Entity Inspector" if target_entity else "DEBUG: Tile Inspector"
         console.draw_frame(
@@ -5303,35 +5305,31 @@ class EntityDebugHandler(SelectIndexHandler):
             title=title, clear=True,
             fg=color.yellow, bg=color.black
         )
-        
+
         # Show info
         info_y = debug_y + 2
-        
+
         if target_entity:
-            # Entity name and basic info
             entity_name = getattr(target_entity, 'name', 'Unknown')
             if target_entity == self.engine.player:
                 console.print(debug_x + 2, info_y, f"PLAYER: {entity_name}", fg=color.green)
             else:
                 console.print(debug_x + 2, info_y, f"ENTITY: {entity_name}", fg=color.white)
             info_y += 1
-            
+
             console.print(debug_x + 2, info_y, f"Position: ({cursor_x}, {cursor_y})", fg=color.gray)
             info_y += 2
-            
-            # Show body parts if available
+
             if hasattr(target_entity, 'body_parts') and target_entity.body_parts:
                 console.print(debug_x + 2, info_y, "BODY PARTS:", fg=color.yellow)
                 info_y += 1
-                
+
                 body_parts = target_entity.body_parts
-                
+
                 for part_type, part in body_parts.body_parts.items():
-                    # Part name and HP
                     hp_text = f"{part.current_hp}/{part.max_hp}"
                     hp_ratio = body_parts.get_part_health_ratio(part)
-                    
-                    # Color based on health
+
                     if hp_ratio <= 0:
                         hp_color = color.red
                     elif hp_ratio <= 0.25:
@@ -5342,12 +5340,10 @@ class EntityDebugHandler(SelectIndexHandler):
                         hp_color = color.light_gray
                     else:
                         hp_color = color.green
-                    
-                    # Part info line
+
                     part_line = f"{part.name:<14} {hp_text:>6} ({hp_ratio*100:.0f}%)"
                     console.print(debug_x + 2, info_y, part_line, fg=hp_color)
-                    
-                    # Additional status info
+
                     status_info = []
                     if part.is_vital:
                         status_info.append("VITAL")
@@ -5357,18 +5353,16 @@ class EntityDebugHandler(SelectIndexHandler):
                         status_info.append("DESTROYED")
                     elif hp_ratio <= 0.25:
                         status_info.append("DISABLED")
-                    
+
                     if status_info:
                         console.print(debug_x + 35, info_y, " ".join(status_info), fg=color.cyan)
-                    
+
                     info_y += 1
-                    
-                    # Don't overflow window
+
                     if info_y >= debug_y + window_height - 8:
                         console.print(debug_x + 2, info_y, "...(more parts)", fg=color.gray)
                         break
-                
-                # Show movement penalty if applicable
+
                 if hasattr(body_parts, 'get_movement_penalty'):
                     movement_penalty = body_parts.get_movement_penalty()
                     if movement_penalty > 0:
@@ -5380,8 +5374,7 @@ class EntityDebugHandler(SelectIndexHandler):
             else:
                 console.print(debug_x + 2, info_y, "No body parts system", fg=color.red)
                 info_y += 2
-            
-            # Show fighter stats if available
+
             if hasattr(target_entity, 'fighter') and target_entity.fighter:
                 console.print(debug_x + 2, info_y, "FIGHTER STATS:", fg=color.yellow)
                 info_y += 1
@@ -5391,43 +5384,37 @@ class EntityDebugHandler(SelectIndexHandler):
                 info_y += 1
                 console.print(debug_x + 2, info_y, f"Power: {target_entity.fighter.power}", fg=color.white)
                 info_y += 1
-            
-            # Show AI info if available
+
             if hasattr(target_entity, 'ai') and target_entity.ai:
                 console.print(debug_x + 2, info_y, f"AI: {type(target_entity.ai).__name__}", fg=color.cyan)
                 info_y += 1
         else:
-            # Show tile information instead
             console.print(debug_x + 2, info_y, "TILE INFORMATION:", fg=color.cyan)
             info_y += 1
             console.print(debug_x + 2, info_y, f"Position: ({cursor_x}, {cursor_y})", fg=color.gray)
             info_y += 2
-            
-            # Get tile information
+
             if self.engine.game_map.in_bounds(cursor_x, cursor_y):
                 tile = self.engine.game_map.tiles[cursor_x, cursor_y]
-                
-                # Show visibility
+
                 if self.engine.game_map.visible[cursor_x, cursor_y]:
                     console.print(debug_x + 2, info_y, "Visibility: VISIBLE", fg=color.green)
                 else:
                     console.print(debug_x + 2, info_y, "Visibility: NOT VISIBLE", fg=color.red)
                 info_y += 1
-                
-                # Show tile properties
+
                 if tile['walkable']:
                     console.print(debug_x + 2, info_y, "Walkable: YES", fg=color.green)
                 else:
                     console.print(debug_x + 2, info_y, "Walkable: NO", fg=color.red)
                 info_y += 1
-                
+
                 if tile['transparent']:
                     console.print(debug_x + 2, info_y, "Transparent: YES", fg=color.green)
                 else:
                     console.print(debug_x + 2, info_y, "Transparent: NO", fg=color.red)
                 info_y += 1
-                
-                # Show tile character and color
+
                 if self.engine.game_map.visible[cursor_x, cursor_y]:
                     char = int(tile['light'][0])
                     fg_color = tuple(tile['light'][1])
@@ -5439,23 +5426,21 @@ class EntityDebugHandler(SelectIndexHandler):
                     console.print(debug_x + 2, info_y, f"BG Color: {bg_color}", fg=color.white)
                     info_y += 1
                 info_y += 1
-                
-                # Show items at this location 
-                items_here = [e for e in self.engine.game_map.entities 
-                             if e.x == cursor_x and e.y == cursor_y and not (hasattr(e, 'fighter') or hasattr(e, 'ai'))]
-                
+
+                items_here = [e for e in self.engine.game_map.entities
+                              if e.x == cursor_x and e.y == cursor_y and not (hasattr(e, 'fighter') or hasattr(e, 'ai'))]
+
                 if items_here:
                     console.print(debug_x + 2, info_y, "ITEMS HERE:", fg=color.yellow)
                     info_y += 1
-                    for item in items_here[:5]:  # Show max 5 items
+                    for item in items_here[:5]:
                         console.print(debug_x + 4, info_y, f"- {item.name}", fg=color.white)
                         info_y += 1
                     if len(items_here) > 5:
                         console.print(debug_x + 4, info_y, f"...and {len(items_here)-5} more", fg=color.gray)
                         info_y += 1
                     info_y += 1
-                
-                # Show liquid coating if present
+
                 if hasattr(self.engine.game_map, 'liquid_system'):
                     coating = self.engine.game_map.liquid_system.get_coating(cursor_x, cursor_y)
                     if coating:
@@ -5464,25 +5449,23 @@ class EntityDebugHandler(SelectIndexHandler):
                         info_y += 1
             else:
                 console.print(debug_x + 2, info_y, "OUT OF BOUNDS", fg=color.red)
-        
-        # Instructions
+
         instructions_y = debug_y + window_height - 4
-        console.print(debug_x + 2, instructions_y, "Arrow Keys: Move cursor", fg=color.light_gray)
-        console.print(debug_x + 2, instructions_y + 1, "Shift+Arrow: Move faster", fg=color.light_gray)
+        console.print(debug_x + 2, instructions_y,     "Arrow Keys: Move cursor",    fg=color.light_gray)
+        console.print(debug_x + 2, instructions_y + 1, "Shift+Arrow: Move faster",   fg=color.light_gray)
         if target_entity:
             console.print(debug_x + 2, instructions_y + 2, "Mode: Entity inspection", fg=color.green)
         else:
-            console.print(debug_x + 2, instructions_y + 2, "Mode: Tile inspection", fg=color.cyan)
-        console.print(debug_x + 2, instructions_y + 3, "Enter/ESC: Exit debug", fg=color.light_gray)
-    
+            console.print(debug_x + 2, instructions_y + 2, "Mode: Tile inspection",   fg=color.cyan)
+        console.print(debug_x + 2, instructions_y + 3, "Enter/ESC: Exit debug",      fg=color.light_gray)
+
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         """Handle key input for debug mode with cursor movement."""
         key = event.sym
-        
+
         if key == tcod.event.KeySym.ESCAPE:
             return MainGameEventHandler(self.engine)
-        
-        # Use parent's key handling for movement and other functionality
+
         return super().ev_keydown(event)
 
 

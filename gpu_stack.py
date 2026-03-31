@@ -190,6 +190,8 @@ def create_glare_texture(renderer, w: int = 512, h: int = 512):
     return texture
 
 
+
+
 # =============================================================================
 # SECTION 3b — CRT POWER ANIMATION CLASS
 # =============================================================================
@@ -246,7 +248,7 @@ class CRTSwitchAnimation:
         # ---- Tunable parameters ----
         DURATION         = 1.4    # total length in seconds
         # Phase boundaries (0..1 normalised)
-        T_SNAP_END       = 0.05   # vertical snap ends
+        T_SNAP_END       = 0.1   # vertical snap ends
         T_LINE_END       = 0.57   # retrace line hold ends
         T_CONTRACT_END   = 0.76   # line contracts to dot
         T_DOT_END        = 0.90   # dot holds, then pops to black
@@ -289,6 +291,8 @@ class CRTSwitchAnimation:
             ov.alpha_mod = min(255, alpha)
             renderer.copy(ov, dest=(lx, ly, line_w, LINE_H))
 
+        _off_frame = 0
+        print(f"[CRT play_off] loop start")
         while True:
             if event_pump:
                 for _ in event_pump():
@@ -372,9 +376,13 @@ class CRTSwitchAnimation:
 
             if glare_tex is not None:
                 renderer.copy(glare_tex, dest=(0, 0, w, h))
+            print(f"[CRT play_off] frame {_off_frame} t={t:.3f} pre-present")
             renderer.present()
+            print(f"[CRT play_off] frame {_off_frame} post-present")
+            _off_frame += 1
             time.sleep(1.0 / 60)
 
+        print(f"[CRT play_off] loop done after {_off_frame} frames")
         # Fully black
         renderer.draw_color = (0, 0, 0, 255)
         renderer.clear()
@@ -384,7 +392,8 @@ class CRTSwitchAnimation:
 
     # ------------------------------------------------------------------
 
-    def play_on(self, scene_tex, event_pump=None, glare_tex=None) -> None:
+    def play_on(self, scene_tex, event_pump=None, glare_tex=None, gpu_stack=None,
+                scanlines_tex=None, scanlines_h=0, vignette_tex=None) -> None:
         """Physically accurate CRT power-on.  Blocks until done (~1.8 s).
 
         Phases                                                  (real seconds)
@@ -397,6 +406,7 @@ class CRTSwitchAnimation:
         0.87-1.00  Settle           — AGC normalises, final bloom fades         (~0.23 s)
         """
         import time, math
+        import sounds
 
         # ---- Tunable parameters ----
         DURATION           = 1.8    # total length in seconds
@@ -405,7 +415,7 @@ class CRTSwitchAnimation:
         T_BLOOM_END        = 0.42   # dot bloom ends
         T_STRETCH_END      = 0.57   # dot-to-line stretch ends
         T_LINE_END         = 0.67   # blazing line hold ends
-        T_EXPAND_END       = 0.87   # vertical expansion ends
+        T_EXPAND_END       = 1.2   # vertical expansion ends
         # Warmup dot (green, dim)
         WARMUP_HALO_W      = 6     # max halo width (px)
         WARMUP_HALO_H      = 4     # max halo height (px)
@@ -425,14 +435,22 @@ class CRTSwitchAnimation:
         BLOOM_OUTER_ALPHA  = 6    # max outer halo alpha
         BLOOM_MID_ALPHA    = 4    # max mid halo alpha
         # Spring overshoot during expansion
-        SPRING_OVERSHOOT   = 0.07   # fraction (0.07 = 7% overshoot)
+        SPRING_OVERSHOOT   = -40.0   # fraction (0.07 = 7% overshoot)
         SPRING_DECAY       = 7.0    # damping coefficient
         SPRING_FREQ        = 3.2    # oscillation frequency
-        # Bloom wash (bright flash as image expands)
-        BLOOM_WASH_ALPHA   = 0      # peak wash alpha (0 = disabled)
-        BLOOM_WASH_DECAY   = 5.0    # how quickly the wash fades
+        # VHS horizontal wobble during expansion
+        VHS_WOBBLE_AMP     = 10     # max horizontal shift (px)
+        VHS_WOBBLE_FREQ    = 13.0   # oscillation cycles within the phase
+        VHS_WOBBLE_DECAY   = 4.5   # damping rate (higher = damps faster)
+        # Bloom wash (warm white flash as image expands — uniform, scene-independent)
+        BLOOM_WASH_ALPHA   = 180    # peak wash alpha (high = visible on dark scenes)
+        BLOOM_WASH_DECAY   = 2.5    # how quickly the wash fades
+        BLOOM_WASH_COLOR   = (255, 245, 220)  # warm white (CRT phosphor tint)
+        # AGC oversaturation — additive self-blend lifts everything
+        OVERSAT_BOOST      = 120    # additive alpha at peak (high for dark scenes)
+        OVERSAT_DECAY      = 3.0    # damping rate for color boost
         # Settle
-        SETTLE_ALPHA       = 0       # residual brightness alpha at start of settle (0 = disabled)
+        SETTLE_ALPHA       = 60      # residual brightness alpha at start of settle
         # ---------------------
 
         t_start  = time.perf_counter()
@@ -441,6 +459,7 @@ class CRTSwitchAnimation:
         ov       = self._overlay
         LINE_H   = self._LINE_H
         line_cy  = h // 2
+        _load_sound_played = False
 
         def _draw_line(lx: int, line_w: int, alpha: int, color: tuple) -> None:
             r, g, b = color
@@ -530,17 +549,37 @@ class CRTSwitchAnimation:
             elif t < T_EXPAND_END:
                 # ---- Vertical expansion with spring overshoot ----
                 p      = (t - T_LINE_END) / (T_EXPAND_END - T_LINE_END)
+                if not _load_sound_played:
+                    # Play crt_load (vhs_bypass=True — allowed through the VHS gate)
+                    sounds.play_crt_load_sound()
+                    _load_sound_played = True
                 ep     = 1.0 - (1.0 - p) ** 3.0    # ease-out cubic
-                spring = 1.0 + math.exp(-p * SPRING_DECAY) * math.cos(p * math.pi * SPRING_FREQ) * SPRING_OVERSHOOT
+                spring = 1.0 + math.exp(-p * SPRING_DECAY) * math.cos(p * math.pi * SPRING_FREQ) ** SPRING_OVERSHOOT
+                # Horizontal wobble — decaying sinusoid mimicking VHS tape settling
+                wobble_x = int(math.exp(-p * VHS_WOBBLE_DECAY) * VHS_WOBBLE_AMP
+                               * math.sin(p * math.pi * VHS_WOBBLE_FREQ))
+
                 cur_h  = min(h, max(LINE_H, int(h * ep * spring)))
                 dy     = max(0, (h - cur_h) // 2)
-                renderer.copy(scene_tex, dest=(0, dy, w, cur_h))
-                # Strong white bloom washes over the expanding image, fades fast
+                # Base image
+                scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                scene_tex.alpha_mod = 255
+                scene_tex.color_mod = (255, 255, 255)
+                renderer.copy(scene_tex, dest=(wobble_x, dy, w, cur_h))
+                # AGC oversaturation: additive pass of the scene itself (boosts bright areas)
+                oversat_a = max(0, int(math.exp(-p * OVERSAT_DECAY) * OVERSAT_BOOST))
+                if oversat_a > 0:
+                    scene_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                    scene_tex.alpha_mod = oversat_a
+                    renderer.copy(scene_tex, dest=(wobble_x, dy, w, cur_h))
+                    scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                    scene_tex.alpha_mod = 255
+                # Warm white bloom wash — uniform brightness lift, visible on any scene
                 bloom_a = int(max(0.0, 1.0 - p * BLOOM_WASH_DECAY) * BLOOM_WASH_ALPHA)
                 if bloom_a > 0:
                     ov.alpha_mod = bloom_a
-                    ov.color_mod = (255, 255, 255)
-                    renderer.copy(ov, dest=(0, dy, w, cur_h))
+                    ov.color_mod = BLOOM_WASH_COLOR
+                    renderer.copy(ov, dest=(wobble_x, dy, w, cur_h))
 
             else:
                 # ---- Full image: AGC settles, residual brightness fades ----
@@ -552,14 +591,28 @@ class CRTSwitchAnimation:
                     ov.color_mod = (255, 255, 255)
                     renderer.copy(ov, dest=(0, 0, w, h))
 
-            if glare_tex is not None:
+            # CRT post-processing — same pipeline as the main loop
+            if gpu_stack is not None:
+                gpu_stack.apply_crt_overlays(
+                    w, h, scanlines_tex=scanlines_tex, scanlines_h=scanlines_h,
+                    vignette_tex=vignette_tex, glare_tex=glare_tex,
+                    bloom_source=gpu_stack.post_crt_tex if t >= T_LINE_END else None,
+                )
+            elif glare_tex is not None:
                 renderer.copy(glare_tex, dest=(0, 0, w, h))
             renderer.present()
             time.sleep(1.0 / 60)
 
         # End on the full scene — game continues naturally from here
         renderer.copy(scene_tex, dest=(0, 0, w, h))
-        if glare_tex is not None:
+        if gpu_stack is not None:
+            gpu_stack.apply_crt_overlays(
+                w, h, scanlines_tex=scanlines_tex, scanlines_h=scanlines_h,
+                vignette_tex=vignette_tex, glare_tex=glare_tex,
+                bloom_source=gpu_stack.post_crt_tex,
+            )
+        elif glare_tex is not None:
+            renderer.copy(glare_tex, dest=(0, 0, w, h))
             renderer.copy(glare_tex, dest=(0, 0, w, h))
         renderer.present()
 
@@ -850,6 +903,57 @@ class GPUStack:
         self._gal_w      = 0
         self._gal_h      = 0
         self._gal_ds     = 2
+
+        # 1×1 white pixel overlay (used for bloom wash / tint overlays)
+        _px = np.array([[[255, 255, 255, 255]]], dtype=np.uint8)
+        self._overlay = renderer.upload_texture(_px)
+        self._overlay.blend_mode = tcod.sdl.render.BlendMode.BLEND
+
+        # ---------------------------------------------------------------
+        # CRT glitch state (jitter + vertical roll)
+        # ---------------------------------------------------------------
+        self._jitter_x       = 0
+        self._jitter_y       = 0
+        self._jitter_band_h  = 3
+        self._jitter_frames  = 0
+
+        self._vroll_offset   = 0.0
+        self._vroll_speed    = 0.0
+        self._vroll_ttl      = 0.0
+        self._vroll_elapsed  = 0.0
+        self._vroll_next     = float(np.random.uniform(5.0, 10.0))
+
+        # ---------------------------------------------------------------
+        # VHS wobble state (screen shake + oversaturation on load)
+        # ---------------------------------------------------------------
+        self._wobble_active       = False
+        self._wobble_time         = 0.0
+        self._wobble_dur          = 1.2
+        self._wobble_amp          = 10
+        self._wobble_freq         = 13.0
+        self._wobble_decay        = 4.5
+        self._spring_overshoot    = -40.0
+        self._spring_decay        = 7.0
+        self._spring_freq         = 3.2
+        self._wobble_oversat_boost = 120
+        self._wobble_oversat_decay = 3.0
+        self._wobble_bloom_alpha   = 180
+        self._wobble_bloom_decay   = 2.5
+        self._wobble_bloom_color   = (255, 245, 220)
+
+        # ---------------------------------------------------------------
+        # Channel overlay (boot splash / dungeon-load splash)
+        # ---------------------------------------------------------------
+        self._chan_overlay_frames  = 30
+        self._chan_overlay_counter = 0
+        self._chan_overlay_active  = None   # "menu", "game", or None
+        self._chan_menu_tex        = None
+        self._chan_menu_w          = 0
+        self._chan_menu_h          = 0
+        self._chan_game_tex        = None
+        self._chan_game_w          = 0
+        self._chan_game_h          = 0
+
         self._smoke_tex    = None
         self._smoke_frames = None
 
@@ -1309,6 +1413,246 @@ class GPUStack:
     # ------------------------------------------------------------------
     # 5f — Full-scene Kawase bloom
     # ------------------------------------------------------------------
+
+    def load_channel_overlays(self, menu_path: str, game_path: str) -> None:
+        """Preload the two channel-splash PNGs.  Call once after the renderer exists."""
+        import numpy as _np
+        from PIL import Image as _Image
+        def _load(path):
+            img = _Image.open(path).convert("RGBA")
+            px  = _np.array(img, dtype=_np.uint8)
+            tex = self.renderer.upload_texture(px)
+            tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+            h, w = px.shape[:2]
+            return tex, w, h
+        self._chan_menu_tex, self._chan_menu_w, self._chan_menu_h = _load(menu_path)
+        self._chan_game_tex, self._chan_game_w, self._chan_game_h = _load(game_path)
+
+    def start_channel_overlay(self, kind: str) -> None:
+        """Trigger the channel overlay.  kind = 'menu' or 'game'."""
+        self._chan_overlay_active  = kind
+        self._chan_overlay_counter = 0
+
+    def draw_channel_overlay(self, glare_tex=None) -> None:
+        """Draw the active channel overlay for one frame; auto-expires after the frame limit."""
+        if self._chan_overlay_active is None:
+            return
+        if self._chan_overlay_counter >= self._chan_overlay_frames:
+            self._chan_overlay_active = None
+            return
+        w = self.window_w
+        h = self.window_h
+        if self._chan_overlay_active == "menu" and self._chan_menu_tex is not None:
+            self.renderer.copy(self._chan_menu_tex,
+                               dest=(0, 0, self._chan_menu_w, self._chan_menu_h))
+        elif self._chan_game_tex is not None:
+            self.renderer.copy(self._chan_game_tex,
+                               dest=(0, 0, self._chan_game_w, self._chan_game_h))
+        if glare_tex is not None:
+            self.renderer.copy(glare_tex, dest=(0, 0, w, h))
+        self._chan_overlay_counter += 1
+
+    def apply_barrel_and_ca(self, window_w: int, window_h: int) -> None:
+        """Barrel-distort scene_tex → barrel_tex, then apply chromatic aberration → post_crt_tex.
+
+        Equivalent to the two-step inline pipeline previously in main.py.
+        """
+        renderer = self.renderer
+
+        # Step 1: barrel curvature
+        with renderer.set_render_target(self.barrel_tex):
+            renderer.draw_color = (0, 0, 0, 255)
+            renderer.clear()
+            self.scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+            self.scene_tex.alpha_mod  = 255
+            self.scene_tex.color_mod  = (255, 255, 255)
+            self.copy_curved(self.scene_tex, dest=(0, 0, window_w, window_h),
+                             src_size=(window_w, window_h))
+
+        # Step 2: chromatic aberration (3-channel pixel shift)
+        with renderer.set_render_target(self.post_crt_tex):
+            renderer.draw_color = (0, 0, 0, 255)
+            renderer.clear()
+            if self.crt_ca_on and not self.crt_force_fast_path and self.ca_shift > 0:
+                ca = round(self.ca_shift)
+                self.barrel_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                self.barrel_tex.alpha_mod  = 255
+                self.barrel_tex.color_mod  = (255, 0, 0)
+                renderer.copy(self.barrel_tex, dest=(-ca, 0, window_w, window_h))
+                self.barrel_tex.color_mod  = (0, 255, 0)
+                renderer.copy(self.barrel_tex, dest=(0, 0, window_w, window_h))
+                self.barrel_tex.color_mod  = (0, 0, 255)
+                renderer.copy(self.barrel_tex, dest=(ca, 0, window_w, window_h))
+                self.barrel_tex.color_mod  = (255, 255, 255)
+                self.barrel_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+            else:
+                self.barrel_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                self.barrel_tex.alpha_mod  = 255
+                self.barrel_tex.color_mod  = (255, 255, 255)
+                renderer.copy(self.barrel_tex, dest=(0, 0, window_w, window_h))
+
+    def tick_wobble(self, dt: float) -> tuple[int, int]:
+        """Advance the VHS wobble timer.  Returns (wx, wy) pixel offsets for this frame."""
+        import math as _math
+        if not self._wobble_active:
+            return 0, 0
+        self._wobble_time += dt
+        if self._wobble_time >= self._wobble_dur:
+            self._wobble_active = False
+            self._wobble_time   = 0.0
+            return 0, 0
+        p = self._wobble_time / self._wobble_dur
+        wx = int(_math.exp(-p * self._wobble_decay) * self._wobble_amp
+                 * _math.sin(p * _math.pi * self._wobble_freq))
+        cos_val = _math.cos(p * _math.pi * self._spring_freq)
+        if abs(cos_val) > 1e-6:
+            spring = (_math.exp(-p * self._spring_decay)
+                      * abs(cos_val) ** self._spring_overshoot)
+            if cos_val < 0:
+                spring = -spring
+        else:
+            spring = 0.0
+        wy = int(spring * self.window_h * 0.04)
+        return wx, wy
+
+    def start_wobble(self) -> None:
+        """Kick off the VHS wobble effect (e.g. after CRT power-on)."""
+        self._wobble_active = True
+        self._wobble_time   = 0.0
+
+    def blit_post_crt(self, wx: int, wy: int) -> None:
+        """Composite post_crt_tex onto the default framebuffer with wobble + vroll offsets.
+
+        Also applies the additive oversaturation and warm-white bloom wash
+        while the wobble is active, matching the play_on() AGC effect.
+        """
+        import math as _math
+        renderer  = self.renderer
+        window_w  = self.window_w
+        window_h  = self.window_h
+        vroll_off = self._vroll_offset
+
+        # Reset texture state before blitting
+        self.post_crt_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+        self.post_crt_tex.alpha_mod  = 255
+        self.post_crt_tex.color_mod  = (255, 255, 255)
+
+        if not self.crt_force_fast_path and vroll_off != 0.0:
+            vo = int(vroll_off) % window_h
+            if vo < 0:
+                vo += window_h
+            if vo == 0:
+                renderer.copy(self.post_crt_tex, dest=(wx, wy, window_w, window_h))
+            else:
+                bot_h = window_h - vo
+                renderer.copy(self.post_crt_tex,
+                              source=(0, 0, window_w, bot_h),
+                              dest=(wx, vo + wy, window_w, bot_h))
+                renderer.copy(self.post_crt_tex,
+                              source=(0, bot_h, window_w, vo),
+                              dest=(wx, wy, window_w, vo))
+        else:
+            renderer.copy(self.post_crt_tex, dest=(wx, wy, window_w, window_h))
+
+        # Wobble oversaturation + bloom wash
+        if self._wobble_active and self._wobble_time > 0:
+            p = self._wobble_time / self._wobble_dur
+            oversat_a = max(0, int(_math.exp(-p * self._wobble_oversat_decay)
+                                   * self._wobble_oversat_boost))
+            if oversat_a > 0:
+                self.post_crt_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                self.post_crt_tex.alpha_mod  = oversat_a
+                renderer.copy(self.post_crt_tex, dest=(wx, wy, window_w, window_h))
+                self.post_crt_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                self.post_crt_tex.alpha_mod  = 255
+            bloom_a = int(max(0.0, 1.0 - p * self._wobble_bloom_decay)
+                          * self._wobble_bloom_alpha)
+            if bloom_a > 0:
+                ov = self._overlay
+                ov.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                ov.alpha_mod  = bloom_a
+                ov.color_mod  = self._wobble_bloom_color
+                renderer.copy(ov, dest=(wx, wy, window_w, window_h))
+
+    def tick_crt_glitches(self, dt: float) -> None:
+        """Advance jitter and vertical-roll state for this frame (call once per frame)."""
+        # Scanline jitter: random one-band horizontal slip
+        if self._jitter_frames > 0:
+            self._jitter_frames -= 1
+            if self._jitter_frames == 0:
+                self._jitter_x = 0
+        elif np.random.random() < 0.25 / 30:   # ~0.8% per frame at 30 fps
+            self._jitter_x      = int(np.random.choice([-4, -3, -2, 2, 3, 4]))
+            self._jitter_y      = int(np.random.randint(4, max(5, self.window_h - 8)))
+            self._jitter_band_h = int(np.random.choice([2, 2, 3, 3, 4]))
+            self._jitter_frames = int(np.random.randint(1, 3))
+
+        # Vertical roll: slow sync-loss scroll
+        self._vroll_elapsed += dt
+        if self._vroll_ttl > 0.0:
+            self._vroll_offset = (self._vroll_offset + self._vroll_speed * dt) % self.window_h
+            self._vroll_ttl   -= dt
+            if self._vroll_ttl <= 0.0:
+                self._vroll_speed  = 0.0
+                self._vroll_offset = 0.0
+        elif self._vroll_elapsed >= self._vroll_next:
+            self._vroll_speed   = float(np.random.uniform(3.0, 8.0))
+            self._vroll_ttl     = float(np.random.uniform(0.4, 1.2))
+            self._vroll_elapsed = 0.0
+            self._vroll_next    = float(np.random.uniform(30.0, 90.0))
+
+    def draw_scanline_jitter(self) -> None:
+        """Draw the current jitter band (if active) on top of the framebuffer."""
+        if self._jitter_frames <= 0 or self._jitter_x == 0:
+            return
+        src_x  = max(-self._jitter_x, 0)
+        dst_x  = max( self._jitter_x, 0)
+        band_w = self.window_w - abs(self._jitter_x)
+        self.renderer.copy(
+            self.post_crt_tex,
+            source=(src_x, self._jitter_y, band_w, self._jitter_band_h),
+            dest  =(dst_x, self._jitter_y, band_w, self._jitter_band_h),
+        )
+
+    def apply_crt_overlays(self, w: int, h: int, scanlines_tex=None, scanlines_h: int = 0,
+                           scanlines_y_offset: int = 0,
+                           vignette_tex=None, glare_tex=None, bloom_source=None,
+                           skip_scanlines: bool = False,
+                           skip_vignette: bool = False) -> None:
+        """Apply the standard CRT overlay stack: scanlines → vignette + glare → bloom.
+
+        Called from the main loop and from CRTSwitchAnimation.play_on() so both
+        paths produce identical output.  All textures are optional; pass None to skip.
+
+        skip_scanlines / skip_vignette allow the caller to handle those passes
+        externally (e.g. the main loop draws game-layer animations between
+        scanlines and vignette, so it calls twice with different skip flags).
+        """
+        renderer = self.renderer
+
+        # --- Scanlines (MOD) ---
+        if not skip_scanlines and self.crt_scanlines_on and scanlines_tex is not None and scanlines_h > 0:
+            y = -scanlines_y_offset
+            while y < h:
+                src_y = 0 if y >= 0 else -y
+                dst_y = max(y, 0)
+                draw_h = min(scanlines_h - src_y, h - dst_y)
+                if draw_h > 0:
+                    renderer.copy(scanlines_tex,
+                                  source=(0, src_y, 1, draw_h),
+                                  dest=(0, dst_y, w, draw_h))
+                y += scanlines_h
+
+        # --- Vignette + glare ---
+        if not skip_vignette:
+            if self.crt_vignette_on and vignette_tex is not None:
+                renderer.copy(vignette_tex, dest=(0, 0, w, h))
+            if glare_tex is not None:
+                renderer.copy(glare_tex, dest=(0, 0, w, h))
+
+        # --- Bloom (ADD) ---
+        if self.crt_bloom_on and bloom_source is not None:
+            self.gpu_bloom(bloom_source, w, h)
 
     def gpu_bloom(self, source_tex, window_w: int, window_h: int) -> None:
         """Run a full GPU Kawase bloom pass from source_tex onto the framebuffer.

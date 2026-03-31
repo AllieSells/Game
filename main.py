@@ -14,7 +14,8 @@ import numpy as np
 import random
 import tcod.sdl.mouse
 
-
+import sounds
+sounds.play_boot_sound()
 # Cursor variables will be initialized after tcod context is created
 cursor = None
 cursor_click = None
@@ -44,6 +45,13 @@ else:
 _render_log_file = open(log_path, "a", buffering=1)  # line-buffered
 _render_frame = 0
 
+
+def _dlog(msg: str) -> None:
+    """Generic debug log message with timestamp."""
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    _render_log_file.write(f"[{timestamp}] {msg}\n")
+    _render_log_file.flush()
+
 def _rlog(msg: str) -> None:
     """Write a checkpoint line to the log file and flush immediately."""
     _render_log_file.write(f"[frame {_render_frame}] {msg}\n")
@@ -65,6 +73,7 @@ def get_data_path(filename):
     return os.path.join(base_path, filename)
 
 # Import tcod and create window as fast as possible
+
 print("Opening window...")
 import tcod
 print(f"Version: {tcod.__version__}")
@@ -244,6 +253,9 @@ def show_loading_screen(context, console, progress: float, status: str) -> None:
 # Show loading screen immediately
 show_loading_screen(context, ui_console, 0.05, "Starting...")
 
+
+
+
 # Now load remaining modules
 import json
 
@@ -251,6 +263,8 @@ start_time = time.time() # Track total loading
 
 
 # Continue with module imports
+
+
 show_loading_screen(context, ui_console, 0.15, "Avoiding glitches...")
 import exceptions
 str = (f"Loaded exceptions module in {time.time() - start_time:.2f} seconds")
@@ -278,6 +292,7 @@ start_time = time.time() # Track total loading
 show_loading_screen(context, ui_console, 0.60, "Importing bananas...")
 import tcod.sdl.video
 import traceback
+
 str = (f"Loaded tcod.sdl.video and traceback modules in {time.time() - start_time:.2f} seconds")
 print(str)
 with open(get_data_path('logs/log.txt'), 'a') as log_file:
@@ -375,7 +390,6 @@ def main() -> None:
     previous_has_game_view = False
     transition_frame_counter = 0
     transition_cooldown_frames = 0
-    
     # Continue with actual loading operations
     show_loading_screen(context, ui_console, 0.75, "Loading game settings...")
     settings = load_settings()
@@ -455,17 +469,6 @@ def main() -> None:
     scanlines_h = scanlines_np.shape[0]
     scanlines_scroll = 0.0
     scanlines_speed = 10.0  # pixels per second
-    # CRT jitter state — rare single-scanline drift (electron beam slip)
-    _jitter_x = 0        # horizontal pixel offset for the jitter band
-    _jitter_y = 0        # top Y coordinate of the jitter band on screen
-    _jitter_band_h = 3   # height of the jitter band in pixels
-    _jitter_frames = 0   # frames remaining for active jitter
-    # CRT vertical-roll state — very rare, slow screen-roll (sync loss)
-    _vroll_offset = 0.0      # current vertical pixel offset of the scene
-    _vroll_speed  = 0.0      # pixels/sec (positive = rolling downward)
-    _vroll_ttl    = 0.0      # seconds remaining for this roll event
-    _vroll_next   = float(np.random.uniform(5.0, 10.0))  # seconds until next roll
-    _vroll_elapsed = 0.0     # total seconds in main loop (for roll scheduling)
     game_tex = None
     ui_tex = None
     overlay_popup_console = None   # small console sized to menu bounding box
@@ -473,6 +476,11 @@ def main() -> None:
     overlay_popup_dest    = None   # screen dest rect for popup
     overlay_popup_src_size = None   # (w, h) pixel dimensions of popup texture
     cached_overlay_handler = None
+    # Inspect-overlay (F3 / LookHandler) cached UI texture --- rebuilt only when
+    # mouse_location changes so render_ui_overlay() isn't called every frame.
+    inspect_ui_tex          = None  # BLEND-mode GPU texture of last UI render
+    inspect_ui_cursor_cache = None  # (cursor_x, cursor_y) that produced that texture
+    _prev_inspect_overlay   = False # True when previous frame was inspect_overlay_view
     overlay_dirty = True
     _last_dirty_ui_tile = None  # track tile under cursor to avoid per-pixel dirty
 
@@ -533,9 +541,21 @@ def main() -> None:
     _crt_on_scene_tex       = None   # captured game frame for play_on
     _crt_on_scene_tex_size  = (0, 0)
 
-    try:
-        while True:
+    # Load channel splash overlays and kick off the menu one immediately
+    gpu.load_channel_overlays(
+        get_data_path("RP/ch032.png"),
+        get_data_path("RP/ch000.png"),
+    )
+    gpu.start_wobble()
+    gpu.start_channel_overlay("menu")
 
+    try:
+        last_frame = time.time()
+        while True:
+            now = time.time()
+            delta = now - last_frame
+            last_frame = now
+            _dlog(f"Main loop start: delta={delta:.4f}s")
             # Process deferred handler transitions (e.g., GameOver) after one final frame update.
             pending_engine = getattr(handler, 'engine', None)
             if pending_engine is not None:
@@ -585,7 +605,7 @@ def main() -> None:
                 has_game_view
                 and isinstance(handler, input_handlers.SelectIndexHandler)
             )
-            inspect_overlay_view = isinstance(handler, input_handlers.LookHandler)
+            inspect_overlay_view = isinstance(handler, (input_handlers.LookHandler, input_handlers.EntityDebugHandler))
             main_game_view = (
                 has_game_view
                 and isinstance(handler, input_handlers.MainGameEventHandler)
@@ -625,29 +645,38 @@ def main() -> None:
             #           allowing the main loop to transition to MainGameEventHandler.
             _rlog(f"CRT_STATE frame={_render_frame} gen={_gen_in_progress} off={_crt_off_played} on={_crt_on_played} snap={'yes' if _gen_scene_tex is not None else 'no'} handler={type(handler).__name__} gen_complete={getattr(handler,'generation_complete',None)}")
             if _gen_in_progress:
-                # Kick off the generation thread if on_render() hasn't done it
-                # (we bypass on_render entirely to prevent the loading screen UI
-                # from ever appearing, so we must start it ourselves).
-                if hasattr(handler, 'generation_started') and not handler.generation_started:
-                    _rlog(f"CRT: starting generation thread")
-                    handler.generation_started = True
-                    handler.start_generation()
-
                 if not _crt_off_played:
                     if _gen_scene_tex is not None:
+                        # Play the screen-OFF animation BEFORE starting the generation
+                        # thread.  Running the blocking render loop while the gen thread
+                        # is active caused SDL/GPU state corruption that froze the
+                        # renderer inside renderer.present().
                         _rlog(f"CRT: playing screen-OFF animation")
                         _crt_off_played = True
                         _sw_anim = CRTSwitchAnimation(renderer, window_w, window_h)
                         _sw_anim.play_off(_gen_scene_tex, event_pump=tcod.event.get, glare_tex=glare_tex)
                         del _sw_anim
                         _rlog(f"CRT: screen-OFF done")
+                        # Now it is safe to start the generation thread — renderer is
+                        # fully idle and will only draw solid-black frames until gen
+                        # completes.
+                        if hasattr(handler, 'generation_started') and not handler.generation_started:
+                            _rlog(f"CRT: starting generation thread")
+                            handler.generation_started = True
+                            handler.start_generation()
                     else:
+                        # No snapshot yet: start the thread immediately (no blocking
+                        # animation to collide with) and wait for the snap.
+                        if hasattr(handler, 'generation_started') and not handler.generation_started:
+                            _rlog(f"CRT: starting generation thread (no snap yet)")
+                            handler.generation_started = True
+                            handler.start_generation()
                         _rlog(f"CRT: waiting for snapshot (gen in progress, no snap yet)")
                     # else: snapshot not ready yet — drop one black frame, try next
                 renderer.draw_color = (0, 0, 0, 255)
                 renderer.clear()
                 renderer.copy(glare_tex, dest=(0, 0, window_w, window_h))
-                renderer.present()
+                #renderer.present()
                 for _ in tcod.event.get():
                     pass
                 time.sleep(frame_time)
@@ -664,6 +693,14 @@ def main() -> None:
                 _crt_off_played      = False
                 _crt_on_played       = False
                 _suppress_degauss_once = True
+                # Flag the main loop to capture the next rendered game frame
+                _crt_on_capture_pending = True
+                # CRT-on sound must play clean, before VHS warps anything.
+                sounds.play_crt_on_sound()
+                time.sleep(0.5)
+                # Open VHS gate BEFORE the new handler initialises so any dungeon
+                # music/ambient loops it starts are warped from the very first sample.
+                sounds.trigger_vhs_audio_effect()
                 class _CRTTransitionEvent:
                     _crt_transition = True
                 new_handler = handler.handle_events(_CRTTransitionEvent())
@@ -671,17 +708,13 @@ def main() -> None:
                 if new_handler is not handler:
                     handler = new_handler
                     overlay_dirty = True
-                # Flag the main loop to capture the next rendered game frame
-                _crt_on_capture_pending = True
                 # Render black this frame while the new handler initialises
                 renderer.draw_color = (0, 0, 0, 255)
                 renderer.clear()
-                renderer.copy(glare_tex, dest=(0, 0, window_w, window_h))
-                renderer.present()
-                for _ in tcod.event.get():
-                    pass
-                time.sleep(frame_time)
-                continue
+
+
+            # Channel overlay (menu boot or game load)
+            gpu.draw_channel_overlay(glare_tex)
 
             # Always use context.sdl_window.size for window and mouse mapping
             base_tile_w = window_w / screen_width
@@ -717,6 +750,11 @@ def main() -> None:
                 gpu.apply_lightmap(active_engine, game_dest_w, game_dest_h, game_console)
 
             if fast_main_view:
+                # Clear inspect cache when returning to normal gameplay
+                if _prev_inspect_overlay:
+                    inspect_ui_tex          = None
+                    inspect_ui_cursor_cache = None
+                _prev_inspect_overlay = False
                 renderer.clear()
                 game_tex = game_console_renderer.render(game_console)
                 renderer.copy(game_tex, dest=(0, 0, int(game_dest_w), int(game_dest_h)))
@@ -763,6 +801,17 @@ def main() -> None:
             elif map_overlay_view:
                 cached_overlay_handler = None
                 overlay_dirty = True
+
+                # --- Shadow-clearing: if the previous frame was inspect_overlay_view
+                # but this one is not (or is a different handler), drop the cached
+                # inspect texture so no ghost image bleeds into the regular overlay path.
+                if _prev_inspect_overlay and not inspect_overlay_view:
+                    inspect_ui_tex          = None
+                    inspect_ui_cursor_cache = None
+                    overlay_popup_tex       = None
+                    overlay_popup_dest      = None
+                _prev_inspect_overlay = inspect_overlay_view
+
                 renderer.clear()
 
                 game_console.clear()
@@ -778,20 +827,32 @@ def main() -> None:
                 ui_console.clear()
                 active_engine.render_ui(ui_console)
                 if inspect_overlay_view:
-                    handler.render_ui_overlay(ui_console)
-                    ui_pixels = render_console_with_transparency(ui_console)
-                    if ui_tex is None:
-                        ui_tex = renderer.upload_texture(ui_pixels)
-                        ui_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-                    else:
-                        ui_tex.update(ui_pixels)
-                    renderer.copy(ui_tex, dest=(0, 0, window_w, window_h))
+                    # Only rebuild the inspect UI texture when the cursor tile changes.
+                    cur_cursor = tuple(getattr(active_engine, 'mouse_location',
+                                               active_engine.mouse_location))
+                    if inspect_ui_cursor_cache != cur_cursor or inspect_ui_tex is None:
+                        inspect_ui_cursor_cache = cur_cursor
+                        handler.render_ui_overlay(ui_console)
+                        ui_pixels = render_console_with_transparency(ui_console)
+                        if inspect_ui_tex is None:
+                            inspect_ui_tex = renderer.upload_texture(ui_pixels)
+                            inspect_ui_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                        else:
+                            inspect_ui_tex.update(ui_pixels)
+                    renderer.copy(inspect_ui_tex, dest=(0, 0, window_w, window_h))
                 else:
                     hud_tex = ui_console_renderer.render(ui_console)
                     renderer.copy(hud_tex,
                                   source=(0, int(hud_source_y), int(_ui_tex_w), int(hud_source_h)),
                                   dest=(0, int(window_h - hud_dest_h), window_w, int(hud_dest_h)))
             elif has_game_view:
+                # Clear inspect cache whenever we leave inspect_overlay_view.
+                if _prev_inspect_overlay:
+                    inspect_ui_tex          = None
+                    inspect_ui_cursor_cache = None
+                    overlay_dirty           = True   # force popup re-render this frame
+                _prev_inspect_overlay = False
+
                 renderer.clear()
                 if needs_live_game_frame:
                     game_tex = game_console_renderer.render(game_console)
@@ -857,6 +918,11 @@ def main() -> None:
                               source=(0, int(hud_source_y), int(_ui_tex_w), int(hud_source_h)),
                               dest=(0, int(window_h - hud_dest_h), window_w, int(hud_dest_h)))
             else:
+                # Clear inspect cache when in main-menu / no-game-view path
+                if _prev_inspect_overlay:
+                    inspect_ui_tex          = None
+                    inspect_ui_cursor_cache = None
+                _prev_inspect_overlay = False
                 cached_overlay_handler = None
                 overlay_dirty = True
                 ui_console.clear()
@@ -869,44 +935,8 @@ def main() -> None:
             _rlog("restore_render_target")
             _scene_ctx.__exit__(None, None, None)  # restore default render target
 
-            # Global CRT post-process pipeline:
-            # 1. Barrel+CA on _scene_tex → captured into _post_crt_tex
-            # 2. _post_crt_tex copied to default framebuffer
-            # 3. Scanlines (MOD) → dims the CRT image
-            # 4. Vignette (BLEND) → darkens edges
-            # 5. Bloom (ADD) → sourced from _post_crt_tex so glow positions
-            #    match the barrel-distorted display exactly
-            _rlog("copy_scene_tex")
-            # Step 1: barrel distortion only — 96 calls, single colour pass
-            with renderer.set_render_target(gpu.barrel_tex):
-                renderer.draw_color = (0, 0, 0, 255)
-                renderer.clear()
-                gpu.scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-                gpu.scene_tex.alpha_mod = 255
-                gpu.scene_tex.color_mod = (255, 255, 255)
-                copy_curved(gpu.scene_tex, dest=(0, 0, window_w, window_h), src_size=(window_w, window_h))
-
-            # Step 2: chromatic aberration — 3 flat pixel-shifts of the barrel result
-            with renderer.set_render_target(gpu.post_crt_tex):
-                renderer.draw_color = (0, 0, 0, 255)
-                renderer.clear()
-                if gpu.crt_ca_on and not _crt_force_fast_path and gpu.ca_shift > 0:
-                    ca = round(gpu.ca_shift)
-                    gpu.barrel_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
-                    gpu.barrel_tex.alpha_mod = 255
-                    gpu.barrel_tex.color_mod = (255, 0, 0)
-                    renderer.copy(gpu.barrel_tex, dest=(-ca, 0, window_w, window_h))
-                    gpu.barrel_tex.color_mod = (0, 255, 0)
-                    renderer.copy(gpu.barrel_tex, dest=(0, 0, window_w, window_h))
-                    gpu.barrel_tex.color_mod = (0, 0, 255)
-                    renderer.copy(gpu.barrel_tex, dest=(ca, 0, window_w, window_h))
-                    gpu.barrel_tex.color_mod = (255, 255, 255)
-                    gpu.barrel_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-                else:
-                    gpu.barrel_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-                    gpu.barrel_tex.alpha_mod = 255
-                    gpu.barrel_tex.color_mod = (255, 255, 255)
-                    renderer.copy(gpu.barrel_tex, dest=(0, 0, window_w, window_h))
+            # Barrel distortion + chromatic aberration: scene_tex → post_crt_tex
+            gpu.apply_barrel_and_ca(window_w, window_h)
 
             # Rolling snapshot of the last pre-gen post-CRT frame.
             # Updated every frame where generation is NOT in progress so it always
@@ -969,125 +999,61 @@ def main() -> None:
                 _crt_on_capture_pending = False
                 _rlog(f"CRT: playing screen-ON animation with real game frame")
                 _sw_anim = CRTSwitchAnimation(renderer, window_w, window_h)
-                _sw_anim.play_on(_crt_on_scene_tex, event_pump=tcod.event.get, glare_tex=glare_tex)
+                _sw_anim.play_on(_crt_on_scene_tex, event_pump=tcod.event.get,
+                                 glare_tex=glare_tex, gpu_stack=gpu,
+                                 scanlines_tex=scanlines_tex, scanlines_h=scanlines_h,
+                                 vignette_tex=vignette_tex)
                 del _sw_anim
                 _rlog(f"CRT: screen-ON done")
                 _crt_on_scene_tex      = None
                 _crt_on_scene_tex_size = (0, 0)
+                # Re-trigger wobble and game-load channel splash
+                gpu.start_wobble()
+                gpu.start_channel_overlay("game")
                 continue   # skip outer present(); play_on already presented final frame
 
-            # Blit post-CRT image to default framebuffer
-            gpu.post_crt_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-            gpu.post_crt_tex.alpha_mod = 255
-            gpu.post_crt_tex.color_mod = (255, 255, 255)
-            if not _crt_force_fast_path and _vroll_offset != 0.0:
-                _vo = int(_vroll_offset) % window_h
-                if _vo < 0:
-                    _vo += window_h
-                if _vo == 0:
-                    renderer.copy(gpu.post_crt_tex, dest=(0, 0, window_w, window_h))
-                else:
-                    # Bottom strip: source [0 .. window_h-_vo] → dest [_vo .. window_h]
-                    _bot_h = window_h - _vo
-                    renderer.copy(gpu.post_crt_tex,
-                                  source=(0, 0, window_w, _bot_h),
-                                  dest=(0, _vo, window_w, _bot_h))
-                    # Top strip: source [window_h-_vo .. window_h] → dest [0 .. _vo]
-                    renderer.copy(gpu.post_crt_tex,
-                                  source=(0, _bot_h, window_w, _vo),
-                                  dest=(0, 0, window_w, _vo))
-            else:
-                renderer.copy(gpu.post_crt_tex, dest=(0, 0, window_w, window_h))
+            # Wobble offset (decaying screen-shake on CRT power-on)
+            _wx, _wy = gpu.tick_wobble(1.0 / target_fps)
 
-            # CRT scanline jitter: occasionally one thin horizontal band slips sideways
-            if not _crt_force_fast_path:
-                if _jitter_frames > 0:
-                    _jitter_frames -= 1
-                    _src_x = max(-_jitter_x, 0)
-                    _dst_x = max(_jitter_x, 0)
-                    _band_w = window_w - abs(_jitter_x)
-                    renderer.copy(
-                        gpu.post_crt_tex,
-                        source=(_src_x, _jitter_y, _band_w, _jitter_band_h),
-                        dest=(_dst_x, _jitter_y, _band_w, _jitter_band_h),
-                    )
-                    if _jitter_frames == 0:
-                        _jitter_x = 0
-                elif np.random.random() < 0.25:  # ~0.8% chance/frame ≈ once per ~4 s at 30 fps
-                    _jitter_x = int(np.random.choice([-4, -3, -2, 2, 3, 4]))
-                    _jitter_y = int(np.random.randint(4, window_h - 8))
-                    _jitter_band_h = int(np.random.choice([2, 2, 3, 3, 4]))
-                    _jitter_frames = int(np.random.randint(1, 3))
-
-            # CRT vertical roll: schedule and advance
-            if not _crt_force_fast_path:
-                _dt_frame = 1.0 / target_fps
-                _vroll_elapsed += _dt_frame
-                if _vroll_ttl > 0.0:
-                    _vroll_offset = (_vroll_offset + _vroll_speed * _dt_frame) % window_h
-                    _vroll_ttl -= _dt_frame
-                    if _vroll_ttl <= 0.0:
-                        # Ease offset back to 0 over next ~0.3 s by decaying speed
-                        _vroll_speed *= 0.0  # stop immediately; offset snaps on next roll
-                        _vroll_offset = 0.0
-                elif _vroll_elapsed >= _vroll_next:
-                    # Trigger a subtle roll: 3–8 px/s for 0.4–1.2 s
-                    _vroll_speed  = float(np.random.uniform(3.0, 8.0))
-                    _vroll_ttl    = float(np.random.uniform(0.4, 1.2))
-                    _vroll_elapsed = 0.0
-                    _vroll_next   = float(np.random.uniform(30.0, 90.0))
-
-            # Degauss: advance and draw chromatic fringe + overlays on top of scene
-            if not _crt_force_fast_path and _active_degauss is not None:
-                _active_degauss.tick(1.0 / target_fps)
-                _active_degauss.draw(window_w, window_h, scene_tex=gpu.post_crt_tex)
-                if _active_degauss.done:
-                    _active_degauss = None
+            # Composite post_crt_tex onto the framebuffer (with wobble, vroll, and
+            # AGC oversaturation/bloom-wash while the wobble is active)
+            gpu.blit_post_crt(_wx, _wy)
 
             if not _crt_force_fast_path:
-                # Scanlines (MOD — dims the barrel-distorted image)
+                # Advance + draw CRT glitch effects (jitter band, vertical roll)
+                gpu.tick_crt_glitches(1.0 / target_fps)
+                gpu.draw_scanline_jitter()
+
+                # Degauss (chromatic fringe on player death)
+                if _active_degauss is not None:
+                    _active_degauss.tick(1.0 / target_fps)
+                    _active_degauss.draw(window_w, window_h, scene_tex=gpu.post_crt_tex)
+                    if _active_degauss.done:
+                        _active_degauss = None
+
+                # Scanlines (scrolling MOD pass)
                 if gpu.crt_scanlines_on:
-                    _rlog("scanlines start")
                     scanlines_scroll = (scanlines_scroll + scanlines_speed * (1.0 / target_fps)) % scanlines_h
-                    y_offset = int(scanlines_scroll)
-                    y = -y_offset
-                    while y < window_h:
-                        tile_h = min(scanlines_h, window_h - y) if y >= 0 else min(scanlines_h + y, window_h)
-                        src_y = 0 if y >= 0 else -y
-                        dst_y = max(y, 0)
-                        draw_h = min(scanlines_h - src_y, window_h - dst_y)
-                        if draw_h > 0:
-                            renderer.copy(scanlines_tex,
-                                          source=(0, src_y, 1, draw_h),
-                                          dest=(0, dst_y, window_w, draw_h))
-                        y += scanlines_h
+                gpu.apply_crt_overlays(
+                    window_w, window_h,
+                    scanlines_tex=scanlines_tex, scanlines_h=scanlines_h,
+                    scanlines_y_offset=int(scanlines_scroll),
+                    skip_vignette=True,
+                )
 
-
-# ----------------------------------------- #
-# POST PROCESSING PASSES (CRT shader effects, bloom, and GPU game-layer animations)
-# ------------------------------------------ #
-
-
-                # GPU game-layer animation passes (embers etc.)
-                # Only run when in pure main-game view (no popups, overlays, or
-                # menus). fast_main_view is False whenever an inventory, popup,
-                # look handler, or any other overlay is active, so embers never
-                # composite on top of UI layers.
+                # GPU game-layer animations (embers, smoke, drips — bloom pipeline)
+                # Skipped when any overlay/menu/popup is active.
                 if fast_main_view and active_engine is not None and (gpu.gpu_anim_registry or gpu.gpu_anim_nobloom_registry):
                     gpu.ensure_gpu_anim_layer(game_dest_w, game_dest_h)
                     gpu.run_gpu_anim_passes(active_engine, game_dest_w, game_dest_h)
 
-
-                # Vignette (BLEND — darkens edges)
-                if gpu.crt_vignette_on:
-                    _rlog("vignette")
-                    renderer.copy(vignette_tex, dest=(0, 0, window_w, window_h))
-                    renderer.copy(glare_tex, dest=(0, 0, window_w, window_h))
-                # Bloom last — ADD glow bleeds over scanlines and vignette
-                if gpu.crt_bloom_on:
-                    _rlog("gpu_bloom start")
-                    gpu.gpu_bloom(gpu.post_crt_tex, window_w, window_h)
-                    _rlog("gpu_bloom done")
+                # Vignette + glare + bloom (drawn after game-layer anims so they glow)
+                gpu.apply_crt_overlays(
+                    window_w, window_h,
+                    skip_scanlines=True,
+                    vignette_tex=vignette_tex, glare_tex=glare_tex,
+                    bloom_source=gpu.post_crt_tex,
+                )
 
             _rlog("renderer.present")
             try:

@@ -576,6 +576,8 @@ class LoadingScreen(input_handlers.BaseEventHandler):
                 self.generation_started = True
                 self.start_generation()
 
+            print("done!")
+
         except Exception as e:
             traceback.print_exc()
             console.print(
@@ -660,6 +662,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
         if self.generation_complete and self.engine is not None:
             if getattr(event, '_crt_transition', False):
                 from input_handlers import MainGameEventHandler
+
                 sounds.start_dungeon_music()
                 return MainGameEventHandler(self.engine)
             if self.engine is None:
@@ -825,7 +828,6 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
                     # Stop menu ambience when leaving menu  
                     sounds.stop_menu_ambience()
                     sounds.stop_all_music()
-                    sounds.play_stairs_sound()
                     sounds.start_dungeon_music()
 
                     return input_handlers.MainGameEventHandler(engine)
@@ -1136,15 +1138,14 @@ class MainMenu(input_handlers.BaseEventHandler):
             return SaveGameMenu(self)
         elif action == "tutorial":
             sounds.stop_menu_ambience()
-            sounds.stop_all_music()
-            sounds.play_stairs_sound()
+            sounds.play_crt_off_sound()
             
             # Create tutorial game engine
             engine = tutorial_game()
             
             # Start dungeon music for tutorial
             sounds.start_dungeon_music()
-            
+
             return input_handlers.MainGameEventHandler(engine)
         elif action == "start_new":
 
@@ -1168,7 +1169,7 @@ class MainMenu(input_handlers.BaseEventHandler):
                 sounds.stop_menu_ambience()
                 sounds.stop_all_music()
                 # Go to seed input screen (optional seed entry)
-                sounds.play_stairs_sound()
+                sounds.play_crt_off_sound()
                 return loading_screen
             
             return input_handlers.TextInputHandler(
