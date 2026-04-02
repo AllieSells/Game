@@ -404,40 +404,6 @@ def generate_circle_based_grass(game_map: GameMap, map_width: int, map_height: i
                 game_map.tiles[x, y] = tile_types.fill_random_grasses()
                 placed[x][y] = True
 
-def generate_tutorial(
-        map_width: int,
-        map_height: int,
-        engine: Engine,
-) -> GameMap:
-    """Generates a pre-determined tutorial map."""
-
-    player = engine.player
-    tutorial = GameMap(engine, map_width, map_height, entities=[player], type="dungeon", name="Tutorial")  # Use dungeon type for world borders
-
-    # Create a simple room
-    room = RectangularRoom(10, 10, map_width - 4, map_height - 4)
-    tutorial.tiles[room.inner] = tile_types.random_floor_tile()
-    place_campfires(tutorial, "dungeon_first_room", room=room, player_pos=(map_width//2, map_height//2))
-    
-    import loot_tables
-    loot = loot_tables.generate_loot_from_table("starter_chest")
-
-    tutorial_chest = entity_factories.make_chest_with_loot(loot, capacity=15)
-    cx, cy = room.center
-    chest_x, chest_y = min(tutorial.width - 1, cx + 1), cy
-
-    # Get guide entity
-    
-    guide = copy.deepcopy(entity_factories.tutorial_guide)
-    guide.spawn(tutorial, player.x + 2, player.y)
-
-
-    tutorial_chest.spawn(tutorial, chest_x, chest_y)
-
-    player.place(cx, cy, tutorial)
-
-    return tutorial
-
 def generate_overworld_chunk(
         map_width: int,
         map_height: int,
@@ -865,7 +831,8 @@ def apply_wall_merging(dungeon: GameMap) -> None:
         for y in range(dungeon.height):
             # Check if this tile is a wall, but not a world border
             tile = dungeon.tiles[x, y]
-            is_wall = not tile["walkable"] and not tile["interactable"]
+            # Check if name has wall in it
+            is_wall = "Wall" in tile["name"] 
             is_world_border = tile["name"] == "World Border"
             
             if is_wall and not is_world_border:
@@ -1080,6 +1047,67 @@ def join_caverns(dungeon: GameMap, width: int, height: int) -> None:
             pt = npt
 
 
+def generate_first_floor(
+        map_width: int,
+        map_height: int,
+        engine: Engine,
+) -> GameMap:
+    # Generate tutorial floor
+
+    _placer = engine.player
+
+    dungeon = GameMap(engine, map_width, map_height, entities=[_placer], type="dungeon", name="Dungeon", sunlit=False, biome="tutorial")
+    rooms: List[RectangularRoom] = []
+    center_of_last_room = (0, 0)
+    dungeon.biome_str = "Mouth of Aerrok"
+    tut_room = RectangularRoom(x=map_width//2, y=map_height//2, width=20, height=9)
+    for x in range(tut_room.x1, tut_room.x2 + 1):
+        for y in range(tut_room.y1, tut_room.y2 + 1):
+            if x == tut_room.x1 or x == tut_room.x2 or y == tut_room.y1 or y == tut_room.y2:
+                dungeon.tiles[x, y] = tile_types.random_wall_tile()
+            else:
+                dungeon.tiles[x, y] = tile_types.wooden_floor
+            # top and bottom walls, between x49 and x59
+            if y == tut_room.y1 or y == tut_room.y2:
+                if x > tut_room.x1 + 1 and x < tut_room.x2 - 2:
+                    print(tut_room.x1, tut_room.x2)
+                    # every 3 tiles
+                    if (x - (tut_room.x1 + 2)) % 3 == 0:
+                        dungeon.tiles[x, y] = tile_types.window
+    dungeon.tiles[40, 24] = tile_types.locked_door
+
+
+        # Starter chest on floor 1, placed adjacent to the player
+    print("[GEN] starter chest placement start")
+    import loot_tables
+    _loot = loot_tables.generate_loot_from_table("starter_chest")
+    _start_chest = entity_factories.make_chest_with_loot(_loot, capacity=15)
+    _start_chest.spawn(dungeon, 46, 21)
+
+    dungeon.tiles[58, 25] = tile_types.down_stairs
+    dungeon.downstairs_location = (58, 25)
+
+    #dungeon.tiles[56, 21] = tile_types.generate_foliage_tile()
+    #dungeon.tiles[55, 21] = tile_types.generate_foliage_tile()
+    #dungeon.tiles[55, 28] = tile_types.generate_foliage_tile()
+    #dungeon.tiles[56, 28] = tile_types.generate_foliage_tile()
+
+
+    apply_wall_merging(dungeon)
+
+    rooms.append(tut_room)
+
+    entity_factories.training_dummy.spawn(dungeon, 49, 21)
+    guide = entity_factories.tutorial_guide
+    guide.generate_villager()
+    guide.spawn(dungeon, 43, 28)
+    _placer.place(41, 24, dungeon)
+
+    return dungeon
+
+
+
+
 def generate_dungeon(
         max_rooms: int,
         room_min_size: int,
@@ -1094,9 +1122,14 @@ def generate_dungeon(
     # Don't re-seed here - it breaks room generation variety
     # Seeding is handled at the top level in setup_game.py
     
+
     # Use proxy instead of real player for background floor generation
     _placer = player_proxy if player_proxy is not None else engine.player
     _floor = floor_num if floor_num is not None else engine.game_world.current_floor
+
+    if _floor == 1:
+        return generate_first_floor(map_width, map_height, engine)
+
 
 
     # Noise params
@@ -1116,6 +1149,10 @@ def generate_dungeon(
 
     # Cavern Type
     if erosion > 2.0 or (erosion <= 2.0 and erosion >= -2.0):
+        if erosion > 2.0:
+            dungeon.biome_str = "Caverns"
+        else:
+            pass  # Ruins biome is set later in mixed section after room/cave split
         print("Generating cavern map with noise erosion value:", erosion)
         # Seed map: 40% floor, 60% wall
         for x in range(1, dungeon.width - 1):
@@ -1172,20 +1209,7 @@ def generate_dungeon(
                 break
         print(f"[GEN] player placed at ({_placer.x}, {_placer.y})")
 
-        # Starter chest on floor 1, placed adjacent to the player
-        print("[GEN] starter chest placement start")
-        if _floor == 1:
-            import loot_tables
-            _loot = loot_tables.generate_loot_from_table("starter_chest")
-            _start_chest = entity_factories.make_chest_with_loot(_loot, capacity=15)
-            _cx, _cy = _placer.x, _placer.y
-            for _cdx, _cdy in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)]:
-                _ccx, _ccy = _cx + _cdx, _cy + _cdy
-                if (1 <= _ccx < map_width - 1 and 1 <= _ccy < map_height - 1
-                        and dungeon.tiles[_ccx, _ccy]["walkable"]
-                        and not any(e.x == _ccx and e.y == _ccy for e in dungeon.entities)):
-                    _start_chest.spawn(dungeon, _ccx, _ccy)
-                    break
+
 
         print("[GEN] cave entity spawning start")
         # Spawn entities in grid sections across the cave (skip player start section)
@@ -1239,6 +1263,10 @@ def generate_dungeon(
     # Dungeon Type
     print(f"[GEN] dungeon-room block check: erosion={erosion:.3f}, will_run={(erosion < -2.0 or (-2.0 <= erosion <= 2.0))}")
     if erosion < -2.0 or (-2.0 <= erosion <= 2.0):
+        if erosion < -2.0:
+            dungeon.biome_str = "Dungeons"
+        else:
+            dungeon.biome_str = "Ruins"
         if rooms:
             rooms = [] # Clear cave generated rooms for ruins type
         for r in range(max_rooms):
@@ -1316,6 +1344,12 @@ def generate_dungeon(
         dungeon.tiles[center_of_last_room] = tile_types.down_stairs
         dungeon.downstairs_location = center_of_last_room
 
+    # If not first floor, place up stairs in the center of the first room
+    if _floor > 1 and rooms:
+        center_of_first_room = rooms[0].center
+        dungeon.tiles[center_of_first_room] = tile_types.up_stairs
+        dungeon.upstairs_location = center_of_first_room
+
 
 
     # Post-processing: Remove isolated walls that have no floors touching them
@@ -1372,7 +1406,9 @@ def generate_dungeon(
                         dungeon.tiles[x, y] = tile_types.mossify_wall_tile(tile)
                 elif tile["walkable"]:
                     if random.random() < (vegetation/6)**2:
-                        dungeon.tiles[x, y] = tile_types.random_mossy_floor_tile()
+                        # Ensure tile is not a stair
+                        if tile["name"] not in ["Down Stairs", "Up Stairs"]:
+                            dungeon.tiles[x, y] = tile_types.random_mossy_floor_tile()
 
     print("[GEN] mossification done")
     # Water pool post-processing
@@ -1407,6 +1443,10 @@ def generate_dungeon(
     print("[GEN] foliage done")
     if vegetation > 4:
         dungeon.biome = "lush"
+        dungeon.biome_str = "Lush " + dungeon.biome_str
+    elif vegetation > 2:
+        dungeon.biome_str = "Overgrown " + dungeon.biome_str
+     
 
     print("[GEN] generate_dungeon complete")
     return dungeon

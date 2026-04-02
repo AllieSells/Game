@@ -1,6 +1,6 @@
 from re import T
 from components import equipment
-from components.ai import DarkHostileEnemy, Friendly, HostileEnemy
+from components.ai import DarkHostileEnemy, Friendly, HostileEnemy, BaseAI
 from components import equippable
 from components.effect import Effect
 from components.equipment import Equipment
@@ -419,12 +419,12 @@ import roman
 def generate_sigil_stone() -> Item:
     # Use current random state - no individual seeding needed
     unlocks_and_descriptions = {
-        #'Teleport' : "Distort space around you",
+        'Teleport' : "Distort space around you",
         "Darkvision": "Sight persists in darkness",
-        #'Poison Spray': "Summon corrosive elements at your will",
-        #'Fireball': 'Unleash flames upon your foes',
-        #'Healing Word': 'Soothing light mends wounds',
-        #'Inflict Wounds': 'Invoke necrotic forces upon your foes',
+        'Poison Spray': "Summon corrosive elements at your will",
+        'Fireball': 'Unleash flames upon your foes',
+        'Healing Word': 'Soothing light mends wounds',
+        'Inflict Wounds': 'Invoke necrotic forces upon your foes',
     }
     
     # Get a random key-value pair from the dictionary
@@ -595,6 +595,7 @@ player = Actor(
     char=chr(0xE030),
     color=(255, 255, 255),
     name = "Player",
+    is_player=True,
     ai_cls=HostileEnemy,
     equipment=Equipment(),
     fighter=Fighter(hp=30, base_defense=2, base_power=5),
@@ -762,18 +763,33 @@ altar = Actor(
     level=Level(xp_given=0),
 )
 
+training_dummy = Actor(
+    char=chr(0xE036),
+    color=(255, 255, 255),
+    name="Training Dummy",
+    ai_cls=BaseAI,
+    equipment=Equipment(),
+    fighter=Fighter(hp=30, base_defense=0, base_power=0, can_bleed=False, leave_corpse=False),
+    inventory=Inventory(capacity=0),
+    level=None,
+    sentient=False,
+    is_known=True,
+    type = "Training Dummy",
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=30),
+)
+
 tutorial_guide = Actor(
-    char="☺",
-    color=(156, 125, 255),
-    name="Guide",
-    ai_cls=None,
+    char=chr(0xE035),
+    color=(255, 255, 255),
+    name="The Guide",
+    ai_cls=BaseAI,
     equipment=Equipment(),
     fighter=Fighter(hp=999999999999, base_defense=0, base_power=0),
     inventory=Inventory(capacity=26),
     level=Level(xp_given=0),
     sentient=True,
     is_known=True,
-    type = "NPC",
+    type = "Guide",
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=999999999999),
 )
 

@@ -411,8 +411,12 @@ class TurnManager:
         from input_handlers import GameOverEventHandler, LevelUpEventHandler
         
         if not self.engine.player.is_alive:
+            sounds.stop_all_music()
+            sounds.stop_all_sounds()
+            sounds.play_gameover_sound()
             # Defer game-over overlay until one more engine sprite-update cycle has run.
             if getattr(self.engine, '_pending_handler', None) is None:
+                
                 self.engine._pending_handler = GameOverEventHandler(self.engine)
                 self.engine._pending_handler_ready = False
             return None

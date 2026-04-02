@@ -128,6 +128,7 @@ from gpu_stack import (
     create_glare_texture,
     DegaussAnimation,
     CRTSwitchAnimation,
+    VHSGlitchAnimation,
 )
 
 # --- Procedural scanlines ---
@@ -153,6 +154,8 @@ except Exception:
 
 # Active degauss instance — set to a DegaussAnimation to run it; None = idle.
 _active_degauss: "DegaussAnimation | None" = None
+# Active VHS glitch — set to a VHSGlitchAnimation on game over; None = idle.
+_active_vhs_glitch: "VHSGlitchAnimation | None" = None
 
 vignette_tex = create_vignette_texture(renderer)
 glare_tex = create_glare_texture(renderer)
@@ -218,7 +221,8 @@ def get_game_screen_tile(position: tuple[float, float], window_w: float, window_
     tile_y = max(0, min(game_view_height - 1, tile_y))
     return tile_x, tile_y
 
-def show_loading_screen(context, console, progress: float, status: str) -> None:
+boot_str = []
+def show_loading_screen(context, console, status: str) -> None:
     """Display a loading screen with progress bar."""
     # Pump the SDL event queue so the OS doesn't mark the window as
     # non-responsive during heavy loading pauses.  Events are discarded
@@ -226,24 +230,21 @@ def show_loading_screen(context, console, progress: float, status: str) -> None:
     for _ in tcod.event.get():
         pass
     console.clear()
-    # Center the loading screen
-    screen_center_x = console.width // 2
-    screen_center_y = console.height // 2
+    # Add str to list
+    global boot_str
+    boot_str.append(status)
     # Title
-    title = "Loading..."
-    console.print(screen_center_x - len(title) // 2, screen_center_y - 4, title, fg=color.fantasy_text)
-    # Progress bar
-    bar_width = 40
-    bar_x = screen_center_x - bar_width // 2
-    bar_y = screen_center_y
-    for i in range(bar_width):
-        console.print(bar_x + i, bar_y, "░", fg=color.parchment_light)
-    fill_width = int(bar_width * progress)
-    for i in range(fill_width):
-        console.print(bar_x + i, bar_y, "█", fg=color.gold_accent)
-    percentage = f"{int(progress * 100)}%"
-    console.print(screen_center_x - len(percentage) // 2, bar_y + 2, percentage, fg=color.gold_accent)
-    console.print(screen_center_x - len(status) // 2, bar_y + 4, status, fg=color.fantasy_text)
+    title = """
+DOA OS (C) 1998 LOXEN, INC
+BIOS DATE 11/19/98 12:40:36 VER: 18.23.00
+CPU: Intel(R) CPU 330 @ 40 MHz
+SPEED: 40MHz
+
+BOOT LOG:
+"""
+    console.print(5, 15, title, fg=color.white)
+    for i, x in enumerate(boot_str):
+        console.print(5, 21 + i, x, fg=color.white)
     # context.present() renders the console AND calls SDL_RenderPresent internally.
     # Do NOT call renderer.present() afterwards — that would be a second
     # SDL_RenderPresent on an undefined backbuffer while vsync=True, which
@@ -251,7 +252,7 @@ def show_loading_screen(context, console, progress: float, status: str) -> None:
     context.present(console)
 
 # Show loading screen immediately
-show_loading_screen(context, ui_console, 0.05, "Starting...")
+show_loading_screen(context, ui_console, "Starting...")
 
 
 
@@ -265,7 +266,7 @@ start_time = time.time() # Track total loading
 # Continue with module imports
 
 
-show_loading_screen(context, ui_console, 0.15, "Avoiding glitches...")
+show_loading_screen(context, ui_console, "Avoiding glitches...")
 import exceptions
 str = (f"Loaded exceptions module in {time.time() - start_time:.2f} seconds")
 print(str)
@@ -273,7 +274,7 @@ with open(get_data_path('logs/log.txt'), 'a') as log_file:
     log_file.write(str + "\n")
 
 start_time = time.time() # Track total loading
-show_loading_screen(context, ui_console, 0.30, "Building inputs...")
+show_loading_screen(context, ui_console, "Building inputs...")
 import input_handlers
 str = (f"Loaded input_handlers module in {time.time() - start_time:.2f} seconds")
 print(str)
@@ -281,7 +282,7 @@ with open(get_data_path('logs/log.txt'), 'a') as log_file:
     log_file.write(str + "\n")
 
 start_time = time.time() # Track total loading
-show_loading_screen(context, ui_console, 0.45, "Setting up dungeons...")
+show_loading_screen(context, ui_console, "Setting up dungeons...")
 import setup_game
 str = (f"Loaded setup_game module in {time.time() - start_time:.2f} seconds")
 print(str)
@@ -289,7 +290,7 @@ with open(get_data_path('logs/log.txt'), 'a') as log_file:
     log_file.write(str + "\n")
 
 start_time = time.time() # Track total loading
-show_loading_screen(context, ui_console, 0.60, "Importing bananas...")
+show_loading_screen(context, ui_console, "Importing bananas...")
 import tcod.sdl.video
 import traceback
 
@@ -381,7 +382,7 @@ def save_game(handler, filename):
 
 def main() -> None:
     
-    global _game_context, context, game_console, ui_console, cursor, cursor_click, _crt_force_fast_path, _render_frame, _active_degauss
+    global _game_context, context, game_console, ui_console, cursor, cursor_click, _crt_force_fast_path, _render_frame, _active_degauss, _active_vhs_glitch
     
     # Use the global context and console that were created during initial loading
     _game_context = context
@@ -391,26 +392,26 @@ def main() -> None:
     transition_frame_counter = 0
     transition_cooldown_frames = 0
     # Continue with actual loading operations
-    show_loading_screen(context, ui_console, 0.75, "Loading game settings...")
+    show_loading_screen(context, ui_console, "Loading game settings...")
     settings = load_settings()
     setting_fullscreen = settings.get("fullscreen", False)
     reload_crt_settings()
-    
-    show_loading_screen(context, ui_console, 0.85, "Initializing main menu...")
+    time.sleep(0.3)
+    show_loading_screen(context, ui_console, "Initializing main menu...")
     handler: input_handlers.BaseEventHandler = setup_game.MainMenu()
-   
+    time.sleep(0.3)
     
-    show_loading_screen(context, ui_console, 0.95, "Finalizing setup...")
+    show_loading_screen(context, ui_console, "Finalizing setup...")
     # Update context title
     context.sdl_window.title = "DoA: Dungeons of Ærrok"
-
+    time.sleep(0.3)
     # Set initial fullscreen state based on settings
     window = context.sdl_window
     if window and setting_fullscreen:
         window.fullscreen = True
         print("DEBUG: Set initial fullscreen mode from settings")
 
-    show_loading_screen(context, ui_console, 1.0, "Ready!")
+    show_loading_screen(context, ui_console, "Ready!")
     str = (f"Finished loading in {time.time() - initial_time:.2f} seconds")
     print(str)
     with open(get_data_path('logs/log.txt'), 'a') as log_file:
@@ -568,9 +569,10 @@ def main() -> None:
                         pending_engine._pending_handler_ready = False
                         # Ensure rendering resets overlay caches when handler changes.
                         overlay_dirty = True
-                        # Fire degauss when the player dies
+                        # Fire degauss + VHS glitch when the player dies
                         if isinstance(handler, input_handlers.GameOverEventHandler):
-                            _active_degauss = DegaussAnimation(renderer)
+                            _active_degauss  = DegaussAnimation(renderer)
+                            _active_vhs_glitch = VHSGlitchAnimation(renderer)
                     else:
                         pending_engine._pending_handler_ready = True
 
@@ -590,11 +592,11 @@ def main() -> None:
 
             active_engine = getattr(handler, "engine", None)
             # Suppress game-view detection while LoadingScreen generation is still
-            # in progress — engine.game_map exists before generation_complete=True,
+            # in progress — engine.game_map exists before game_load=True,
             # which would prematurely fire TRANSITION and break the CRT timing.
             _loading_in_progress = (
-                hasattr(handler, 'generation_complete')
-                and not handler.generation_complete
+                hasattr(handler, 'game_load')
+                and not handler.game_load
             )
             has_game_view = (
                 active_engine is not None
@@ -640,10 +642,10 @@ def main() -> None:
             #           idle, so no vsync stalls possible.
             # Phase 2 — black hold: while gen is running, render nothing but black
             #           + a "..." dot animation via draw_color only (zero textures).
-            # Phase 3 — screen-on: played once when generation_complete flips True.
+            # Phase 3 — screen-on: played once when game_load flips True.
             #           Expands from line to full scene, then falls through normally,
             #           allowing the main loop to transition to MainGameEventHandler.
-            _rlog(f"CRT_STATE frame={_render_frame} gen={_gen_in_progress} off={_crt_off_played} on={_crt_on_played} snap={'yes' if _gen_scene_tex is not None else 'no'} handler={type(handler).__name__} gen_complete={getattr(handler,'generation_complete',None)}")
+            _rlog(f"CRT_STATE frame={_render_frame} gen={_gen_in_progress} off={_crt_off_played} on={_crt_on_played} snap={'yes' if _gen_scene_tex is not None else 'no'} handler={type(handler).__name__} gen_complete={getattr(handler,'game_load',None)}")
             if _gen_in_progress:
                 if not _crt_off_played:
                     if _gen_scene_tex is not None:
@@ -653,6 +655,7 @@ def main() -> None:
                         # renderer inside renderer.present().
                         _rlog(f"CRT: playing screen-OFF animation")
                         _crt_off_played = True
+                        sounds.play_crt_off_sound()
                         _sw_anim = CRTSwitchAnimation(renderer, window_w, window_h)
                         _sw_anim.play_off(_gen_scene_tex, event_pump=tcod.event.get, glare_tex=glare_tex)
                         del _sw_anim
@@ -727,6 +730,11 @@ def main() -> None:
             hud_source_h = hud_rows * tileset.tile_height
             hud_dest_h = hud_rows * base_tile_h
 
+            # Expose tile size to input handlers for pixel-accurate minimap click mapping
+            if active_engine is not None:
+                active_engine.base_tile_w = base_tile_w
+                active_engine.base_tile_h = base_tile_h
+
             if main_game_view:
                 game_console.clear()
                 handler.engine.tick(console=game_console)
@@ -760,6 +768,11 @@ def main() -> None:
                 renderer.copy(game_tex, dest=(0, 0, int(game_dest_w), int(game_dest_h)))
                 _apply_lightmap()
 
+                # GPU game-layer animations drawn into scene_tex so they sit UNDER CRT effects
+                if not _crt_force_fast_path and active_engine is not None and (gpu.gpu_anim_registry or gpu.gpu_anim_nobloom_registry):
+                    gpu.ensure_gpu_anim_layer(game_dest_w, game_dest_h)
+                    gpu.run_gpu_anim_passes(active_engine, game_dest_w, game_dest_h)
+
                 if getattr(active_engine, "debug", False):
                     cached_overlay_handler = None
                     overlay_dirty = True
@@ -769,6 +782,22 @@ def main() -> None:
                     renderer.copy(hud_tex,
                                   source=(0, int(hud_source_y), int(_ui_tex_w), int(hud_source_h)),
                                   dest=(0, int(window_h - hud_dest_h), window_w, int(hud_dest_h)))
+                    # Minimap / hints panel (auto side)
+                    _tw, _th = tileset.tile_width, tileset.tile_height
+                    _mm_x = render_functions.get_minimap_origin_x(active_engine)
+                    _mm_y, _mm_w, _mm_h = render_functions._MM_Y, render_functions._MM_W, render_functions._MM_H
+                    _mm_mode = getattr(active_engine, 'show_minimap', 0)
+                    if _mm_mode == 2:
+                        renderer.copy(hud_tex,
+                                      source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_th)),
+                                      dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
+                                            int(_mm_w * base_tile_w), int(base_tile_h)))
+                    else:
+                        renderer.copy(hud_tex,
+                                      source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_mm_h * _th)),
+                                      dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
+                                            int(_mm_w * base_tile_w), int(_mm_h * base_tile_h)))
+                        render_functions.render_gpu_minimap_body(renderer, active_engine, base_tile_w, base_tile_h)
                     debug_console.clear()
                     render_functions.render_debug_overlay(
                         debug_console,
@@ -789,6 +818,22 @@ def main() -> None:
                     renderer.copy(hud_tex,
                                   source=(0, int(hud_source_y), int(_ui_tex_w), int(hud_source_h)),
                                   dest=(0, int(window_h - hud_dest_h), window_w, int(hud_dest_h)))
+                    # Minimap / hints panel (auto side)
+                    _tw, _th = tileset.tile_width, tileset.tile_height
+                    _mm_x = render_functions.get_minimap_origin_x(active_engine)
+                    _mm_y, _mm_w, _mm_h = render_functions._MM_Y, render_functions._MM_W, render_functions._MM_H
+                    _mm_mode = getattr(active_engine, 'show_minimap', 0)
+                    if _mm_mode == 2:
+                        renderer.copy(hud_tex,
+                                      source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_th)),
+                                      dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
+                                            int(_mm_w * base_tile_w), int(base_tile_h)))
+                    else:
+                        renderer.copy(hud_tex,
+                                      source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_mm_h * _th)),
+                                      dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
+                                            int(_mm_w * base_tile_w), int(_mm_h * base_tile_h)))
+                        render_functions.render_gpu_minimap_body(renderer, active_engine, base_tile_w, base_tile_h)
                     _sb = getattr(active_engine, 'speech_bubble_ui_rect', None)
                     if _sb:
                         _sb_x, _sb_y, _sb_w, _sb_h = _sb
@@ -827,9 +872,15 @@ def main() -> None:
                 ui_console.clear()
                 active_engine.render_ui(ui_console)
                 if inspect_overlay_view:
-                    # Only rebuild the inspect UI texture when the cursor tile changes.
-                    cur_cursor = tuple(getattr(active_engine, 'mouse_location',
-                                               active_engine.mouse_location))
+                    # Rebuild the inspect UI texture when the cursor tile OR handler
+                    # display state (tab, scroll, selected item) changes.
+                    cur_cursor = (
+                        tuple(getattr(active_engine, 'mouse_location',
+                                      active_engine.mouse_location)),
+                        getattr(handler, 'current_tab', 0),
+                        getattr(handler, 'scroll_offset', 0),
+                        getattr(handler, 'detail_index', 0),
+                    )
                     if inspect_ui_cursor_cache != cur_cursor or inspect_ui_tex is None:
                         inspect_ui_cursor_cache = cur_cursor
                         handler.render_ui_overlay(ui_console)
@@ -861,6 +912,11 @@ def main() -> None:
 
                 # Dim the game underneath the overlay
                 renderer.copy(dim_tex, dest=(0, 0, window_w, window_h))
+
+                # Force re-render every frame while the game-over fade-in is active
+                if (isinstance(handler, input_handlers.GameOverEventHandler)
+                        and handler._get_fade_alpha() < 1.0):
+                    overlay_dirty = True
 
                 if overlay_dirty or cached_overlay_handler is not handler:
                     ui_console.clear()
@@ -965,9 +1021,8 @@ def main() -> None:
                         renderer.copy(vignette_tex, dest=(0, 0, window_w, window_h))
                         renderer.copy(glare_tex,    dest=(0, 0, window_w, window_h))
 
-            # CRT power-on: once the game handler has rendered its first real frame,
-            # capture it and play the reveal animation into it.
-            if _crt_on_capture_pending and has_game_view:
+            # CRT power-on: fire for ALL transition targets (game or menu)
+            if _crt_on_capture_pending:
                 _rlog(f"CRT: capturing game frame for play_on")
                 if _crt_on_scene_tex_size != (window_w, window_h):
                     _crt_on_scene_tex = renderer.new_texture(
@@ -1007,9 +1062,13 @@ def main() -> None:
                 _rlog(f"CRT: screen-ON done")
                 _crt_on_scene_tex      = None
                 _crt_on_scene_tex_size = (0, 0)
-                # Re-trigger wobble and game-load channel splash
+                # Re-trigger wobble and channel splash ("game" or "menu" overlay)
+                _new_has_game = (
+                    getattr(handler, 'engine', None) is not None
+                    and getattr(getattr(handler, 'engine', None), 'game_map', None) is not None
+                )
                 gpu.start_wobble()
-                gpu.start_channel_overlay("game")
+                gpu.start_channel_overlay("game" if _new_has_game else "menu")
                 continue   # skip outer present(); play_on already presented final frame
 
             # Wobble offset (decaying screen-shake on CRT power-on)
@@ -1020,6 +1079,9 @@ def main() -> None:
             gpu.blit_post_crt(_wx, _wy)
 
             if not _crt_force_fast_path:
+
+
+
                 # Advance + draw CRT glitch effects (jitter band, vertical roll)
                 gpu.tick_crt_glitches(1.0 / target_fps)
                 gpu.draw_scanline_jitter()
@@ -1031,6 +1093,14 @@ def main() -> None:
                     if _active_degauss.done:
                         _active_degauss = None
 
+                # VHS glitch (persistent distortion on game over screen)
+                if _active_vhs_glitch is not None:
+                    if isinstance(handler, input_handlers.GameOverEventHandler):
+                        _active_vhs_glitch.tick(1.0 / target_fps)
+                        _active_vhs_glitch.draw(window_w, window_h, scene_tex=gpu.post_crt_tex)
+                    else:
+                        _active_vhs_glitch = None
+
                 # Scanlines (scrolling MOD pass)
                 if gpu.crt_scanlines_on:
                     scanlines_scroll = (scanlines_scroll + scanlines_speed * (1.0 / target_fps)) % scanlines_h
@@ -1040,12 +1110,6 @@ def main() -> None:
                     scanlines_y_offset=int(scanlines_scroll),
                     skip_vignette=True,
                 )
-
-                # GPU game-layer animations (embers, smoke, drips — bloom pipeline)
-                # Skipped when any overlay/menu/popup is active.
-                if fast_main_view and active_engine is not None and (gpu.gpu_anim_registry or gpu.gpu_anim_nobloom_registry):
-                    gpu.ensure_gpu_anim_layer(game_dest_w, game_dest_h)
-                    gpu.run_gpu_anim_passes(active_engine, game_dest_w, game_dest_h)
 
                 # Vignette + glare + bloom (drawn after game-layer anims so they glow)
                 gpu.apply_crt_overlays(
@@ -1127,6 +1191,15 @@ def main() -> None:
                     handler.engine.message_log.add_message(
                         traceback.format_exc(), color.error 
                     )
+
+            # Fire degauss + VHS glitch if handler transitioned to GameOver
+            # during event processing (the pending_handler path at the top of
+            # the loop may have been consumed by EventHandler.handle_events).
+            if (isinstance(handler, input_handlers.GameOverEventHandler)
+                    and _active_vhs_glitch is None):
+                _active_degauss = DegaussAnimation(renderer)
+                _active_vhs_glitch = VHSGlitchAnimation(renderer)
+
             # Frame limiting 
             elapsed = time.time() - current_time
             sleep_time = frame_time - elapsed

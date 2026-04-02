@@ -90,11 +90,11 @@ class AudioMixer:
         self._vhs_dropout_rng = np.random.default_rng()
         # --- Bad VHS player parameters ---
         # Deep, slow warble — like a stretched/wrinkled tape
-        self._wow_freq = 0.18          # slow, sickly pitch roll
-        self._wow_amp  = 0.45          # very heavy pitch swing
+        self._wow_freq = 0.96          # slow, sickly pitch roll
+        self._wow_amp  = 0.65          # very heavy pitch swing
         # Secondary wow — irregular tape tension
-        self._wow2_freq = 0.73
-        self._wow2_amp  = 0.15
+        self._wow2_freq = 1.6
+        self._wow2_amp  = 0.65
         # Jittery flutter — worn capstan/pinch roller
         self._flutter_freq = 7.5
         self._flutter_amp  = 0.06
@@ -105,7 +105,7 @@ class AudioMixer:
         self._flutter2_phase = 0.0
         # Head-switching noise rate (~30 Hz vertical sync artifacts)
         self._head_switch_freq = 30.0
-        self._head_switch_phase = 0.0
+        self._head_switch_phase = 0.9
         self.vhs_enabled = True  # set last — gate opens after buffer is clean
     def _apply_vhs_effect(self, audio: np.ndarray) -> np.ndarray:
         """Apply dramatic bad-VHS-player effect — fully vectorised."""
@@ -131,7 +131,7 @@ class AudioMixer:
 
         # --- 2. Build per-sample speed curve ---
         # Slower decay = effect lasts longer (~4 seconds audible)
-        decay = np.exp(-t_vec / 1.8).astype(np.float32)
+        decay = np.exp(-t_vec / 0.8).astype(np.float32)
 
         # PRIMARY WOW: deep sickly warble
         wow1 = (self._wow_amp * np.sin(2 * np.pi * self._wow_freq * t_vec)).astype(np.float32)
@@ -737,6 +737,9 @@ def play_sound_with_pitch_variation(sound: Sound, pitch_range=(0.85, 1.15), volu
         except:
             sound.play()
 
+
+def play_gameover_sound():
+    play_sound_with_pitch_variation(Sound("RP/sfx/death.wav"), pitch_range=(0.75, 0.75), volume=0.5)
 
 def play_boot_sound():
     play_sound_with_pitch_variation(Sound("RP/sfx/boot.mp3"), pitch_range=(0.9, 1.1), volume=0.5)
@@ -1590,14 +1593,27 @@ def start_ambient_sound(ambient_type: str, volume: float = None):
         _ambient_manager.start_ambient_loop(ambient_type, vol)
 
 
+def stop_vhs_audio_effect():
+    """Immediately disable the VHS wow/flutter audio effect."""
+    _mixer.vhs_enabled = False
+    _mixer.vhs_time    = 0.0
+
+
 def stop_all_sounds():
-    """Stop all ambient loops, music, and reset all sound state immediately."""
+    """Stop all ambient loops, music, one-shot sounds, and VHS effect immediately."""
     global _menu_ambience_active, _menu_music_active
-    
+
     # Stop all ambient loops
-    for ambient_type in _ambient_manager.active_ambients:
+    for ambient_type in list(_ambient_manager.active_ambients):
         _ambient_manager.stop_ambient_loop(ambient_type)
-    
+
+    # Clear any in-flight one-shot sounds so they don't bleed into the next scene
+    with _mixer.lock:
+        _mixer.playing_sounds.clear()
+
+    # Kill the VHS wow/flutter effect so it doesn't warp the next scene's audio
+    stop_vhs_audio_effect()
+
     # Reset all global state variables
     _menu_ambience_active = False
     _menu_music_active = False

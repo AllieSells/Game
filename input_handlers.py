@@ -10,7 +10,6 @@ import tcod.event
 import random
 import traceback
 
-from tcod.console import Console
 
 import actions
 from actions import (
@@ -18,13 +17,11 @@ from actions import (
     BumpAction,
     PickupAction,
     WaitAction,
-    InteractAction,
 )
 
 import color
 from components.dialogue_generator import ConversationNode
 from components.effect import BurningEffect
-import engine
 import exceptions
 from render_functions import MenuRenderer
 
@@ -186,6 +183,47 @@ class BaseEventHandler(tcod.event.EventDispatch[ActionOrHandler]):
         return self.parent
 
 
+
+
+class CRTTransition(BaseEventHandler):
+    """Triggers CRT power-off/on animation
+
+    To use,
+        return CRTTransition(MainGameEventHandler(engine),
+                             pre_fn=lambda: (sounds.stop_menu_ambience(),
+                                             sounds.stop_all_music()),
+                             post_fn=sounds.start_dungeon_music)
+    """
+    def __init__(self, target, *, pre_fn=None, post_fn=None):
+        if callable(target) and not isinstance(target, BaseEventHandler):
+            self._factory = target
+            self._target = None
+        else:
+            self._factory = None
+            self._target = target
+        self._pre_fn = pre_fn # called during black screen phase
+        self._post_fn = post_fn # called before new handler is returned
+        # Protocol fields expected by main.py CRT state
+        self.game_load = False
+        self.generation_started = False
+
+    def start_generation(self) -> None:
+        if self._pre_fn is not None:
+            self._pre_fn()
+        if self._factory is not None:
+            self._target = self._factory()
+        self.game_load = True
+    
+    def handle_events(self, event) -> "BaseEventHandler":
+        if getattr(event, '_crt_transition', False):
+            if self._post_fn is not None:
+                self._post_fn()
+            return self._target if self._target is not None else self
+        return self
+
+    def on_render(self, console) -> None:
+        pass # main renders black during prograss, so this is never called
+
 class EventHandler(BaseEventHandler):
     def __init__(self, engine: Engine):
         self.alt_held = False
@@ -273,6 +311,12 @@ class EventHandler(BaseEventHandler):
     
 class AskUserEventHandler(EventHandler):
     # Handles user input for actions with special input
+    def __init__(self, engine: Engine):
+        super().__init__(engine)
+        # Auto-minimize the minimap while this menu is open, restore on exit
+        engine._pre_menu_minimap = getattr(engine, 'show_minimap', 0)
+        engine.show_minimap = 2
+
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         
         # any key exits this handler
@@ -312,6 +356,12 @@ class TradeEventHandler(AskUserEventHandler):
     # Container UI recycled for trading. Modified.
     def __init__(self, engine: Engine, container: Container):
         super().__init__(engine)
+        self.engine.context_hints = [
+            ("Enter", "Trade"),
+            ("\u2191\u2193", "Navigate"),
+            ("Tab", "Switch Side"),
+            ("Esc", "Close"),
+        ]
         # Innit NPC being interacted with
         self.container = container
         # Skip filter, not needed
@@ -349,7 +399,7 @@ class TradeEventHandler(AskUserEventHandler):
         npc_color = getattr(self.container.parent, 'color', 'Container')
         container_name = getattr(self.container.parent, 'name', 'Container')
         is_corpse = getattr(self.container.parent, 'type', None) == 'Dead'
-        title = f"Corpse" if is_corpse else f"Trading with {container_name}"
+        title = "Corpse" if is_corpse else f"Trading with {container_name}"
         MenuRenderer.draw_ornate_border(console, x, y, total_width, height, title)
 
         # Calculate panel dimensions
@@ -459,9 +509,9 @@ class TradeEventHandler(AskUserEventHandler):
         
         # Instructions footer
         if self.menu == "Player":
-            instructions = "[Tab] Switch Panel · [↑↓] Navigate ·  [Space] Sell · [Esc] Close"
+            instructions = ""
         else:
-            instructions = "[Tab] Switch Panel · [↑↓] Navigate ·  [Space] Buy · [Esc] Close"
+            instructions = ""
         inst_x = x + (total_width - len(instructions)) // 2
         console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
 
@@ -614,9 +664,13 @@ class DialogueEventHandler(AskUserEventHandler):
     
     def __init__(self, engine: Engine, npc: Actor):
         super().__init__(engine)
+        self.engine.context_hints = [
+            ("\u2191\u2193", "Navigate"),
+            ("Enter", "Select"),
+            ("Esc", "Exit"),
+        ]
         self.npc = npc
         # Initialize dialogue system
-        from components.dialogue_generator import ConversationNode
         self.dialogue = ConversationNode()
         
         # Menu system
@@ -851,6 +905,14 @@ class DialogueEventHandler(AskUserEventHandler):
 class LevelUpEventHandler(AskUserEventHandler):
     TITLE = "Level Up!"
 
+    def __init__(self, engine: Engine):
+        super().__init__(engine)
+        self.engine.context_hints = [
+            ("A", "Constitution"),
+            ("B", "Strength"),
+            ("C", "Agility"),
+        ]
+
     def on_render(self, console: tcod.Console) -> None:
         super().on_render(console)
 
@@ -923,6 +985,10 @@ class ContainerEventHandler(AskUserEventHandler):
     # Handler displays both inventories and allows transferring items
     def __init__(self, engine: Engine, container: Container):
         super().__init__(engine)
+        self.engine.context_hints = [
+            ("Click", "Take/Give"),
+            ("Tab/Esc", "Close"),
+        ]
         # Innit container being interacted with
         self.container = container
         # Skip filter, not needed
@@ -967,7 +1033,7 @@ class ContainerEventHandler(AskUserEventHandler):
         # Draw ornate main border
         container_name = getattr(self.container.parent, 'name', 'Container')
         is_corpse = getattr(self.container.parent, 'type', None) == 'Dead'
-        title = f"Corpse" if is_corpse else f"Container: {container_name}"
+        title = "Corpse" if is_corpse else f"Container: {container_name}"
         MenuRenderer.draw_ornate_border(console, x, y, total_width, height, title)
 
         # Calculate panel dimensions
@@ -995,7 +1061,7 @@ class ContainerEventHandler(AskUserEventHandler):
         
         # Panel headers
         player_header = "Your Inventory"
-        container_header = f"Corpse" if is_corpse else f"{container_name}"
+        container_header = "Corpse" if is_corpse else f"{container_name}"
         
         # Center headers in panels
         player_header_x = left_x + (panel_width - len(player_header)) // 2
@@ -1086,7 +1152,7 @@ class ContainerEventHandler(AskUserEventHandler):
             console.print(right_x + 4, item_start_y, "~ Empty ~", fg=(120, 100, 80), bg=panel_bg)
         
         # Instructions footer
-        instructions = "[Tab] Switch Panel · [↑↓] Navigate ·  [Enter] Transfer · [Esc] Close"
+        instructions = ""
         inst_x = x + (total_width - len(instructions)) // 2
         console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
 
@@ -1294,7 +1360,7 @@ class ContainerEventHandler(AskUserEventHandler):
                     if "coin" in item.name.lower():
                         # Auto-convert coins to player gold
                         self.engine.player.gold += item.value
-                        self.engine.message_log.add_message(f"You pick up some coins.")
+                        self.engine.message_log.add_message("You pick up some coins.")
 
                         # Play coin pickup sound if it exists
                         if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
@@ -1360,6 +1426,11 @@ class InventoryEventHandler(AskUserEventHandler):
 
     def __init__(self, engine: Engine, item_filter: Optional[Callable] = None):
         super().__init__(engine)
+        self.engine.context_hints = [
+            ("RClick", "Context Menu"),
+            ("Enter", "Use/Equip"),
+            ("Esc", "Close"),
+        ]
         # item_filter should accept an Item and return True if it should be shown
         self.item_filter: Callable = item_filter if item_filter is not None else (lambda i: True)
         # selected index for arrow navigation
@@ -1367,6 +1438,7 @@ class InventoryEventHandler(AskUserEventHandler):
         # category tabs
         self.current_category: int = 0
         self.categories = [
+
             ("All", self._filter_all),
             ("Equipment", self._filter_equipment), 
             ("Consumables", self._filter_consumables),
@@ -1408,6 +1480,9 @@ class InventoryEventHandler(AskUserEventHandler):
         self._render_x = x
         self._render_y = y
         self._render_items_x = x + sidebar_width + 1
+        self._sidebar_x = x + 1
+        self._sidebar_y = y + 3
+        self._sidebar_width = sidebar_width - 2
         
         # Fade the background except for the inventory menu
         super().render_faded(console, x, y, total_width, height)
@@ -1478,7 +1553,7 @@ class InventoryEventHandler(AskUserEventHandler):
             console.print(preview_x + 2, y + 8, "~ No item selected ~", fg=(120, 100, 80))
         
         # Draw elegant instruction footer
-        instructions = "✦ [↑↓] Navigate · [←→] Category · [Space] Use · [Esc] Return ✦"
+        instructions = ""
         inst_x = x + (total_width - len(instructions)) // 2
         console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
     
@@ -1981,20 +2056,50 @@ class InventoryEventHandler(AskUserEventHandler):
             if hovered_index != self.selected_index:
                 sounds.play_ui_move_sound()
             self.selected_index = hovered_index
+            return
+
+        # Hover over sidebar categories
+        if hasattr(self, '_sidebar_x'):
+            sidebar_x = self._sidebar_x
+            sidebar_y = self._sidebar_y
+            sidebar_w = self._sidebar_width
+            for i in range(len(self.categories)):
+                if (sidebar_x <= mouse_x < sidebar_x + sidebar_w
+                        and mouse_y == sidebar_y + i):
+                    if i != self.current_category:
+                        sounds.play_ui_move_sound()
+                        self.current_category = i
+                        self.selected_index = 0
+                    break
 
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
-        if event.button != tcod.event.BUTTON_LEFT:
+        if event.button not in (tcod.event.BUTTON_LEFT, tcod.event.BUTTON_RIGHT):
             return None
-        self.engine.mouse_held = True
+        if event.button == tcod.event.BUTTON_LEFT:
+            self.engine.mouse_held = True
         if not hasattr(self, '_render_items_x') or not hasattr(self, '_render_y'):
             return self.on_exit()
 
         mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
         items_x = self._render_items_x
         items_start_y = self._render_y + 4
+
+        # Click on sidebar category
+        if hasattr(self, '_sidebar_x') and event.button == tcod.event.BUTTON_LEFT:
+            sidebar_x = self._sidebar_x
+            sidebar_y = self._sidebar_y
+            sidebar_w = self._sidebar_width
+            for i in range(len(self.categories)):
+                if (sidebar_x <= mouse_x < sidebar_x + sidebar_w
+                        and mouse_y == sidebar_y + i):
+                    if i != self.current_category:
+                        sounds.play_ui_move_sound()
+                        self.current_category = i
+                        self.selected_index = 0
+                    return None
         items_width = 32
 
-        # Check if out of bounds of UI
+        # Check if out of bounds of UI (right-click outside also closes)
         if (mouse_x < self.width and mouse_x >= items_x + items_width) or mouse_y < self._render_y or mouse_y >= self._render_y + self.height:
             return self.on_exit()
 
@@ -2006,7 +2111,10 @@ class InventoryEventHandler(AskUserEventHandler):
                 items_start_y <= mouse_y < items_start_y + len(filtered_groups)):
             clicked_index = mouse_y - items_start_y
             self.selected_index = clicked_index
-            return self.on_item_selected(filtered_groups[clicked_index]['item'])
+            clicked_item = filtered_groups[clicked_index]['item']
+            if event.button == tcod.event.BUTTON_RIGHT:
+                return ItemContextMenu(self, clicked_item, mouse_x, mouse_y)
+            return self.on_item_selected(clicked_item)
 
 
     def ev_mousewheel(self, event: tcod.event.MouseWheel) -> Optional[ActionOrHandler]:
@@ -2223,12 +2331,208 @@ class InventoryDropHandler(InventoryEventHandler):
 #             self.engine.message_log.add_message(f"{item.name} cannot be equipped.", color.invalid)
 #             return None
 
+
+class ItemContextMenu(EventHandler):
+    """A floating right-click context menu for an inventory item.
+
+    Renders on top of the parent inventory handler with a small popup listing
+    the actions available for the item.  Arrow keys / mouse hover navigate,
+    Enter / left-click activates, Esc closes.
+    """
+
+    def __init__(
+        self,
+        parent_handler: "InventoryEventHandler",
+        item,
+        click_x: int,
+        click_y: int,
+    ):
+        super().__init__(parent_handler.engine)
+        self.parent_handler = parent_handler
+        self.item = item
+        self.click_x = click_x
+        self.click_y = click_y
+        self.selected_option = 0
+        self._options: list[tuple[str, str]] = self._build_options()
+        # Will be filled on first render
+        self._menu_x: int = 0
+        self._menu_y: int = 0
+        self._option_width: int = 0
+
+    # ------------------------------------------------------------------
+    # Build the option list based on item capabilities
+    # ------------------------------------------------------------------
+    def _build_options(self) -> list[tuple[str, str]]:
+        """Return (label, action_key) pairs for available actions."""
+        item = self.item
+        player = self.engine.player
+        options: list[tuple[str, str]] = []
+
+        if getattr(item, "consumable", None) is not None:
+            name_lower = item.name.lower()
+            if "potion" in name_lower:
+                options.append(("Quaff", "quaff"))
+            elif "scroll" in name_lower:
+                options.append(("Read", "read"))
+            else:
+                options.append(("Use", "use"))
+
+        if getattr(item, "equippable", None) is not None:
+            is_equipped = player.equipment.item_is_equipped(item)
+            if is_equipped:
+                options.append(("Unequip", "equip"))
+            else:
+                options.append(("Equip", "equip"))
+
+        options.append(("Throw", "throw"))
+        options.append(("Drop", "drop"))
+        return options
+
+    # ------------------------------------------------------------------
+    # Rendering
+    # ------------------------------------------------------------------
+    def on_render(self, console: tcod.Console) -> None:
+        # Draw parent inventory behind us
+        self.parent_handler.on_render(console)
+
+        if not self._options:
+            return
+
+        # Measure popup
+        max_label_len = max(len(label) for label, _ in self._options)
+        menu_w = max_label_len + 4   # 2 padding + 2 marker chars
+        menu_h = len(self._options) + 2  # top + bottom border
+
+        # Position: try to the right of the click, clamp to screen
+        mx = self.click_x + 1
+        my = self.click_y
+        if mx + menu_w > console.width:
+            mx = self.click_x - menu_w
+        if my + menu_h > console.height:
+            my = console.height - menu_h
+        mx = max(0, mx)
+        my = max(0, my)
+
+        self._menu_x = mx
+        self._menu_y = my
+        self._option_width = menu_w
+
+        MenuRenderer.draw_parchment_background(console, mx, my, menu_w, menu_h)
+        MenuRenderer.draw_ornate_border(console, mx, my, menu_w, menu_h, "")
+
+        for i, (label, _) in enumerate(self._options):
+            is_sel = i == self.selected_option
+            fg = color.gold_accent if is_sel else color.fantasy_text
+            bg = (80, 60, 30) if is_sel else (45, 35, 25)
+            row_y = my + 1 + i
+
+            # Fill row background
+            for dx in range(menu_w - 2):
+                console.print(mx + 1 + dx, row_y, " ", bg=bg)
+
+            marker = ">" if is_sel else " "
+            console.print(mx + 1, row_y, f"{marker} {label}", fg=fg, bg=bg)
+
+    # ------------------------------------------------------------------
+    # Input
+    # ------------------------------------------------------------------
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
+        key = event.sym
+        if key == tcod.event.K_ESCAPE:
+            return self.parent_handler
+        if key == tcod.event.K_UP:
+            sounds.play_ui_move_sound()
+            self.selected_option = (self.selected_option - 1) % len(self._options)
+            return None
+        if key == tcod.event.K_DOWN:
+            sounds.play_ui_move_sound()
+            self.selected_option = (self.selected_option + 1) % len(self._options)
+            return None
+        if key in CONFIRM_KEYS:
+            return self._activate_selected()
+        return None
+
+    def ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:
+        mx, my = int(event.tile.x), int(event.tile.y)
+        for i in range(len(self._options)):
+            row_y = self._menu_y + 1 + i
+            if (self._menu_x < mx < self._menu_x + self._option_width
+                    and my == row_y):
+                if self.selected_option != i:
+                    sounds.play_ui_move_sound()
+                self.selected_option = i
+                break
+
+    def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
+        mx, my = int(event.tile.x), int(event.tile.y)
+        # Click outside the popup → close
+        if not (self._menu_x <= mx < self._menu_x + self._option_width
+                and self._menu_y <= my < self._menu_y + len(self._options) + 2):
+            return self.parent_handler
+
+        if event.button == tcod.event.BUTTON_LEFT:
+            row_y = my - self._menu_y - 1
+            if 0 <= row_y < len(self._options):
+                self.selected_option = row_y
+                return self._activate_selected()
+        return None
+
+    # ------------------------------------------------------------------
+    # Action dispatch
+    # ------------------------------------------------------------------
+    def _activate_selected(self) -> Optional[ActionOrHandler]:
+        if not self._options:
+            return self.parent_handler
+        _, action_key = self._options[self.selected_option]
+        item = self.item
+
+        if action_key in ("quaff", "read", "use"):
+            if item.consumable:
+                if action_key == "quaff":
+                    sounds.play_quaff_sound()
+                action_or_handler = item.consumable.get_action(self.engine.player)
+                if action_or_handler:
+                    if hasattr(action_or_handler, "perform"):
+                        try:
+                            action_or_handler.perform()
+                        except exceptions.Impossible as exc:
+                            self.engine.message_log.add_message(exc.args[0], color.impossible)
+                        return self.parent_handler
+                    else:
+                        return action_or_handler
+            return self.parent_handler
+
+        elif action_key == "equip":
+            try:
+                actions.EquipAction(self.engine.player, item).perform()
+            except exceptions.Impossible as exc:
+                self.engine.message_log.add_message(exc.args[0], color.impossible)
+            return self.parent_handler
+
+        elif action_key == "throw":
+            return ThrowTargetHandler(self.engine, item)
+
+        elif action_key == "drop":
+            try:
+                actions.DropItem(self.engine.player, item).perform()
+            except exceptions.Impossible as exc:
+                self.engine.message_log.add_message(exc.args[0], color.impossible)
+            return self.parent_handler
+
+        return self.parent_handler
+
+
 class SelectIndexHandler(AskUserEventHandler):
     # Handles asking the user for a location on the map
 
     def __init__(self, engine: Engine):
         #sets cursor to player when handler is made
         super().__init__(engine)
+        self.engine.context_hints = [
+            ("Mouse/WASD", "Aim"),
+            ("Enter", "Confirm"),
+            ("Esc", "Cancel"),
+        ]
         player = self.engine.player
         engine.mouse_location = player.x, player.y
 
@@ -2375,6 +2679,11 @@ class AttackModeHandler(AskUserEventHandler):
     
     def __init__(self, engine: Engine):
         super().__init__(engine)
+        self.engine.context_hints = [
+            ("\u2191\u2193", "Select Mode"),
+            ("Enter", "Confirm"),
+            ("Esc", "Cancel"),
+        ]
         self.selected_index = 0
         
         # Available targeting modes
@@ -2569,8 +2878,8 @@ class AttackModeHandler(AskUserEventHandler):
         
         # Instructions footer
         instructions = [
-            "[↑↓] Navigate  [0-6] Quick Select  [Enter] Set Mode  [Esc] Cancel",
-            "This affects all future attacks until changed."
+            #"[↑↓] Navigate  [0-6] Quick Select  [Enter] Set Mode  [Esc] Cancel",
+            #"This affects all future attacks until changed."
         ]
         
         for i, instruction in enumerate(instructions):
@@ -2635,6 +2944,12 @@ class LimbTargetingHandler(AskUserEventHandler):
     
     def __init__(self, engine: Engine, attacker: Actor, target: Actor):
         super().__init__(engine)
+        self.engine.context_hints = [
+            ("\u2191\u2193", "Navigate"),
+            ("Enter/Click", "Target"),
+            ("1-6", "Quick Select"),
+            ("Esc", "Cancel"),
+        ]
         self.attacker = attacker
         self.target = target
         self.selected_index = 0
@@ -2902,7 +3217,10 @@ class SpellCastingHandler(AskUserEventHandler):
         super().__init__(engine)
         self.selected_index = 0
         self.scroll_offset = 0
-        
+        self.engine.context_hints = [
+            ("1-9", "Quick Cast Bind"),
+            ("Esc", "Close"),
+        ]
         # Initialize spell registry
         self._initialize_spell_registry()
         
@@ -3102,10 +3420,6 @@ class SpellCastingHandler(AskUserEventHandler):
         if end_index < len(self.available_spells):
             console.print(x + window_width - 2, y + window_height - 5, "↓", fg=color.yellow)
         
-        # Instructions
-        instructions = [
-            "[↑↓] Navigate  [1-9] Assign/Unbind  [Enter] Cast  [Esc] Exit"
-        ]
         
         # Cache render coords for mouse interaction
         self._spell_render_x = x
@@ -3177,20 +3491,25 @@ class SpellCastingHandler(AskUserEventHandler):
             if self.available_spells:
                 selected_spell = self.available_spells[self.selected_index]
                 current_slot_spell = self.engine.player.quickcast_slots[slot_index]
-                
-                # If same spell is already in this slot, unbind it
+
+                # If same spell is already in this slot, unbind it (toggle off)
                 if current_slot_spell == selected_spell.name:
                     self.engine.player.quickcast_slots[slot_index] = None
                     self.engine.message_log.add_message(
-                        f"Unbound {selected_spell.name} from quick cast slot {slot_index + 1}", 
-                        (255, 165, 0)  # Orange
+                        f"Unbound {selected_spell.name} from quick cast slot {slot_index + 1}",
+                        (255, 165, 0)
                     )
                 else:
-                    # Assign spell to slot
+                    # Clear this spell from any other slot it currently occupies
+                    for i, s in enumerate(self.engine.player.quickcast_slots):
+                        if s == selected_spell.name:
+                            self.engine.player.quickcast_slots[i] = None
+                            break
+                    # Assign spell to the new slot
                     self.engine.player.quickcast_slots[slot_index] = selected_spell.name
                     self.engine.message_log.add_message(
-                        f"Assigned {selected_spell.name} to quick cast slot {slot_index + 1}", 
-                        (255, 215, 0)  # Gold
+                        f"Assigned {selected_spell.name} to quick cast slot {slot_index + 1}",
+                        (255, 215, 0)
                     )
                 sounds.play_ui_move_sound()
             return None
@@ -3322,11 +3641,24 @@ class LookHandler(SelectIndexHandler):
 
     def __init__(self, engine: Engine):
         super().__init__(engine)
+        self.engine.context_hints = [
+            ("Mouse/Arrows", "Look"),
+            ("Tab", "Switch Tabs"),
+            ("Esc", "Exit"),
+        ]
         self.alt_held = False
         self.detail_index = 0  # Index for cycling through items at location
         self.scroll_offset = 0  # For scrolling through text
         self.current_tab = LookHandler.last_selected_tab  # Start with remembered tab
         self.tab_names = ["Glance", "Damages", "Coatings","Inspect"]
+        # Render caches — avoid expensive recomputation every frame
+        self._cache_location: tuple = (-1, -1)
+        self._cache_items_entities: list = []
+        self._cache_tab: int = -1
+        self._cache_detail_index: int = -1
+        self._cache_tab_content: list = []
+        # Pre-built entity position map used by render_visual_preview
+        self._entity_pos_map: dict = {}
 
     def on_index_selected(self, x: int, y: int) -> Optional[ActionOrHandler]:
         """Return to main handler when location is selected."""
@@ -3364,9 +3696,23 @@ class LookHandler(SelectIndexHandler):
         x, y = self.engine.mouse_location
         x, y = int(x), int(y)
         
-        # Get all items and entities at location
-        items_and_entities = self.get_items_and_entities_at(x, y)
-        
+        # Re-query items/entities only when the cursor has actually moved
+        if (x, y) != self._cache_location:
+            self._cache_location = (x, y)
+            self._cache_items_entities = self.get_items_and_entities_at(x, y)
+            # Rebuild position map for preview rendering
+            gm = self.engine.game_map
+            pos_map: dict = {}
+            for entity in gm.entities:
+                key = (entity.x, entity.y)
+                if key not in pos_map:
+                    pos_map[key] = []
+                pos_map[key].append(entity)
+            self._entity_pos_map = pos_map
+            # Invalidate tab content too
+            self._cache_tab = -1
+
+        items_and_entities = self._cache_items_entities
         if not items_and_entities:
             return
             
@@ -3456,8 +3802,13 @@ class LookHandler(SelectIndexHandler):
         controls_height = 2
         text_area_height = sidebar_height - (text_details_y - sidebar_y) - controls_height - 1  # Leave space for instructions + margin
         
-        # Build complete text content based on current tab
-        full_text = self.build_tabbed_content(current_item, text_area_width, x, y)
+        # Build complete text content based on current tab (cache by tab + item)
+        if (self._cache_tab != self.current_tab or
+                self._cache_detail_index != self.detail_index):
+            self._cache_tab = self.current_tab
+            self._cache_detail_index = self.detail_index
+            self._cache_tab_content = self.build_tabbed_content(current_item, text_area_width, x, y)
+        full_text = self._cache_tab_content
         
         # Render scrollable text with strict height limit
         self.render_scrollable_text(console, full_text, sidebar_x, text_details_y, text_area_width, text_area_height)
@@ -3486,71 +3837,60 @@ class LookHandler(SelectIndexHandler):
         # Center position in the preview frame (inside the frame borders)
         center_x = frame_x + 1 + preview_size // 2
         center_y = frame_y + 1 + preview_size // 2
+
+        gm = self.engine.game_map
+        # Use the pre-built position map (avoids O(n) scan per minimap cell)
+        pos_map = self._entity_pos_map
         
         # Draw the surrounding area first (for context)
         for dy in range(-preview_size//2, preview_size//2 + 1):
             for dx in range(-preview_size//2, preview_size//2 + 1):
                 world_x = look_x + dx
                 world_y = look_y + dy
-                preview_x = center_x + dx
-                preview_y = center_y + dy
+                px = center_x + dx
+                py = center_y + dy
                 
                 # Only draw within the frame boundaries
-                if (preview_x > frame_x and preview_x < frame_x + preview_size + 1 and
-                    preview_y > frame_y and preview_y < frame_y + preview_size + 1):
+                if (px > frame_x and px < frame_x + preview_size + 1 and
+                    py > frame_y and py < frame_y + preview_size + 1):
                     
                     # Draw tile background
-                    if self.engine.game_map.in_bounds(world_x, world_y):
-                        tile = self.engine.game_map.tiles[world_x, world_y]
+                    if gm.in_bounds(world_x, world_y):
+                        tile = gm.tiles[world_x, world_y]
                         
                         # Get tile character and color
-                        if self.engine.game_map.visible[world_x, world_y]:
-                            # Use light colors for visible tiles
+                        if gm.visible[world_x, world_y]:
                             char = int(tile['light'][0]) if 'light' in tile.dtype.names else ord('.')
                             fg = tuple(tile['light'][1]) if 'light' in tile.dtype.names else (255, 255, 255)
                             bg = tuple(tile['light'][2]) if 'light' in tile.dtype.names else (0, 0, 0)
                         else:
-                            # Use dark colors for non-visible tiles
                             char = int(tile['dark'][0]) if 'dark' in tile.dtype.names else ord('.')
                             fg = tuple(tile['dark'][1]) if 'dark' in tile.dtype.names else (128, 128, 128)
                             bg = tuple(tile['dark'][2]) if 'dark' in tile.dtype.names else (0, 0, 0)
                         
-                        # If this is the center tile (the one being looked at), highlight it
-                        # But only if there's no entity at this position (entities get their own highlighting)
-                        if preview_x == center_x and preview_y == center_y and current_item['type'] == 'tile':
-                            # For floor tiles (space or period), highlight the background
+                        # Highlight center tile when inspecting a tile type
+                        if px == center_x and py == center_y and current_item['type'] == 'tile':
                             if char == ord(' ') or char == ord('.') or char == ord('+') or char == ord('/'):
                                 bg = color.white
                             else:
-                                # For tiles with visible characters, highlight the foreground
                                 fg = color.white
                         
-                        console.print(preview_x, preview_y, chr(char), fg=fg, bg=bg)
+                        console.print(px, py, chr(char), fg=fg, bg=bg)
         
-        # Draw entities and items at their positions
+        # Draw entities at their positions using pre-built position map
         for dy in range(-preview_size//2, preview_size//2 + 1):
             for dx in range(-preview_size//2, preview_size//2 + 1):
                 world_x = look_x + dx
                 world_y = look_y + dy
-                preview_x = center_x + dx
-                preview_y = center_y + dy
+                px = center_x + dx
+                py = center_y + dy
                 
-                # Only draw within the frame boundaries
-                if (preview_x > frame_x and preview_x < frame_x + preview_size + 1 and
-                    preview_y > frame_y and preview_y < frame_y + preview_size + 1):
+                if (px > frame_x and px < frame_x + preview_size + 1 and
+                    py > frame_y and py < frame_y + preview_size + 1):
                     
-                    # Draw entities
-                    for entity in self.engine.game_map.entities:
-                        if entity.x == world_x and entity.y == world_y:
-                            if hasattr(entity, 'char') and hasattr(entity, 'color'):
-                                console.print(preview_x, preview_y, entity.char, fg=entity.color)
-                    
-                    # Draw items
-                    if hasattr(self.engine.game_map, 'items'):
-                        for item in self.engine.game_map.items:
-                            if item.x == world_x and item.y == world_y:
-                                if hasattr(item, 'char') and hasattr(item, 'color'):
-                                    console.print(preview_x, preview_y, item.char, fg=item.color)
+                    for entity in pos_map.get((world_x, world_y), ()):
+                        if hasattr(entity, 'char') and hasattr(entity, 'color'):
+                            console.print(px, py, entity.char, fg=entity.color)
         
         # Highlight the current object being inspected with a subtle border instead of background
         obj = current_item['object']
@@ -3653,7 +3993,7 @@ class LookHandler(SelectIndexHandler):
                             name_text = f"You do not know {objective_pronoun}."
                         else:
                             # For entities without knowledge (like chests), show generic message
-                            name_text = f"You don't know what this is."
+                            name_text = "You don't know what this is."
                         lines.append([(name_text, color.white)])
                     else:
                         lines.append([(entity.name, entity_name_color)])
@@ -4300,6 +4640,26 @@ class AreaRangedAttackHandler(SelectIndexHandler):
 
 class MainGameEventHandler(EventHandler):
 
+    def __init__(self, engine: Engine):
+        super().__init__(engine)
+        # Restore minimap mode saved before any popup menu was opened
+        if hasattr(engine, '_pre_menu_minimap'):
+            engine.show_minimap = engine._pre_menu_minimap
+            del engine._pre_menu_minimap
+        self.engine.context_hints = [
+            ("G", "Get"),
+            ("RClick", "Interact"),
+            ("RClick", "Path"),
+            ("TAB", "Inventory"),
+            ("E", "Equipment"),
+            ("F", "Character Sheet"),
+            ("C", "Spells"),
+            (">", "Take Stairs"),
+            ("Alt", "Look"),
+            ("M", "Map/Keys"),
+            ("V", "History")
+        ]
+
     def handle_events(self, event: tcod.event.Event) -> BaseEventHandler:
         # Return any handler change that was queued by auto-move in engine.tick(),
         # but only once we've shown one final pre-transition frame.
@@ -4402,6 +4762,33 @@ class MainGameEventHandler(EventHandler):
                     )
                 return None
         if event.button == tcod.event.MouseButton.RIGHT:
+
+            # --- Minimap right-click: navigate to clicked map location ---
+            import render_functions as _rf
+            _mm_ox = _rf.get_minimap_origin_x(self.engine)
+            _btw = getattr(self.engine, 'base_tile_w', None)
+            _bth = getattr(self.engine, 'base_tile_h', None)
+            if (_btw and _bth
+                    and getattr(self.engine, 'show_minimap', 0) == 0
+                    and self.engine.game_map is not None):
+                # Interior pixel bounds on screen
+                _ix0 = (_mm_ox + 1) * _btw
+                _iy0 = (_rf._MM_Y + 1) * _bth
+                _ipw = (_rf._MM_W - 2) * _btw
+                _iph = (_rf._MM_H - 2) * _bth
+                # Raw pixel coords of the click
+                _cpx, _cpy = float(event.position[0]), float(event.position[1])
+                if _ix0 <= _cpx < _ix0 + _ipw and _iy0 <= _cpy < _iy0 + _iph:
+                    gm = self.engine.game_map
+                    dest_x = int((_cpx - _ix0) / _ipw * gm.width)
+                    dest_y = int((_cpy - _iy0) / _iph * gm.height)
+                    dest_x = max(0, min(gm.width  - 1, dest_x))
+                    dest_y = max(0, min(gm.height - 1, dest_y))
+                    if gm.explored[dest_x, dest_y]:
+                        return actions.MoveToAction(self.engine.player, dest_x, dest_y)
+                    else:
+                        self.engine.message_log.add_message("That area is unexplored.", color.impossible)
+                        return None
 
             # First check if interactable under mouse
             if self.engine.cursor_hint == "interact":
@@ -4533,15 +4920,20 @@ class MainGameEventHandler(EventHandler):
             return PauseHandler(self.engine)
         elif key == tcod.event.KeySym.V:
             return HistoryViewer(self.engine)
+        elif key == tcod.event.KeySym.M:
+            self.engine.show_minimap = (getattr(self.engine, 'show_minimap', 0) + 1) % 3
+            return None
         elif key == tcod.event.KeySym.G:
             action = PickupAction(player)
         elif key == tcod.event.KeySym.R:
-            return ScrollActivateHandler(self.engine)
+            pass
+            #return ScrollActivateHandler(self.engine)
         elif key == tcod.event.KeySym.TAB:
             return InventoryActivateHandler(self.engine)
         # Throw Handler
         elif key == tcod.event.KeySym.T:
-            return ThrowSelectionHandler(self.engine)
+            pass
+            #return ThrowSelectionHandler(self.engine)
         elif key == tcod.event.KeySym.F1:
             pass
             #return CheatMaxLevel(self.engine)
@@ -4552,17 +4944,19 @@ class MainGameEventHandler(EventHandler):
         # elif key == tcod.event.KeySym.U:
         #     return InventoryEquipHandler(self.engine)
         elif key == tcod.event.KeySym.Q:
-            return QuaffActivateHandler(self.engine)
+            pass
+            #return QuaffActivateHandler(self.engine)
         elif key == tcod.event.KeySym.Z:
-            return InventoryDropHandler(self.engine)
+            pass
+            #return InventoryDropHandler(self.engine)
         elif key == tcod.event.KeySym.F:
             from character_sheet_ui import CharacterScreen
             return CharacterScreen(self.engine)
         # t key for targeting mode
-        elif key == tcod.event.KeySym.A:
-            return AttackModeHandler(self.engine)
-        elif key == tcod.event.KeySym.S:
-            return LookHandler(self.engine)
+        #elif key == tcod.event.KeySym.A:
+        #    return AttackModeHandler(self.engine)
+        #elif key == tcod.event.KeySym.S:
+        #    return LookHandler(self.engine)
         elif key == tcod.event.KeySym.C:
             return SpellCastingHandler(self.engine)
 
@@ -4990,8 +5384,26 @@ give(ITEM) - Ex. give(sigil_stone)
 
 class GameOverEventHandler(EventHandler):
 
+    FADE_DURATION = 3.0  # seconds for the popup to fully fade in
+
+    def __init__(self, engine: Engine):
+        super().__init__(engine)
+        import time as _time
+
+        self._spawn_time = _time.monotonic()
+
+    def _get_fade_alpha(self) -> float:
+        """Return 0.0 → 1.0 over FADE_DURATION seconds."""
+        import time as _time
+        elapsed = _time.monotonic() - self._spawn_time
+        return min(1.0, elapsed / self.FADE_DURATION)
+
     def on_render(self, console: tcod.Console) -> None:
         super().on_render(console)
+        alpha = self._get_fade_alpha()
+        if alpha <= 0.0:
+            return
+
         window_width = 30
         window_height = 6
         x = (console.width - window_width) // 2
@@ -5000,11 +5412,24 @@ class GameOverEventHandler(EventHandler):
         # Fade the entire screen except for the game over message area
         super().render_faded(console, x, y, window_width, window_height)
         
-        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
-        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Death")
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height, bg_color=(color.dark_red))
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Death", border_fg=(color.red))
         
         console.print(x + 2, y + 2, "Your adventure ends here.", fg=(color.light_red))
         console.print(x + 2, y + 3, "You fade into obscurity...", fg=(color.light_gray))
+
+        # Blend the popup region toward the underlying game image based on alpha
+        if alpha < 1.0:
+            inv = 1.0 - alpha
+            # Dim fg toward black and bg toward the game background
+            x2 = min(console.width, x + window_width)
+            y2 = min(console.height, y + window_height)
+            region_fg = console.fg[x:x2, y:y2].astype(np.float32)
+            region_bg = console.bg[x:x2, y:y2].astype(np.float32)
+            # Lerp toward the faded background colour (the area outside the popup)
+            fade_bg = np.array((20, 20, 30), dtype=np.float32)
+            console.fg[x:x2, y:y2] = (region_fg * alpha + fade_bg * inv).astype(np.uint8)
+            console.bg[x:x2, y:y2] = (region_bg * alpha + fade_bg * inv).astype(np.uint8)
     
     def on_quit(self) -> None:
         """Handle exiting out of a finished game."""
@@ -5014,12 +5439,11 @@ class GameOverEventHandler(EventHandler):
             os.remove(savegame_path)  # Deletes the active save file.
         sounds.stop_all_music()
         sounds.stop_all_sounds()
-        sounds.start_menu_ambience()
-        sounds.start_menu_music()
-        
-        # Import MainMenu here to avoid circular imports
         from setup_game import MainMenu
-        return MainMenu()
+        return CRTTransition(
+            MainMenu(_auto_music=False),
+            post_fn=lambda: (sounds.start_menu_ambience(), sounds.start_menu_music()),
+        )
 
     def ev_quit(self, event: tcod.event.Quit) -> None:
         return self.on_quit()
@@ -5044,6 +5468,11 @@ class PauseHandler(AskUserEventHandler):
 
     def __init__(self, engine: Engine):
         super().__init__(engine)
+        self.engine.context_hints = [
+            ("\u2191\u2193", "Navigate"),
+            ("Enter", "Select"),
+            ("Esc", "Resume"),
+        ]
         self.categories = ["Resume Game", "Save and Exit", "Exit without Saving", "Settings"]
         self.selected_option = 0
         self.scroll_offset = 0
@@ -5082,14 +5511,13 @@ class PauseHandler(AskUserEventHandler):
             save_path = setup_game.get_save_path("savegame.sav")
             self.engine.save_as(save_path)
         
-        # Stop game audio and start menu audio
         sounds.stop_all_sounds()
-        sounds.start_menu_ambience()
-        sounds.start_menu_music()
-        
-        # Return to main menu after saving
+        sounds.stop_all_music()
         from setup_game import MainMenu
-        return MainMenu()
+        return CRTTransition(
+            MainMenu(_auto_music=False),
+            post_fn=lambda: (sounds.start_menu_ambience(), sounds.start_menu_music()),
+        )
     
     def process_response(self, response: str):
         if response == "Resume Game":
@@ -5097,14 +5525,14 @@ class PauseHandler(AskUserEventHandler):
         elif response == "Save and Exit":
             return TextInputHandler(self.engine, prompt="Enter save name:", callback=self.handle_save_with_name)
         elif response == "Exit without Saving":
-            # Stop game audio and start menu audio
             sounds.stop_all_sounds()
-            sounds.start_menu_ambience()
-            sounds.start_menu_music()
-            
-            # Import MainMenu here to avoid circular imports
+            sounds.stop_all_music()
             from setup_game import MainMenu
-            return MainMenu()
+            return CRTTransition(
+                MainMenu(_auto_music=False),
+                post_fn=lambda: (sounds.start_menu_ambience(), sounds.start_menu_music()),
+            )
+        
         elif response == "Settings":
             return Settings(parent_handler=PauseHandler(self.engine))
         else:
@@ -5496,7 +5924,7 @@ class HelpMenuHandler(BaseEventHandler):
 
 
 
-        text = f"""Movement:
+        text = """Movement:
     WASD: Move Cardinally
     Numpad: Move Ordinally
     R Click: Auto-move to destination
@@ -5799,7 +6227,7 @@ class Settings(BaseEventHandler):
                 f.write(f'    "crt_curvature": {json.dumps(self.settings_data.get("crt_curvature", True))},\n')
                 f.write(f'    "light_flicker": {json.dumps(self.settings_data.get("light_flicker", True))}\n')
                 f.write("}\n")
-        except Exception as e:
+        except Exception:
             # If saving fails, just continue - don't crash the game
             pass
 

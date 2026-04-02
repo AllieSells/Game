@@ -191,81 +191,64 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
     engine.message_log.add_message(
         f"Seed: {get_current_seed()}", color.welcome_text
     )
-    engine.message_log.add_message(
-        "You enter the dungeon. Haunted figures move in the dark...", color.welcome_text
-    )
 
     return engine
 
 def tutorial_game(game_seed = None, seed_string = None) -> Engine:
     """Return a new game session with a custom tutorial map."""
-
+    """Return a brand new game session as an Engine instance."""
     map_width = 80
     map_height = 40
 
+    room_max_size = 10
+    room_min_size = 6
+    max_rooms = 30
+
+    # Set global seed once for the entire generation
     _set_global_seed(game_seed=game_seed, seed_string=seed_string)
 
     player = copy.deepcopy(entity_factories.player)
+    
+    # DEBUG: Set XP close to level up (350 needed for level 2)
+    player.level.current_xp = 0
 
     engine = Engine(player=player)
-
+    engine.debug_log(f"Starting new game with seed: {get_current_seed()}", handler=type(engine).__name__, event="game_start")
+    engine.debug_log(f"Engine: {engine}", handler=type(engine).__name__, event="game_start")
+    
+    # Set world generation flag to suppress equipment sounds
     engine.is_generating_world = True
 
-    # Create simple tutorial map with 8x8 room in center
-    from game_map import GameMap
-    import tile_types
-    
-    game_map = GameMap(engine, map_width, map_height, entities=[player], type="tutorial", name="Tutorial Level")
-    
-    # Calculate 8x8 room in center of map
-    center_x, center_y = map_width // 2, map_height // 2
-    room_size = 8
-    room_x1 = center_x - room_size // 2
-    room_y1 = center_y - room_size // 2
-    room_x2 = room_x1 + room_size
-    room_y2 = room_y1 + room_size
-    
-    # Create the room floor
-    game_map.tiles[room_x1:room_x2, room_y1:room_y2] = tile_types.floor
-    
-    # Place player in center of room
-    player.place(center_x, center_y, game_map)
-    
-    # Add a simple tutorial enemy (slime) in the room
-    guide = copy.deepcopy(entity_factories.tutorial_guide)
-    guide.generate_villager()
-    guide.tradable = False
-
-    guide.spawn(game_map, center_x + 2, center_y + 2)
-
-    campfire = copy.deepcopy(entity_factories.campfire)
-    campfire.spawn(game_map, center_x - 2, center_y + 2)
-    
-    # Add a tutorial chest with basic loot
-    import loot_tables
-    loot = loot_tables.generate_loot_from_table("starter_chest")
-    tutorial_chest = entity_factories.make_chest_with_loot(loot, capacity=15)
-    tutorial_chest.spawn(game_map, center_x - 2, center_y - 2)
-    
-    engine.game_map = game_map
-    
-    # Add minimal GameWorld for engine compatibility
     engine.game_world = GameWorld(
         engine=engine,
-        max_rooms=0,  # Tutorial doesn't use room generation
-        room_min_size=0,
-        room_max_size=0,
+        max_rooms=max_rooms,
+        room_min_size=room_min_size,
+        room_max_size=room_max_size,
         map_width=map_width,
         map_height=map_height,
     )
-    engine.game_world.current_floor = 0
+
+    # Global variance generation
+    import random  # Keep local for compatibility
+    for x in range(random.randint(5, 10)):
+        fungus = entity_factories.get_random_fungus()
+        engine.game_world.fungi.append(fungus)
+        engine.debug_log(f"Generated fungus: {fungus.name}", handler=type(engine).__name__, event="world_gen")
     
+    # Generate world noise 
+    engine.game_world.generate_tutorial()
     engine.update_fov()
-    engine.is_generating_world = False
     
-    engine.message_log.add_message("Welcome to the tutorial!", color.welcome_text)
-    engine.message_log.add_message("Use arrow keys to move, [Space] to interact.", color.welcome_text)
-    engine.message_log.add_message("Defeat the slime to complete the tutorial.", color.welcome_text)
+    # Clear world generation flag after generation is complete
+    engine.is_generating_world = False
+
+    engine.message_log.add_message("Press ? For Controls")
+    engine.message_log.add_message(
+        f"Seed: {get_current_seed()}", color.welcome_text
+    )
+    engine.message_log.add_message(
+        "You enter the dungeon. Haunted figures move in the dark...", color.welcome_text
+    )
 
     return engine
 
@@ -443,7 +426,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
         self.frame_count = 0
         self.engine = None
         self.generation_started = False
-        self.generation_complete = False
+        self.game_load = False
         self.completion_delay = 0  # Frames to show completion before transitioning
     
     def cleanup_resources(self):
@@ -477,7 +460,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             # Display current step
             if self.current_step < len(self.generation_steps):
                 current_text = self.generation_steps[self.current_step]
-                if not self.generation_complete:
+                if not self.game_load:
                     current_text += "." * self.dots + " " * (self.max_dots - self.dots)
             else:
                 current_text = "World generated!"
@@ -498,7 +481,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             bar_y = y + 5
             
             # Calculate progress percentage
-            if self.generation_complete:
+            if self.game_load:
                 progress = 1.0
             else:
                 progress = self.current_step / len(self.generation_steps)
@@ -511,7 +494,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             fill_width = int((bar_width - 2) * progress)
             for i in range(bar_width - 2):
                 if i < fill_width:
-                    if self.generation_complete:
+                    if self.game_load:
                         char = "█"
                         fg = color.gold_accent
                     else:
@@ -550,7 +533,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
                     steps_shown += 1
             
             # Show instructions
-            if not self.generation_complete:
+            if not self.game_load:
                 instructions_y = y + window_height - 2
                 console.print(
                     x + (window_width // 2),
@@ -609,13 +592,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             self.current_step = 2
             
             # Start actual generation with any configured seed
-            if hasattr(self, 'game_seed') or hasattr(self, 'seed_string'):
-                self.engine = new_game(
-                    game_seed=getattr(self, 'game_seed', None),
-                    seed_string=getattr(self, 'seed_string', None)
-                )
-            else:
-                self.engine = new_game()
+
             
             # Step 4: Doors and entrances (already done in new_game)
             self.current_step = 3
@@ -631,14 +608,14 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             
             # Step 8: Complete
             self.current_step = 7
-            self.generation_complete = True
+            self.game_load = True
             
             # Wait a moment to show completion, then auto-transition
             
         except Exception as e:
             # If generation fails
             self.current_step = len(self.generation_steps)
-            self.generation_complete = True
+            self.game_load = True
             self.engine = None
             self.engine.debug_log(f"World generation failed: {e}", handler=type(self).__name__, event="world_gen_error") if self.engine else None
             import traceback
@@ -649,7 +626,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
         """Handle events during loading.
 
         The CRT screen-off/on animation and the transition to MainGameEventHandler
-        are driven by the main render loop (main.py) once generation_complete is True.
+        are driven by the main render loop (main.py) once game_load is True.
         handle_events only needs to handle ESC-to-cancel; everything else is a no-op
         so the main loop stays in control of the timing.
         """
@@ -659,7 +636,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
 
         # Once generation is complete the main loop will play the screen-on animation
         # and then call handle_events with a synthetic event to trigger the transition.
-        if self.generation_complete and self.engine is not None:
+        if self.game_load and self.engine is not None:
             if getattr(event, '_crt_transition', False):
                 from input_handlers import MainGameEventHandler
 
@@ -828,9 +805,12 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
                     # Stop menu ambience when leaving menu  
                     sounds.stop_menu_ambience()
                     sounds.stop_all_music()
-                    sounds.start_dungeon_music()
 
-                    return input_handlers.MainGameEventHandler(engine)
+
+                    return input_handlers.CRTTransition(
+                        input_handlers.MainGameEventHandler(engine),
+                        post_fn=sounds.start_dungeon_music
+                    )
                 except FileNotFoundError:
                     return input_handlers.PopupMessage(self, f"Save file '{display_name}' not found.")
                 except Exception as exc:
@@ -971,23 +951,24 @@ class DebugLevelScreen(input_handlers.BaseEventHandler):
 class MainMenu(input_handlers.BaseEventHandler):
     """Handle the main menu rendering and input."""
     
-    def __init__(self):
+    def __init__(self, _auto_music=True):
         super().__init__()
         self.menu_options = [
             ("Enter New Dungeon", "start_new"),
             ("Reenter Saved Dungeon", "load_game"), 
             #("Tutorial", "tutorial"),
             ("Settings", "settings"),
-            ("Debug Level", "debug_level"),
+            #("Debug Level", "debug_level"),
             ("Quit", "quit")
         ]
         self.selected_option = 0
         self.engine = Engine()
         self.engine.debug_log("Menu Engine init", handler=type(self).__name__, event="menu_init")
-        # Start menu ambience only if not already playing
-        sounds.start_menu_ambience()
-        # Start menu music
-        sounds.start_menu_music()
+        # Start menu ambience and music (suppressed when entering via CRT transition
+        # so the VHS warp triggers first, then post_fn starts music)
+        if _auto_music:
+            sounds.start_menu_ambience()
+            sounds.start_menu_music()
         self.menu_start_y = 0
         self.menu_x = 0 
 
@@ -1132,21 +1113,23 @@ class MainMenu(input_handlers.BaseEventHandler):
             print("Quitting game...")
             sounds.stop_menu_ambience()
             sounds.stop_all_music()
-            raise SystemExit()
+            return input_handlers.CRTTransition(
+                lambda: None,
+                pre_fn=lambda: (sounds.stop_all_sounds(), sys.exit()),
+            )
         elif action == "load_game":
             # Show save game selection menu
             return SaveGameMenu(self)
         elif action == "tutorial":
-            sounds.stop_menu_ambience()
-            sounds.play_crt_off_sound()
             
             # Create tutorial game engine
             engine = tutorial_game()
             
-            # Start dungeon music for tutorial
-            sounds.start_dungeon_music()
-
-            return input_handlers.MainGameEventHandler(engine)
+            return input_handlers.CRTTransition(
+                input_handlers.MainGameEventHandler(engine),
+                pre_fn=lambda: (sounds.stop_menu_ambience(), sounds.stop_all_music()),
+                post_fn=sounds.start_dungeon_music
+            )
         elif action == "start_new":
 
             
@@ -1168,8 +1151,18 @@ class MainMenu(input_handlers.BaseEventHandler):
                             # Stop menu ambience when leaving menu  
                 sounds.stop_menu_ambience()
                 sounds.stop_all_music()
-                # Go to seed input screen (optional seed entry)
-                sounds.play_crt_off_sound()
+                sounds.stop_all_sounds()
+                if hasattr(self, 'game_seed') or hasattr(self, 'seed_string'):
+                    engine = new_game(
+                        game_seed=getattr(self, 'game_seed', None),
+                        seed_string=getattr(self, 'seed_string', None)
+                    )
+                else:
+                    engine = new_game()
+                return input_handlers.CRTTransition(
+                    input_handlers.MainGameEventHandler(engine),
+                    post_fn=sounds.start_dungeon_music
+                )
                 return loading_screen
             
             return input_handlers.TextInputHandler(
@@ -1181,11 +1174,11 @@ class MainMenu(input_handlers.BaseEventHandler):
                 parent_handler=self  # Pass self so background can be rendered
             )
         elif action == "debug_level":
-            # Stop menu ambience when leaving menu
-            sounds.stop_menu_ambience()
-            sounds.stop_all_music()
-            # Create debug level
-            return DebugLevelScreen(self)
+            return input_handlers.CRTTransition(
+                lambda: input_handlers.MainGameEventHandler(new_debug_game()),
+                pre_fn=lambda: (sounds.stop_menu_ambience(), sounds.stop_all_music()),
+                post_fn=sounds.start_dungeon_music
+            )
         elif action == "settings":
             from input_handlers import Settings
             return Settings(parent_handler=self)

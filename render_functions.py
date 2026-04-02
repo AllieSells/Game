@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Tuple, TYPE_CHECKING
 
 import tcod
+import numpy as np
 
 import color
 import text_utils
@@ -325,6 +326,15 @@ def render_player_level(
         x=LEVEL_BAR_X, y=LEVEL_BAR_Y, string=f"Level: {current_value}/{maximum_value} ({total_value})", fg=color.fantasy_text
     )
 
+def render_biome(
+        console: 'Console', biome_name: str, map: GameMap = None,
+) -> None:
+    # === ADJUSTABLE COORDINATES ===
+    BIOME_X = 1
+    BIOME_Y = 48
+    # ==============================
+    
+    console.print(x=BIOME_X, y=BIOME_Y, string=f"{biome_name}", fg=color.grey)
 
 
 def render_dungeon_level(
@@ -656,6 +666,294 @@ def render_status_hover_panel(console: 'Console', mouse_ui_x: int, mouse_ui_y: i
         fg = color.fantasy_text if idx == 1 else color.bronze_text
         console.print(x=x + 1, y=y + idx, string=line, fg=fg, bg=color.parchment_bg)
 
+
+
+def render_context_hints(console: tcod.Console, hints: list) -> None:
+    """Render context-sensitive key hints one row above the bottom HUD."""
+    if not hints:
+        return
+    HINTS_Y = 38  # One row above the bottom UI border (UI_TOP = 39)
+    x = 1
+    MAX_X = console.width - 2
+
+    for i, (key, action) in enumerate(hints):
+        if x >= MAX_X:
+            break
+        # Separator between entries
+        if i > 0:
+            sep = " \u25c6 "  # ◆
+            if x + len(sep) > MAX_X:
+                break
+            console.print(x=x, y=HINTS_Y, string=sep, fg=color.bronze_border, bg=color.parchment_dark)
+            x += len(sep)
+        # Opening bracket
+        if x >= MAX_X:
+            break
+        console.print(x=x, y=HINTS_Y, string="[", fg=color.bronze_border, bg=color.parchment_dark)
+        x += 1
+        # Key label
+        if x + len(key) > MAX_X:
+            break
+        console.print(x=x, y=HINTS_Y, string=key, fg=color.gold_accent, bg=color.parchment_dark)
+        x += len(key)
+        # Closing bracket
+        if x >= MAX_X:
+            break
+        console.print(x=x, y=HINTS_Y, string="]", fg=color.bronze_border, bg=color.parchment_dark)
+        x += 1
+        # Action label
+        action_str = " " + action
+        available = MAX_X - x
+        if available <= 0:
+            break
+        if len(action_str) > available:
+            action_str = action_str[:available]
+        console.print(x=x, y=HINTS_Y, string=action_str, fg=color.fantasy_text, bg=color.parchment_dark)
+        x += len(action_str)
+
+
+# ── Minimap / Hints panel constants ────────────────────────────────────────────
+_MM_RIGHT_X = 57  # default right-side col
+_MM_LEFT_X  = 0   # fallback left-side col
+_MM_X = _MM_RIGHT_X  # kept for backward compat
+_MM_Y = 0    # top edge
+_MM_W = 23   # panel width  (interior: 21 cols)
+_MM_H = 15   # panel height (interior: 13 rows)
+
+
+def get_minimap_origin_x(engine) -> int:
+    """Return the left-edge column for the minimap box.
+
+    Normally the box sits in the top-RIGHT corner (col 57).  When the player
+    is near the top-right edge of the map the camera clamps and the player
+    character appears in that region of the game view, obscured by the box.
+    In that case we flip to the top-LEFT corner (col 0).
+    """
+    if engine is None:
+        return _MM_RIGHT_X
+    gm = getattr(engine, 'game_map', None)
+    player = getattr(engine, 'player', None)
+    if gm is None or player is None:
+        return _MM_RIGHT_X
+    # Game console is 40×20; player screen col = player.x - origin_x
+    view_w, view_h = 40, 20
+    origin_x, origin_y = engine.get_camera_origin(view_w, view_h)
+    gc_x = player.x - origin_x
+    gc_y = player.y - origin_y
+    # Minimap right box covers roughly gc cols 28-39, gc rows 0-7
+    if gc_x >= 27 and gc_y <= 8:
+        return _MM_LEFT_X
+    return _MM_RIGHT_X
+
+
+def _render_hints_content(
+    console: tcod.Console,
+    engine: 'Engine',
+    x: int, y: int, w: int, h: int,
+) -> None:
+    """Fill the interior of the hints box with the current context hints."""
+    hints = getattr(engine, 'context_hints', [])
+    BG = color.parchment_dark
+    for i, (key, action) in enumerate(hints):
+        if i >= h:
+            break
+        bracket_str = f"[{key}]"
+        console.print(x, y + i, bracket_str, fg=color.gold_accent, bg=BG)
+        kx = x + len(bracket_str) + 1
+        available = w - len(bracket_str) - 1
+        if available > 0:
+            console.print(kx, y + i, action[:available], fg=color.fantasy_text, bg=BG)
+
+
+# Colour palette for the GPU minimap
+# Visible (lit) tiles are intentionally dim so CRT bloom doesn't wash out markers.
+_MM_COL_WALL_VIS     = ( 88,  82,  75, 255)  # medium stone
+_MM_COL_WALL_EXP     = ( 55,  50,  46, 255)  # dim stone
+_MM_COL_FLOOR_VIS    = ( 90,  72,  50, 255)  # warm brown (dim to avoid bloom)
+_MM_COL_FLOOR_EXP    = ( 50,  40,  28, 255)  # unlit floor
+_MM_COL_WATER_VIS    = ( 55, 140, 185, 255)
+_MM_COL_WATER_EXP    = ( 22,  58,  88, 255)
+_MM_COL_GRASS_VIS    = ( 55, 145,  55, 255)
+_MM_COL_GRASS_EXP    = ( 28,  72,  28, 255)
+_MM_COL_DOOR_VIS     = (160, 110,  45, 255)  # warm oak
+_MM_COL_DOOR_EXP     = ( 90,  65,  32, 255)
+_MM_COL_STAIR_DOWN   = (140,  80, 240, 255)  # purple — bright marker
+_MM_COL_STAIR_UP     = (200, 140, 255, 255)  # light purple
+_MM_COL_ENEMY        = (240,  40,  40, 255)  # vivid red
+_MM_COL_CHEST        = (255, 190,  40, 255)  # chest brown
+_MM_COL_ITEM         = (225, 190,  40, 255)  # gold
+_MM_COL_PLAYER       = (  0, 240, 100, 255)  # bright green — most important
+
+
+def render_gpu_minimap_body(
+    renderer,
+    engine: 'Engine',
+    base_tile_w: float,
+    base_tile_h: float,
+) -> None:
+    """Draw a GPU pixel-art minimap into the current render target.
+
+    One pixel per map tile, scaled up to fill the box interior.
+    The ASCII border/title are blitted from hud_tex first; this call
+    then overlays pure pixel content inside the border.
+    """
+    if getattr(engine, 'show_minimap', 0) != 0:
+        return
+    gm = getattr(engine, 'game_map', None)
+    if gm is None:
+        return
+
+    from entity import Actor
+
+    # Dynamic box position (flips to left when player is near top-right edge)
+    box_x = get_minimap_origin_x(engine)
+
+    # Interior tile coords (1-cell inset from box border)
+    ix = box_x + 1
+    iy = _MM_Y + 1
+    iw = _MM_W - 2
+    ih = _MM_H - 2
+
+    # Interior pixel bounds on screen
+    px0 = int(ix * base_tile_w)
+    py0 = int(iy * base_tile_h)
+    pw  = int(iw * base_tile_w)
+    ph  = int(ih * base_tile_h)
+    if pw <= 0 or ph <= 0:
+        return
+
+    map_w, map_h = gm.width, gm.height
+
+    # One RGBA pixel per map tile — (map_h, map_w, 4) row-major
+    pixels = np.zeros((map_h, map_w, 4), dtype=np.uint8)
+
+    exp      = gm.explored.T    # (H, W)
+    vis      = gm.visible.T     # (H, W)
+    walkable = gm.tiles['walkable'].T
+
+    # --- Terrain (vectorised) ----------------------------------------
+    pixels[exp & ~vis & ~walkable] = _MM_COL_WALL_EXP
+    pixels[vis & ~walkable]        = _MM_COL_WALL_VIS
+    pixels[exp & ~vis & walkable]  = _MM_COL_FLOOR_EXP
+    pixels[vis & walkable]         = _MM_COL_FLOOR_VIS
+
+    # --- Special terrain via name field (water / grass / door) -------
+    try:
+        names = gm.tiles['name']  # (W, H)
+        # Build boolean masks per special type — vectorised string search
+        def _name_mask(keyword):
+            """Return (H, W) bool mask where tile name contains keyword."""
+            vfunc = np.vectorize(lambda n: keyword in str(n).lower())
+            return vfunc(names).T  # transpose to (H, W)
+
+        water_m  = _name_mask('water')
+        grass_m  = _name_mask('grass') | _name_mask('foliage')
+        door_m   = _name_mask('door')
+
+        pixels[exp & water_m & ~vis] = _MM_COL_WATER_EXP
+        pixels[vis & water_m]        = _MM_COL_WATER_VIS
+        pixels[exp & grass_m & ~vis] = _MM_COL_GRASS_EXP
+        pixels[vis & grass_m]        = _MM_COL_GRASS_VIS
+        pixels[exp & door_m  & ~vis] = _MM_COL_DOOR_EXP
+        pixels[vis & door_m]         = _MM_COL_DOOR_VIS
+    except (ValueError, TypeError):
+        pass
+
+    # --- Stairs -------------------------------------------------------
+    down_loc = getattr(gm, 'downstairs_location', None)
+    up_loc   = getattr(gm, 'upstairs_location',   None)
+    if down_loc is not None:
+        dx, dy = int(down_loc[0]), int(down_loc[1])
+        if 0 <= dx < map_w and 0 <= dy < map_h and gm.explored[dx, dy]:
+            pixels[dy, dx] = _MM_COL_STAIR_DOWN
+    if up_loc is not None:
+        ux, uy = int(up_loc[0]), int(up_loc[1])
+        if 0 <= ux < map_w and 0 <= uy < map_h and gm.explored[ux, uy]:
+            pixels[uy, ux] = _MM_COL_STAIR_UP
+
+    # --- Entities -----------------------------------------------------
+    for ent in gm.entities:
+        ex, ey = ent.x, ent.y
+        if not (0 <= ex < map_w and 0 <= ey < map_h):
+            continue
+        if ent is engine.player:
+            continue
+        if isinstance(ent, Actor):
+            if ent.fighter and ent.fighter.hp > 0 and gm.visible[ex, ey]:
+                pixels[ey, ex] = _MM_COL_ENEMY
+        else:
+            if gm.visible[ex, ey] or gm.explored[ex, ey]:
+                # Distinguish chests (container component) from loose items
+                from components.container import Container
+                if hasattr(ent, 'container') and ent.container is not None:
+                    pixels[ey, ex] = _MM_COL_CHEST
+                else:
+                    pixels[ey, ex] = _MM_COL_ITEM
+
+    # --- Player (always visible, bright green) -----------------------
+    ppx, ppy = engine.player.x, engine.player.y
+    if 0 <= ppx < map_w and 0 <= ppy < map_h:
+        pixels[ppy, ppx] = _MM_COL_PLAYER
+
+    # --- Upload and blit scaled to interior ---------------------------
+    tex = renderer.upload_texture(pixels)
+    tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+    renderer.copy(tex, dest=(px0, py0, pw, ph))
+
+
+def render_minimap_box(console: tcod.Console, engine: 'Engine') -> None:
+    """Render the minimap / hints toggle panel (auto-flips left/right)."""
+    BOX_X = get_minimap_origin_x(engine)
+    BOX_Y = _MM_Y
+    BOX_W, BOX_H = _MM_W, _MM_H
+    IX, IY = BOX_X + 1, BOX_Y + 1  # interior origin
+    IW, IH = BOX_W - 2, BOX_H - 2  # interior size
+
+    mode = getattr(engine, 'show_minimap', 0)  # 0=map, 1=keys, 2=minimized
+
+    if mode == 2:
+        # Minimized — draw only a single-row tab strip at y=0.
+        # Deliberately skip draw_rect/draw_frame so no full-box content
+        # exists in the console (prevents popup bbox detector from picking it up).
+        _row = BOX_Y
+        console.draw_rect(x=BOX_X, y=_row, width=BOX_W, height=1,
+                          ch=ord(' '), bg=color.parchment_dark)
+        console.print(BOX_X, _row, '\u2570', fg=color.bronze_border, bg=color.parchment_dark)
+        console.print(BOX_X + BOX_W - 1, _row, '\u256f', fg=color.bronze_border, bg=color.parchment_dark)
+        for _bx in range(BOX_X + 1, BOX_X + BOX_W - 1):
+            console.print(_bx, _row, '\u2500', fg=color.bronze_border, bg=color.parchment_dark)
+        toggle = "[M]"
+        console.print(BOX_X + BOX_W - len(toggle) - 1, _row,
+                      toggle, fg=color.bronze_border, bg=color.parchment_dark)
+        return
+
+    # Background fill
+    console.draw_rect(x=BOX_X, y=BOX_Y, width=BOX_W, height=BOX_H,
+                      ch=ord(' '), bg=color.parchment_dark)
+
+    # Border (corners + edges)
+    console.draw_frame(x=BOX_X, y=BOX_Y, width=BOX_W, height=BOX_H,
+                       fg=color.bronze_border, bg=color.parchment_dark, clear=False)
+
+    if mode == 0:
+        title = " Map "
+        title_x = BOX_X + (BOX_W - len(title)) // 2
+        console.print(title_x, BOX_Y, title, fg=color.gold_accent, bg=color.parchment_dark)
+        # Toggle hint in bottom border
+        toggle = "[M]"
+        console.print(BOX_X + BOX_W - len(toggle) - 1, BOX_Y + BOX_H - 1,
+                      toggle, fg=color.bronze_border, bg=color.parchment_dark)
+        # Interior is filled by render_gpu_minimap_body — fill with black here
+        # so the parchment doesn't bleed through before the GPU pass runs.
+        console.draw_rect(x=IX, y=IY, width=IW, height=IH, ch=ord(' '), bg=(0, 0, 0))
+    else:  # mode == 1 (keys)
+        title = " Keys "
+        title_x = BOX_X + (BOX_W - len(title)) // 2
+        console.print(title_x, BOX_Y, title, fg=color.gold_accent, bg=color.parchment_dark)
+        toggle = "[M]"
+        console.print(BOX_X + BOX_W - len(toggle) - 1, BOX_Y + BOX_H - 1,
+                      toggle, fg=color.bronze_border, bg=color.parchment_dark)
+        _render_hints_content(console, engine, IX, IY, IW, IH)
 
 
 def render_bottom_ui_border(console: tcod.Console):

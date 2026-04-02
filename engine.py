@@ -6,12 +6,14 @@ import trace
 import traceback
 from typing import TYPE_CHECKING, Optional
 import os
+import numpy as np
 from tcod.console import Console
 from tcod.map import compute_fov
 from collections import deque
 import random
 
 from components import equipment
+import components
 import exceptions
 import game_map
 from liquid_system import LiquidType
@@ -26,7 +28,8 @@ if TYPE_CHECKING:
     from game_map import GameMap, GameWorld
 
 import time
-from animations import FireFlicker, BonefireFlicker, SmokeCloudParticle, FlameAnimation, EmberParticle, DripParticle
+from animations import FireFlicker, BonefireFlicker, FlameAnimation
+from gpu_stack import SmokeCloudParticle, EmberParticle, DripParticle, LightShaftParticles
 import sprite_manager
 
 
@@ -41,11 +44,16 @@ class Engine:
         self.mouse_location = (0,0)
         self.player = player
         self.mouse_held = False
+
+        # Tutorial checkpoints
+        self.tutorial_checkpoints: list = []
         
         self.animation_queue = deque()
         self.animations_enabled = True
         self.debug = False
         self.cursor_hint = None 
+        self.context_hints = []
+        self.show_minimap = 0  # 0=map, 1=keys, 2=minimized
         self.hovered_inventory_button = None
         
         # Initialize turn manager for centralized turn processing
@@ -85,6 +93,8 @@ class Engine:
         self._pending_handler = None  # Handler change queued by auto-move (e.g. GameOver)
         self._pending_handler_ready = False  # Delay until one final sprite-update frame completes before switching handler
 
+        # Turn counter
+        self.turn_count = 0
         # Persistent Simplex noise generator for torch/fire flicker.
         # Stored on the engine (not per-map) so the animation is continuous
         # across floor transitions and is preserved in save files.
@@ -187,172 +197,43 @@ class Engine:
         return effect
 
     def tutorial_ticking(self, console: Console):
-        """Special tick method used during the tutorial"""
-        now = time.monotonic()
-        _last = getattr(self, "_last_tick_time", None)
+        for entity in self.game_map.entities:
+            if getattr(entity, "type", None) == "Guide":
+                guide = entity
+                break
 
-        if _last is None:
-            # first tick: initialize storage
-            self._last_tick_time = now
-            self._tick_intervals = deque(maxlen=60)  # smooth over last N frames
-            self.tick_rate = 0.0
-
+        if "start" not in self.tutorial_checkpoints:
+            self.tutorial_checkpoints.append("start")
+            print("Tutorial: Starting tutorial sequence.")
+            guide.ai.say(custom="Welcome adventurer. Use WASD or right click to move. Try it out a bit!")
         else:
-            dt = now - _last
-            self._last_tick_time = now
-            if dt > 0:
-                self._tick_intervals.append(dt)
-                total = sum(self._tick_intervals)
-                # ticks per second = number of recorded ticks / total time covered
-                self.tick_rate = (len(self._tick_intervals) / total) if total > 0 else 0.0
+            if "moved" not in self.tutorial_checkpoints:
+                if self.turn_count > 5:
+                    self.tutorial_checkpoints.append("moved")
+                    print("Tutorial: Detected player movement.")
+                    guide.ai.say(custom="Excellent. Now, move to that chest northward, and right click on it to get some basic equipment.")
             else:
-                # very unlikely, but avoid division by zero
-                self.tick_rate = getattr(self, "tick_rate", 0.0)
+                if "looted" not in self.tutorial_checkpoints:
+                    if len(self.player.inventory.items) > 0:
+                        self.tutorial_checkpoints.append("looted")
+                        print("Tutorial: Detected player looting chest.")
+                        guide.ai.say(custom="Well done. Equip items using the (E) equipment menu. Try defeating that training dummy by moving into it, or left clicking it.")
+                else:
+                    if "defeat" not in self.tutorial_checkpoints:
+                        dummy = next((e for e in self.game_map.entities if getattr(e, "name", None) == "Training Dummy"), None)
+                        if not dummy or (dummy.fighter and dummy.fighter.hp <= 0):
+                            self.tutorial_checkpoints.append("defeat")
+                            print("Tutorial: Detected training dummy defeat.")
+                            guide.ai.say(custom="That was a real challenge. You will gain levels as you hone your skills (F). Open your inventory (TAB) and use the sigil stone from the chest.")
+                    else:
+                        if "stoneused" not in self.tutorial_checkpoints:
+                            # check if player has level 2 arcana
+                            if self.player.level and self.player.level.traits['arcana']['level'] >= 2:
+                                self.tutorial_checkpoints.append("stoneused")
+                                print("Tutorial: Detected sigil stone use and arcana level.")
+                                guide.ai.say(custom="Well done. Access the controls menu (M) if you need a refresher. Descend (>) the stairs to the east, and best of luck traveller.")
 
-        # Tutorial state management - only update when state changes
-        current_tutorial_state = self._determine_tutorial_state()
-        last_state = getattr(self, '_last_tutorial_state', None)
-        
-        if current_tutorial_state != last_state:
-            self._update_tutorial_message(current_tutorial_state)
-            self._last_tutorial_state = current_tutorial_state
-            
-        # Process animations - this was missing!
-        # Don't call process_animations here as it needs console/game_map params
-        # Instead just clean up expired animations
-        expired = [anim for anim in list(self.animation_queue) if getattr(anim, "frames", 1) <= 0]
-        for anim in expired:
-            try:
-                self.animation_queue.remove(anim)
-            except ValueError:
-                pass
-    
-    def _determine_tutorial_state(self):
-        """Determine the current tutorial state based on player progress"""
-        # No items in inventory - need to get items from chest
-        
-        if self.turn_manager.total_player_moves == 0:
-            return "move"
-        elif len(self.player.inventory.items) == 0:
-            return "get_items"
-        elif self.player.level.traits["arcana"]["level"] > 1:
-            return "level_up_arcana"
-        elif self.dropped_stone_dummy_var:
-            return "sigil_stone_dropped"
 
-        
-        # Has items but none equipped - need to equip items
-        elif len(self.player.inventory.items) > 0 and not any(item in self.player.equipment.equipped_items.values() for item in self.player.inventory.items):
-            return "equip_items"
-        
-        elif any(entity.name == "Sigil Stone" for entity in self.game_map.entities):
-
-            if self.dropped_stone_dummy_var == False:
-                self.dropped_stone_dummy_var = True
-                return "sigil_stone_dropped"
-                
-            else:
-                return "sigil_stone_dropped"
-            
-
-            
-                
-        
-        # Check for goblin corpse first - if defeated, move to next phase
-        elif any(entity.name == "Corpse of Goblin" for entity in self.game_map.entities):
-            return "goblin_defeated"
-        
-        # Has any item equipped - explain equipment usage and spawn goblin if needed
-        elif any(item in self.player.equipment.equipped_items.values() for item in self.player.inventory.items):
-            # Spawn goblin if not already present (alive or dead)
-            if not any(entity.name == "Goblin" for entity in self.game_map.entities) and not any(entity.name == "Corpse of Goblin" for entity in self.game_map.entities):
-                 # Spawn a goblin enemy to demonstrate combat after equipping
-                import entity_factories
-                goblin = entity_factories.goblin
-                goblin.inventory.items.append(entity_factories.generate_sigil_stone())
-                goblin.spawn(self.game_map, 42, 17)  # Spawn a bit away from player
-            return "item_equipped"
-        
-        # Add more states here as needed
-        # elif some_other_condition:
-        #     return "next_state"
-        
-        return None
-    
-    def _update_tutorial_message(self, tutorial_state):
-        """Update the tutorial message display based on current state"""
-        # Only update if we don't already have this tutorial state showing
-        if hasattr(self, '_last_tutorial_message_state') and self._last_tutorial_message_state == tutorial_state:
-            return  # Already showing the correct message, don't interfere
-        
-        # Mark existing tutorial animation as expired
-        if hasattr(self, '_current_tutorial_animation') and self._current_tutorial_animation:
-            self._current_tutorial_animation.frames = 0
-        
-        # Tutorial messages for each state
-        messages = {
-            "move": """
->Arrow keys move you 
- cardinally. Numpad keys
- move ordinally. Try it!""",
-
-            "get_items": """
->Interact with objects
- with ALT + Direction.
- Try interacting with the chest (C)
- and take the items inside.""",
-            
-            "equip_items": """
->Great job. You can
- interact with many
- objects. Try equipping
- those items using the 
- Equipment menu (E). """,
-            
-            "item_equipped": """
->Excellent! Try attacking
- this goblin (g) by moving
- into it, or using
- SHIFT + Direction.""",
-            
-            "goblin_defeated": """
->Great job! Inspect (S) the
- goblin corpse to see the
- loot it dropped. Interact with
- it like a chest! Use the drop (D)
- menu and drop the sigil stone. """,
-            "sigil_stone_dropped": """
->Great. Sigil stones can be 
- used (SPACE) from your 
- inventory (TAB) to unlock
- spells and level magic.
- Pick up (G) the stone 
- and use it now!""",
-            "level_up_arcana": """
->Check your levels with (F).
- Skills build from use. That
- is all from me! Use (ESC) to exit,
- and check the controls in settings
- if you need a refresh.""",
-
-            
-            # Add more tutorial messages here
-            # "next_state": """Your next tutorial message here""",
-        }
-        
-        # Add the appropriate tutorial animation and store reference
-        if tutorial_state in messages:
-            tutorial_animation = TextPopupAnimation(
-                43, 21, 
-                messages[tutorial_state],
-                color=(255, 255, 0), 
-                duration=99999
-            )
-            self.animation_queue.append(tutorial_animation)
-            self._current_tutorial_animation = tutorial_animation
-            self._last_tutorial_message_state = tutorial_state
-
-                
     
     def tick(self, console: Console):
 
@@ -378,24 +259,55 @@ class Engine:
                 # very unlikely, but avoid division by zero
                 self.tick_rate = getattr(self, "tick_rate", 0.0)
 
+        # Always clean up expired animations regardless of map type.
+        expired = [anim for anim in list(self.animation_queue) if getattr(anim, "frames", 1) <= 0]
+        for anim in expired:
+            try:
+                self.animation_queue.remove(anim)
+            except ValueError:
+                pass
+
+        # Always advance auto-move regardless of map type.
+        auto_path = getattr(self, 'auto_move_path', None)
+        if auto_path and getattr(self, 'turn_manager', None):
+            self.cursor_hint = "walk"
+            import color as _color
+            now_am = time.monotonic()
+            if now_am - self._last_auto_move_time >= 0.05:
+                enemy_visible = any(
+                    actor is not self.player and self.game_map.visible[actor.x, actor.y] and isinstance(actor.ai, components.ai.HostileEnemy)
+                    for actor in self.game_map.actors
+                )
+                if enemy_visible:
+                    self.auto_move_path = []
+                    self.cursor_hint = None
+                    self.message_log.add_message("No longer pathing, spotted an enemy.", _color.yellow)
+                else:
+                    next_pos = auto_path.pop(0)
+                    dx = next_pos[0] - self.player.x
+                    dy = next_pos[1] - self.player.y
+                    from actions import MovementAction
+                    try:
+                        self.turn_manager.process_pre_player_turn()
+                        MovementAction(self.player, dx, dy).perform()
+                        self._last_auto_move_time = now_am
+                        if not auto_path:
+                            self.cursor_hint = None
+                        result = self.turn_manager.process_player_turn_end()
+                        if result is not None:
+                            self.auto_move_path = []
+                            self.cursor_hint = None
+                            self._pending_handler = result
+                    except exceptions.Impossible as exc:
+                        self.auto_move_path = []
+                        self.cursor_hint = None
+                        self.message_log.add_message(exc.args[0], _color.impossible)
+
         # Handle tutorial-specific ticking for tutorial maps
-        if hasattr(self, 'game_map') and getattr(self.game_map, 'type', None) == "tutorial":
+        if hasattr(self, 'game_map') and getattr(self.game_map, 'biome', None) == "tutorial":
             self.tutorial_ticking(console)
-            return  # Skip regular game ticking for tutorials
         
-        # Generate water drop animations for random tiles 
-        #try:
-        #    if hasattr(self.game_map, "tiles") and "name" in self.game_map.tiles.dtype.names:
-        #        if random.random() < 0.0 5:  # 5% chance each tick to try spawning drops
-        #            for _ in range(2):  # Try to spawn a couple of drops each tick
-        #               x = random.randint(0, self.game_map.width - 1)
-        #               y = random.randint(0, self.game_map.height - 1)
-        #               if (self.game_map.tiles["walkable"][x, y]
-        #                       and self.game_map.visible[x, y]):
-        #                   from animations import WaterDropAnimation
-        #                    self.animation_queue.append(WaterDropAnimation((x, y)))
-        #except Exception:
-        #    traceback.print_exc()
+
 
         # Generate grass waves that sweep across the visible area
         try:
@@ -415,22 +327,37 @@ class Engine:
             traceback.print_exc()
 
 
-        # Don't call animation rendering here; rendering happens in GameMap.render().
-        # Here we only clean up animations that were expired during the last render pass.
-        expired = [anim for anim in list(self.animation_queue) if getattr(anim, "frames", 1) <= 0]
-        for anim in expired:
-            try:
-                # Delete expired animations from queue
-                self.animation_queue.remove(anim)
-            except ValueError:
-                pass
-
         # Body part coating system moved to turn_manager.py
 
         # Keep a single persistent GlobalWaterAnimation instead of per-tile spawns
         if not any(type(a).__name__ == 'GlobalWaterAnimation' for a in self.animation_queue):
             from animations import GlobalWaterAnimation
             self.animation_queue.appendleft(GlobalWaterAnimation())
+
+        # Spawn directional light shaft particles for visible Window tiles.
+        # Check north (y-1) and south (y+1) independently: if that side is open
+        # (transparent), spawn a shaft going in that direction.
+        if self.animations_enabled and hasattr(self, 'game_map'):
+            existing_shafts = {
+                (int(a.fx), int(a.fy), a.shaft_direction)
+                for a in self.animation_queue
+                if isinstance(a, LightShaftParticles) and a.frames > 0
+            }
+            visible_windows = np.argwhere(
+                self.game_map.visible & (self.game_map.tiles["name"] == "Window")
+            )
+            for x, y in visible_windows:
+                ix, iy = int(x), int(y)
+                # North side open → shaft goes north (up on screen, direction=-1)
+                if (self.game_map.in_bounds(ix, iy - 1)
+                        and self.game_map.tiles[ix, iy - 1]["transparent"]
+                        and (ix, iy, -1) not in existing_shafts):
+                    self.animation_queue.append(LightShaftParticles((ix, iy), shaft_direction=-1))
+                # South side open → shaft goes south (down on screen, direction=+1)
+                if (self.game_map.in_bounds(ix, iy + 1)
+                        and self.game_map.tiles[ix, iy + 1]["transparent"]
+                        and (ix, iy, 1) not in existing_shafts):
+                    self.animation_queue.append(LightShaftParticles((ix, iy), shaft_direction=1))
 
         
         try:
@@ -598,48 +525,6 @@ class Engine:
         except Exception:
             traceback.print_exc()
             pass
-
-        # Auto-movement: advance one step along the queued path every 150 ms
-        auto_path = getattr(self, 'auto_move_path', None)
-        if auto_path and getattr(self, 'turn_manager', None):
-            self.cursor_hint = "walk"
-            import color as _color
-            now_am = time.monotonic()
-            if now_am - self._last_auto_move_time >= 0.05:
-                # Cancel if an enemy is visible
-                enemy_visible = any(
-                    actor is not self.player and self.game_map.visible[actor.x, actor.y]
-                    for actor in self.game_map.actors
-                )
-                if enemy_visible:
-                    self.auto_move_path = []
-                    self.cursor_hint = None
-                    self.message_log.add_message("No longer pathing, spotted an enemy.", _color.yellow)
-                else:
-                    next_pos = auto_path.pop(0)
-                    dx = next_pos[0] - self.player.x
-                    dy = next_pos[1] - self.player.y
-                    from actions import MovementAction
-                    try:
-                        self.turn_manager.process_pre_player_turn()
-                        MovementAction(self.player, dx, dy).perform()
-                        self._last_auto_move_time = now_am
-                        # Clear cursor hint when path is exhausted
-                        if not auto_path:
-                            self.cursor_hint = None
-                        result = self.turn_manager.process_player_turn_end()
-                        if result is not None:
-                            self.auto_move_path = []
-                            self.cursor_hint = None
-                            self._pending_handler = result
-                    except exceptions.Impossible as exc:
-                        self.auto_move_path = []
-                        self.cursor_hint = None
-                        self.message_log.add_message(exc.args[0], _color.impossible)
-                        self.message_log.add_message(exc.args[0], _color.impossible)
-
-
-
 
     def process_animations(self):
         if not self.animation_queue:
@@ -969,7 +854,8 @@ class Engine:
 
         if self.game_map.sunlit:
             radius = max(radius, 1000)  # Sunlit areas have large FOV regardless of torch
-
+        if self.game_map.biome == "tutorial":
+            radius = 10
         # If player in village, greatly increase FOV radius
         if self.game_map.type == "village":
             radius = 1000
@@ -1055,11 +941,17 @@ class Engine:
             console=console,
             gold_amount=self.player.gold
         )
+        render_functions.render_biome(
+            console=console,
+            biome_name=self.game_map.biome_str,
+            map=self.game_map
+        )
         render_functions.render_dungeon_level(
             console=console,
             dungeon_level=self.game_world.current_floor,
             map=self.game_map
         )
+
 
         render_functions.render_ui_buttons(
             console=console,
@@ -1086,6 +978,12 @@ class Engine:
             self.cursor_hint = "walk"
             render_functions.render_names_at_mouse_location(
                 console=console, x=1, y=42, engine=self
+            )
+            render_functions.render_context_hints(
+                console=console, hints=self.context_hints
+            )
+            render_functions.render_minimap_box(
+                console=console, engine=self
             )
             if self.debug:
                 if not skip_debug:
@@ -1125,7 +1023,15 @@ class Engine:
         render_functions.render_names_at_mouse_location(
             console=console, x=1, y=42, engine=self  # MOUSE_LOCATION coordinates
             )
-        
+
+        render_functions.render_context_hints(
+            console=console, hints=self.context_hints
+        )
+
+        render_functions.render_minimap_box(
+            console=console, engine=self
+        )
+
         if self.debug and not skip_debug:
             render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities), self)
 
@@ -1143,38 +1049,4 @@ class Engine:
     def render_damage_indicator(self, console):
         """Render red corners on screen edges when player takes damage"""
         # Calculate fade effect based on remaining timer
-        fade_ratio = self.damage_indicator_timer / self.damage_indicator_duration
-        red_intensity = int(255 * fade_ratio)
-        red_color = (red_intensity, 0, 0)
-        
-        # Get console dimensions
-        width = console.width
-        height = console.height
-        
-        # Corner size
-        corner_size = 8  # Made bigger to see better
-        
-        # Test: Just draw simple rectangles in all four corners to make sure it's working
-        # Top-left corner (L facing inward)
-        for x in range(corner_size):
-            for y in range(corner_size):
-                if x < 2 or y < 2:  # Thinner L shape
-                    console.print(x, y, " ", bg=red_color)
-        
-        # Top-right corner (backwards L facing inward)
-        for x in range(corner_size):
-            for y in range(corner_size):
-                if x >= corner_size - 2 or y < 2:  # Thinner backwards L shape
-                    console.print(width - corner_size + x, y, " ", bg=red_color)
-        
-        # Bottom-left corner (upside-down L facing inward)
-        for x in range(corner_size):
-            for y in range(corner_size):
-                if x < 2 or y >= corner_size - 2:  # Thinner upside-down L shape
-                    console.print(x, height - corner_size + y, " ", bg=red_color)
-        
-        # Bottom-right corner (upside-down backwards L facing inward)
-        for x in range(corner_size):
-            for y in range(corner_size):
-                if x >= corner_size - 2 or y >= corner_size - 2:  # Thinner upside-down backwards L shape
-                    console.print(width - corner_size + x, height - corner_size + y, " ", bg=red_color)
+        return # Out dated code TODO

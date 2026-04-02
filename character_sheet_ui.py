@@ -22,6 +22,11 @@ class CharacterScreen(AskUserEventHandler):
 
     def __init__(self, engine: Engine):
         super().__init__(engine)
+        self.engine.context_hints = [
+            ("\u2191\u2193", "Navigate"),
+            ("Enter/Click", "Expand"),
+            ("Esc/F", "Close"),
+        ]
         self.selected_slot = 0
         self.selected_category = 0
         self.expanded_categories = CharacterScreen._last_expanded_categories.copy()  # Restore previous state

@@ -23,6 +23,7 @@ else:
 import sounds
 import animations
 import sprite_manager
+import gpu_stack
 # Body part targeting modifiers (damage_modifier, hit_difficulty_modifier)
 # hit_difficulty_modifier: Positive = easier to hit, negative = harder to hit
 
@@ -318,7 +319,7 @@ class TakeStairsAction(Action):
         pos = (self.entity.x, self.entity.y)
 
         # Descend if on the downstairs tile
-        if 1 == 1: #pos == self.engine.game_map.downstairs_location:
+        if pos == self.engine.game_map.downstairs_location:
             # Use GameWorld.descend helper if available, otherwise fall back
             self.engine.game_world.descend()
             sounds.stairs_sound.play()
@@ -733,7 +734,15 @@ class RangedAction(ActionWithDirection):
                     pass
 
             if target is self.engine.player:
-                self.engine.trigger_damage_indicator()
+                existing_bleed = next(
+                    (a for a in self.engine.animation_queue
+                     if isinstance(a, gpu_stack.CRTBleedAnim)), None
+                )
+                if existing_bleed is not None:
+                    existing_bleed.frames = existing_bleed.total_frames
+                else:
+                    self.engine.animation_queue.append(gpu_stack.CRTBleedAnim())
+                
         else:
             self.engine.message_log.add_message(
                 f"{attack_desc}, but does no damage.", attack_color
@@ -770,7 +779,7 @@ class MeleeAction(ActionWithDirection):
 
         if not target:
             x, y = self.target_location
-            self.engine.animation_queue.append(animations.SlashAnimation(x, y))
+            self.engine.animation_queue.append(gpu_stack.SlashParticle((x, y), enchanted=False))
             sounds.play_miss_sound()
             raise exceptions.Impossible("Nothing to attack.")
 
@@ -894,7 +903,7 @@ class MeleeAction(ActionWithDirection):
 
         # Animation
         if hit_success:
-            self.engine.animation_queue.append(animations.SlashAnimation(target.x, target.y))
+            self.engine.animation_queue.append(gpu_stack.SlashParticle((target.x, target.y), enchanted=False, angle=(self.dx, self.dy)))
 
         attack_color = color.player_atk if self.entity is self.engine.player else color.enemy_atk
 
@@ -910,7 +919,7 @@ class MeleeAction(ActionWithDirection):
                 for enchantment in weapon.enchantments:
                     enchantment.on_hit(self.engine, target, hit_part)
                     self.engine.animation_queue.append(
-                        animations.EnchantedSlashAnimation(target.x, target.y, enchantment.get_color())
+                        gpu_stack.SlashParticle((target.x, target.y), enchanted=True, color=enchantment.get_color())
                     )
 
             if hit_part:
@@ -931,7 +940,14 @@ class MeleeAction(ActionWithDirection):
                 target.fighter.take_damage(final_damage)
 
             if target is self.engine.player:
-                self.engine.trigger_damage_indicator()
+                existing_bleed = next(
+                    (a for a in self.engine.animation_queue
+                     if isinstance(a, gpu_stack.CRTBleedAnim)), None
+                )
+                if existing_bleed is not None:
+                    existing_bleed.frames = existing_bleed.total_frames
+                else:
+                    self.engine.animation_queue.append(gpu_stack.CRTBleedAnim())
         else:
             self.engine.message_log.add_message(
                 f"{attack_desc}, but does no damage.", attack_color
@@ -954,9 +970,11 @@ class MeleeAction(ActionWithDirection):
             defender_xp = {'vigor': part_damage * 2}
             if armor_defense > 0 and hit_part:
                 armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name) if target.equipment else []
-                if "light armor" in armor_tags:
-                    defender_xp['light armor'] = int(armor_defense * 1.5)
-            target.level.add_xp(defender_xp)
+                if armor_tags is not None:
+                    if "light armor" in armor_tags:
+                        defender_xp['light armor'] = int(armor_defense * 1.5)
+            if target.level is not None:
+                target.level.add_xp(defender_xp)
 
 class MovementAction(ActionWithDirection):
 
@@ -980,6 +998,7 @@ class MovementAction(ActionWithDirection):
             self.entity.is_swimming = is_water
 
     def perform(self) -> None:
+        
         dest_x, dest_y = self.dest_xy
 
         # Check if entity can move (has working legs/locomotion)
@@ -992,6 +1011,7 @@ class MovementAction(ActionWithDirection):
             
             # Warn player about movement penalties from leg injuries
             if self.entity == self.engine.player:
+                self.engine.turn_count += 1
                 penalty = self.entity.body_parts.get_movement_penalty()
                 if penalty > 0.5:  # Significant penalty (> 50%)
                     if not hasattr(self, '_shown_movement_warning'):

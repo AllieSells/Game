@@ -62,7 +62,7 @@ class _FloorProbe:
 
 class GameMap:
     def __init__(
-            self, engine: Engine, width: int, height: int, entities: Iterable[Entity] = (), type: str = "dungeon", name: str = "Dungeon", sunlit: bool = False
+            self, engine: Engine, width: int, height: int, entities: Iterable[Entity] = (), type: str = "dungeon", name: str = "Dungeon", sunlit: bool = False, biome: str = "dungeon"
     ):
         self.engine = engine
         self.width, self.height = width, height
@@ -70,7 +70,8 @@ class GameMap:
         self.type = type
         self.sunlit = sunlit
         self.temperature = 20
-        self.biome = "dungeon"
+        self.biome = biome
+        self.biome_str = None
         
         # Initialize tiles. For dungeon maps, populate per-tile using
         # tile_types.random_wall_tile() so we get variation (mossy walls etc.).
@@ -103,6 +104,11 @@ class GameMap:
         
         # Initialize liquid system
         self.liquid_system = LiquidSystem(self)
+
+        # Per-tile white/neutral light accumulator (separate from warm-tinted light_level).
+        # Sources with light_color=(255,255,255) contribute here; build_lightmap blends
+        # warm and white contributions to produce the final per-tile tint.
+        self._white_light_level = np.zeros((width, height), dtype=np.float32, order="F")
         
     @property
     def gamemap(self) -> GameMap:
@@ -137,7 +143,8 @@ class GameMap:
         return 0 <= x < self.width and 0 <= y < self.height
     
     def _add_light_source(self, source_x: int, source_y: int, radius: int, max_intensity: float = 1.0,
-                          wobble_dx: float = 0.0, wobble_dy: float = 0.0, di: float = 0.0) -> None:
+                          wobble_dx: float = 0.0, wobble_dy: float = 0.0, di: float = 0.0,
+                          light_color: tuple = None) -> None:
         """Add light from a source with distance-based falloff and FOV blocking.
 
         wobble_dx / wobble_dy shift the effective light centre each frame so
@@ -180,6 +187,10 @@ class GameMap:
                 1.0,
                 self.tiles["light_level"] + light_intensity
             )
+            if light_color is not None:
+                wl = getattr(self, '_white_light_level', None)
+                if wl is not None:
+                    self._white_light_level = np.minimum(1.0, wl + light_intensity)
 
         except Exception:
             # Fallback: simple distance-based lighting without wobble.
@@ -199,6 +210,10 @@ class GameMap:
                 1.0,
                 self.tiles["light_level"] + light_intensity
             )
+            if light_color is not None:
+                wl = getattr(self, '_white_light_level', None)
+                if wl is not None:
+                    self._white_light_level = np.minimum(1.0, wl + light_intensity)
     
     def _apply_lighting_to_entity_color(self, entity_color: tuple, x: int, y: int) -> tuple:
         """Apply lighting effects to entity color based on tile light level."""
@@ -358,9 +373,21 @@ class GameMap:
 
 
         brightness = LIGHT_MIN_BRIGHTNESS + (1.0 - LIGHT_MIN_BRIGHTNESS) * ll
-        r = brightness                                    # R: no warm-tint change
-        g = brightness * (1.0 - LIGHT_WARM_G * ll)       # G: slight amber at bright
-        b = brightness * (1.0 - LIGHT_WARM_B * ll)       # B: strong warm reduction
+
+        # Blend warm-amber tint with neutral white based on white-light contribution.
+        # white_ratio=1.0 → pure white (no tint); white_ratio=0.0 → full warm amber.
+        raw_wl = getattr(self, '_white_light_level', None)
+        if raw_wl is not None:
+            wl = np.clip(raw_wl[x_slice, y_slice].T.astype(np.float32), 0.0, 1.0)
+        else:
+            wl = np.zeros_like(ll)
+        safe_ll = np.where(ll > 0.0, ll, np.float32(1.0))
+        white_ratio = np.clip(wl / safe_ll, 0.0, 1.0)  # fraction of light that is white
+        warm_ratio  = 1.0 - white_ratio
+
+        r = brightness                                                               # R: unchanged for both tints
+        g = brightness * (warm_ratio * (1.0 - LIGHT_WARM_G * ll) + white_ratio)    # G: amber only on warm portion
+        b = brightness * (warm_ratio * (1.0 - LIGHT_WARM_B * ll) + white_ratio)    # B: amber only on warm portion
 
         # Lightmap encoding per tile state:
         #   visible          → brightness formula + warm-amber tint
@@ -401,6 +428,8 @@ class GameMap:
         # Update tile lighting with gradient falloff based on distance to light sources  
         # Reset all tiles to zero light level first
         self.tiles["light_level"][:] = 0.0
+        if hasattr(self, '_white_light_level'):
+            self._white_light_level[:] = 0.0
 
         # Advance the torch-flicker time variable exactly like fov_torchx in the
         # libtcod demo (0.2 per frame).  Three 1-D noise samples at fixed offsets
@@ -437,6 +466,8 @@ class GameMap:
 
         if getattr(self, "sunlit", True):
             self.tiles["light_level"][:] = 1.0  # Sunlit maps are fully lit
+            if hasattr(self, '_white_light_level'):
+                self._white_light_level[:] = 1.0  # Sunlit = fully white light
         
         try:
             player = self.engine.player
@@ -494,6 +525,16 @@ class GameMap:
                 pass
         except Exception:
             self.tiles["light_level"][:] = 0.0
+
+        # Find tile light sources 
+        for x in range(self.width):
+            for y in range(self.height):
+                if not (0 <= x < self.width and 0 <= y < self.height):
+                    continue
+                else:
+                    tile = self.tiles[x, y]
+                    if tile["name"] == "Window":
+                        self._add_light_source(x, y, radius=8, max_intensity=1.0, light_color=(255, 255, 255))
 
         # Render tiles with gradient lighting based on light levels
         self._render_tiles_with_gradient(console)
@@ -679,7 +720,7 @@ class GameWorld:
 
 
     def generate_floor(self) -> None:
-        from procgen import generate_dungeon, generate_village
+        from procgen import generate_dungeon, generate_village, generate_tutorial_floor
         import random
 
         self.current_floor += 1
@@ -725,39 +766,66 @@ class GameWorld:
             self.descend()  # Use the same generation method as normal descents
     def descend(self) -> None:
         """Descend one level."""
-        from procgen import generate_dungeon
-        
-        # Save current floor
+        # Save current floor to the up-stack so we can return to it.
         current_map = self.engine.game_map
         player_pos = (self.engine.player.x, self.engine.player.y)
         self.up_stack.append((current_map, player_pos, self.current_floor))
-        
-        # Generate next floor
-        self.current_floor += 1
-        
-        new_map = generate_dungeon(
-            max_rooms=self.max_rooms,
-            room_min_size=self.room_min_size,
-            room_max_size=self.room_max_size,
-            map_width=self.map_width,
-            map_height=self.map_height,
-            engine=self.engine,
-            noise_vals = self.generate_noise(self.current_floor),
-            floor_num=self.current_floor,
-        )
-        
-        self.engine.game_map = new_map
+
+        # If we previously ascended from a floor below, reuse it instead of
+        # regenerating so the player returns to the same dungeon layout.
+        if self.down_stack:
+            next_map, next_player_pos, next_floor = self.down_stack.pop()
+            self.current_floor = next_floor
+            self.engine.game_map = next_map
+            px, py = next_player_pos
+            self.engine.player.place(px, py, next_map)
+        else:
+            from procgen import generate_dungeon
+            self.current_floor += 1
+            new_map = generate_dungeon(
+                max_rooms=self.max_rooms,
+                room_min_size=self.room_min_size,
+                room_max_size=self.room_max_size,
+                map_width=self.map_width,
+                map_height=self.map_height,
+                engine=self.engine,
+                noise_vals=self.generate_noise(self.current_floor),
+                floor_num=self.current_floor,
+            )
+            self.engine.game_map = new_map
+        # Clear stale animations from the previous floor.
+        anim_q = getattr(self.engine, "animation_queue", None)
+        if anim_q is not None:
+            try:
+                anim_q.clear()
+            except Exception:
+                while anim_q:
+                    anim_q.popleft()
 
     def ascend(self) -> None:
         """Ascend one level."""
         if len(self.up_stack) == 0:
             return
-            
+
+        # Save current floor to the down-stack so descending again reuses it.
+        current_map = self.engine.game_map
+        player_pos = (self.engine.player.x, self.engine.player.y)
+        self.down_stack.append((current_map, player_pos, self.current_floor))
+
         # Restore previous floor
         prev_map, prev_player_pos, prev_floor = self.up_stack.pop()
         self.engine.game_map = prev_map
         self.current_floor = prev_floor
         
+        # Clear stale animations from the previous floor.
+        anim_q = getattr(self.engine, "animation_queue", None)
+        if anim_q is not None:
+            try:
+                anim_q.clear()
+            except Exception:
+                while anim_q:
+                    anim_q.popleft()
+
         # Restore player position  
         px, py = prev_player_pos
         self.engine.player.place(px, py, prev_map)

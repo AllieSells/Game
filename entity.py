@@ -132,6 +132,7 @@ class Actor(Entity):
         x: int = 0,
         y: int = 0,
         char: str = "?",
+        is_player: bool = False,
         color: Tuple[int, int, int] = (255, 255, 255),
         name: str = "<Unnamed>",
         ai_cls: Optional[Type[BaseAI]] = None,
@@ -185,6 +186,7 @@ class Actor(Entity):
         self.base_char: str = char
         self.sprite_layers: list = []  # list of equip_sprite_cp ints currently active
         self.equipment_scale: float = equipment_scale
+        self.is_player = is_player
 
         # Initialize AI if provided
         self.ai: Optional[BaseAI] = ai_cls(self) if ai_cls is not None else None

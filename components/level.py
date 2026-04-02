@@ -160,18 +160,17 @@ class Level(BaseComponent):
             for spell in self.parent.known_spells:
                 if spell.school == trait_name:
                     spell.level_up_spell(level_increased_to, self.parent)
-                    
-
-        # Message to indicate level up
-        if hasattr(self.parent, 'parent') and hasattr(self.parent.parent, 'engine'):
-            self.parent.parent.engine.message_log.add_message(
-                f"{trait_name.capitalize()} increased to level {self.traits[trait_name]['level']}!", 
-                fg=(0, 255, 0)  # Green color as RGB tuple
-            )
-        
-        # Only play sound if requested
-        if play_sound:
-            sounds.play_level_up_sound()
+        if self.parent.is_player:
+            # Message to indicate level up
+            if hasattr(self.parent, 'parent') and hasattr(self.parent.parent, 'engine'):
+                self.parent.parent.engine.message_log.add_message(
+                    f"{trait_name.capitalize()} increased to level {self.traits[trait_name]['level']}!", 
+                    fg=(0, 255, 0)  # Green color as RGB tuple
+                )
+            
+            # Only play sound if requested
+            if play_sound:
+                sounds.play_level_up_sound()
     
     def _increase_max_health(self, health_per_level: int = 5) -> None:
         """Increase max health and redistribute to body parts proportionally."""

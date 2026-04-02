@@ -529,6 +529,8 @@ class FlameAnimation:
         self.frames -= 1
 
 
+
+
 class FireFlicker:
     def __init__(self, position):
         self.position = position

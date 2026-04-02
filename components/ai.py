@@ -33,6 +33,22 @@ class BaseAI(Action):
         self.movement_speed: int = 2
         self.movement_counter: int = 0
 
+
+    def say(self, context: Optional[str] = "idle", custom: Optional[str] = None) -> None:
+        if (self.entity.name == "Goblin" or self.entity.name == "Troll"):
+            say = generate_sentence(context , "goblin", known=False)
+            from render_functions import SpeechBubble
+            self.engine.speech_bubbles.append(SpeechBubble(self.entity, 90))
+            self.engine.message_log.add_message(f"{self.entity.name}: '{say}'", color.green)
+        if (self.entity.name == "The Guide"):
+            from render_functions import SpeechBubble
+            self.engine.speech_bubbles.append(SpeechBubble(self.entity, 90))
+            if custom:
+                self.engine.message_log.add_message(f"{self.entity.name}: '{custom}'", color.gold_accent)
+            else:
+                pass
+
+
     def perform(self) -> None:
         raise NotImplementedError(
         )
@@ -281,12 +297,6 @@ class HostileEnemy(BaseAI):
         self.movement_counter = 0
         self.last_saw_player = -99999999999999 # Tracks turns since last saw player
 
-    def say(self, context: str = "idle") -> None:
-        if (self.entity.name == "Goblin" or self.entity.name == "Troll"):
-            say = generate_sentence(context , "goblin", known=False)
-            from render_functions import SpeechBubble
-            self.engine.speech_bubbles.append(SpeechBubble(self.entity, 90))
-            self.engine.message_log.add_message(f"{self.entity.name}: '{say}'", color.green)
 
     
 

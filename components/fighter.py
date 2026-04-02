@@ -19,7 +19,7 @@ class Fighter(BaseComponent):
 
     parent: Actor
 
-    def __init__(self, hp: int, base_defense: int, base_power: int, leave_corpse: bool = True):
+    def __init__(self, hp: int, base_defense: int, base_power: int, leave_corpse: bool = True, can_bleed: bool = True):
         self.max_hp = hp
         self._hp = hp
         self.base_defense = base_defense
@@ -30,6 +30,7 @@ class Fighter(BaseComponent):
         self.strength = 1
         self.dexterity = 1
         self.constitution = 1
+        self.can_bleed = can_bleed  # By default, entities can bleed unless specified otherwise
 
 
     @property
@@ -98,8 +99,8 @@ class Fighter(BaseComponent):
                     except Exception:
                         try:
                             gm.entities.discard(self.parent)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            print(f"Error removing entity from gamemap entities: {e}")
             except Exception:
                 pass
 
@@ -135,6 +136,7 @@ class Fighter(BaseComponent):
         self.parent.name = f"Corpse of {self.parent.name}"
         self.parent.render_order = RenderOrder.CORPSE
         self.parent.type = "Dead"
+        self.can_bleed = False
 
         # Make corpse lootable by creating a container with all their items
         from components.container import Container
@@ -286,17 +288,19 @@ class Fighter(BaseComponent):
                 self._check_weapon_drop(damaged_part)
         
         # Add blood spilling when taking damage (only if causes_bleeding is True)
-        if (causes_bleeding and hasattr(self.parent, 'gamemap') and 
-            hasattr(self.parent.gamemap, 'liquid_system')):
-            from liquid_system import LiquidType
-            # Create small blood splash for damage
-            blood_amount = min(2, max(1, amount // 4))  # Less blood than melee
-            self.parent.gamemap.liquid_system.create_splash(
-                self.parent.x, self.parent.y,
-                LiquidType.BLOOD,
-                radius=1,  # Small radius
-                max_depth=blood_amount
-            )
+        if self.can_bleed:
+            print(self.can_bleed)
+            if (causes_bleeding and hasattr(self.parent, 'gamemap') and 
+                hasattr(self.parent.gamemap, 'liquid_system')):
+                from liquid_system import LiquidType
+                # Create small blood splash for damage
+                blood_amount = min(2, max(1, amount // 4))  # Less blood than melee
+                self.parent.gamemap.liquid_system.create_splash(
+                    self.parent.x, self.parent.y,
+                    LiquidType.BLOOD,
+                    radius=1,  # Small radius
+                    max_depth=blood_amount
+                )
         
         # Trigger damage indicator if this is the player
         if (hasattr(self.parent, 'gamemap') and 

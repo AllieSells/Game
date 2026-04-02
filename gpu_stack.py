@@ -27,6 +27,7 @@ import random
 import numpy as np
 import tcod
 import tcod.sdl.render
+import math
 
 from PIL import Image
 
@@ -80,6 +81,61 @@ class DripParticle:
         self.frames -= 1
 
 
+class LightShaftParticles:
+    """Physics state for a directional light shaft from a Window tile.
+
+    shaft_direction: -1 = going north (up on screen), 1 = going south (down on screen).
+    Rendered by GPUStack._light_shaft_render (bloom pass) as a fading trapezoid.
+    """
+
+    def __init__(self, position: tuple, shaft_direction: int):
+        x, y = position
+        self.fx = float(x)
+        self.fy = float(y)
+        self.shaft_direction = shaft_direction   # -1 north/up, +1 south/down
+        self.frames = 999999999   # perpetual — never expires
+        self.total_frames = self.frames
+        self.render_priority = 1
+        self.length = 2.0               # shaft length in world tiles
+        self.color = (255, 242, 210)    # warm-white RGB
+
+    def tick(self, console, game_map) -> None:
+        pass  # perpetual; no countdown
+
+
+
+class SlashParticle:
+    """Physics state for a brief melee slash effect."""
+
+    def __init__(self, position: tuple, enchanted: bool = False, color: tuple = (255, 255, 255), angle: tuple = (0, 0)):
+        import math as _math, random as _random
+        x, y = position
+        self.fx = float(x)
+        self.fy = float(y)
+        self.total_frames = 6
+        self.frames = self.total_frames
+        self.enchanted = enchanted
+        self.color = color
+        # Bake a fixed jitter angle so the slash renders at the same angle every frame
+        dx, dy = angle
+        mag = _math.hypot(dx, dy)
+        if mag > 0:
+            jitter = _random.uniform(-0.35, 0.35)
+            cos_j, sin_j = _math.cos(jitter), _math.sin(jitter)
+            nx = (cos_j * dx - sin_j * dy) / mag
+            ny = (sin_j * dx + cos_j * dy) / mag
+            self.angle = (nx, ny)
+        else:
+            self.angle = (0.0, 0.0)
+
+    def tick(self, console, game_map) -> None:
+        if self.frames <= 0:
+            return
+        self.frames -= 1
+
+
+
+
 class SmokeCloudParticle:
     """Physics state for a rising smoke puff.
 
@@ -104,6 +160,23 @@ class SmokeCloudParticle:
         self.vx += random.uniform(-0.005, 0.005)
         self.vx = max(-0.2, min(0.2, self.vx))
         self.frames -= 1
+
+class CRTBleedAnim:
+    """Physics state for a brief red bleed effect when the player takes damage.
+
+    Rendered by GPUStack._damage_bleed_render (no-bloom, BLEND composite).
+    """
+
+    def __init__(self):
+        self.frames = 30
+        self.total_frames = self.frames
+        self.render_priority = 2
+
+    def tick(self, console=None, game_map=None) -> None:
+        if self.frames <= 0:
+            return
+        self.frames -= 1
+        #print("ticking")
 
 
 class EmberParticle:
@@ -815,6 +888,171 @@ class DegaussAnimation:
 
 
 # =============================================================================
+# SECTION 4b — VHS GLITCH ANIMATION CLASS
+# =============================================================================
+# Persistent VHS-tape distortion effect used on the game over screen.
+# Loops indefinitely until .done is set to True externally (or the caller
+# stops calling tick/draw).
+#
+# Usage:
+#   anim = VHSGlitchAnimation(renderer)
+#   # each frame:
+#   anim.tick(dt)
+#   anim.draw(window_w, window_h, scene_tex=gpu.post_crt_tex)
+
+class VHSGlitchAnimation:
+    """Persistent VHS glitch overlay for the game over screen.
+
+    Continuously renders:
+      • A pulsing dark-red desaturation tint
+      • Mild persistent chromatic aberration
+      • Periodic burst mode: random horizontal band displacement with per-band
+        R/G/B channel fringe (matching the teleport-mode per-band technique)
+      • Occasional static noise lines during bursts
+    """
+
+    def __init__(self, renderer):
+        self._renderer = renderer
+        self._t        = 0.0
+        self.done      = False
+
+        # 1×1 white pixel stretched as overlay / noise source
+        _px = np.array([[[255, 255, 255, 128]]], dtype=np.uint8)
+        self._overlay_tex = renderer.upload_texture(_px)
+        self._overlay_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+
+        # Burst scheduling
+        self._burst_active = False
+        self._burst_t      = 0.0
+        self._burst_dur    = 0.0
+        self._next_burst   = random.uniform(0.05, 0.5)  # seconds until first burst
+
+        # Current band list: (y_frac, band_h, x_shift, r_shift, b_shift, base_alpha)
+        self._bands: list = []
+
+    # ------------------------------------------------------------------
+    def tick(self, dt: float) -> None:
+        """Advance animation by *dt* seconds.  Call once per frame."""
+        self._t += dt
+
+        if self._burst_active:
+            self._burst_t += dt
+            if self._burst_t >= self._burst_dur:
+                self._burst_active = False
+                self._bands        = []
+                self._next_burst   = random.uniform(0.08, 0.4)
+            elif random.random() < 0.35:
+                self._regenerate_bands()
+        else:
+            self._next_burst -= dt
+            if self._next_burst <= 0.0:
+                self._burst_active = True
+                self._burst_t      = 0.0
+                self._burst_dur    = random.uniform(0.4, 1.2)
+                self._regenerate_bands()
+
+    # ------------------------------------------------------------------
+    def _regenerate_bands(self) -> None:
+        """Build a fresh set of random displacement bands."""
+        self._bands = []
+        count = random.randint(10, 28)
+        for _ in range(count):
+            y_frac   = random.random()
+            band_h   = random.randint(4, 40)
+            x_shift  = random.randint(-60, 60)
+            r_shift  = x_shift + random.randint(-20, 20)
+            b_shift  = -x_shift + random.randint(-14, 14)
+            alpha    = random.randint(160, 255)
+            self._bands.append((y_frac, band_h, x_shift, r_shift, b_shift, alpha))
+
+    # ------------------------------------------------------------------
+    def draw(self, window_w: int, window_h: int, scene_tex=None) -> None:
+        """Composite VHS glitch on top of the already-blitted framebuffer.
+
+        scene_tex — post-CRT scene texture used for chromatic passes.
+        """
+        renderer = self._renderer
+        ov       = self._overlay_tex
+
+        # ---- Persistent dark-red desaturation tint (pulsing) ----
+        tint_a = int(55 + 30 * math.sin(self._t * 2.4))
+        tint_a = max(0, min(255, tint_a))
+        ov.blend_mode = tcod.sdl.render.BlendMode.BLEND
+        ov.alpha_mod  = tint_a
+        ov.color_mod  = (80, 0, 0)
+        renderer.copy(ov, dest=(0, 0, window_w, window_h))
+
+        # ---- Persistent chromatic aberration ----
+        if scene_tex is not None:
+            ca_i = int(4 + 5 * abs(math.sin(self._t * 3.1)))
+            if ca_i >= 1:
+                scene_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                scene_tex.alpha_mod  = 70
+                scene_tex.color_mod  = (255, 0, 0)
+                renderer.copy(scene_tex, dest=(ca_i, 0, window_w, window_h))
+                scene_tex.color_mod  = (0, 0, 255)
+                renderer.copy(scene_tex, dest=(-ca_i, 0, window_w, window_h))
+                scene_tex.alpha_mod  = 255
+                scene_tex.color_mod  = (255, 255, 255)
+                scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+
+        # ---- Burst: per-band displacement + RGB fringe + static noise ----
+        if not self._burst_active or not self._bands or scene_tex is None:
+            return
+
+        burst_p  = min(1.0, self._burst_t / max(self._burst_dur, 0.001))
+        envelope = min(1.0, burst_p * 3.0) * min(1.0, (1.0 - burst_p) * 4.0)
+        if envelope <= 0.0:
+            return
+
+        for y_frac, band_h, x_shift, r_shift, b_shift, base_alpha in self._bands:
+            y0  = int(y_frac * window_h)
+            bh  = max(1, min(band_h, window_h - y0))
+            alpha = int(base_alpha * envelope)
+            if alpha <= 0:
+                continue
+
+            src = (0, y0, window_w, bh)
+
+            # Displaced base copy (brighter to simulate tape bleed)
+            scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+            scene_tex.alpha_mod  = min(255, int(alpha * 1.4))
+            scene_tex.color_mod  = (255, 255, 255)
+            renderer.copy(scene_tex, source=src, dest=(x_shift, y0, window_w, bh))
+
+            # R channel fringe
+            if abs(r_shift) >= 1:
+                scene_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                scene_tex.alpha_mod  = int(alpha * 0.75)
+                scene_tex.color_mod  = (255, 0, 0)
+                renderer.copy(scene_tex, source=src, dest=(r_shift, y0, window_w, bh))
+
+            # B channel fringe
+            if abs(b_shift) >= 1:
+                scene_tex.color_mod = (0, 0, 255)
+                scene_tex.alpha_mod = int(alpha * 0.60)
+                renderer.copy(scene_tex, source=src, dest=(b_shift, y0, window_w, bh))
+
+        # Reset scene_tex state
+        scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+        scene_tex.alpha_mod  = 255
+        scene_tex.color_mod  = (255, 255, 255)
+
+        # Static noise lines during the burst (multiple passes)
+        for _ in range(random.randint(1, 4)):
+            if random.random() < 0.7:
+                noise_y = random.randint(0, max(0, window_h - 5))
+                noise_h = random.randint(1, 6)
+                noise_a = int(random.uniform(40, 120) * envelope)
+                if noise_a > 0:
+                    ov.blend_mode = tcod.sdl.render.BlendMode.ADD
+                    ov.alpha_mod  = noise_a
+                    ov.color_mod  = (200, 200, 220)
+                    renderer.copy(ov, dest=(0, noise_y, window_w, noise_h))
+                    ov.blend_mode = tcod.sdl.render.BlendMode.BLEND
+
+
+# =============================================================================
 # SECTION 5 — GPU STACK CLASS
 # =============================================================================
 # Owns all per-session GPU render targets, parameters, and render passes.
@@ -970,8 +1208,11 @@ class GPUStack:
 
         # Register the built-in particle passes
         self.gpu_anim_registry.append(self._gpu_ember_render)         # bloom
+        self.gpu_anim_registry.append(self._gpu_crtbleed_render)      # bloom
         self.gpu_anim_registry.append(self._gpu_smoke_render)         # bloom
-        self.gpu_anim_nobloom_registry.append(self._gpu_drip_render)  # no-bloom (exact color)
+        self.gpu_anim_registry.append(self._light_shaft_render)       # bloom
+        self.gpu_anim_registry.append(self._slash_render)            # bloom
+        self.gpu_anim_registry.append(self._gpu_drip_render)  # bloom ? (exact color)
 
     # ------------------------------------------------------------------
     # Frame dimension update
@@ -1173,6 +1414,51 @@ class GPUStack:
     # Each method draws into self._gal_src (assumed pre-cleared) and
     # returns True if at least one pixel was drawn.
 
+
+    def _gpu_crtbleed_render(self, active_engine) -> bool:
+        """Draw screen-edge red color bleed for each CRTBleedAnim (damage flash)."""
+        bleeds = [a for a in active_engine.animation_queue
+                  if isinstance(a, CRTBleedAnim) and a.frames > 0]
+
+        if not bleeds:
+            return False
+
+        # Deduplicated by the spawner — there should only be one, but guard anyway
+        bleed     = max(bleeds, key=lambda b: b.frames)
+        renderer  = self.renderer
+        gw        = float(self._gal_w)
+        gh        = float(self._gal_h)
+
+        # Linear fade: bright flash at birth, fully gone at end
+        age       = 1.0 - (bleed.frames / float(bleed.total_frames))
+        intensity = int(210 * (1.0 - age))
+        if intensity < 6:
+            return False
+
+        # Smooth gradient: many thin strips from each edge, cubic falloff
+        STEPS     = 20
+        max_depth = gh * 0.07          # 7% of viewport height from each edge
+        step_size = max(1.0, max_depth / STEPS)
+
+        drew = False
+        with renderer.set_render_target(self._gal_src):
+            for i in range(STEPS):
+                t           = i / STEPS                           # 0 at edge, ~1 at max_depth
+                alpha       = int(intensity * (1.0 - t) ** 3)    # cubic: very fast center falloff
+                if alpha < 3:
+                    break                                         # remaining strips will also be < 3
+                offset = i * step_size
+                renderer.draw_color = (intensity, int(intensity * 0.05), 0, alpha)
+                renderer.fill_rect((0.0,               float(offset),              gw,        step_size))  # top
+                renderer.fill_rect((0.0,               gh - offset - step_size,    gw,        step_size))  # bottom
+                renderer.fill_rect((float(offset),     0.0,                        step_size, gh))         # left
+                renderer.fill_rect((gw - offset - step_size, 0.0,                 step_size, gh))         # right
+            drew = True
+        return drew
+
+
+
+
     def _gpu_ember_render(self, active_engine) -> bool:
         """Draw EmberParticle emission rects into _gal_src (bloom pass)."""
         embers = [a for a in active_engine.animation_queue
@@ -1219,6 +1505,174 @@ class GPUStack:
                                     float(sz * 2), float(sz * 2)))
                 drew = True
         return drew
+
+    def _slash_render(self, active_engine) -> bool:
+        """Draw a slicing slash effect for each SlashParticle into _gal_src (bloom pass)."""
+        slashes = [a for a in active_engine.animation_queue
+                   if isinstance(a, SlashParticle) and a.frames > 0]
+        if not slashes:
+            return False
+        
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        renderer  = self.renderer
+        game_map  = active_engine.game_map
+
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        
+        drew = False
+        with renderer.set_render_target(self._gal_src):
+            for slash in slashes:
+                wx, wy = int(slash.fx), int(slash.fy)
+                if not game_map.in_bounds(wx, wy) or not game_map.visible[wx, wy]:
+                    continue
+
+                # Screen position
+                scr_x = slash.fx - origin_x
+                scr_y = slash.fy - origin_y
+
+                if not (0.0 <= scr_x < self.game_view_width and
+                        0.0 <= scr_y < self.game_view_height):
+                    continue
+
+                px = int(scr_x * tile_px_w + tile_px_w * 0.5)
+                py = int(scr_y * tile_px_h + tile_px_h * 0.5)
+
+                if not (0 <= px < self._gal_w and 0 <= py < self._gal_h):
+                    continue
+
+                # Intensity: linear fade from 255 → 0 over lifetime
+                age = 1.0 - (slash.frames / float(slash.total_frames))
+                intensity = int(255 * (1.0 - age))
+
+                if intensity <= 8: # Avoid invisible slashes
+                    continue
+
+                # Color
+                r, g, b = slash.color
+                if slash.enchanted:
+                    r = min(255, int(r * 1.5))
+                    g = min(255, int(g * 1.5))
+                    b = min(255, int(b * 2.0))
+                else:
+                    r = min(255, int(r * 1.3))
+                    g = min(255, int(g * 1.3))
+                    b = min(255, int(b * 1.3))
+
+                # Direction — already normalized + jittered at spawn time
+                norm_dx, norm_dy = slash.angle
+                if norm_dx == 0.0 and norm_dy == 0.0:
+                    continue
+
+                # Perpendicular vector (for arc bow)
+                perp_dx = -norm_dy
+                perp_dy =  norm_dx
+
+                # ~1 tile, centered on the target tile
+                half_len = tile_px_w * 0.55
+                arc_amp  = tile_px_h * 0.18   # small perpendicular bow
+
+                SEGMENTS = 18
+                for i in range(SEGMENTS):
+                    t   = i / (SEGMENTS - 1)                 # 0..1 inclusive
+                    s   = t * 2.0 - 1.0                      # -1..1 centered
+                    arc = math.sin(t * math.pi) * arc_amp    # smooth bow, 0 at tips
+
+                    sx = px + norm_dx * half_len * s + perp_dx * arc
+                    sy = py + norm_dy * half_len * s + perp_dy * arc
+
+                    # Sin envelope: bright centre, dim at tips; scaled by overall intensity
+                    env  = math.sin(t * math.pi)
+                    fade = int(intensity * env)
+                    if fade < 8:
+                        continue
+
+                    renderer.draw_color = (r, g, b, fade)
+                    renderer.fill_rect((sx - 1.5, sy - 1.5, 3.0, 3.0))
+
+                drew = True
+        return drew
+                
+
+
+    
+    def _light_shaft_render(self, active_engine) -> bool:
+        """Draw a fading trapezoid light shaft for each LightShaftParticles into _gal_src (bloom).
+
+        Each shaft is sliced into SLICES horizontal bands.  Near the window the
+        band is 1 tile wide; at the far end it spreads to (1 + 2*SPREAD) tiles.
+        RGB intensity fades linearly to zero at the far end.  The whole thing
+        also fades in/out at birth/death via an age envelope.
+        """
+        shafts = [a for a in active_engine.animation_queue
+                  if isinstance(a, LightShaftParticles) and a.frames > 0]
+        if not shafts:
+            return False
+
+        SLICES    = 80
+        SPREAD    = .75    # extra half-tiles of width gained over the shaft length
+        BASE_INT  = 0.70   # peak brightness (0–1); bloom amplifies this further
+
+        tile_px_w  = self.base_tile_w * 2.0
+        tile_px_h  = self.base_tile_h * 2.0
+        renderer   = self.renderer
+        game_map   = active_engine.game_map
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+
+        drew = False
+        with renderer.set_render_target(self._gal_src):
+            for shaft in shafts:
+                wx, wy = int(shaft.fx), int(shaft.fy)
+                if not game_map.in_bounds(wx, wy) or not game_map.visible[wx, wy]:
+                    continue
+
+                # Screen-pixel centre of the window tile
+                cx_px = (shaft.fx - origin_x) * tile_px_w + tile_px_w * 0.5
+                if shaft.shaft_direction == 1:
+                    cy_px = (shaft.fy - origin_y) * tile_px_h + tile_px_h * 1
+                else:
+                    cy_px = (shaft.fy - origin_y) * tile_px_h + tile_px_h * 0
+
+                # +1 = downward (south), -1 = upward (north)
+                screen_sign = float(shaft.shaft_direction)
+                length_px   = shaft.length * tile_px_h
+
+                sr, sg, sb = shaft.color
+                half_tile_w = tile_px_w * 0.30
+                spread_px   = SPREAD * tile_px_w
+
+                for i in range(SLICES):
+                    t0    = i       / SLICES
+                    t1    = (i + 1) / SLICES
+                    t_mid = (t0 + t1) * 0.5
+
+                    # Vertical extent of this slice
+                    y_a   = cy_px + screen_sign * t0 * length_px
+                    y_b   = cy_px + screen_sign * t1 * length_px
+                    y_top = min(y_a, y_b)
+                    
+                    s_h   = max(1.0, abs(y_b - y_a))
+
+                    # Horizontal extent: widens from 1 tile → (1 + 2·SPREAD) tiles
+                    half_w = half_tile_w + spread_px * t_mid
+                    x0     = cx_px - half_w
+
+                    # Intensity fades to zero at the far tip
+                    intensity = BASE_INT * (1.0 - t_mid)
+                    r = int(sr * intensity)
+                    g = int(sg * intensity)
+                    b = int(sb * intensity)
+                    if r == 0 and g == 0 and b == 0:
+                        continue
+
+                    renderer.draw_color = (r, g, b, 150)
+                    renderer.fill_rect((float(x0), float(y_top),
+                                        float(half_w * 2.0), float(s_h)))
+                drew = True
+        return drew
+
 
     def _gpu_smoke_render(self, active_engine) -> bool:
         """Draw SmokeCloudParticle sprite frames into _gal_src (bloom pass)."""

@@ -99,6 +99,11 @@ class EquipmentUI(AskUserEventHandler):
     
     def __init__(self, engine: Engine):
         super().__init__(engine)
+        self.engine.context_hints = [
+            ("\u2191\u2193/WS", "Navigate Slots"),
+            ("\u2190\u2192/AD", "Navigate Items"),
+            ("Space/Click", "Equip"),
+        ]
         self.selected_slot = 0
         self.selected_item = 0  # For cycling through item groups
         self.slots = self._create_equipment_slots()
@@ -214,8 +219,8 @@ class EquipmentUI(AskUserEventHandler):
         
         # Instructions
         instructions = [
-            "[↑↓] Navigate slots  [←→] Navigate items  [Space] Equip",
-            "[Del] Unequip  [Esc] Exit"
+            #"[WS] Navigate slots  [AD] Navigate items  [Space] Equip",
+            #"Mouse Compatible  [Esc/E] Exit"
         ]
         
         for i, instruction in enumerate(instructions):
@@ -291,8 +296,8 @@ class EquipmentUI(AskUserEventHandler):
         from text_utils import print_colored_text_with_bg
         stats_x = base_x + 5
         stats_y = base_y + 15
-        power = self.engine.player.fighter.power
-        defense = self.engine.player.fighter.defense
+        power = self.engine.player.fighter.power + self.engine.player.fighter.power_bonus
+        defense = self.engine.player.fighter.defense + self.engine.player.fighter.defense_bonus
         stats_text = f"Power: {power}   Defense: {defense}"
         print_colored_text_with_bg(console, stats_x, stats_y, [(stats_text, color.bronze_text)], (45, 35, 25))
     def _draw_items_list(self, console: Console, base_x: int, base_y: int,
@@ -490,7 +495,7 @@ class EquipmentUI(AskUserEventHandler):
         
         
         # Slot navigation
-        if key == tcod.event.KeySym.UP:
+        if key == tcod.event.KeySym.W:
             # Check if selected slot would have been -1 (out of bounds) before moving up, to play sound only on valid moves
             if self.selected_slot > 0:
                 sounds.play_ui_move_sound()
@@ -501,7 +506,7 @@ class EquipmentUI(AskUserEventHandler):
             self.selected_item = 0  # Reset item selection when changing slots
             
             return None
-        elif key == tcod.event.KeySym.DOWN:
+        elif key == tcod.event.KeySym.A:
             # Check if selected slot would have been out of bounds before moving down, to play sound only on valid moves
             if self.selected_slot < len(self.slots) - 1:
                 sounds.play_ui_move_sound()
@@ -510,7 +515,7 @@ class EquipmentUI(AskUserEventHandler):
             return None
         
         # Item navigation
-        elif key == tcod.event.KeySym.LEFT:
+        elif key == tcod.event.KeySym.A:
             if self.slots:
                 compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot])
                 if compatible_groups:
@@ -518,7 +523,7 @@ class EquipmentUI(AskUserEventHandler):
                     sounds.play_ui_move_sound()
                     self.selected_item = (self.selected_item - 1) % len(compatible_groups)
             return None
-        elif key == tcod.event.KeySym.RIGHT:
+        elif key == tcod.event.KeySym.D:
             if self.slots:
                 compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot])
                 if compatible_groups:

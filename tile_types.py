@@ -176,8 +176,8 @@ wooden_floor = new_tile(
     walkable=True,
     transparent=True,
     # Yellowish brown
-    dark=(ord(" "), (255, 255, 255), (89, 87, 78)),
-    light=(ord(" "), (255, 255, 255), (158, 152, 128)),
+    dark=(0xE14A, (255, 255, 255), (20, 20, 20)),
+    light=(0xE14A, (255, 255, 255), (102, 57, 49)),
 )
 
 
@@ -344,6 +344,26 @@ up_stairs = new_tile(
     dark=((0xE00E), (100, 100, 100), (25, 25, 25)),
     light=((0xE00E), (255, 255, 255), (50, 50, 50)),
 )
+
+
+window = new_tile(
+    name="Window",
+    walkable=False,
+    transparent=False,
+    dark=(0xE14C, (60, 60, 60), (15, 15, 15)),
+    light=(0xE14C, (255, 255, 255), (0, 0, 0)),
+    interactable=False # For now
+)
+
+locked_door = new_tile(
+    name="Locked Door",
+    walkable=False,
+    transparent=False,
+    dark=(0xE14B, (60, 60, 60), (15, 15, 15)),
+    light=(0xE14B, (255, 255, 255), (0, 0, 0)),
+    interactable=False # For now
+)
+
 closed_door = new_tile(
     name="Door",
     walkable=False,
