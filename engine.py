@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 import time
 from animations import FireFlicker, BonefireFlicker, FlameAnimation
-from gpu_stack import SmokeCloudParticle, EmberParticle, DripParticle, LightShaftParticles
+from gpu_stack import SmokeCloudParticle, EmberParticle, DripParticle, LightShaftParticles, BurningParticle
 import sprite_manager
 
 
@@ -67,6 +67,7 @@ class Engine:
         # Movement sound system
         self.last_movement_time = 0
         self.min_time_between_sounds = 0.15  # Minimum 150ms between walk sounds
+
         
         # Sound control flags
         self.is_generating_world = False  # Flag to suppress sounds during world generation
@@ -93,7 +94,7 @@ class Engine:
         self._pending_handler = None  # Handler change queued by auto-move (e.g. GameOver)
         self._pending_handler_ready = False  # Delay until one final sprite-update frame completes before switching handler
 
-        # Turn counter
+        # Turn counter and doge 
         self.turn_count = 0
         # Persistent Simplex noise generator for torch/fire flicker.
         # Stored on the engine (not per-map) so the animation is continuous
@@ -404,16 +405,18 @@ class Engine:
                     )
                     
                     if has_fire_coating:
-                        # Check if we already have an EntityFireFlicker animation for this entity
-                        entity_has_fire_animation = any(
-                            hasattr(anim, 'entity') and anim.entity == entity 
-                            and type(anim).__name__ == 'EntityFireFlicker'
-                            for anim in self.animation_queue
+                        # Spawn a burst of flame sparks each turn, capped so the
+                        # queue doesn't grow unbounded for long-burning entities.
+                        FIRE_CAP = 18
+                        current_fires = sum(
+                            1 for a in self.animation_queue
+                            if isinstance(a, BurningParticle)
+                            and getattr(a, 'entity', None) is entity
                         )
-                        
-                        if not entity_has_fire_animation:
-                            from animations import EntityFireFlicker
-                            self.animation_queue.append(EntityFireFlicker(entity))
+                        if current_fires < FIRE_CAP:
+                            for _ in range(random.randint(3, 5)):
+                                self.animation_queue.append(
+                                    BurningParticle((entity.x, entity.y), entity))
 
                     # Spawn drip particles for blood/water body-part coatings
                     if self.animations_enabled and getattr(entity, 'ai', True) is not None:
@@ -495,6 +498,26 @@ class Engine:
                                     self.animation_queue.append(SigilStoneAnimation(position))
                         except Exception:
                             pass
+
+                # Keep exactly one persistent IlluminatedParticle per illuminated entity
+                if self.animations_enabled:
+                    try:
+                        is_illuminated = any(
+                            getattr(e, 'name', '') == 'Illuminated'
+                            for e in getattr(entity, 'effects', [])
+                        )
+                        if is_illuminated:
+                            from gpu_stack import IlluminatedParticle as _IllumP
+                            already = any(
+                                type(a).__name__ == 'IlluminatedParticle'
+                                and a.entity is entity
+                                and a.frames > 0
+                                for a in self.animation_queue
+                            )
+                            if not already:
+                                self.animation_queue.append(_IllumP(entity))
+                    except Exception:
+                        pass
         
             # Torch ember sparks for the player when a torch is equipped
             if self.animations_enabled:

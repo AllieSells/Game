@@ -141,7 +141,7 @@ class RectangularRoom:
             and self.y2 >= other.y1
         )
     
-def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) -> None:
+def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int, biome: str = "any") -> None:
     # Don't re-seed here as it breaks dungeon generation flow
     # The main generation seed is set at the start of generate_dungeon
     
@@ -153,7 +153,7 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int,) 
     )
 
     # Get scaled enemies using new system
-    monsters = get_enemies_for_floor(floor_number, number_of_monsters)
+    monsters = get_enemies_for_floor(floor_number, number_of_monsters, biome)
 
     items: List[Entity] = get_entities_at_random(
         item_chances, number_of_items, floor_number
@@ -850,7 +850,7 @@ def apply_wall_merging(dungeon: GameMap) -> None:
         dungeon.tiles[x, y] = new_tile
 
 
-def place_entities_cave(floor_tiles: List[Tuple[int, int]], dungeon: GameMap, floor_number: int, max_rooms: int) -> None:
+def place_entities_cave(floor_tiles: List[Tuple[int, int]], dungeon: GameMap, floor_number: int, max_rooms: int, biome: str = "any") -> None:
     """Place monsters, chests, and campfires on walkable tiles within a cave section."""
     if len(floor_tiles) < 8:
         return
@@ -860,13 +860,14 @@ def place_entities_cave(floor_tiles: List[Tuple[int, int]], dungeon: GameMap, fl
 
     number_of_monsters = get_enemy_count_for_floor(floor_number)
     #print(f"Placing {number_of_monsters} monsters in cave section with {len(floor_tiles)} floor tiles for floor #{floor_number}")
-    monsters = get_enemies_for_floor(floor_number, number_of_monsters)
+    monsters = get_enemies_for_floor(floor_number, number_of_monsters, biome)
 
     shuffled = list(floor_tiles)
     random.shuffle(shuffled)
 
     # Place monsters
     for entity in monsters:
+        print(f"[GEN] spawning: {len(monsters)} enemies total")
         for x, y in shuffled:
             if not any(e.x == x and e.y == y for e in dungeon.entities):
                 entity.spawn(dungeon, x, y)
@@ -1070,7 +1071,7 @@ def generate_first_floor(
             # top and bottom walls, between x49 and x59
             if y == tut_room.y1 or y == tut_room.y2:
                 if x > tut_room.x1 + 1 and x < tut_room.x2 - 2:
-                    print(tut_room.x1, tut_room.x2)
+                    #print(tut_room.x1, tut_room.x2)
                     # every 3 tiles
                     if (x - (tut_room.x1 + 2)) % 3 == 0:
                         dungeon.tiles[x, y] = tile_types.window
@@ -1150,6 +1151,7 @@ def generate_dungeon(
     # Cavern Type
     if erosion > 2.0 or (erosion <= 2.0 and erosion >= -2.0):
         if erosion > 2.0:
+            dungeon.biome = "caverns"
             dungeon.biome_str = "Caverns"
         else:
             pass  # Ruins biome is set later in mixed section after room/cave split
@@ -1213,7 +1215,7 @@ def generate_dungeon(
 
         print("[GEN] cave entity spawning start")
         # Spawn entities in grid sections across the cave (skip player start section)
-        _section_size = 15
+        _section_size = 20
         _player_sx = (_placer.x // _section_size) * _section_size
         _player_sy = (_placer.y // _section_size) * _section_size
         for _gx in range(1, map_width - 1, _section_size):
@@ -1226,7 +1228,8 @@ def generate_dungeon(
                     for _ty in range(_gy, min(_gy + _section_size, map_height - 1))
                     if dungeon.tiles[_tx, _ty]["walkable"]
                 ]
-                place_entities_cave(_section_tiles, dungeon, _floor, max_rooms)
+                print("[GEN] placing entities in cave section at grid ({}, {}) with {} floor tiles".format(_gx // _section_size, _gy // _section_size, len(_section_tiles)))
+                place_entities_cave(_section_tiles, dungeon, _floor, max_rooms, dungeon.biome)
 
         print("[GEN] cave entity spawning done")
         # Place stairs toward a corner of the map (far from player start)
@@ -1264,8 +1267,10 @@ def generate_dungeon(
     print(f"[GEN] dungeon-room block check: erosion={erosion:.3f}, will_run={(erosion < -2.0 or (-2.0 <= erosion <= 2.0))}")
     if erosion < -2.0 or (-2.0 <= erosion <= 2.0):
         if erosion < -2.0:
+            dungeon.biome = "dungeon"
             dungeon.biome_str = "Dungeons"
         else:
+            dungeon.biome = "ruins"
             dungeon.biome_str = "Ruins"
         if rooms:
             rooms = [] # Clear cave generated rooms for ruins type
@@ -1335,7 +1340,7 @@ def generate_dungeon(
 
             # Place entities in non-first rooms
             if len(rooms) > 1:  # Skip first room for entity placement  
-                place_entities(new_room, dungeon, _floor)
+                place_entities(new_room, dungeon, _floor, dungeon.biome)
   
     # Place stairs in the center of the last room (rectangular dungeon)
     print(f"[GEN] rectangular stair placement: rooms={len(rooms)}")

@@ -267,6 +267,8 @@ class LiquidSystem:
         # Blend background colors with liquid (only modify background)
         liquid_bg_dark = coating.get_bg_color(orig_bg_dark)
         liquid_bg_light = coating.get_bg_color(orig_bg_light)
+        liquid_fg_dark = coating.get_bg_color(orig_fg_dark)
+        liquid_fg_light = coating.get_bg_color(orig_fg_light)
         
         # Update tile graphics
         current_tile = self.game_map.tiles[x, y]
@@ -277,8 +279,8 @@ class LiquidSystem:
             current_tile["name"],
             current_tile["walkable"],
             current_tile["transparent"],
-            np.array((orig_char, orig_fg_dark, liquid_bg_dark), dtype=current_tile["dark"].dtype),
-            np.array((orig_char, orig_fg_light, liquid_bg_light), dtype=current_tile["light"].dtype),
+            np.array((orig_char, liquid_fg_dark, liquid_bg_dark), dtype=current_tile["dark"].dtype),
+            np.array((orig_char, liquid_fg_light, liquid_bg_light), dtype=current_tile["light"].dtype),
             current_tile["interactable"],
             current_tile["type"],
             current_tile["direction"]

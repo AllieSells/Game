@@ -176,9 +176,10 @@ class TurnManager:
             self.engine.game_map.liquid_system.tick_liquid()
 
         # 8. Process liquid coating entities
-        self._process_body_part_liquid_effects()
-        self._process_body_part_liquid_coating()
         self._process_body_part_coating_evaporation()
+        self._process_body_part_liquid_coating()
+        self._process_body_part_liquid_effects()
+
 
         
         return None
@@ -343,17 +344,18 @@ class TurnManager:
         """Process any actors who still have initiative to act after the player."""
         # Consume player's action
         self.engine.player.initiative_counter -= 100
-        
-        # Rebuild queue and process remaining turns
-        self._rebuild_turn_queue()
-        
-        for initiative, actor in self.turn_queue:
+
+        # Use the queue already built in _process_turn_queue_until_player (do NOT rebuild
+        # here - that would add speed a second time and double every actor's accumulation).
+        for initiative, actor in list(self.turn_queue):
             if actor != self.engine.player and actor.ai:
                 try:
                     actor.ai.perform()
                     actor.initiative_counter -= 100
                 except Exception:
                     actor.initiative_counter -= 100
+
+        self.turn_queue = []  # Clear – next round will be built fresh
     
     def _update_fov(self) -> None:
         """Update the player's field of view."""

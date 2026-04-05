@@ -2,7 +2,7 @@
 Example of how to add new enemies to the simple spawning system.
 Much easier and cleaner than the previous complex approach.
 """
-from enemy_spawning import add_enemy_to_floor, enemy_spawner
+from enemy_spawning import add_enemy, add_enemy_to_floor, enemy_spawner
 from components.ai import HostileEnemy
 from components.equipment import Equipment
 from components.fighter import Fighter
@@ -82,19 +82,18 @@ def add_example_enemies():
     Call this function to add these enemies to the game.
     """
     
-    # Add Orc starting at floor 5 with weight 25
-    add_enemy_to_floor(5, lambda: copy.deepcopy(create_orc()), 25)
+    # Add Orc starting at floor 5, all biomes
+    add_enemy(factory=lambda: copy.deepcopy(create_orc()), weight=25, biome="any", min_floor=5)
     
-    # Add Skeleton starting at floor 4 with weight 30  
-    add_enemy_to_floor(4, lambda: copy.deepcopy(create_skeleton()), 30)
+    # Add Skeleton starting at floor 4, dungeon biome only
+    add_enemy(factory=lambda: copy.deepcopy(create_skeleton()), weight=30, biome="dungeon", min_floor=4)
     
-    # Add Dragon Wyrmling starting at floor 15 with low weight (rare)
-    add_enemy_to_floor(15, lambda: copy.deepcopy(create_dragon_wyrmling()), 5)
+    # Add Dragon Wyrmling starting at floor 15 (rare), all biomes
+    add_enemy(factory=lambda: copy.deepcopy(create_dragon_wyrmling()), weight=5, biome="any", min_floor=15)
     
-    # You can also add multiple entries for the same enemy at different floors
-    # to change spawn rates over time
-    add_enemy_to_floor(10, lambda: copy.deepcopy(create_orc()), 40)  # More common later
-    add_enemy_to_floor(20, lambda: copy.deepcopy(create_dragon_wyrmling()), 15)  # Much more common
+    # More common in later floors
+    add_enemy(factory=lambda: copy.deepcopy(create_orc()), weight=40, biome="any", min_floor=10)
+    add_enemy(factory=lambda: copy.deepcopy(create_dragon_wyrmling()), weight=15, biome="any", min_floor=20)
 
 # Uncomment to add these enemies:
 # add_example_enemies()

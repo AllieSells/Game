@@ -439,7 +439,7 @@ class GameMap:
         # Read flicker setting once per frame (avoid repeated disk reads).
         try:
             import json as _json
-            with open("settings.json") as _sf:
+            with open("json/settings.json") as _sf:
                 _content = "\n".join(
                     line for line in _sf.read().splitlines()
                     if not line.lstrip().startswith("//")
@@ -500,6 +500,19 @@ class GameMap:
 
             # Campfire and Bonfire lighting - doesn't affect FOV, only visual lighting
             try:
+                for entity in self.entities:
+                    try:
+                        # Find entities with "Illuminated" effect
+                        if any(getattr(effect, "name", "") == "Illuminated" for effect in getattr(entity, "effects", [])):
+                            ex, ey = entity.x, entity.y
+                            # Only apply lighting if entity is within map bounds
+                            if not (0 <= ex < self.width and 0 <= ey < self.height):
+                                continue
+                            wdx, wdy, di = 0.0, 0.0, 0.0
+                            self._add_light_source(ex, ey, radius=5, max_intensity=1.0,
+                                                   wobble_dx=wdx, wobble_dy=wdy, di=di)
+                    except Exception as e:
+                        print(f"Error processing entity for lighting: {e}")
                 for item in getattr(self, "items", []):
                     try:
                         if item.name == "Campfire":

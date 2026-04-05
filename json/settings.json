@@ -1,6 +1,6 @@
 {
     // Display settings
-    "fullscreen": true,
+    "fullscreen": false,
     "audio": 100,
     // CRT filter settings
     "crt_scanlines": true,

@@ -1,0 +1,25 @@
+[
+  {"biome": "any",     "min_floor": 0, "factory": "goblin",       "weight": 70},
+  {"biome": "any",     "min_floor": 4, "factory": "goblin",       "weight": 30},
+  {"biome": "any",     "min_floor": 0, "factory": "kobold",       "weight": 25},
+  {"biome": "any",     "min_floor": 4, "factory": "kobold",       "weight": 15},
+  {"biome": "any",     "min_floor": 3, "factory": "troll",        "weight": 15},
+  {"biome": "any",     "min_floor": 5, "factory": "troll",        "weight": 30},
+  {"biome": "any",     "min_floor": 7, "factory": "troll",        "weight": 60},
+  
+  {"biome": "dungeon", "min_floor": 0, "factory": "giant_spider", "weight":  5},
+  {"biome": "dungeon", "min_floor": 2, "factory": "statue",       "weight": 10},
+  {"biome": "dungeon", "min_floor": 4, "factory": "statue",      "weight": 30},
+  
+  {"biome": "caverns", "min_floor": 0, "factory": "giant_spider", "weight": 20},
+  {"biome": "caverns", "min_floor": 4, "factory": "naga",         "weight": 30},
+  {"biome": "caverns", "min_floor": 7, "factory": "naga",         "weight": 60},
+  
+  {"biome": "ruins",   "min_floor": 0, "factory": "giant_spider", "weight": 10},
+  {"biome": "ruins",   "min_floor": 5, "factory": "naga",         "weight": 15},
+  {"biome": "ruins",   "min_floor": 2, "factory": "statue",      "weight": 20},
+  {"biome": "ruins",   "min_floor": 4, "factory": "statue",       "weight": 30},
+
+  {"biome": "lush",    "min_floor": 0, "factory": "giant_spider", "weight": 40},
+  {"biome": "lush",    "min_floor": 2, "factory": "naga",         "weight": 25}
+]

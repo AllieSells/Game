@@ -914,6 +914,31 @@ def play_transfer_item_sound():
     sound = random.choice(transfer_item_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.95, 1.2))
 
+def play_moss_walk_sound(entity_x=0, entity_y=0):
+    if random.random() < 0.3:
+        return  # 30% chance to not play a sound for variety
+    
+    # Add unique stagger delay per entity using position as seed
+    # Each entity gets a different delay based on their coordinates
+    entity_seed = (entity_x * 31 + entity_y * 17) % 1000  # Create unique value per position
+    delay = (entity_seed / 1000.0) * 0.1  # Convert to 0-100ms delay
+    
+    if delay > 0:
+        threading.Timer(delay, _delayed_moss_walk_sound).start()
+    else:
+        _delayed_moss_walk_sound()
+
+def _delayed_moss_walk_sound():
+    """Internal function for delayed moss walk sound playback."""
+    moss_sounds = [
+        Sound("RP/sfx/walk/moss/walk1.mp3"),
+        Sound("RP/sfx/walk/moss/walk2.mp3"),
+        Sound("RP/sfx/walk/moss/walk3.mp3"),
+        Sound("RP/sfx/walk/moss/walk4.mp3")
+    ]
+    sound = random.choice(moss_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.5), volume=0.5)
+
 def play_grass_walk_sound(entity_x=0, entity_y=0):
     if random.random() < 0.3:
         return  # 30% chance to not play a sound for variety
@@ -1024,9 +1049,12 @@ def play_miss_sound():
     miss_sounds = [
         Sound("RP/sfx/hit_miss/miss1.wav"),
         Sound("RP/sfx/hit_miss/miss2.wav"),
+        Sound("RP/sfx/hit_miss/miss3.wav"),
+        Sound("RP/sfx/hit_miss/miss4.wav"),
+        Sound("RP/sfx/hit_miss/miss5.wav"),
     ]
     sound = random.choice(miss_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=1.0)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.5)
     
 def play_attack_sound_weapon_to_no_armor():
     #swing_sounds = [
@@ -1956,7 +1984,7 @@ def play_combat_sound_at(sound_func, x, y, player, game_map):
 def play_movement_sound_at(sound_func, x, y, player, game_map):
     """Play movement sound with positional muffling and entity-specific timing."""
     # Pass coordinates to sound function for unique entity timing
-    if sound_func.__name__ in ['play_walk_sound', 'play_grass_walk_sound', 'play_liquid_walk_sound', 'play_swim_sound']:
+    if sound_func.__name__ in ['play_walk_sound', 'play_grass_walk_sound', 'play_liquid_walk_sound', 'play_swim_sound', 'play_moss_walk_sound']:
         # First check if sound should be played at all (distance check)
         if not should_play_sound(x, y, player, game_map):
             return  # Don't play sounds beyond 10 tiles
@@ -1988,6 +2016,18 @@ def play_muffled_sound_with_coords(sound_func, cutoff=800, entity_x=0, entity_y=
         sound = random.choice(grass_walk_sounds)
         sound.set_volume(0.5)  # Match original volume
         
+    elif sound_func.__name__ == 'play_moss_walk_sound':
+        # 30% chance to not play a sound for variety (same as original)
+        if random.random() < 0.3:
+            return
+        moss_walk_sounds = [
+            Sound("RP/sfx/walk/moss/moss1.mp3"),
+            Sound("RP/sfx/walk/moss/moss2.mp3"),
+            Sound("RP/sfx/walk/moss/moss3.mp3"),
+            Sound("RP/sfx/walk/moss/moss4.mp3"),
+        ]
+        sound = random.choice(moss_walk_sounds)
+        sound.set_volume(0.5)  # Match original volume
     elif sound_func.__name__ == 'play_liquid_walk_sound':
         # 30% chance to not play a sound for variety
         if random.random() < 0.3:

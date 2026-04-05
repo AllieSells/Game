@@ -10,7 +10,7 @@ from typing import Optional, Dict, List, Tuple, TYPE_CHECKING
 import tcod
 import color
 from equipment_types import EquipmentType
-from input_handlers import AskUserEventHandler
+from input_handlers import AskUserEventHandler, PopupEventHandler, ItemContextMenu
 from render_functions import MenuRenderer
 from tcod.console import Console
 import actions
@@ -94,7 +94,7 @@ class EquipmentSlot:
         return None
 
 
-class EquipmentUI(AskUserEventHandler):
+class EquipmentUI(PopupEventHandler):
     """Simple list-based equipment interface."""
     
     def __init__(self, engine: Engine):
@@ -201,6 +201,7 @@ class EquipmentUI(AskUserEventHandler):
         y = (console.height - window_height) // 2
         self._ui_x = x
         self._ui_y = y
+        self._set_popup_bounds(x, y, window_width, window_height)
         
         # Fade the background except for the equipment UI
         super().render_faded(console, x, y, window_width, window_height)
@@ -685,22 +686,21 @@ class EquipmentUI(AskUserEventHandler):
     def ev_mousebuttondown(self, event) -> Optional[AskUserEventHandler]:
         """Click a slot to select it; click an item to equip/unequip it."""
 
-
-        if event.button != tcod.event.BUTTON_LEFT:
+        if event.button not in (tcod.event.BUTTON_LEFT, tcod.event.BUTTON_RIGHT):
             return None
         if not hasattr(self, '_ui_x'):
             return None
-
-
 
         mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
         bx, by = self._ui_x, self._ui_y
 
         # Check if out of bounds of equipment UI
-        if mouse_x < bx or mouse_x >= bx + 65 or mouse_y < by or mouse_y >= by + 20:
-            # Exit menu if clicking outside of it
-            from input_handlers import MainGameEventHandler
-            return MainGameEventHandler(self.engine)
+        if not self._in_popup(mouse_x, mouse_y):
+            return self.on_exit()
+
+        # Right-click → context menu for the item under the cursor
+        if event.button == tcod.event.BUTTON_RIGHT:
+            return self.on_right_click(mouse_x, mouse_y)
 
 
         # Slots panel click -> select slot
@@ -721,4 +721,22 @@ class EquipmentUI(AskUserEventHandler):
                 self.selected_item = actual_index
                 return self._handle_equip_selected()
 
+        return None
+
+    def on_right_click(self, mx: int, my: int):
+        """Right-click inside the equipment UI – open a context menu for the
+        item under the cursor (items panel only)."""
+        if not self.slots or not hasattr(self, '_ui_x'):
+            return None
+        bx, by = self._ui_x, self._ui_y
+        # Only trigger in the items panel area
+        if bx + 40 <= mx < bx + 64 and my >= by + 3:
+            compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot])
+            if compatible_groups:
+                start_index = max(0, self.selected_item - 8)
+                display_i = my - (by + 3)
+                actual_index = start_index + display_i
+                if 0 <= display_i < 13 and 0 <= actual_index < len(compatible_groups):
+                    item = compatible_groups[actual_index]['item']
+                    return ItemContextMenu(self, item, mx, my)
         return None

@@ -103,24 +103,189 @@ class LightShaftParticles:
         pass  # perpetual; no countdown
 
 
+class SpaceDistortSpellParticle:
+    """A brief expanding distortion effect for space-warping spells like Blink.
+
+    Rendered by GPUStack._space_distort_render (bloom pass) as a brightening halo
+    around the target tile that rapidly expands and fades over its lifetime.
+    """
+
+    def __init__(self, position: tuple):
+        x, y = position
+        self.fx = float(x)
+        self.fy = float(y)
+        self.frames = 12
+        self.total_frames = self.frames
+        self.render_priority = 2
+        self.color = (200, 220, 255)  # icy blue-white
+
+    def tick(self, console, game_map) -> None:
+        if self.frames <= 0:
+            return
+        self.frames -= 1
+
+
+class JaggedLineSpellParticle:
+    """Jagged line spell that follows path from caster to target."""
+
+    def __init__(self, path: list[tuple], color: tuple):
+        self.path = path
+        self.color = color
+        self.frames = 12
+        self.total_frames = self.frames
+        self.render_priority = 2
+
+    def tick(self, console=None, game_map=None) -> None:
+        self.frames -= 1
+
+
+class IlluminatedParticle:
+    """Persistent light-ray corona for a light orb (rendered by GPUStack._illuminated_render).
+
+    Tracks the entity position every tick so the glow moves with the orb.
+    Lifetime is long enough to outlast the LightEffect duration; the engine
+    keeps exactly one instance per entity and never spawns a second while one
+    is alive.
+    """
+
+    # Shared slow-breath phase so all orbs pulse together
+    _breath_speed = 0.4   # Hz — full cycle every 2.5 s
+
+    def __init__(self, entity, color: tuple = (255, 255, 210)):
+        self.entity = entity
+        self.fx = float(entity.x)
+        self.fy = float(entity.y)
+        self.frames = 9000        # ~150 s @ 60 fps — outlasts any LightEffect
+        self.total_frames = self.frames
+        self.render_priority = 2
+        self.color = color
+
+    def tick(self, console, game_map) -> None:
+        # Always follow the entity so the glow never trails behind
+        self.fx = float(self.entity.x)
+        self.fy = float(self.entity.y)
+        # Expire if the entity no longer has the Illuminated effect
+        still_lit = any(
+            getattr(e, 'name', '') == 'Illuminated'
+            for e in getattr(self.entity, 'effects', [])
+        )
+        if not still_lit:
+            self.frames = 0
+        else:
+            self.frames -= 1
+
+class HealthParticle:
+    """Rising green cross indicating healing."""
+    def __init__(self, position: tuple, entity):
+        x, y = position
+        self.fx = float(x)
+        self.fy = float(y)
+        self.vx = random.uniform(-0.018, 0.018)   # gentle horizontal wobble
+        self.entity = entity
+        self.frames = 20
+        self.total_frames = self.frames
+        self.render_priority = 2
+    
+    def tick(self, console, game_map) -> None:
+        if self.frames <= 0:
+            return
+    
+        self.fx += self.vx
+        self.fy -= 0.02  # rise speed
+        self.frames -= 1
+
+class BurningParticle:
+    """A single short-lived flame spark that rises upward from a burning entity.
+
+    Spawn several per turn (see engine.py) to build up a convincing fire.
+    Each spark rises up to 1 tile above its spawn point, then dies.
+    Rendered in the bloom pass by GPUStack._burn_render.
+    """
+
+    def __init__(self, position: tuple, entity):
+        x, y = position
+        # Random horizontal spread across the tile, spawn in lower half
+        self.fx = float(x) + random.uniform(-0.42, 0.42)
+        self.fy = float(y) + random.uniform(0.0, 0.35)
+        self.origin_y = float(y)          # cap: never rise > 1 tile above this
+        self.vx = random.uniform(-0.018, 0.018)   # gentle horizontal wobble
+        self.vy = random.uniform(-0.07, -0.035)   # rise upward (negative = up)
+        self.entity = entity
+        self.frames = random.randint(10, 22)
+        self.total_frames = self.frames
+        self.render_priority = 2
+
+    def tick(self, console, game_map) -> None:
+        if not hasattr(self.entity, 'body_parts') or not self.entity.body_parts:
+            self.frames -= 1 
+            return
+
+        from liquid_system import LiquidType
+        has_fire_coating = any(
+            part.coating == LiquidType.FIRE
+            for part in self.entity.body_parts.body_parts.values()
+        )
+        if not has_fire_coating:
+            print("EXPIRE")
+            self.frames -= 1
+            return
+
+        self.fx += self.vx
+        self.fy += self.vy
+        # Cap rise at 1 tile above spawn
+        if self.fy < self.origin_y - 1.0:
+            self.fy = self.origin_y - 1.0
+            self.vy = 0.0
+        self.frames -= 1
+
+class DodgeParticle:
+    """Physics state for a dodge-step effect.
+
+    The tile image slides in *direction* over its lifetime while leaving
+    ghost afterimage copies trailing behind it.  Rendered by
+    GPUStack._dodge_render (bloom pass).
+    """
+    def __init__(self, position: tuple, character: str = "*",
+                 direction: tuple = (0, 0)):
+        x, y = position
+        self.fx = float(x)
+        self.fy = float(y)
+        self.frames = 10
+        self.total_frames = self.frames
+        self.render_priority = 2
+        self.character = character
+
+        dx, dy = direction
+        mag = math.hypot(dx, dy)
+        if mag > 0:
+            self.dir = (dx / mag, dy / mag)
+        else:
+            self.dir = (0.0, 0.0)
+
+    def tick(self, console, game_map) -> None:
+        if self.frames <= 0:
+            return
+        self.frames -= 1
+
 
 class SlashParticle:
     """Physics state for a brief melee slash effect."""
 
-    def __init__(self, position: tuple, enchanted: bool = False, color: tuple = (255, 255, 255), angle: tuple = (0, 0)):
+    def __init__(self, position: tuple, enchanted: bool = False, color: tuple = (255, 255, 255), angle: tuple = (0, 0), type: str = "blade"):
         import math as _math, random as _random
         x, y = position
         self.fx = float(x)
         self.fy = float(y)
-        self.total_frames = 6
+        self.total_frames = 12
         self.frames = self.total_frames
         self.enchanted = enchanted
         self.color = color
+        self.type = type
         # Bake a fixed jitter angle so the slash renders at the same angle every frame
         dx, dy = angle
         mag = _math.hypot(dx, dy)
         if mag > 0:
-            jitter = _random.uniform(-0.35, 0.35)
+            jitter = _random.uniform(-0.5, 0.5)
             cos_j, sin_j = _math.cos(jitter), _math.sin(jitter)
             nx = (cos_j * dx - sin_j * dy) / mag
             ny = (sin_j * dx + cos_j * dy) / mag
@@ -966,13 +1131,44 @@ class VHSGlitchAnimation:
             self._bands.append((y_frac, band_h, x_shift, r_shift, b_shift, alpha))
 
     # ------------------------------------------------------------------
-    def draw(self, window_w: int, window_h: int, scene_tex=None) -> None:
+    def draw(self, window_w: int, window_h: int, scene_tex=None, gpu=None) -> None:
         """Composite VHS glitch on top of the already-blitted framebuffer.
 
         scene_tex — post-CRT scene texture used for chromatic passes.
+        gpu       — GPUStack instance; when provided, all pixel copies are
+                    clipped to the barrel-curve boundary at each row so that
+                    glitch artefacts never bleed outside the curved screen area.
         """
         renderer = self._renderer
         ov       = self._overlay_tex
+
+        # --- Barrel-curve horizontal clip helper ----------------------------
+        # Returns (barrel_left, barrel_right) in physical pixels for a given
+        # mid-Y screen position.  Falls back to full width when CRT is off.
+        def _barrel_clip(y_mid: float):
+            if gpu is None or not getattr(gpu, 'crt_curvature_on', False):
+                return 0, window_w
+            st_h = getattr(gpu, 'crt_strength', 0.0)
+            if st_h <= 0.0:
+                return 0, window_w
+            ny = (y_mid / window_h - 0.5) * 2.0 if window_h > 0 else 0.0
+            horz_scale = max(0.0, 1.0 - st_h * ny * ny)
+            bl = int(round(window_w * (1.0 - horz_scale) * 0.5))
+            br = window_w - bl
+            return bl, br
+
+        # --- 1:1 clipped horizontal copy ------------------------------------
+        # Copies scene_tex row (src_y, src_h) shifted to dest_x, clamped to
+        # [barrel_left, barrel_right].  Adjusts source rect to match.
+        def _band_copy(tex, src_y: int, src_h: int, dest_x: int, bl: int, br: int):
+            cl = max(bl, dest_x)
+            cr = min(br, dest_x + window_w)
+            if cl >= cr:
+                return
+            src_off = cl - dest_x          # how many px into source we start
+            renderer.copy(tex,
+                          source=(src_off, src_y, cr - cl, src_h),
+                          dest=(cl, src_y, cr - cl, src_h))
 
         # ---- Persistent dark-red desaturation tint (pulsing) ----
         tint_a = int(55 + 30 * math.sin(self._t * 2.4))
@@ -1012,26 +1208,26 @@ class VHSGlitchAnimation:
             if alpha <= 0:
                 continue
 
-            src = (0, y0, window_w, bh)
+            bl, br = _barrel_clip(y0 + bh * 0.5)
 
             # Displaced base copy (brighter to simulate tape bleed)
             scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
             scene_tex.alpha_mod  = min(255, int(alpha * 1.4))
             scene_tex.color_mod  = (255, 255, 255)
-            renderer.copy(scene_tex, source=src, dest=(x_shift, y0, window_w, bh))
+            _band_copy(scene_tex, y0, bh, x_shift, bl, br)
 
             # R channel fringe
             if abs(r_shift) >= 1:
                 scene_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
                 scene_tex.alpha_mod  = int(alpha * 0.75)
                 scene_tex.color_mod  = (255, 0, 0)
-                renderer.copy(scene_tex, source=src, dest=(r_shift, y0, window_w, bh))
+                _band_copy(scene_tex, y0, bh, r_shift, bl, br)
 
             # B channel fringe
             if abs(b_shift) >= 1:
                 scene_tex.color_mod = (0, 0, 255)
                 scene_tex.alpha_mod = int(alpha * 0.60)
-                renderer.copy(scene_tex, source=src, dest=(b_shift, y0, window_w, bh))
+                _band_copy(scene_tex, y0, bh, b_shift, bl, br)
 
         # Reset scene_tex state
         scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
@@ -1045,10 +1241,11 @@ class VHSGlitchAnimation:
                 noise_h = random.randint(1, 6)
                 noise_a = int(random.uniform(40, 120) * envelope)
                 if noise_a > 0:
+                    bl, br = _barrel_clip(noise_y + noise_h * 0.5)
                     ov.blend_mode = tcod.sdl.render.BlendMode.ADD
                     ov.alpha_mod  = noise_a
                     ov.color_mod  = (200, 200, 220)
-                    renderer.copy(ov, dest=(0, noise_y, window_w, noise_h))
+                    renderer.copy(ov, dest=(bl, noise_y, br - bl, noise_h))
                     ov.blend_mode = tcod.sdl.render.BlendMode.BLEND
 
 
@@ -1194,6 +1391,7 @@ class GPUStack:
 
         self._smoke_tex    = None
         self._smoke_frames = None
+        self._dodge_tile_cache: dict = {}  # codepoint -> uploaded texture
 
         # Ember/smoke bloom tuning
         self._ember_bloom_passes    = 3
@@ -1207,12 +1405,18 @@ class GPUStack:
         self._lightmap_tex_size = (0, 0)
 
         # Register the built-in particle passes
-        self.gpu_anim_registry.append(self._gpu_ember_render)         # bloom
+        self.gpu_anim_registry.append(self._gpu_ember_render)   
+        self.gpu_anim_registry.append(self._jagged_line_spell_render)      # bloom
+        self.gpu_anim_registry.append(self._burn_render)      # bloom
+        self.gpu_anim_registry.append(self._dodge_render)      # under entities, no bloom
         self.gpu_anim_registry.append(self._gpu_crtbleed_render)      # bloom
         self.gpu_anim_registry.append(self._gpu_smoke_render)         # bloom
         self.gpu_anim_registry.append(self._light_shaft_render)       # bloom
         self.gpu_anim_registry.append(self._slash_render)            # bloom
         self.gpu_anim_registry.append(self._gpu_drip_render)  # bloom ? (exact color)
+        self.gpu_anim_registry.append(self._heal_render)  # bloom ? (exact color)
+        self.gpu_anim_registry.append(self._space_distort_spell_render)    # bloom
+        self.gpu_anim_registry.append(self._illuminated_render)            # bloom
 
     # ------------------------------------------------------------------
     # Frame dimension update
@@ -1506,6 +1710,565 @@ class GPUStack:
                 drew = True
         return drew
 
+    def _space_distort_spell_render(self, active_engine) -> bool:
+        """Expanding warp-rings for SpaceDistortSpellParticle (bloom pass).
+
+        Each particle draws:
+          1. A brief central pinpoint flash (first 25 % of life).
+          2. A single tight ring that expands via ease-out quadratic over roughly
+             1 tile radius, with per-dot radial noise so the edge looks 'torn'.
+          3. 6 radial rift lines from center outward — short dotted streaks with
+             perpendicular wobble that grows with distance (crack-in-space look).
+          4. Chromatic fringe dots inside/outside the ring.
+        """
+        particles = [a for a in active_engine.animation_queue
+                     if isinstance(a, SpaceDistortSpellParticle) and a.frames > 0]
+        if not particles:
+            return False
+
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        game_map = active_engine.game_map
+        renderer = self.renderer
+        drew     = False
+
+        TWO_PI  = 2.0 * math.pi
+        N_DOTS  = 28                      # sample points per ring sweep
+        N_RIFTS = 6                       # radial crack lines
+        aspect  = tile_px_h / tile_px_w  # oval correction
+
+        # max ring radius: just over one tile wide
+        max_r     = tile_px_w * 1.1
+        # radial noise amplitude: how far each dot can be pushed off the ring
+        r_noise   = tile_px_w * 0.28
+        dot_sz    = max(1, int(tile_px_w * 0.09))
+        fringe_sz = max(1, dot_sz - 1)
+        fringe_r  = tile_px_w * 0.18     # CA offset distance
+
+        with renderer.set_render_target(self._gal_src):
+            for p in particles:
+                world_xi = int(round(p.fx))
+                world_yi = int(round(p.fy))
+                if not game_map.in_bounds(world_xi, world_yi):
+                    continue
+                if not game_map.visible[world_xi, world_yi]:
+                    continue
+
+                scr_x = p.fx - origin_x
+                scr_y = p.fy - origin_y
+                if not (0.0 <= scr_x < self.game_view_width and
+                        0.0 <= scr_y < self.game_view_height):
+                    continue
+
+                cx  = scr_x * tile_px_w + tile_px_w * 0.5
+                cy  = scr_y * tile_px_h + tile_px_h * 0.5
+                age = 1.0 - (p.frames / float(p.total_frames))
+
+                # ── 1. Central flash (first 25 % of life) ────────────────────
+                if age < 0.25:
+                    t_f     = age / 0.25
+                    f_alpha = int(200 * math.sin(t_f * math.pi))
+                    sz      = max(1, int(tile_px_w * 0.22))
+                    px_c    = int(cx)
+                    py_c    = int(cy)
+                    if f_alpha > 8 and 1 <= px_c < self._gal_w - 1 and 1 <= py_c < self._gal_h - 1:
+                        renderer.draw_color = (210, 230, 255, f_alpha)
+                        renderer.fill_rect((float(px_c - sz), float(py_c - sz),
+                                            float(sz * 2), float(sz * 2)))
+
+                # ── 2. Torn ring ──────────────────────────────────────────────
+                # ease-out quadratic: r_norm = 1-(1-age)^2
+                r_norm     = 1.0 - (1.0 - age) ** 2
+                radius     = max_r * r_norm
+                ring_alpha = int(210 * math.sin(age * math.pi))
+
+                if ring_alpha > 5:
+                    rr = int((1.0 - age) * 190 + age * 130)
+                    rg = int((1.0 - age) * 220 + age * 100)
+                    rb = 255
+
+                    for i in range(N_DOTS):
+                        theta = TWO_PI * i / N_DOTS + random.uniform(-0.20, 0.20)
+                        cos_t = math.cos(theta)
+                        sin_t = math.sin(theta)
+
+                        # Radial noise: push dot inward or outward randomly
+                        r_jit = radius + random.gauss(0.0, r_noise * math.sin(age * math.pi))
+                        pxd   = int(cx + r_jit * cos_t)
+                        pyd   = int(cy + r_jit * sin_t * aspect)
+
+                        if not (dot_sz <= pxd < self._gal_w - dot_sz and
+                                dot_sz <= pyd < self._gal_h - dot_sz):
+                            continue
+
+                        # Fade dots that are far off the ideal ring
+                        radial_dev = abs(r_jit - radius) / max(r_noise, 1.0)
+                        dot_a = int(ring_alpha * max(0.0, 1.0 - radial_dev * 0.6))
+                        if dot_a > 6:
+                            renderer.draw_color = (rr, rg, rb, dot_a)
+                            renderer.fill_rect((float(pxd - dot_sz), float(pyd - dot_sz),
+                                                float(dot_sz * 2), float(dot_sz * 2)))
+
+                        # Chromatic fringe
+                        ca_a = dot_a // 5
+                        if ca_a > 5:
+                            inner_bx = int(cx + (r_jit - fringe_r) * cos_t)
+                            inner_by = int(cy + (r_jit - fringe_r) * sin_t * aspect)
+                            outer_bx = int(cx + (r_jit + fringe_r) * cos_t)
+                            outer_by = int(cy + (r_jit + fringe_r) * sin_t * aspect)
+                            if (fringe_sz <= inner_bx < self._gal_w - fringe_sz and
+                                    fringe_sz <= inner_by < self._gal_h - fringe_sz):
+                                renderer.draw_color = (40, 90, 255, ca_a)
+                                renderer.fill_rect((float(inner_bx - fringe_sz),
+                                                    float(inner_by - fringe_sz),
+                                                    float(fringe_sz * 2),
+                                                    float(fringe_sz * 2)))
+                            if (fringe_sz <= outer_bx < self._gal_w - fringe_sz and
+                                    fringe_sz <= outer_by < self._gal_h - fringe_sz):
+                                renderer.draw_color = (255, 60, 200, ca_a)
+                                renderer.fill_rect((float(outer_bx - fringe_sz),
+                                                    float(outer_by - fringe_sz),
+                                                    float(fringe_sz * 2),
+                                                    float(fringe_sz * 2)))
+
+                # ── 3. Radial rift lines (cracks in space) ────────────────────
+                # Only visible in first 70 % of life; each crack is a dotted
+                # line from center outward with perpendicular wobble that grows
+                # with distance (wider crack tip).
+                if age < 0.70 and ring_alpha > 10:
+                    rift_len   = radius * 0.88
+                    rift_alpha = int(ring_alpha * 0.75)
+                    N_STEPS    = 7
+                    for ri in range(N_RIFTS):
+                        base_angle  = TWO_PI * ri / N_RIFTS
+                        rift_angle  = base_angle + random.uniform(-0.18, 0.18)
+                        rc = math.cos(rift_angle)
+                        rs = math.sin(rift_angle)
+                        # perpendicular direction (rotated 90°)
+                        pc = -rs
+                        ps =  rc
+                        for si in range(1, N_STEPS + 1):
+                            t_r  = si / N_STEPS
+                            dr   = rift_len * t_r
+                            # perpendicular wobble grows toward the tip
+                            wobble = random.gauss(0.0, tile_px_w * 0.14 * t_r)
+                            rpx = int(cx + dr * rc + wobble * pc)
+                            rpy = int(cy + (dr * rs + wobble * ps) * aspect)
+                            if not (1 <= rpx < self._gal_w - 1 and 1 <= rpy < self._gal_h - 1):
+                                continue
+                            # Fade along the crack: bright at base, dim at tip
+                            step_a = int(rift_alpha * (1.0 - t_r * 0.55))
+                            if step_a > 6:
+                                renderer.draw_color = (rr, rg, rb, step_a)
+                                renderer.fill_rect((float(rpx - 1), float(rpy - 1), 2.0, 2.0))
+
+                drew = True
+        return drew
+
+    def _jagged_line_spell_render(self, active_engine) -> bool:
+        """Draws a jagged lightning bolt along the full spell path (bloom pass)."""
+        jagged_lines = [a for a in active_engine.animation_queue
+                        if isinstance(a, JaggedLineSpellParticle) and a.frames > 0]
+        if not jagged_lines:
+            return False
+
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        game_map  = active_engine.game_map
+        renderer  = self.renderer
+        drew      = False
+
+        with renderer.set_render_target(self._gal_src):
+            for spell in jagged_lines:
+                if not spell.path:
+                    continue
+
+                age = 1.0 - (spell.frames / float(spell.total_frames))
+                # Stay bright for 70% of lifetime, fade over the last 30%
+                alpha = int(220 * max(0.0, 1.0 - max(0.0, age - 0.7) / 0.1))
+                if alpha < 8:
+                    continue
+
+                r, g, b = spell.color
+
+                # Draw a segment for every consecutive pair of tiles in the path
+                for i in range(len(spell.path) - 1):
+                    ax, ay = spell.path[i]
+                    bx, by = spell.path[i + 1]
+
+                    # Visibility: skip if neither endpoint is on screen
+                    if not (game_map.in_bounds(ax, ay) and game_map.visible[ax, ay]) and \
+                       not (game_map.in_bounds(bx, by) and game_map.visible[bx, by]):
+                        continue
+
+                    # Screen pixel centres for this segment
+                    scr_ax = (ax - origin_x) * tile_px_w + tile_px_w * 0.5
+                    scr_ay = (ay - origin_y) * tile_px_h + tile_px_h * 0.5
+                    scr_bx = (bx - origin_x) * tile_px_w + tile_px_w * 0.5
+                    scr_by = (by - origin_y) * tile_px_h + tile_px_h * 0.5
+
+                    # Interpolate along the segment and draw jittered dots
+                    STEPS = 10
+                    for s in range(STEPS + 1):
+                        t = s / STEPS
+                        ix = scr_ax + (scr_bx - scr_ax) * t
+                        iy = scr_ay + (scr_by - scr_ay) * t
+
+                        # Perpendicular jitter — magnitude shrinks at endpoints
+                        jitter_scale = tile_px_w * 0.25 * math.sin(t * math.pi)
+                        jx = random.uniform(-jitter_scale, jitter_scale)
+                        jy = random.uniform(-jitter_scale, jitter_scale)
+
+                        px = int(ix + jx)
+                        py = int(iy + jy)
+
+                        if not (2 <= px < self._gal_w - 2 and 2 <= py < self._gal_h - 2):
+                            continue
+
+                        # Core bolt: bright center
+                        renderer.draw_color = (r, g, b, alpha)
+                        renderer.fill_rect((float(px - 2), float(py - 2), 4.0, 4.0))
+
+                        # Glow halo: slightly larger, semi-transparent
+                        halo_a = alpha // 3
+                        if halo_a > 8:
+                            renderer.draw_color = (r, g, b, halo_a)
+                            renderer.fill_rect((float(px - 4), float(py - 4), 8.0, 8.0))
+
+                drew = True
+
+        return drew
+
+
+    def _illuminated_render(self, active_engine) -> bool:
+        """Draws a smooth breathing corona for each IlluminatedParticle (bloom pass).
+
+        One persistent particle exists per orb.  The glow brightness is driven
+        by a shared wall-clock sine so the corona breathes smoothly regardless
+        of particle age or spawn timing.
+        """
+        import time as _time
+        rays = [a for a in active_engine.animation_queue
+                if isinstance(a, IlluminatedParticle) and a.frames > 0]
+        if not rays:
+            return False
+
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        game_map  = active_engine.game_map
+        renderer  = self.renderer
+        drew      = False
+
+        N_BEAMS  = 8
+        SEGS     = 24
+        max_len  = tile_px_w * 1.1
+
+        # Clock-based envelope: smoothly breathes between 0.55 and 1.0
+        t_now    = _time.monotonic()
+        envelope = 0.55 + 0.25 * math.sin(t_now * IlluminatedParticle._breath_speed * 2.0 * math.pi)
+        peak_alpha = 55
+        base_alpha = int(peak_alpha * envelope)
+
+        with renderer.set_render_target(self._gal_src):
+            for ray in rays:
+                world_xi = int(round(ray.fx))
+                world_yi = int(round(ray.fy))
+                if not game_map.in_bounds(world_xi, world_yi):
+                    continue
+                if not game_map.visible[world_xi, world_yi]:
+                    continue
+
+                scr_x = ray.fx - origin_x
+                scr_y = ray.fy - origin_y
+                if not (0.0 <= scr_x < self.game_view_width and
+                        0.0 <= scr_y < self.game_view_height):
+                    continue
+
+                cx = scr_x * tile_px_w + tile_px_w * 0.5
+                cy = scr_y * tile_px_h + tile_px_h * 0.5
+                if not (4 <= cx < self._gal_w - 4 and 4 <= cy < self._gal_h - 4):
+                    continue
+
+                r, g, b = ray.color
+                beam_len = max_len * (0.5 + 0.5 * envelope)
+
+                # Unique per-orb angle offset so multiple orbs don't look identical
+                angle_offset = (hash(id(ray)) % 360)
+
+                for i in range(N_BEAMS):
+                    rad   = math.radians(i * (360 / N_BEAMS) + angle_offset)
+                    cos_a = math.cos(rad)
+                    sin_a = math.sin(rad)
+
+                    for s in range(1, SEGS + 1):
+                        t = s / SEGS
+
+                        # Squared falloff: bright near center, dim at tip
+                        seg_alpha = int(base_alpha * (1.0 - t * t))
+                        if seg_alpha < 2:
+                            continue
+
+                        dist = beam_len * t
+                        sx = cx + cos_a * dist
+                        sy = cy + sin_a * dist
+
+                        half = max(0.5, 1.5 * (1.0 - t))
+
+                        sx_i = int(sx)
+                        sy_i = int(sy)
+                        if not (int(half) + 1 <= sx_i < self._gal_w - int(half) - 1 and
+                                int(half) + 1 <= sy_i < self._gal_h - int(half) - 1):
+                            continue
+
+                        renderer.draw_color = (r, g, b, seg_alpha)
+                        renderer.fill_rect((sx - half, sy - half, half * 2.0, half * 2.0))
+
+                # Soft central glow dot
+                glow_alpha = int(base_alpha * 1.4)
+                if glow_alpha > 0:
+                    glow_r = max(1.5, tile_px_w * 0.12)
+                    renderer.draw_color = (r, g, min(255, b + 20), min(255, glow_alpha))
+                    renderer.fill_rect((cx - glow_r, cy - glow_r, glow_r * 2.0, glow_r * 2.0))
+
+                drew = True
+
+        return drew
+
+
+    def _heal_render(self, active_engine) -> bool:
+        """Draw rising green crosses for each HealthParticle (bloom pass)."""
+        heals = [a for a in active_engine.animation_queue
+                 if isinstance(a, HealthParticle) and a.frames > 0]
+        if not heals:
+            return False
+
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        game_map  = active_engine.game_map
+        renderer  = self.renderer
+        drew      = False
+
+        with renderer.set_render_target(self._gal_src):
+            for heal in heals:
+                world_xi = int(round(heal.fx))
+                world_yi = int(round(heal.fy))
+                if not game_map.in_bounds(world_xi, world_yi):
+                    continue
+                if not game_map.visible[world_xi, world_yi]:
+                    continue
+
+                scr_x = heal.fx - origin_x
+                scr_y = heal.fy - origin_y
+                if not (0.0 <= scr_x < self.game_view_width and
+                        0.0 <= scr_y < self.game_view_height):
+                    continue
+
+                px = int(scr_x * tile_px_w + tile_px_w * 0.5)
+                py = int(scr_y * tile_px_h + tile_px_h * 0.5)
+                if not (2 <= px < self._gal_w - 2 and 2 <= py < self._gal_h - 2):
+                    continue
+
+                age = 1.0 - (heal.frames / float(heal.total_frames))
+
+                # Colour: bright green fading to transparent
+                alpha = int(200 * (1.0 - age))
+                if alpha < 8:
+                    continue
+
+                # Cross shape: two thin rectangles intersecting at the center
+                # Draw three randomly offset copies
+                sz = max(2, int(min(tile_px_w, tile_px_h) * 0.15))
+                renderer.draw_color = (120, 255, 120, alpha)
+                renderer.fill_rect((float(px + random.random() * sz - sz // 2), float(py - sz // 4),
+                                    float(sz * 2), float(sz // 2)))
+                renderer.fill_rect((float(px + random.random() * sz - sz // 4), float(py - sz),
+                                    float(sz // 2), float(sz * 2)))
+                renderer.fill_rect((float(px - sz), float(py - sz // 4),
+                                    float(sz * 2), float(sz // 2)))
+                renderer.fill_rect((float(px - sz // 4), float(py - sz),
+                                    float(sz // 2), float(sz * 2)))
+                drew = True
+
+        return drew
+
+    def _burn_render(self, active_engine) -> bool:
+        """Draw rising flame sparks for each BurningParticle (bloom pass).
+
+        Each particle is a small vertically-elongated rect whose colour shifts
+        from bright yellow-white at birth through orange to dim red at death,
+        mirroring how a real flame tongue cools as it rises.
+        """
+        burns = [a for a in active_engine.animation_queue
+                 if isinstance(a, BurningParticle) and a.frames > 0]
+        if not burns:
+            return False
+
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        game_map  = active_engine.game_map
+        renderer  = self.renderer
+        drew      = False
+
+        with renderer.set_render_target(self._gal_src):
+            for burn in burns:
+                # Visibility — check origin tile (entity tile), not spark tile
+                ex = int(round(burn.entity.x if hasattr(burn.entity, 'x') else burn.fx))
+                ey = int(round(burn.entity.y if hasattr(burn.entity, 'y') else burn.fy))
+                if not game_map.in_bounds(ex, ey):
+                    continue
+                if not game_map.visible[ex, ey]:
+                    continue
+
+                scr_x = burn.fx - origin_x
+                scr_y = burn.fy - origin_y
+                if not (-1.0 <= scr_x < self.game_view_width + 1.0 and
+                        -1.0 <= scr_y < self.game_view_height + 1.0):
+                    continue
+
+                px = int(scr_x * tile_px_w + tile_px_w * 0.5)
+                py = int(scr_y * tile_px_h + tile_px_h * 0.5)
+                if not (2 <= px < self._gal_w - 2 and 2 <= py < self._gal_h - 2):
+                    continue
+
+                # age 0=birth 1=death
+                age = 1.0 - (burn.frames / float(burn.total_frames))
+
+                # Colour: young=yellow-white, middle=orange, old=dim red
+                if age < 0.4:
+                    t   = age / 0.4
+                    r   = 255
+                    g   = int(255 - t * 105)   # 255 -> 150
+                    b   = int(180 - t * 180)   # 180 -> 0
+                else:
+                    t   = (age - 0.4) / 0.6
+                    r   = int(255 - t * 55)    # 255 -> 200
+                    g   = int(150 - t * 150)   # 150 -> 0
+                    b   = 0
+
+                # Alpha: full for first 60%, then fade out
+                alpha = int(220 * max(0.0, 1.0 - max(0.0, age - 0.6) / 0.4))
+                if alpha < 8:
+                    continue
+
+                # Small vertically-elongated flame tongue
+                w = max(2, int(tile_px_w * 0.09))
+                h = max(3, int(tile_px_h * 0.18))
+                renderer.draw_color = (r, g, b, alpha)
+                renderer.fill_rect((float(px - w // 2), float(py - h // 2),
+                                    float(w), float(h)))
+                drew = True
+
+        return drew
+
+    def _dodge_render(self, active_engine) -> bool:
+        """Draw DodgeParticle tiles with a directional slide and ghost afterimages.
+
+        The leading tile moves up to half a tile in dodge.dir over its lifetime.
+        Two ghost copies are drawn behind it at decreasing alpha to sell the
+        speed-step feel.  The codepoint must sit in the 0xE000 PUA range.
+        """
+        dodges = [a for a in active_engine.animation_queue
+                  if isinstance(a, DodgeParticle) and a.frames > 0]
+        if not dodges:
+            return False
+
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        hw        = int(tile_px_w * 0.5)
+        hh        = int(tile_px_h * 0.5)
+        renderer  = self.renderer
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        game_map = active_engine.game_map
+        drew     = False
+
+        # Ghost offsets in tile-fractions behind the leader (negative = behind)
+        GHOSTS = (
+            (-0.35, 55),   # (tile-fraction back, base alpha)
+            (-0.70, 25),
+        )
+        # Max leader travel — half a tile
+        MAX_TRAVEL_PX = tile_px_w * 0.5
+
+        with renderer.set_render_target(self._gal_src):
+            for dodge in dodges:
+                world_xi = int(round(dodge.fx))
+                world_yi = int(round(dodge.fy))
+                if not game_map.in_bounds(world_xi, world_yi):
+                    continue
+                if not game_map.visible[world_xi, world_yi]:
+                    continue
+
+                scr_x = dodge.fx - origin_x
+                scr_y = dodge.fy - origin_y
+                if not (0.0 <= scr_x < self.game_view_width and
+                        0.0 <= scr_y < self.game_view_height):
+                    continue
+
+                base_px = int(scr_x * tile_px_w + tile_px_w * 0.5)
+                base_py = int(scr_y * tile_px_h + tile_px_h * 0.5)
+
+                # Resolve / cache texture
+                cp = ord(dodge.character)
+                if cp not in self._dodge_tile_cache:
+                    tile_pixels = self.tileset.get_tile(cp)  # (H, W, 4) RGBA
+                    tex = renderer.upload_texture(tile_pixels)
+                    tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                    self._dodge_tile_cache[cp] = tex
+                tex = self._dodge_tile_cache[cp]
+
+                # age: 0 at birth → 1 at death
+                age      = 1.0 - (dodge.frames / float(dodge.total_frames))
+                # Leader slides forward, then fades out in the last 35%
+                travel   = age * MAX_TRAVEL_PX
+                fade_in  = min(1.0, age / 0.10)           # quick flash-in
+                fade_out = max(0.0, 1.0 - max(0.0, age - 0.65) / 0.35)
+                lead_alpha = int(50 * fade_in * fade_out)
+
+                ndx, ndy = dodge.dir
+
+                # Pale cyan tint — visible but not blinding
+                tex.color_mod = (160, 220, 255)
+
+                # --- Ghost afterimages ---
+                for ghost_frac, ghost_base_alpha in GHOSTS:
+                    g_off    = travel + ghost_frac * tile_px_w
+                    g_px     = base_px + int(ndx * g_off)
+                    g_py     = base_py + int(ndy * g_off)
+                    if not (hw <= g_px < self._gal_w - hw and
+                            hh <= g_py < self._gal_h - hh):
+                        continue
+                    g_alpha  = int(ghost_base_alpha * fade_in * fade_out)
+                    if g_alpha <= 0:
+                        continue
+                    tex.alpha_mod = g_alpha
+                    renderer.copy(tex, dest=(float(g_px - hw), float(g_py - hh),
+                                             float(tile_px_w), float(tile_px_h)))
+
+                # --- Leading tile ---
+                lead_px = base_px + int(ndx * travel)
+                lead_py = base_py + int(ndy * travel)
+                if (hw <= lead_px < self._gal_w - hw and
+                        hh <= lead_py < self._gal_h - hh
+                        and lead_alpha > 0):
+                    tex.alpha_mod = lead_alpha
+                    renderer.copy(tex, dest=(float(lead_px - hw), float(lead_py - hh),
+                                             float(tile_px_w), float(tile_px_h)))
+                    drew = True
+
+        return drew
+
+
     def _slash_render(self, active_engine) -> bool:
         """Draw a slicing slash effect for each SlashParticle into _gal_src (bloom pass)."""
         slashes = [a for a in active_engine.animation_queue
@@ -1589,7 +2352,12 @@ class GPUStack:
                         continue
 
                     renderer.draw_color = (r, g, b, fade)
-                    renderer.fill_rect((sx - 1.5, sy - 1.5, 3.0, 3.0))
+                    print(slash.type)
+                    if slash.type == "miss":
+                        renderer.draw_color = (int(r/2), int(g//3), int(b//4), int(fade//3))
+                        renderer.fill_rect((sx - 25, sy - 25, 3.0, 3.0))
+                    else:
+                        renderer.fill_rect((sx - 1.5, sy - 1.5, 3.0, 3.0))
 
                 drew = True
         return drew
@@ -1612,7 +2380,7 @@ class GPUStack:
 
         SLICES    = 80
         SPREAD    = .75    # extra half-tiles of width gained over the shaft length
-        BASE_INT  = 0.70   # peak brightness (0–1); bloom amplifies this further
+        BASE_INT  = 0.3   # peak brightness (0–1); bloom amplifies this further
 
         tile_px_w  = self.base_tile_w * 2.0
         tile_px_h  = self.base_tile_h * 2.0

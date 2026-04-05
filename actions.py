@@ -28,56 +28,119 @@ import gpu_stack
 # hit_difficulty_modifier: Positive = easier to hit, negative = harder to hit
 
 
-# Second value adds to base 85% hit chance, so a -20 would make it 65% base hit chance, while a +30 would make it 115% (capped at 100% in code)
+# Body parts affect damage only; hit chance is resolved separately.
 BODY_PART_MODIFIERS = {
-    "HEAD": (1.5, -50),    # 50% more damage to head, much harder to hit (35% base hit chance)
-    "NECK": (1.5, -80),    # 50% more damage to neck, very hard to hit (5% base hit chance)
-    "TORSO": (1.0, 15),    # Normal damage, easier to hit (large target) (100% base hit chance)
-    "LEG": (0.9, -10),      # Slightly less damage, slightly harder to hit (75% base hit chance)
-    "ARM": (0.9, -10),     # Slightly less damage, harder to hit (75% base hit chance)
-    "HAND": (0.75, -35),    # Reduced damage, very hard to hit (50% base hit chance)
-    "FOOT": (0.75, -35),    # Reduced damage, very hard to hit (50% base hit chance)
+    "HEAD":  (1.5,  0),
+    "NECK":  (1.5,  0),
+    "TORSO": (1.0,  0),
+    "LEG":   (0.9,  0),
+    "ARM":   (0.9,  0),
+    "HAND":  (0.75, 0),
+    "FOOT":  (0.75, 0),
+    "TAIL":  (0.8,  0),
+}
+
+# Base hit chances (0.0–1.0)
+BASE_HIT        = 0.90  # Melee
+BASE_HIT_RANGED = 0.75  # Ranged
+
+# Weighted likelihood of hitting each zone (higher = hit more often)
+BODY_PART_WEIGHTS = {
+    "TORSO": 50,
+    "LEG":   15,
+    "ARM":   15,
+    "HEAD":  10,
+    "TAIL":   5,
+    "HAND":   3,
+    "FOOT":   3,
+    "NECK":   2,
 }
 
 
+def get_weighted_part_selection(body_parts):
+    """Select a random, non-destroyed body part using BODY_PART_WEIGHTS."""
+    parts, weights = [], []
+    for part in body_parts.body_parts.values():
+        if not part.is_destroyed:
+            parts.append(part)
+            weights.append(BODY_PART_WEIGHTS.get(part.part_type.name, 10))
+    if not parts:
+        return None
+    return random.choices(parts, weights=weights, k=1)[0]
+
+
+def get_part_from_tile_position(body_parts, tile_rel_x: float, tile_rel_y: float):
+    """Map a normalised cursor position within a tile (0.0–1.0) to a body part.
+
+    tile_rel_y=0.0 is the top of the tile (head); 1.0 is the bottom (feet).
+    Returns a BodyPart instance, or None if nothing is available.
+    """
+    available = {
+        pt: part for pt, part in body_parts.body_parts.items()
+        if not part.is_destroyed
+    }
+    if not available:
+        return None
+
+    if tile_rel_y < 0.2:
+        preferred = ["NECK", "HEAD"]
+    elif tile_rel_y < 0.4:
+        preferred = ["HEAD", "ARM"]
+    elif tile_rel_y < 0.6:
+        preferred = ["TORSO", "ARM"]
+    elif tile_rel_y < 0.8:
+        preferred = ["LEG", "HAND"]
+    else:
+        preferred = ["FOOT", "LEG"]
+
+    for pref in preferred:
+        for pt, part in available.items():
+            if pref in pt.name:
+                return part
+
+    return get_weighted_part_selection(body_parts)
+
+
 def _get_part_modifiers(part_type_name: str) -> tuple:
-    """Return (damage_modifier, hit_difficulty_modifier) for a body part type name."""
+    """Return (damage_modifier, 0) for a body part type name."""
     if part_type_name in BODY_PART_MODIFIERS:
         return BODY_PART_MODIFIERS[part_type_name]
     for key, val in BODY_PART_MODIFIERS.items():
         if key in part_type_name:
             return val
-    return (1.0, 0.0)
+    return (1.0, 0)
 
 
 def _resolve_hit_part(target, target_part):
-    """Return (hit_part, target_part, damage_mod, hit_diff_mod) after resolving body part targeting."""
+    """Return (hit_part, target_part, damage_mod) after resolving body part targeting.
+
+    Body part selection uses BODY_PART_WEIGHTS when no explicit target_part is given.
+    """
     damage_modifier = 1.0
-    hit_difficulty_modifier = 0.0
     hit_part = None
 
     body_parts = getattr(target, 'body_parts', None)
     if not body_parts:
-        return None, target_part, damage_modifier, hit_difficulty_modifier
+        return None, target_part, damage_modifier
 
     if not target_part:
-        rp = body_parts.get_random_part()
+        rp = get_weighted_part_selection(body_parts)
         target_part = rp.part_type if rp else None
 
     if target_part:
         hit_part = body_parts.body_parts.get(target_part)
         if hit_part and not hit_part.is_destroyed:
-            damage_modifier, hit_difficulty_modifier = _get_part_modifiers(hit_part.part_type.name)
+            damage_modifier, _ = _get_part_modifiers(hit_part.part_type.name)
         else:
-            # Fall back to a random available part
-            rp = body_parts.get_random_part()
+            # Requested part is gone – fall back to weighted random
+            rp = get_weighted_part_selection(body_parts)
             if rp:
                 target_part = rp.part_type
                 hit_part = rp
                 if hit_part and not hit_part.is_destroyed:
-                    damage_modifier, hit_difficulty_modifier = _get_part_modifiers(hit_part.part_type.name)
+                    damage_modifier, _ = _get_part_modifiers(hit_part.part_type.name)
 
-    return hit_part, target_part, damage_modifier, hit_difficulty_modifier
+    return hit_part, target_part, damage_modifier
 
 class Action:
     def __init__(self, entity: Actor) -> None:
@@ -378,9 +441,10 @@ class ActionWithDirection(Action):
 class RangedAction(ActionWithDirection):
     """Directional ranged attack that can target a specific body part."""
 
-    def __init__(self, entity: Actor, dx: int, dy: int, target_part: Optional['BodyPartType'] = None):
+    def __init__(self, entity: Actor, dx: int, dy: int, target_part: Optional['BodyPartType'] = None, tile_rel_pos: Optional[Tuple[float, float]] = None):
         super().__init__(entity, dx, dy)
         self.target_part = target_part
+        self.tile_rel_pos = tile_rel_pos  # normalised (x, y) within target tile, 0.0–1.0
 
     def _get_ready_ranged_items(self):
         """Return currently readied bow and projectile items, if any."""
@@ -610,7 +674,18 @@ class RangedAction(ActionWithDirection):
                 elif part.damage_level_float > 0.5 and random.random() < 0.5:
                     self.entity.fighter._drop_grasped_items(part)
 
-        hit_part, self.target_part, damage_modifier, hit_difficulty_modifier = _resolve_hit_part(target, self.target_part)
+        # Apply mouse precision targeting if available
+        if self.tile_rel_pos and not self.target_part:
+            body_parts_comp = getattr(target, 'body_parts', None)
+            if body_parts_comp:
+                aimed = get_part_from_tile_position(body_parts_comp, *self.tile_rel_pos)
+                if aimed:
+                    dist_from_center = ((self.tile_rel_pos[0] - 0.5) ** 2 + (self.tile_rel_pos[1] - 0.5) ** 2) ** 0.5
+                    accuracy_bonus = max(0.0, 1.0 - (dist_from_center / 0.5))
+                    if accuracy_bonus > 0.6:
+                        self.target_part = aimed.part_type
+
+        hit_part, self.target_part, damage_modifier = _resolve_hit_part(target, self.target_part)
 
         # Calculate defense and damage
         armor_defense = 0
@@ -625,16 +700,27 @@ class RangedAction(ActionWithDirection):
         base_damage = self.entity.fighter.power - total_defense
         final_damage = max(0, int(base_damage * damage_modifier))
 
-        # Hit chance calculation (ranged base is 50%)
-        hit_chance = 50 + hit_difficulty_modifier
-        hit_success = random.randint(1, 100) <= hit_chance
+        # Hit chance: BASE_HIT_RANGED (75 %), optionally scaled by mouse precision
+        if self.tile_rel_pos:
+            dist_from_center = ((self.tile_rel_pos[0] - 0.5) ** 2 + (self.tile_rel_pos[1] - 0.5) ** 2) ** 0.5
+            accuracy_bonus = max(0.0, 1.0 - (dist_from_center / 0.5))
+            hit_chance = BASE_HIT_RANGED * (0.8 + 0.4 * accuracy_bonus)
+            hit_chance = min(hit_chance, 0.95)
+        else:
+            hit_chance = max(0.75, BASE_HIT_RANGED)
+        hit_success = random.random() < hit_chance
 
         # Dodge calculation
         dodge_success = False
         if hit_success and random.random() < target.dodge_chance:
-            hit_success = False
-            dodge_success = True
+            if target.dodge_cooldown == 0:
+                hit_success = False
+                dodge_success = True
+                target.dodge_cooldown = target.dodge_cooldown_max
 
+
+        old_dodge_x, old_dodge_y = target.x, target.y
+        dodge_dir = (0, 0)
         if dodge_success:
             adjacent_positions = [
                 (target.x + 1, target.y), (target.x - 1, target.y),
@@ -653,10 +739,13 @@ class RangedAction(ActionWithDirection):
                 if (gm.in_bounds(new_x, new_y)
                         and gm.tiles["walkable"][new_x, new_y]
                         and not gm.get_blocking_entity_at_location(new_x, new_y)):
-                    target.x = new_x
-                    target.y = new_y
+                    DodgeAction(target, new_x - target.x, new_y - target.y).perform()
                     self.engine.message_log.add_message(f"{target.name} dodges to the side!", color.teal)
                     break
+            self.engine.animation_queue.append(
+                gpu_stack.DodgeParticle((old_dodge_x, old_dodge_y),
+                                        character=target.char,
+                                        direction=dodge_dir))
 
         # Create attack description
         if hit_part:
@@ -766,20 +855,52 @@ class RangedAction(ActionWithDirection):
                     target.level.add_xp({'light armor': int(armor_defense)})
                     self.engine.debug_log(f"Gained light armor XP from ranged: {int(armor_defense)}", handler=type(self).__name__, event="perform")
 
+class DodgeAction(ActionWithDirection):
+    """Dodge in a direction to attempt to avoid attacks, moving to an adjacent tile if successful."""
+
+    def perform(self) -> None:
+        
+        if self.entity.dodge_cooldown > 0:
+            raise exceptions.Impossible("Too tired to dodge!")
+        else:
+            target_x, target_y = self.dest_xy
+            gm = self.engine.game_map
+
+            if not gm.in_bounds(target_x, target_y):
+                raise exceptions.Impossible("You can't dodge out of bounds!")
+            if not gm.tiles["walkable"][target_x, target_y]:
+                raise exceptions.Impossible("You can't dodge into a wall!")
+            if gm.get_blocking_entity_at_location(target_x, target_y):
+                raise exceptions.Impossible("You can't dodge into an obstacle!")
+            sounds.play_miss_sound()
+            self.entity.x = target_x
+            self.entity.y = target_y
+            import components.effect
+            self.entity.effects.append(components.effect.TiredEffect(duration=self.entity.dodge_cooldown_max+1))
+            self.engine.animation_queue.append(gpu_stack.DodgeParticle((target_x, target_y), character=self.entity.char, direction=(self.dx, self.dy)))
+            self.entity.dodge_cooldown = self.entity.dodge_cooldown_max
+
 class MeleeAction(ActionWithDirection):
     """Melee action that targets a specific body part."""
-    
-    def __init__(self, entity: Actor, dx: int, dy: int, target_part: Optional['BodyPartType'] = None):
+
+    def __init__(self, entity: Actor, dx: int, dy: int, target_part: Optional['BodyPartType'] = None, tile_rel_pos: Optional[Tuple[float, float]] = None):
         super().__init__(entity, dx, dy)
         self.target_part = target_part
+        self.tile_rel_pos = tile_rel_pos  # normalised (x, y) within target tile, 0.0–1.0
     
     def perform(self) -> None:
         target = self.target_actor
         part_damage = 0
 
+        # Direction: actual attacker→target vector when target exists, else tile dx/dy
+        if target:
+            slash_angle = (target.x - self.entity.x, target.y - self.entity.y)
+        else:
+            slash_angle = (self.dx, self.dy)
+
         if not target:
             x, y = self.target_location
-            self.engine.animation_queue.append(gpu_stack.SlashParticle((x, y), enchanted=False))
+            self.engine.animation_queue.append(gpu_stack.SlashParticle((x, y), enchanted=False, angle=slash_angle, type="miss"))
             sounds.play_miss_sound()
             raise exceptions.Impossible("Nothing to attack.")
 
@@ -791,8 +912,19 @@ class MeleeAction(ActionWithDirection):
                 elif part.damage_level_float > 0.5 and random.random() < 0.5:
                     self.entity.fighter._drop_grasped_items(part)
 
+        # Apply mouse precision targeting when the caller supplies a tile-relative cursor position
+        if self.tile_rel_pos and not self.target_part:
+            body_parts_comp = getattr(target, 'body_parts', None)
+            if body_parts_comp:
+                aimed = get_part_from_tile_position(body_parts_comp, *self.tile_rel_pos)
+                if aimed:
+                    dist_from_center = ((self.tile_rel_pos[0] - 0.5) ** 2 + (self.tile_rel_pos[1] - 0.5) ** 2) ** 0.5
+                    accuracy_bonus = max(0.0, 1.0 - (dist_from_center / 0.5))
+                    if accuracy_bonus > 0.6:
+                        self.target_part = aimed.part_type
+
         # Resolve which body part is hit and its modifiers
-        hit_part, self.target_part, damage_modifier, hit_difficulty_modifier = _resolve_hit_part(target, self.target_part)
+        hit_part, self.target_part, damage_modifier = _resolve_hit_part(target, self.target_part)
 
         # Calculate localized defense
         armor_defense = 0
@@ -807,9 +939,15 @@ class MeleeAction(ActionWithDirection):
         base_damage = self.entity.fighter.power - total_defense
         final_damage = max(0, int(base_damage * damage_modifier))
 
-        # Hit chance (base 85% ± body part modifier)
-        hit_chance = 85 + hit_difficulty_modifier
-        hit_success = random.randint(1, 100) <= hit_chance
+        # Hit chance: BASE_HIT (90 %), optionally scaled by mouse‑precision accuracy bonus
+        if self.tile_rel_pos:
+            dist_from_center = ((self.tile_rel_pos[0] - 0.5) ** 2 + (self.tile_rel_pos[1] - 0.5) ** 2) ** 0.5
+            accuracy_bonus = max(0.0, 1.0 - (dist_from_center / 0.5))
+            hit_chance = BASE_HIT * (0.8 + 0.4 * accuracy_bonus)
+            hit_chance = min(hit_chance, 0.95)
+        else:
+            hit_chance = max(0.75, BASE_HIT)
+        hit_success = random.random() < hit_chance
 
         # Dodge check
         dodge_success = False
@@ -818,6 +956,8 @@ class MeleeAction(ActionWithDirection):
             dodge_success = True
 
         # Dodge – move target to an adjacent free tile
+        old_dodge_x, old_dodge_y = target.x, target.y
+        dodge_dir = (0, 0)
         if dodge_success:
             adjacent_positions = [
                 (target.x + 1, target.y), (target.x - 1, target.y),
@@ -836,8 +976,11 @@ class MeleeAction(ActionWithDirection):
                 if (gm.in_bounds(new_x, new_y)
                         and gm.tiles["walkable"][new_x, new_y]
                         and not gm.get_blocking_entity_at_location(new_x, new_y)):
-                    target.x = new_x
-                    target.y = new_y
+                    DodgeAction(target, new_x - target.x, new_y - target.y).perform()
+                    self.engine.animation_queue.append(
+                        gpu_stack.DodgeParticle((old_dodge_x, old_dodge_y),
+                                                character=target.char,
+                                                direction=dodge_dir))
                     self.engine.message_log.add_message(f"{target.name} dodges to the side!", color.teal)
                     break
 
@@ -903,7 +1046,7 @@ class MeleeAction(ActionWithDirection):
 
         # Animation
         if hit_success:
-            self.engine.animation_queue.append(gpu_stack.SlashParticle((target.x, target.y), enchanted=False, angle=(self.dx, self.dy)))
+            self.engine.animation_queue.append(gpu_stack.SlashParticle((target.x, target.y), enchanted=False, angle=slash_angle, type=weapon_verb))
 
         attack_color = color.player_atk if self.entity is self.engine.player else color.enemy_atk
 
@@ -911,6 +1054,12 @@ class MeleeAction(ActionWithDirection):
         if not hit_success:
             msg = (f"{attack_desc}, but {target.name} dodges!" if dodge_success
                    else f"{attack_desc}, but misses!")
+            if dodge_success:
+                self.engine.animation_queue.append(
+                    gpu_stack.DodgeParticle((old_dodge_x, old_dodge_y),
+                                            character=target.char,
+                                            direction=dodge_dir))
+            self.engine.animation_queue.append(gpu_stack.SlashParticle((target.x, target.y), enchanted=False, angle=slash_angle, type="miss"))
             self.engine.message_log.add_message(msg, color.teal if dodge_success else color.dark_gray)
 
         elif final_damage > 0:
@@ -919,7 +1068,7 @@ class MeleeAction(ActionWithDirection):
                 for enchantment in weapon.enchantments:
                     enchantment.on_hit(self.engine, target, hit_part)
                     self.engine.animation_queue.append(
-                        gpu_stack.SlashParticle((target.x, target.y), enchanted=True, color=enchantment.get_color())
+                        gpu_stack.SlashParticle((target.x, target.y), enchanted=True, color=enchantment.get_color(), angle=slash_angle, type=weapon_verb)
                     )
 
             if hit_part:
@@ -998,7 +1147,7 @@ class MovementAction(ActionWithDirection):
             self.entity.is_swimming = is_water
 
     def perform(self) -> None:
-        
+        self.entity.dodge_cooldown = max(0, self.entity.dodge_cooldown - 1)
         dest_x, dest_y = self.dest_xy
 
         # Check if entity can move (has working legs/locomotion)
@@ -1050,6 +1199,8 @@ class MovementAction(ActionWithDirection):
                     tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
                     if tile_name == "Grass":
                         sounds.play_movement_sound_at(sounds.play_grass_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
+                    elif tile_name == "Mossy Floor":
+                        sounds.play_movement_sound_at(sounds.play_moss_walk_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
                     elif tile_name == "Water":
                         self._update_swim_state(dest_x, dest_y)
                         sounds.play_movement_sound_at(sounds.play_swim_sound, dest_x, dest_y, self.engine.player, self.engine.game_map)
@@ -1090,6 +1241,8 @@ class MovementAction(ActionWithDirection):
                     tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
                     if tile_name == "Grass":
                         sounds.play_grass_walk_sound()
+                    elif tile_name == "Mossy Floor":
+                        sounds.play_moss_walk_sound()
                     elif tile_name == "Water":
                         self._update_swim_state(dest_x, dest_y)
                         sounds.play_swim_sound()
@@ -1202,7 +1355,8 @@ class ThrowItem(ItemAction):
 
 class BumpAction(ActionWithDirection):
     def perform(self) -> None:
-        if self.target_actor:
+        actor = self.target_actor
+        if actor and getattr(actor, "blocks_movement", True):
             return MeleeAction(self.entity, self.dx, self.dy).perform()
         else:
             return MovementAction(self.entity, self.dx, self.dy).perform()

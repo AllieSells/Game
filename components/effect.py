@@ -42,6 +42,80 @@ class Effect:
             label=self.name,
         )
 
+class HealingEffect(Effect):
+    def __init__(self, total_amount: int, duration: int):
+        super().__init__(
+            name="Healing",
+            duration=duration,
+            description=f"Heal {total_amount} HP over {duration} turns.",
+            type="buff",
+            display=EffectDisplay(glyph=chr(0xE025), fg=(255, 255, 255), label="Healing"),
+        )
+        self.total_amount = total_amount
+        self.amount_per_tick = total_amount // duration if duration > 0 else total_amount
+
+    def tick(self, target):
+        if self.duration is None:
+            return False
+        self.duration -= 1
+        heal_amount = self.amount_per_tick
+        if self.duration == 0:  # Heal any remaining amount on the last tick
+            heal_amount = self.total_amount - (self.amount_per_tick * (self.total_amount // self.amount_per_tick - 1))
+        target.fighter.heal(heal_amount)
+        return self.duration <= 0
+
+class TiredEffect(Effect):
+    def __init__(self, duration: int):
+        super().__init__(
+            name="Tired",
+            duration=duration,
+            description="Reduced mobility.",
+            type="debuff",
+            display=EffectDisplay(glyph=chr(0xE026), fg=(255, 255, 255), label="Tired"),
+        )
+    def tick(self, target):
+        if self.duration is None:
+            return False
+        self.duration -= 1
+        return self.duration <= 0
+    
+
+
+
+class LightEffect(Effect):
+    """Applied to a summoned light orb. When it expires the orb is silently
+    removed from the map — no death sound, no message."""
+
+    def __init__(self, duration: int):
+        super().__init__(
+            name="Illuminated",
+            duration=duration,
+            description="A summoned orb of light that will fade after a time.",
+            type="status",
+            display=EffectDisplay(glyph=chr(0xE027), fg=(255, 255, 150), label="Illuminated"),
+        )
+
+    def tick(self, target):
+        if self.duration is None:
+            return False
+        # Particle is now managed by engine.tick() — no per-turn spawning needed here
+        self.duration -= 1
+        if self.duration <= 0:
+            # Silently remove the orb from the map
+            try:
+                gm = getattr(target, "gamemap", None)
+                if gm is not None:
+                    try:
+                        gm.entities.remove(target)
+                    except (KeyError, ValueError):
+                        gm.entities.discard(target)
+                target.ai = None
+            except Exception:
+                pass
+            return True
+        return False
+
+
 class Darkness(Effect):
     def __init__(self, duration: Optional[int] = None):
         super().__init__(
@@ -49,7 +123,7 @@ class Darkness(Effect):
             duration=duration,
             description="Engulfed in darkness. Vision is severely limited.",
             type="debuff",
-            display=EffectDisplay(glyph=0xE020, fg=(140, 90, 220), label="Darkness"),
+            display=EffectDisplay(glyph=chr(0xE020), fg=(255, 255, 255), label="Darkness"),
         )
 
     def tick(self, target):
@@ -63,7 +137,7 @@ class PoisonEffect(Effect):
             duration=duration,
             description=f"Take {amount} damage each turn.",
             type="debuff",
-            display=EffectDisplay(glyph="P", fg=(80, 220, 120), label="Poisoned"),
+            display=EffectDisplay(glyph=chr(0xE021), fg=(255, 255, 255), label="Poisoned"),
         )
         self.amount = amount  # Store the damage amount
 
@@ -82,7 +156,7 @@ class DarkvisionEffect(Effect):
             duration=duration,
             description="See in the dark.",
             type="buff",
-            display=EffectDisplay(glyph=chr(0xE023), fg=(180, 180, 255), label="Darkvision"),
+            display=EffectDisplay(glyph=chr(0xE023), fg=(255, 255, 255), label="Darkvision"),
         )
 
     def tick(self, target):
@@ -104,7 +178,7 @@ class BurningEffect(Effect):
             duration=duration,
             description=f"Take {amount} fire damage each turn.",
             type="debuff",
-            display=EffectDisplay(glyph=chr(0xE022), fg=(255, 120, 40), label="Burning"),
+            display=EffectDisplay(glyph=chr(0xE022), fg=(255, 255, 255), label="Burning"),
         )
         self.amount = amount  # Store the damage amount
 
@@ -138,7 +212,7 @@ class WetEffect(Effect):
             duration=duration,
             description="Soaked in water.",
             type="status",
-            display=EffectDisplay(glyph=chr(0xE024), fg=color.light_blue, label="Wet"),
+            display=EffectDisplay(glyph=chr(0xE024), fg=color.sprite_sheet, label="Wet"),
         )
 
 
@@ -151,7 +225,7 @@ class OilyEffect(Effect):
             duration=duration,
             description="Covered in oil.",
             type="status",
-            display=EffectDisplay(glyph="\u2022", fg=(200, 200, 80), label="Oily"),
+            display=EffectDisplay(glyph="\u2022", fg=(255, 255, 255), label="Oily"),
         )
 
 
@@ -164,5 +238,5 @@ class SlimyEffect(Effect):
             duration=duration,
             description="Covered in slime.",
             type="status",
-            display=EffectDisplay(glyph="\u223f", fg=(80, 200, 80), label="Slimy"),
+            display=EffectDisplay(glyph="\u223f", fg=(255, 255, 255), label="Slimy"),
         )

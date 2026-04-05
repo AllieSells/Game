@@ -100,11 +100,13 @@ class HealingConsumables(Consumable):
 
     def activate(self, action: actions.ItemAction) -> None:
         consumer = action.entity
-        amount_recovered = consumer.fighter.heal(self.amount)
+        from components.effect import HealingEffect
+        healing_effect = HealingEffect(total_amount=self.amount, duration=6)
+        consumer.add_effect(healing_effect)
 
-        if amount_recovered > 0:
+        if self.amount > 0:
             self.engine.message_log.add_message(
-                f"You consume the {self.parent.name}, and recover {amount_recovered}!",
+                f"You consume the {self.parent.name}!",
                 color.health_recovered
             )
             self.consume()
@@ -124,7 +126,8 @@ class SigilStoneConsumable(Consumable):
             "Poison Spray": (PoisonSpraySpell, 'conjuration', None),
             "Fireball": (FireballSpell, 'evocation', None),
             "Healing Word": (HealingWordSpell, 'evocation', None),
-            'Inflict Wounds': (InflictWoundsSpell, 'necromancy', None)
+            'Inflict Wounds': (InflictWoundsSpell, 'necromancy', None),
+            'Light': (LightSpell, 'evocation', None)
         }
         
         # Check if consumer already knows this spell (base name or leveled version)

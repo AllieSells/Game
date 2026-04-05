@@ -1,6 +1,6 @@
 from re import T
 from components import equipment
-from components.ai import DarkHostileEnemy, Friendly, HostileEnemy, BaseAI
+from components.ai import DarkHostileEnemy, Friendly, HostileEnemy, BaseAI, StatueAI, FollowerAI
 from components import equippable
 from components.effect import Effect
 from components.equipment import Equipment
@@ -19,7 +19,21 @@ import copy
 import liquid_system
 import color
 import random
+import colorsys
 
+
+def hue_shift(rgb_color):
+    """Convert RGB to HSV and shift"""
+    r, g, b = [x / 255.0 for x in rgb_color]
+
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+
+
+    h = (h + random.uniform(0.1, 0.9)) % 1.0
+
+    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+
+    return int(r * 255), int(g * 255), int(b * 255)
 
 
 poison_potion = Item(
@@ -425,6 +439,7 @@ def generate_sigil_stone() -> Item:
         'Fireball': 'Unleash flames upon your foes',
         'Healing Word': 'Soothing light mends wounds',
         'Inflict Wounds': 'Invoke necrotic forces upon your foes',
+        'Light': 'Illuminate the darkness around you',
     }
     
     # Get a random key-value pair from the dictionary
@@ -619,7 +634,7 @@ giant_spider = Actor(
     description="A large arachnid",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
-    fighter=Fighter(hp=8, base_defense=0, base_power=2),
+    fighter=Fighter(hp=8, base_defense=0, base_power=3),
     inventory=Inventory(capacity=0),
     level=copy.deepcopy(basic_entity_levelling),
     speed=120,  # Faster than player to make them more threatening
@@ -716,13 +731,36 @@ goblin = Actor(
     }
 )
 
+naga = Actor(
+    char=chr(0xE037),
+    color=(hue_shift(color.sprite_sheet)),
+    name="Naga",
+    ai_cls=HostileEnemy,
+    equipment=Equipment(),
+    fighter=Fighter(hp=25, base_defense=1, base_power=10),
+    inventory=Inventory(capacity=0),
+    level=copy.deepcopy(basic_entity_levelling),
+    speed=70,
+    body_parts=BodyParts(AnatomyType.SNAKE, max_hp=25),
+    verb_base="strike",
+    verb_present="strikes",
+    verb_past="struck",
+    verb_participial="striking",
+    dodge_chance=0.25,
+    equipment_table={
+        "potion": {
+            get_random_potion(): 15,
+            None: 85
+        }
+    }
+)
 troll = Actor(
     char=chr(0xE034),
     color=(color.sprite_sheet),
     name="Troll",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
-    fighter=Fighter(hp=16, base_defense=1, base_power=4),
+    fighter=Fighter(hp=16, base_defense=1, base_power=6),
     inventory=Inventory(capacity=0),
     level=copy.deepcopy(basic_entity_levelling),
     speed=80,
@@ -738,6 +776,43 @@ troll = Actor(
             None: 95
         }
     }
+)
+
+animated_armor = Actor(
+    char=chr(0xE039),
+    color=(color.sprite_sheet),
+    name="Animated Armor",
+    description="A suit of possessed armor.",
+    ai_cls=HostileEnemy,
+    equipment=Equipment(),
+    fighter=Fighter(hp=20, base_defense=4, base_power=6, can_bleed=False, leave_corpse=False),
+    inventory=Inventory(capacity=0),
+    level=copy.deepcopy(basic_entity_levelling),
+    speed=50,
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=20),
+    verb_base="slash",
+    verb_present="slashes",
+    verb_past="slashed",
+    verb_participial="slashing",
+    dodge_chance=0.10,
+    equipment_table= None,
+)
+        
+
+statue = Actor(
+    char=chr(0xE038),
+    color=(color.sprite_sheet),
+    name="Statue",
+    description="A statue, worn by time.",
+    ai_cls=StatueAI,
+    equipment=Equipment(),
+    fighter=Fighter(hp=999999999, base_defense=999, base_power=0, can_bleed=False, leave_corpse=False),
+    inventory=Inventory(capacity=0),
+    level=Level(xp_given=0),
+    sentient=False,
+    is_known=True,
+    type = "Statue",
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=999999999),
 )
 
 chest = Actor(
@@ -822,3 +897,21 @@ quest_giver = Actor(
     type = "NPC",
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
 )
+
+light_orb = Actor(
+    char=chr(0xE03A),
+    color=(color.sprite_sheet),
+    name="Orb of Light",
+    description="A floating orb of light.",
+    ai_cls=FollowerAI,
+    equipment=Equipment(),
+    fighter=Fighter(hp=20, base_defense=0, base_power=0, can_bleed=False, leave_corpse=False),
+    inventory=Inventory(capacity=0),
+    level=Level(xp_given=0),
+    sentient=False,
+    is_known=True,
+    type = "Orb",
+    body_parts=BodyParts(AnatomyType.ORB, max_hp=10),
+)
+light_orb.blocks_movement = False   # Orb floats — player can walk through it
+light_orb.render_order = RenderOrder.ITEM  # Renders under actors (players, enemies)

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 import sounds
 import random
+import gpu_stack
 
 
 class Fighter(BaseComponent):
@@ -39,7 +40,7 @@ class Fighter(BaseComponent):
     
     @property
     def power(self) -> int:
-        return self.base_power
+        return self.base_power + self.power_bonus
     
     @property
     def defense(self) -> int:
@@ -235,15 +236,20 @@ class Fighter(BaseComponent):
         # Also heal damaged body parts if entity has them (use actual amount recovered)
         body_parts_healed = self._heal_body_parts(amount_recovered)
         
-        # Add body part healing message if any parts were healed
+        # Show particle and message whenever any HP was actually recovered
+        if amount_recovered > 0 and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
+            try:
+                self.parent.gamemap.engine.animation_queue.append(gpu_stack.HealthParticle((self.parent.x, self.parent.y), self.parent))
+            except Exception as e:
+                print(e)
         if body_parts_healed and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
             try:
                 self.parent.gamemap.engine.message_log.add_message(
                     f"Your injuries begin to mend.",
                     color.light_green
                 )
-            except:
-                pass
+            except Exception as e:
+                print(e)
 
         return amount_recovered
     
@@ -257,35 +263,13 @@ class Fighter(BaseComponent):
                 self.parent.ai.say("hurt")
 
         
-        # Always reduce overall HP first
+        # Reduce overall HP — body part damage is applied by actions.py before this call
         self.hp -= amount
-        
-        # If entity has body parts, damage them as well for tactical effects
-        if hasattr(self.parent, 'body_parts') and self.parent.body_parts:
-            if targeted_part:
-                # Target specific body part
-                damaged_part = self.parent.body_parts.damage_specific_part(targeted_part, amount)
-            else:
-                # Damage random part
-                damaged_part = self.parent.body_parts.damage_random_part(amount)
-            
-            # Check if entity dies from body part destruction (in addition to HP loss)
-            if not self.parent.body_parts.is_alive():
-                self.hp = 0  # Force death from vital part destruction
-            
-            # Add detailed damage message for body parts (using original name)
-            if (damaged_part and hasattr(self.parent, 'gamemap') and 
-                hasattr(self.parent.gamemap, 'engine') and self.hp > 0):  # Only show if still alive
-                part_name = damaged_part.name
-                if damaged_part.is_destroyed:
-                    message = f"{entity_name}'s {part_name} is destroyed!"
-                    message_color = color.enemy_die
-                else:
-                    message = f"{entity_name}'s {part_name} is {damaged_part.damage_level_text}!"
-                    message_color = color.health_recovered
 
-                # Check if damaged limb should cause weapon dropping
-                self._check_weapon_drop(damaged_part)
+        # If a vital part was destroyed by the caller (actions.py), force death
+        if hasattr(self.parent, 'body_parts') and self.parent.body_parts:
+            if not self.parent.body_parts.is_alive():
+                self.hp = 0
         
         # Add blood spilling when taking damage (only if causes_bleeding is True)
         if self.can_bleed:

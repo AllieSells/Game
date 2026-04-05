@@ -619,3 +619,142 @@ class DarkHostileEnemy(BaseAI):
             ).perform()
         
         return WaitAction(self.entity).perform()
+
+
+
+class FollowerAI(BaseAI):
+    def __init__(self, entity: "Actor", target: Actor = None):
+        super().__init__(entity)
+        self.target = target
+        self.path: List[Tuple[int, int]] = []
+
+    def perform(self) -> None:
+        if not self.target:
+            return WaitAction(self.entity).perform()
+
+        if self.can_see_actor(self.target):
+            tx, ty = self.target.x, self.target.y
+            ex, ey = self.entity.x, self.entity.y
+            # Chebyshev distance — already adjacent, stay put
+            if max(abs(tx - ex), abs(ty - ey)) <= 1:
+                self.path = []
+            else:
+                # Path to the walkable neighbour of the target closest to us
+                gm = self.entity.gamemap
+                adj_tiles = [
+                    (tx + dx, ty + dy)
+                    for dx in range(-1, 2) for dy in range(-1, 2)
+                    if (dx, dy) != (0, 0)
+                    and gm.in_bounds(tx + dx, ty + dy)
+                    and gm.tiles[tx + dx, ty + dy]['walkable']
+                ]
+                if adj_tiles:
+                    goal = min(adj_tiles, key=lambda p: abs(p[0] - ex) + abs(p[1] - ey))
+                    self.path = self.get_path_to(*goal)
+                else:
+                    self.path = self.get_path_to(tx, ty)
+
+        if self.path:
+            dest_x, dest_y = self.path.pop(0)
+            return MovementAction(
+                self.entity, dest_x - self.entity.x, dest_y - self.entity.y,
+            ).perform()
+
+        return WaitAction(self.entity).perform()
+
+
+
+class StatueAI(BaseAI):
+    """Dormant AI attached to statues.
+
+    The statue does nothing until the player enters its sight radius.  On
+    activation it transforms into an Animated Armor: stats, sprite, and AI are
+    all swapped in-place so the entity reference stays valid on the game map.
+    """
+
+    def __init__(self, entity: "Actor", animate_chance: float = 0.75):
+        super().__init__(entity)
+        self.activated = False
+        # Decided at spawn time: only this fraction of statues will ever animate
+        self.will_animate: bool = random.random() < animate_chance
+
+    def perform(self) -> None:
+        if not self.will_animate or self.activated:
+            return WaitAction(self.entity).perform()
+
+        target = self.engine.player
+        dx = target.x - self.entity.x
+        dy = target.y - self.entity.y
+        distance = (dx * dx + dy * dy) ** 0.5
+
+        if distance > 2 or not self.can_see_actor(target):
+            return WaitAction(self.entity).perform()
+
+        # Lock immediately — prevents replaying if anything below raises
+        self.activated = True
+
+        # --- Transform in place ---
+        try:
+            import copy
+            import sounds
+            import color as _color
+            import entity_factories
+
+            template = entity_factories.animated_armor
+            e = self.entity
+
+            # Copy visual / identity from the template
+            e.char = template.char
+            e.base_char = template.base_char
+            e.name = template.name
+            e.description = template.description
+            e.type = template.type
+            e.sentient = getattr(template, 'sentient', False)
+            e.is_known = getattr(template, 'is_known', True)
+            e.speed = template.speed
+            e.dodge_chance = template.dodge_chance
+            e.verb_base = template.verb_base
+            e.verb_present = template.verb_present
+            e.verb_past = template.verb_past
+            e.verb_participial = template.verb_participial
+
+            # Deep-copy fighter and body_parts from the template
+            fighter = copy.deepcopy(template.fighter)
+            fighter.parent = e
+            e.fighter = fighter
+
+            bp = copy.deepcopy(template.body_parts)
+            bp.parent = e
+            e.body_parts = bp
+
+            # Ensure equipment / inventory are present
+            if e.equipment is None:
+                from components.equipment import Equipment
+                eq = Equipment()
+                eq.parent = e
+                e.equipment = eq
+            if e.inventory is None:
+                from components.inventory import Inventory
+                inv = Inventory(capacity=0)
+                inv.parent = e
+                e.inventory = inv
+
+            # Sound + message
+            sounds.play_stone_sound()
+            self.engine.message_log.add_message(
+                "The statue shudders and springs to life!", _color.white
+            )
+
+            # Swap to HostileEnemy AI
+            new_ai = HostileEnemy(e)
+            e.ai = new_ai
+
+        except Exception as _ex:
+            import traceback
+            try:
+                from gpu_stack import get_data_path
+                with open(get_data_path('logs/log.txt'), 'a') as _lf:
+                    _lf.write(f"[StatueAI] Transform failed: {_ex}\n")
+                    _lf.write(traceback.format_exc())
+            except Exception:
+                pass

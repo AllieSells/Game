@@ -1023,9 +1023,9 @@ class MainMenu(input_handlers.BaseEventHandler):
         # Draw footer information with parchment styling
         footer_y = y + window_height - 3
         console.print(
-            x + (window_width // 2) + 36,
+            x + (window_width // 2) + 38,
             footer_y + 20,
-            "oxenfree",
+            "loxen",
             fg=color.gold_accent,
             bg=None,
             alignment=tcod.CENTER,

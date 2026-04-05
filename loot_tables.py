@@ -19,11 +19,11 @@ def get_data_path(filename):
 def load_loot_tables():
     """Load loot tables from JSON file."""
     try:
-        with open(get_data_path('loot_tables.json'), 'r') as f:
+        with open(get_data_path('json/loot_tables.json'), 'r') as f:
             return json.load(f)
     except FileNotFoundError:
         with open(get_data_path('logs/log.txt'), 'a') as log_file:
-            log_file.write("GAME ERROR: loot_tables.json not found. No loot tables loaded.\n")
+            log_file.write("GAME ERROR: json/loot_tables.json not found. No loot tables loaded.\n")
         return {}
 
 def generate_loot_from_table(table_name):

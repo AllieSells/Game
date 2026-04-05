@@ -82,7 +82,7 @@ class SwimmingAnimation:
         sequence = [0, 1, 2, 3, 4, 3, 2, 1]
 
         idx = (self._tick_count // self.FRAME_DURATION) % len(sequence)
-        print(idx)
+        #print(idx)
         frame_index = self.CHARS[sequence[idx]]
 
         # Refresh base render (keeps equipped layers) before applying water splash.

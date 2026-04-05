@@ -161,6 +161,8 @@ class Actor(Entity):
         speed: int = 100,  # Higher = faster, 100 = normal speed
         manipulation: int = 100, # Higher = better at using items, opening doors, etc. 100 = normal manipulation
         dodge_chance: float = 0.0,  # Chance to dodge attacks (0.0 to 1.0)
+        base_hit_chance: float = 1.0,  # Attacker accuracy multiplier (ACC component, 1.0 = average)
+        evasion: float = 0.3,          # How hard this entity is to hit (DIFF component, higher = harder)
         equipment_scale: float = 1.0,
         preferred_dodge_direction: Optional[str] = random.choice(["north", "south", "east", "west"]), 
         verb_base: Optional[str] = None,
@@ -248,12 +250,16 @@ class Actor(Entity):
         self.verb_past = verb_past or self.verb_base + "ed"
         self.verb_participial = verb_participial or self.verb_base + "ing"
         self.dodge_chance = dodge_chance
+        self.base_hit_chance = base_hit_chance
+        self.evasion = evasion
         self.mana = mana
         self.mana_max = mana_max
         self.preferred_dodge_direction = preferred_dodge_direction
         self.equipment_table = equipment_table  # Store equipment table for spawning
         self.known_spells = known_spells if known_spells is not None else []
         self.quickcast_slots = [None] * 9  # Quick cast spell slots (1-9)
+        self.dodge_cooldown = 0
+        self.dodge_cooldown_max = 5  # Cooldown in turns
 
     
     def add_effect(self, effect: Effect) -> None:

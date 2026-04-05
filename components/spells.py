@@ -1,6 +1,7 @@
 import actions
 import color
 from components import effect
+from components.ai import FollowerAI
 from exceptions import Impossible
 from liquid_system import LiquidType
 import sounds
@@ -11,7 +12,8 @@ from input_handlers import (
     AreaRangedAttackHandler, 
     SingleRangedAttackHandler,
 )
-
+import gpu_stack
+import random
 
 class Spell():
     def __init__(self, name, duration, description, damage, mana_cost, components, spell_tags, school, arcana_level = 1, cast_xp = 5, radius = 0):
@@ -171,8 +173,8 @@ class TeleportSpell(Spell):
         # All checks passed - consume mana and teleport!
         consumer.mana -= self.mana_cost
         self.give_xp(consumer)
-        action.engine.animation_queue.append(animations.TeleportAnimation((consumer.x, consumer.y)))
-        action.engine.animation_queue.append(animations.TeleportAnimation((target_x, target_y)))
+        action.engine.animation_queue.append(gpu_stack.SpaceDistortSpellParticle((target_x, target_y)))
+        action.engine.animation_queue.append(gpu_stack.SpaceDistortSpellParticle((target_x, target_y)))
         
         consumer.x = target_x
         consumer.y = target_y
@@ -299,6 +301,57 @@ class FireballSpell(Spell):
         )
         sounds.play_explosion_sound()
 
+
+class LightSpell(Spell):
+    def __init__(self):
+        super().__init__(
+            name="Light",
+            description="Summon a floating orb of light that illuminates the area.",
+            damage=0,
+            duration=40,
+            mana_cost=5,
+            components=['V', 'S'],
+            spell_tags=["light"],
+            school="evocation",
+            arcana_level = 1,
+            cast_xp = 1,
+            radius = 5
+        )
+    def get_description(self, caster=None):
+        return f"Summon a floating orb of light that illuminates the area for {self.duration} turns."
+    
+    def activate(self, action: actions.SpellAction) -> None:
+        import entity_factories
+        consumer = action.entity
+        gm = action.engine.game_map
+
+        # Try to spawn adjacent to the player first, then fall back to any visible walkable tile
+        px, py = consumer.x, consumer.y
+        candidates = [(px + dx, py + dy) for dx in range(-1, 2) for dy in range(-1, 2)
+                      if not (dx == 0 and dy == 0)]
+        candidates += list(zip(*gm.visible.nonzero()))
+
+        for x, y in candidates:
+            x, y = int(x), int(y)
+            if not gm.in_bounds(x, y) or not gm.visible[x, y]:
+                continue
+            if not gm.tiles[x, y]['walkable']:
+                continue
+            if gm.get_blocking_entity_at_location(x, y):
+                continue
+            # Spawn a fresh clone so the template is never mutated
+            light_orb = entity_factories.light_orb.spawn(gm, x, y)
+            light_orb.ai = FollowerAI(light_orb, consumer)
+            light_orb.add_effect(effect.LightEffect(duration=self.duration))
+            self.give_xp(consumer)
+            consumer.mana -= self.mana_cost
+            action.engine.message_log.add_message(
+                "You summon an orb of light!", color.yellow)
+            return
+
+        action.engine.message_log.add_message(
+            "There is no room to summon the orb!", color.impossible)
+
 class HealingWordSpell(Spell):
     def __init__(self):
         super().__init__(
@@ -351,7 +404,9 @@ class HealingWordSpell(Spell):
                 
                 consumer.mana -= self.mana_cost
                 self.give_xp(consumer)
-                action.engine.animation_queue.append(animations.HealAnimation((target_x, target_y)))
+                for _ in range(random.randint(3, 5)):
+                    action.engine.animation_queue.append(gpu_stack.HealthParticle(target, (target_x+random.uniform(-0.5, 0.5), target_y+random.uniform(-0.5, 0.5))))
+                
                 action.engine.message_log.add_message(
                     f"The {target.name} is bathed in a soothing light! (4+{heal_level} HP)", color.light_green
                 )
@@ -395,7 +450,7 @@ class InflictWoundsSpell(Spell):
             consumer.mana -= self.mana_cost
             self.give_xp(consumer)
             path = list(tcod.los.bresenham((consumer.x, consumer.y), (target_x, target_y)).tolist())
-            action.engine.animation_queue.append(animations.DarkBoltAnimation(path))
+            action.engine.animation_queue.append(gpu_stack.JaggedLineSpellParticle(path, color.dark_purple))
             sounds.play_dark_spell_sound()
             action.engine.message_log.add_message(
                 f"Your dark energy lashes out but finds no target.", color.dark_red
@@ -411,6 +466,6 @@ class InflictWoundsSpell(Spell):
             self.give_xp(consumer)
             # Create path from caster to target for animation
             path = list(tcod.los.bresenham((consumer.x, consumer.y), (target_x, target_y)).tolist())
-            action.engine.animation_queue.append(animations.DarkBoltAnimation(path))
+            action.engine.animation_queue.append(gpu_stack.JaggedLineSpellParticle(path, color.dark_purple))
             sounds.play_dark_spell_sound()
             

@@ -307,6 +307,10 @@ class EventHandler(BaseEventHandler):
             self.engine.render_ui(console)
 
     def render_faded(self, console: tcod.Console, menu_x: int = None, menu_y: int = None, menu_width: int = None, menu_height: int = None) -> None:
+        # In the GPU popup overlay path main.py already applies dim_tex on the GPU.
+        # Skip the expensive numpy fade to avoid redundant CPU work every dirty frame.
+        if getattr(self.engine, '_popup_overlay_active', False):
+            return
         _fade_console_background(console, menu_x, menu_y, menu_width, menu_height)
     
 class AskUserEventHandler(EventHandler):
@@ -342,6 +346,99 @@ class AskUserEventHandler(EventHandler):
         return MainGameEventHandler(self.engine)
 
 
+class PopupEventHandler(AskUserEventHandler):
+    """Base class for all modal popup / menu UI elements.
+
+    Provides shared infrastructure so each popup does not have to re-implement
+    the same boilerplate:
+
+    * **Click-outside-to-close** – call ``_set_popup_bounds(x, y, w, h)``
+      inside ``on_render`` once the window position is known.  Any click that
+      lands outside those bounds automatically calls ``on_exit()``.
+    * **Right-click context hook** – override ``on_right_click(mx, my)`` to
+      open a context menu or otherwise handle right-clicks inside the popup.
+    * **Left-click hook** – override ``on_left_click(mx, my)`` for
+      pointer-based item / option selection.
+
+    Example skeleton for a new popup::
+
+        class MyMenu(PopupEventHandler):
+            def on_render(self, console):
+                super().on_render(console)
+                x, y, w, h = ...        # compute window position
+                self._set_popup_bounds(x, y, w, h)
+                # ... draw the window ...
+
+            def on_left_click(self, mx, my):
+                # handle click-on-item logic
+                ...
+
+            def on_right_click(self, mx, my):
+                # optionally open a context menu
+                return ItemContextMenu(self, item, mx, my)
+    """
+
+    def __init__(self, engine: "Engine") -> None:
+        super().__init__(engine)
+        self._px: Optional[int] = None
+        self._py: Optional[int] = None
+        self._pw: Optional[int] = None
+        self._ph: Optional[int] = None
+
+    # ------------------------------------------------------------------
+    # Bounds helpers
+    # ------------------------------------------------------------------
+
+    def _set_popup_bounds(self, x: int, y: int, w: int, h: int) -> None:
+        """Register the screen-space bounds of this popup.
+
+        Call this in ``on_render`` once the window position is finalized so
+        the base-class mouse handler knows which area belongs to the popup.
+        """
+        self._px, self._py, self._pw, self._ph = x, y, w, h
+
+    def _in_popup(self, mx: int, my: int) -> bool:
+        """Return *True* if ``(mx, my)`` is inside the popup's registered bounds."""
+        if self._px is None:
+            return True  # bounds not set yet – assume inside to avoid accidental close
+        return (self._px <= mx < self._px + self._pw and
+                self._py <= my < self._py + self._ph)
+
+    # ------------------------------------------------------------------
+    # Mouse dispatch
+    # ------------------------------------------------------------------
+
+    def ev_mousebuttondown(
+        self, event: tcod.event.MouseButtonDown
+    ) -> Optional[ActionOrHandler]:
+        if event.button not in (tcod.event.BUTTON_LEFT, tcod.event.BUTTON_RIGHT):
+            return None
+        if event.button == tcod.event.BUTTON_LEFT:
+            self.engine.mouse_held = True
+
+        mx, my = int(event.tile.x), int(event.tile.y)
+
+        # Click outside the popup → close
+        if not self._in_popup(mx, my):
+            return self.on_exit()
+
+        if event.button == tcod.event.BUTTON_RIGHT:
+            return self.on_right_click(mx, my)
+        return self.on_left_click(mx, my)
+
+    # ------------------------------------------------------------------
+    # Hooks for subclasses
+    # ------------------------------------------------------------------
+
+    def on_left_click(self, mx: int, my: int) -> Optional[ActionOrHandler]:
+        """Left-click inside the popup.  Override in subclasses."""
+        return None
+
+    def on_right_click(self, mx: int, my: int) -> Optional[ActionOrHandler]:
+        """Right-click inside the popup.  Override in subclasses."""
+        return None
+
+
 class CharacterScreenEventHandler(EventHandler):
     TITLE = "Character Sheet"
 
@@ -352,7 +449,7 @@ class CharacterScreenEventHandler(EventHandler):
         
 
 
-class TradeEventHandler(AskUserEventHandler):
+class TradeEventHandler(PopupEventHandler):
     # Container UI recycled for trading. Modified.
     def __init__(self, engine: Engine, container: Container):
         super().__init__(engine)
@@ -388,6 +485,7 @@ class TradeEventHandler(AskUserEventHandler):
         # Position window
         x = (console.width - total_width) // 2
         y = 10
+        self._set_popup_bounds(x, y, total_width, height)
         
         # Fade the background except for the container menu
         super().render_faded(console, x, y, total_width, height)
@@ -659,7 +757,7 @@ class TradeEventHandler(AskUserEventHandler):
 
 
 
-class DialogueEventHandler(AskUserEventHandler):
+class DialogueEventHandler(PopupEventHandler):
     """Handles dialogue interactions with NPCs with hierarchical menu system."""
     
     def __init__(self, engine: Engine, npc: Actor):
@@ -737,6 +835,7 @@ class DialogueEventHandler(AskUserEventHandler):
         height = 20
         x = (self.engine.game_map.width - width) // 2
         y = (self.engine.game_map.height - height) // 2
+        self._set_popup_bounds(x, y, width, height)
         
         # Fade the background except for the dialogue area
         super().render_faded(console, x, y, width, height)
@@ -902,7 +1001,7 @@ class DialogueEventHandler(AskUserEventHandler):
 
 
 
-class LevelUpEventHandler(AskUserEventHandler):
+class LevelUpEventHandler(PopupEventHandler):
     TITLE = "Level Up!"
 
     def __init__(self, engine: Engine):
@@ -921,6 +1020,7 @@ class LevelUpEventHandler(AskUserEventHandler):
         height = 12
         x = (console.width - width) // 2
         y = (console.height - height) // 2
+        self._set_popup_bounds(x, y, width, height)
         
         # Fade the background except for the level up menu
         super().render_faded(console, x, y, width, height)
@@ -981,7 +1081,7 @@ class LevelUpEventHandler(AskUserEventHandler):
     ) -> Optional[ActionOrHandler]:
         # Cant click out
         return None
-class ContainerEventHandler(AskUserEventHandler):
+class ContainerEventHandler(PopupEventHandler):
     # Handler displays both inventories and allows transferring items
     def __init__(self, engine: Engine, container: Container):
         super().__init__(engine)
@@ -1023,6 +1123,7 @@ class ContainerEventHandler(AskUserEventHandler):
         y = 10
         self.x = x
         self.y = y
+        self._set_popup_bounds(x, y, total_width, height)
         
         # Fade the background except for the container menu
         super().render_faded(console, x, y, total_width, height)
@@ -1210,8 +1311,8 @@ class ContainerEventHandler(AskUserEventHandler):
         item_start_y = self.y + 6
 
         # Check if mouse click was outside UI
-        if not (left_x <= mouse_x < right_x + panel_width and item_start_y <= mouse_y < item_start_y + 15):
-            return MainGameEventHandler(self.engine)
+        if not self._in_popup(mouse_x, mouse_y):
+            return self.on_exit()
 
         player_groups = self.engine.player.inventory.get_display_groups()
         container_items = list(self.container.items)
@@ -1416,7 +1517,7 @@ class ContainerEventHandler(AskUserEventHandler):
             else:
                 console.print(x, y + dy, "│", fg=divider_fg, bg=bg)
 
-class InventoryEventHandler(AskUserEventHandler):
+class InventoryEventHandler(PopupEventHandler):
     """This handler lets the user select an item.
 
     What happens then depends on the subclass.
@@ -1480,6 +1581,7 @@ class InventoryEventHandler(AskUserEventHandler):
         self._render_x = x
         self._render_y = y
         self._render_items_x = x + sidebar_width + 1
+        self._set_popup_bounds(x, y, total_width, height)
         self._sidebar_x = x + 1
         self._sidebar_y = y + 3
         self._sidebar_width = sidebar_width - 2
@@ -2100,7 +2202,7 @@ class InventoryEventHandler(AskUserEventHandler):
         items_width = 32
 
         # Check if out of bounds of UI (right-click outside also closes)
-        if (mouse_x < self.width and mouse_x >= items_x + items_width) or mouse_y < self._render_y or mouse_y >= self._render_y + self.height:
+        if not self._in_popup(mouse_x, mouse_y):
             return self.on_exit()
 
         item_groups = self.engine.player.inventory.get_display_groups()
@@ -3192,7 +3294,7 @@ class LimbTargetingHandler(AskUserEventHandler):
         return MainGameEventHandler(self.engine)
 
 
-class SpellCastingHandler(AskUserEventHandler):
+class SpellCastingHandler(PopupEventHandler):
     """Handle spell selection and casting with hotkey support."""
     
     TITLE = "Cast Spell"
@@ -3281,13 +3383,12 @@ class SpellCastingHandler(AskUserEventHandler):
         super().on_render(console)
         
         if not self.available_spells:
-            # Fade the entire background
-            super().render_faded(console)
             # Show "no spells known" message
             window_width = 40
             window_height = 8
             x = (console.width - window_width) // 2
             y = (console.height - window_height) // 2
+            self._set_popup_bounds(x, y, window_width, window_height)
             
             MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
             MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Spellcasting")
@@ -3303,6 +3404,7 @@ class SpellCastingHandler(AskUserEventHandler):
         
         x = (console.width - window_width) // 2
         y = (console.height - window_height) // 2
+        self._set_popup_bounds(x, y, window_width, window_height)
         
         # Fade the background except for the spell menu
         super().render_faded(console, x, y, window_width, window_height)
@@ -3445,19 +3547,14 @@ class SpellCastingHandler(AskUserEventHandler):
                     sounds.play_ui_move_sound()
                 self.selected_index = spell_index
 
-    def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
-        self.engine.mouse_held = True
-        if event.button != tcod.event.BUTTON_LEFT:
-            return None
+    def on_left_click(self, mx: int, my: int) -> Optional[ActionOrHandler]:
+        """Left-click inside the spell menu — select and cast the clicked spell."""
         if not hasattr(self, '_spell_list_start_y') or not self.available_spells:
             return None
-        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
-        x = self._spell_render_x
-        w = self._spell_window_width
         list_y = self._spell_list_start_y
         visible = self._spell_visible_height
-        if x + 1 <= mouse_x < x + w - 1 and list_y <= mouse_y < list_y + visible:
-            spell_index = (mouse_y - list_y) + self._spell_scroll_offset
+        if self._spell_render_x + 1 <= mx < self._spell_render_x + self._spell_window_width - 1 and list_y <= my < list_y + visible:
+            spell_index = (my - list_y) + self._spell_scroll_offset
             if 0 <= spell_index < len(self.available_spells):
                 self.selected_index = spell_index
                 return self._cast_spell(self.available_spells[spell_index])
@@ -3590,6 +3687,10 @@ class SpellCastingHandler(AskUserEventHandler):
         if hasattr(spell, 'get_targeting_handler') and callable(spell.get_targeting_handler):
             targeting_handler = spell.get_targeting_handler(self.engine, player)
             if targeting_handler is not None:
+                # Restore minimap before entering targeting mode (SpellCastingHandler minimized it)
+                if hasattr(self.engine, '_pre_menu_minimap'):
+                    self.engine.show_minimap = self.engine._pre_menu_minimap
+                    del self.engine._pre_menu_minimap
                 # Pre-seed cursor to current physical mouse position
                 self.engine.mouse_location = self.engine.mouse_x, self.engine.mouse_y
                 return targeting_handler
@@ -4556,9 +4657,9 @@ class LookHandler(SelectIndexHandler):
         """Handle keyboard input for inspection interface."""
         key = event.sym
         modifier = event.mod
-        print(modifier)
+        #print(modifier)
         if key == tcod.event.KeySym.TAB and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT):
-            print("T")
+            #print("T")
             self.current_tab = (self.current_tab - 1) % len(self.tab_names)
             LookHandler.last_selected_tab = self.current_tab
             self.scroll_offset = 0
@@ -4657,8 +4758,10 @@ class MainGameEventHandler(EventHandler):
             (">", "Take Stairs"),
             ("Alt", "Look"),
             ("M", "Map/Keys"),
-            ("V", "History")
-        ]
+            ("V", "History"),
+            ("LClick", "Attack"),
+            ("SHIFT+WASD", "Dodge")
+        ]   
 
     def handle_events(self, event: tcod.event.Event) -> BaseEventHandler:
         # Return any handler change that was queued by auto-move in engine.tick(),
@@ -4700,33 +4803,38 @@ class MainGameEventHandler(EventHandler):
             if self.engine.mouse_ui_y > 38:
                 return None
 
+            # Compute sub-tile cursor position (0.0–1.0 within the clicked tile).
+            # The game viewport is rendered at 2× zoom, so each tile = base_tile * 2 px.
+            _btw = getattr(self.engine, 'base_tile_w', 0)
+            _bth = getattr(self.engine, 'base_tile_h', 0)
+            tile_rel_pos = None
+            if _btw and _bth:
+                _gtw = _btw * 2.0
+                _gth = _bth * 2.0
+                _px, _py = float(event.position[0]), float(event.position[1])
+                tile_rel_pos = (
+                    (_px % _gtw) / _gtw,
+                    (_py % _gth) / _gth,
+                )
+
             # Get the target actor at the attack location
             target_x = self.engine.player.x + dx
             target_y = self.engine.player.y + dy
 
             target_actor = self.engine.game_map.get_actor_at_location(target_x, target_y)
-            # Convert preferred target tag to specific body part for ranged attacks
+
+            # When a preferred attack type is set (keyboard targeting mode), honour it.
+            # Otherwise tile_rel_pos inside the action will pick the part.
             if preferred_target and target_actor:
-                # Find all body parts with the preferred target tag  
                 import random
                 matching_parts = []
                 if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
                     for part_type, body_part in target_actor.body_parts.body_parts.items():
                         if preferred_target in body_part.tags:
                             matching_parts.append(part_type)
-                
-                # Randomly select one matching part if any found
-                if matching_parts:
-                    target_part = random.choice(matching_parts)
-                else:
-                    target_part = None
-            elif target_actor:
-                if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
-                    # Target random part
-                    target_part = random.choice(list(target_actor.body_parts.body_parts.keys()))
-                else:
-                    target_part = None
+                target_part = random.choice(matching_parts) if matching_parts else None
             else:
+                # Let tile_rel_pos inside the action determine the targeted part
                 target_part = None
 
             equipment = getattr(self.engine.player, 'equipment', None)
@@ -4753,9 +4861,9 @@ class MainGameEventHandler(EventHandler):
                     has_melee_weapon = True
 
             if has_bow and has_arrow:
-                return actions.RangedAction(self.engine.player, dx, dy, target_part)
+                return actions.RangedAction(self.engine.player, dx, dy, target_part, tile_rel_pos=tile_rel_pos)
             elif has_melee_weapon:
-                return actions.MeleeAction(self.engine.player, dx, dy, target_part)
+                return actions.MeleeAction(self.engine.player, dx, dy, target_part, tile_rel_pos=tile_rel_pos)
             else:
                 self.engine.message_log.add_message(
                     "No suitable weapon readied for directional attack.", color.impossible
@@ -4870,8 +4978,10 @@ class MainGameEventHandler(EventHandler):
         # Interact action (Right click) checks if within reach of player
         #elif self.engine.mouse_held and self.engine.mouse_location:
         #    print("Mouse held at:", self.engine.mouse_location)
-
-            
+        elif key in MOVE_KEYS and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT):
+            dx, dy = MOVE_KEYS[key]
+            return actions.DodgeAction(player, dx*2, dy*2)
+        
         elif key in MOVE_KEYS:
             dx, dy = MOVE_KEYS[key]
             
@@ -5413,7 +5523,7 @@ class GameOverEventHandler(EventHandler):
         super().render_faded(console, x, y, window_width, window_height)
         
         MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height, bg_color=(color.dark_red))
-        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Death", border_fg=(color.red))
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "DEATH", border_fg=(color.red))
         
         console.print(x + 2, y + 2, "Your adventure ends here.", fg=(color.light_red))
         console.print(x + 2, y + 3, "You fade into obscurity...", fg=(color.light_gray))
@@ -6008,7 +6118,7 @@ class Settings(BaseEventHandler):
     
     def __init__(self, parent_handler=None):
         # Load settings from JSON file
-        self.settings_file = "settings.json"
+        self.settings_file = "json/settings.json"
         self.settings_data = self._load_settings()
         
         self.categories = {

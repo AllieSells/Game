@@ -30,6 +30,7 @@ class BodyPartType(Enum):
     HEAD = auto()
     NECK = auto()
     TORSO = auto()
+    CORE = auto()
     
     # Arms
     LEFT_ARM = auto()
@@ -67,10 +68,12 @@ class BodyPartType(Enum):
 class AnatomyType(Enum):
     """Different creature anatomy layouts."""
     HUMANOID = auto()
+    SNAKE = auto()
     QUADRUPED = auto()
     INSECT = auto()
     ARACHNID = auto()
     BIRD = auto()
+    ORB = auto()
     SIMPLE = auto()  # Basic creatures
 
 
@@ -161,8 +164,41 @@ class BodyParts(BaseComponent):
             self._create_humanoid_anatomy()
         elif anatomy_type == AnatomyType.ARACHNID:
             self._create_arachnid_anatomy()
+        elif anatomy_type == AnatomyType.SNAKE:
+            self._create_snake_anatomy()
+        elif anatomy_type == AnatomyType.ORB:
+            self._create_orb_anatomy()
         else:  # SIMPLE
             self._create_simple_anatomy()
+
+    def _create_orb_anatomy(self) -> None:
+        """Create orb anatomy (for floating orbs, slimes, etc.)."""
+        parent_max_hp = self.max_hp
+        
+        self.body_parts = {
+            BodyPartType.CORE: BodyPart(
+                BodyPartType.CORE, "core", 1.0, max_hp=parent_max_hp, is_vital=True, protection=1,
+                tags={"core", "armor"}
+            ),
+        }
+
+    def _create_snake_anatomy(self) -> None:
+        parent_max_hp = self.max_hp
+
+        self.body_parts = {
+            BodyPartType.HEAD: BodyPart(
+                BodyPartType.HEAD, "head", 2.0, max_hp=int(0.5 * parent_max_hp), is_vital=True,
+                tags={"head", "armor", "cranium"}
+            ),
+            BodyPartType.TORSO: BodyPart(
+                BodyPartType.TORSO, "torso", 1.0, max_hp=int(1.0 * parent_max_hp), is_vital=True,
+                tags={"torso", "armor", "core"}
+            ),
+            BodyPartType.TAIL: BodyPart(
+                BodyPartType.TAIL, "tail", 0.5, max_hp=int(0.5 * parent_max_hp), is_vital=False, is_limb=True,
+                tags={"tail", "armor"}
+            )
+        }
 
     def _create_arachnid_anatomy(self) -> None:
         """Create arachnid body parts (spiders, scorpions, etc.)."""
@@ -365,6 +401,16 @@ class BodyParts(BaseComponent):
         """Check if entity can move (has working legs/locomotion)."""
         if self.anatomy_type == AnatomyType.SIMPLE:
             return not self.body_parts[BodyPartType.TORSO].is_destroyed
+        
+        # Orbs float — they can always move unless their core is destroyed
+        if self.anatomy_type == AnatomyType.ORB:
+            core = self.body_parts.get(BodyPartType.CORE)
+            return core is None or not core.is_destroyed
+
+        # Snakes move with their torso/tail, not legs
+        if self.anatomy_type == AnatomyType.SNAKE:
+            torso = self.body_parts.get(BodyPartType.TORSO)
+            return torso is not None and not torso.is_destroyed
         
         # Check if at least one leg is functional
         legs = [part for part_type, part in self.body_parts.items() 

@@ -4,7 +4,7 @@ from typing import Optional, Dict, List, Tuple, TYPE_CHECKING
 import tcod
 import color
 from equipment_types import EquipmentType
-from input_handlers import AskUserEventHandler
+from input_handlers import AskUserEventHandler, PopupEventHandler
 from render_functions import MenuRenderer
 from tcod.console import Console
 import actions
@@ -16,7 +16,7 @@ import sounds
 import components.level
 
 
-class CharacterScreen(AskUserEventHandler):
+class CharacterScreen(PopupEventHandler):
     # Class variable to remember expanded categories across instances
     _last_expanded_categories = set()  # Default to all categories closed
 
@@ -86,6 +86,7 @@ class CharacterScreen(AskUserEventHandler):
         window_height = 30
         x = (console.width - window_width) // 2
         y = (console.height - window_height -4) // 2
+        self._set_popup_bounds(x, y, window_width, window_height)
         
         # Fade the background except for the character sheet
         super().render_faded(console, x, y, window_width, window_height)
@@ -152,6 +153,12 @@ class CharacterScreen(AskUserEventHandler):
                     logical_line += 1
 
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> AskUserEventHandler:
+        if event.button == tcod.event.BUTTON_LEFT:
+            self.engine.mouse_held = True
+        mx, my = int(event.tile.x), int(event.tile.y)
+        # Click outside popup → close
+        if not self._in_popup(mx, my):
+            return self.on_exit()
         if event.button != tcod.event.BUTTON_LEFT:
             return self
         if not hasattr(self, '_stats_y'):

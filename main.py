@@ -302,7 +302,7 @@ with open(get_data_path('logs/log.txt'), 'a') as log_file:
 def load_settings():
     """Load settings from JSON file."""
     try:
-        with open("settings.json", 'r') as f:
+        with open("json/settings.json", 'r') as f:
             content = f.read()
             # Remove JSON comments
             lines = [line for line in content.split('\n') if not line.strip().startswith('//')]
@@ -472,10 +472,13 @@ def main() -> None:
     scanlines_speed = 10.0  # pixels per second
     game_tex = None
     ui_tex = None
-    overlay_popup_console = None   # small console sized to menu bounding box
-    overlay_popup_tex     = None   # GPU texture for popup (BLEND mode)
+    overlay_popup_console = None   # small console sized to menu bounding box (fallback path)
+    overlay_popup_tex     = None   # BLEND-mode GPU texture for fallback path
     overlay_popup_dest    = None   # screen dest rect for popup
-    overlay_popup_src_size = None   # (w, h) pixel dimensions of popup texture
+    overlay_popup_src_rect = None   # source rect in ui_tex (pixel coords) for GPU-direct path
+    overlay_hints_console = None   # 1-row sub-console for context hints (GPU-direct path)
+    overlay_hints_tex     = None   # BLEND-mode GPU texture for hints row
+    overlay_hints_dest    = None   # screen dest rect for hints row
     cached_overlay_handler = None
     # Inspect-overlay (F3 / LookHandler) cached UI texture --- rebuilt only when
     # mouse_location changes so render_ui_overlay() isn't called every frame.
@@ -920,57 +923,129 @@ def main() -> None:
 
                 if overlay_dirty or cached_overlay_handler is not handler:
                     ui_console.clear()
+                    # Signal PopupEventHandler subclasses to skip redundant numpy fade
+                    # (dim_tex already handles dimming on the GPU; render_faded is only
+                    # needed for the BLEND fallback path below where the sub-console copy
+                    # relies on near-black cells being made transparent).
+                    _is_gpu_popup = (isinstance(handler, input_handlers.PopupEventHandler)
+                                     and not isinstance(handler, input_handlers.ItemContextMenu))
+                    if _is_gpu_popup and active_engine is not None:
+                        active_engine._popup_overlay_active = True
                     handler.on_render(console=ui_console)
+                    if _is_gpu_popup and active_engine is not None:
+                        active_engine._popup_overlay_active = False
                     cached_overlay_handler = handler
                     overlay_dirty = False
 
-                    # Find the bounding box of non-blank popup content (above HUD)
-                    _ch  = ui_console.ch[:, :hud_top_row]
-                    _bg  = ui_console.bg[:, :hud_top_row, :]
-                    _content = (_ch != ord(' ')) | np.any(_bg > 16, axis=2)
-                    _cells = np.where(_content)
-
-                    if _cells[0].size > 0:
-                        _mx1 = int(_cells[0].min())
-                        _my1 = int(_cells[1].min())
-                        _mx2 = int(_cells[0].max()) + 1
-                        _my2 = int(_cells[1].max()) + 1
-                        _sw, _sh = _mx2 - _mx1, _my2 - _my1
-
-                        # Reuse sub-console when size is unchanged (avoids allocation)
-                        if (overlay_popup_console is None
-                                or overlay_popup_console.width  != _sw
-                                or overlay_popup_console.height != _sh):
-                            overlay_popup_console = tcod.console.Console(_sw, _sh, order="F")
-                            overlay_popup_tex = None  # texture size changed — must recreate
-
-                        # Blit only the menu region — tiny CPU transparency render
-                        ui_console.blit(overlay_popup_console,
-                                        dest_x=0, dest_y=0,
-                                        src_x=_mx1, src_y=_my1,
-                                        width=_sw, height=_sh)
-                        _popup_pixels = render_console_with_transparency(overlay_popup_console)
-                        if overlay_popup_tex is None:
-                            overlay_popup_tex = renderer.upload_texture(_popup_pixels)
-                            overlay_popup_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-                        else:
-                            overlay_popup_tex.update(_popup_pixels)
+                    _tw, _th = tileset.tile_width, tileset.tile_height
+                    if _is_gpu_popup and handler._px is not None:
+                        # ── Fast GPU path ──────────────────────────────────────────────────
+                        # PopupEventHandler subclasses register exact parchment bounds via
+                        # _set_popup_bounds(). Copy that region directly from the atlas
+                        # renderer texture — zero sub-console allocation, zero CPU pixel work.
+                        _px, _py, _pw, _ph = handler._px, handler._py, handler._pw, handler._ph
                         overlay_popup_dest = (
-                            int(_mx1 * base_tile_w), int(_my1 * base_tile_h),
-                            int(_sw  * base_tile_w), int(_sh  * base_tile_h),
+                            int(_px * base_tile_w), int(_py * base_tile_h),
+                            int(_pw * base_tile_w), int(_ph * base_tile_h),
                         )
-                        overlay_popup_src_size = (_popup_pixels.shape[1], _popup_pixels.shape[0])
-                    else:
-                        overlay_popup_tex  = None
-                        overlay_popup_dest = None
-                        overlay_popup_src_size = None
+                        overlay_popup_src_rect = (
+                            int(_px * _tw), int(_py * _th),
+                            int(_pw * _tw), int(_ph * _th),
+                        )
+                        overlay_popup_tex = None  # not used in this path
 
-                if overlay_popup_tex is not None and overlay_popup_dest is not None:
+                        # Context hints at row 38 render over the game map and need
+                        # transparency — handle them with a small BLEND sub-texture.
+                        _hints_row = hud_top_row - 1
+                        _hints_ch = ui_console.ch[:, _hints_row]
+                        _hints_bg = ui_console.bg[:, _hints_row, :]
+                        _hints_cols = np.where(
+                            (_hints_ch != ord(' ')) | np.any(_hints_bg > 16, axis=1)
+                        )[0]
+                        if _hints_cols.size > 0:
+                            _hx1 = int(_hints_cols.min())
+                            _hx2 = int(_hints_cols.max()) + 1
+                            _hw   = _hx2 - _hx1
+                            if (overlay_hints_console is None
+                                    or overlay_hints_console.width  != _hw
+                                    or overlay_hints_console.height != 1):
+                                overlay_hints_console = tcod.console.Console(_hw, 1, order="F")
+                                overlay_hints_tex = None
+                            ui_console.blit(overlay_hints_console,
+                                            dest_x=0, dest_y=0,
+                                            src_x=_hx1, src_y=_hints_row,
+                                            width=_hw, height=1)
+                            _hints_pixels = render_console_with_transparency(overlay_hints_console)
+                            if overlay_hints_tex is None:
+                                overlay_hints_tex = renderer.upload_texture(_hints_pixels)
+                                overlay_hints_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                            else:
+                                overlay_hints_tex.update(_hints_pixels)
+                            overlay_hints_dest = (
+                                int(_hx1 * base_tile_w), int(_hints_row * base_tile_h),
+                                int(_hw   * base_tile_w), int(base_tile_h),
+                            )
+                        else:
+                            overlay_hints_tex  = None
+                            overlay_hints_dest = None
+                    else:
+                        # ── BLEND fallback path ────────────────────────────────────────────
+                        # Used for ItemContextMenu and any other non-PopupEventHandler popup.
+                        # The context menu may extend slightly outside the parent parchment,
+                        # leaving gap cells with bg=(0,0,0). render_console_with_transparency
+                        # + BLEND upload makes those cells transparent so the game shows through.
+                        overlay_popup_src_rect = None
+                        _ch2 = ui_console.ch[:, :hud_top_row]
+                        _bg2 = ui_console.bg[:, :hud_top_row, :]
+                        _content = (_ch2 != ord(' ')) | np.any(_bg2 > 16, axis=2)
+                        _cells = np.where(_content)
+                        if _cells[0].size > 0:
+                            _mx1 = int(_cells[0].min())
+                            _my1 = int(_cells[1].min())
+                            _mx2 = int(_cells[0].max()) + 1
+                            _my2 = int(_cells[1].max()) + 1
+                            _sw, _sh = _mx2 - _mx1, _my2 - _my1
+                            if (overlay_popup_console is None
+                                    or overlay_popup_console.width  != _sw
+                                    or overlay_popup_console.height != _sh):
+                                overlay_popup_console = tcod.console.Console(_sw, _sh, order="F")
+                                overlay_popup_tex = None
+                            ui_console.blit(overlay_popup_console,
+                                            dest_x=0, dest_y=0,
+                                            src_x=_mx1, src_y=_my1,
+                                            width=_sw, height=_sh)
+                            _popup_pixels = render_console_with_transparency(overlay_popup_console)
+                            if overlay_popup_tex is None:
+                                overlay_popup_tex = renderer.upload_texture(_popup_pixels)
+                                overlay_popup_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                            else:
+                                overlay_popup_tex.update(_popup_pixels)
+                            overlay_popup_dest = (
+                                int(_mx1 * base_tile_w), int(_my1 * base_tile_h),
+                                int(_sw  * base_tile_w), int(_sh  * base_tile_h),
+                            )
+                        else:
+                            overlay_popup_tex  = None
+                            overlay_popup_dest = None
+                        # Hints are included in the BLEND fallback bbox scan above
+                        overlay_hints_tex  = None
+                        overlay_hints_dest = None
+
+                # Render ui_console to GPU texture once — reused for both popup and HUD strip.
+                _ov_tex = ui_console_renderer.render(ui_console)
+
+                if overlay_popup_src_rect is not None and overlay_popup_dest is not None:
+                    # GPU-direct path: single source-rect copy, fully opaque (parchment fills bounds)
+                    renderer.copy(_ov_tex, source=overlay_popup_src_rect, dest=overlay_popup_dest)
+                    # Context hints (row 38) sit outside the parchment — render with BLEND transparency
+                    if overlay_hints_tex is not None and overlay_hints_dest is not None:
+                        renderer.copy(overlay_hints_tex, dest=overlay_hints_dest)
+                elif overlay_popup_tex is not None and overlay_popup_dest is not None:
+                    # BLEND path: transparency-aware copy for ItemContextMenu / fallback handlers
                     renderer.copy(overlay_popup_tex, dest=overlay_popup_dest)
 
-                # HUD strip
-                _ov_hud_tex = ui_console_renderer.render(ui_console)
-                renderer.copy(_ov_hud_tex,
+                # HUD strip (from the same already-rendered GPU texture)
+                renderer.copy(_ov_tex,
                               source=(0, int(hud_source_y), int(_ui_tex_w), int(hud_source_h)),
                               dest=(0, int(window_h - hud_dest_h), window_w, int(hud_dest_h)))
             else:
@@ -1097,7 +1172,7 @@ def main() -> None:
                 if _active_vhs_glitch is not None:
                     if isinstance(handler, input_handlers.GameOverEventHandler):
                         _active_vhs_glitch.tick(1.0 / target_fps)
-                        _active_vhs_glitch.draw(window_w, window_h, scene_tex=gpu.post_crt_tex)
+                        _active_vhs_glitch.draw(window_w, window_h, scene_tex=gpu.post_crt_tex, gpu=gpu)
                     else:
                         _active_vhs_glitch = None
 

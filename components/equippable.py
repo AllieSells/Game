@@ -19,12 +19,14 @@ class Equippable(BaseComponent):
         defense_bonus: int = 0,
         required_tags: Set[str] | None = None,
         equip_all_matching: bool = True,  # True = cover all matching parts, False = use only one
+        base_hit_chance: float | None = None,  # Overrides entity base_hit_chance when set
     ):
         self.equipment_type = equipment_type
         self.power_bonus = power_bonus
         self.defense_bonus = defense_bonus
         self.required_tags = required_tags or set()  # Tags that body parts must have to equip this item
         self.equip_all_matching = equip_all_matching  # Whether to equip to all matching parts or just one
+        self.base_hit_chance = base_hit_chance  # None = use the attacking entity's base_hit_chance
 
     def get_defense(self) -> int:
         """Calculate total defense provided by this item, including any trait bonuses."""
