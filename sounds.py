@@ -1045,6 +1045,17 @@ def play_attack_sound_finishing_blow():
     sound = random.choice(finishing_blow_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.5)
 
+def play_chain_sound():
+    chain_sounds = [
+        Sound("RP/sfx/equip/chain/chain1.mp3"),
+        Sound("RP/sfx/equip/chain/chain2.mp3"),
+        Sound("RP/sfx/equip/chain/chain3.mp3"),
+        Sound("RP/sfx/equip/chain/chain4.mp3"),
+    ]
+    sound = random.choice(chain_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=0.25)
+
+
 def play_miss_sound():
     miss_sounds = [
         Sound("RP/sfx/hit_miss/miss1.wav"),

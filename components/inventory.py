@@ -12,9 +12,81 @@ if TYPE_CHECKING:
 class Inventory(BaseComponent):
     parent: Actor
 
-    def __init__(self, capacity: int):
-        self.capacity = capacity
+    def __init__(self, capacity: int, max_weight: float = 50.0):
+        # capacity=0 means this actor cannot pick up items at all (NPCs, containers).
+        # For the player capacity is kept for legacy compat but weight is the real limit.
+        self.capacity    = capacity
+        self._max_weight = max_weight
         self.items: List[Item] = []
+        self.item_slots: List = []  # positional grid slots — grows dynamically
+
+    @property
+    def max_weight(self) -> float:
+        # getattr fallback keeps old save files working (they lack _max_weight)
+        return getattr(self, '_max_weight', 50.0)
+
+    @max_weight.setter
+    def max_weight(self, value: float) -> None:
+        self._max_weight = value
+
+    @property
+    def current_weight(self) -> float:
+        """Total weight of all carried items."""
+        total = 0.0
+        for item in self.items:
+            w = getattr(item, 'weight', None)
+            if not isinstance(w, (int, float)):
+                w = 0.0
+            total += w * max(1, getattr(item, '_quantity', 1))
+        return total
+
+    def can_carry(self, item) -> bool:
+        """Return True if this actor can pick up *item* right now.
+
+        * capacity == 0 → actor has no inventory (always False).
+        * Otherwise check carry-weight limit.
+        """
+        if self.capacity == 0:
+            return False
+        w = getattr(item, 'weight', None)
+        item_weight = w if isinstance(w, (int, float)) else 0.0
+        return (self.current_weight + item_weight) <= self.max_weight
+
+    def sync_slots(self) -> None:
+        """Reconcile item_slots with the items list.
+
+        Called once per frame when the inventory UI is open.  New items are
+        assigned to the first free slot; stale entries are cleared.  The list
+        grows as needed — there is no upper bound tied to capacity.
+        """
+        if not hasattr(self, 'item_slots') or self.item_slots is None:
+            self.item_slots = []
+
+        # Get current display groups (one representative per stack)
+        groups    = self.get_display_groups()
+        valid_ids = {id(g['item']) for g in groups}
+
+        # Clear stale slots
+        for i, s in enumerate(self.item_slots):
+            if s is not None and id(s) not in valid_ids:
+                self.item_slots[i] = None
+
+        # Assign unslotted groups — extend the list if no free slot exists
+        slotted = {id(s) for s in self.item_slots if s is not None}
+        for g in groups:
+            if id(g['item']) not in slotted:
+                # Find first None slot
+                placed = False
+                for i in range(len(self.item_slots)):
+                    if self.item_slots[i] is None:
+                        self.item_slots[i] = g['item']
+                        slotted.add(id(g['item']))
+                        placed = True
+                        break
+                if not placed:
+                    # No free slot — append a new one
+                    self.item_slots.append(g['item'])
+                    slotted.add(id(g['item']))
     
     def get_display_groups(self) -> List[Dict]:
         """Group identical items for display purposes with quantities."""

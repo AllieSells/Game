@@ -56,6 +56,8 @@ class Longsword(Equippable):
     def __init__(self) -> None:
         super().__init__(equipment_type=EquipmentType.WEAPON, power_bonus=6, required_tags={"hand", "grasp"}, equip_all_matching=True)
 
+# Leather
+
 class LeatherCap(Equippable):
     def __init__(self) -> None:
         super().__init__(equipment_type=EquipmentType.HELMET, defense_bonus=1, required_tags={"head", "neck"}, equip_all_matching=True)
@@ -73,9 +75,20 @@ class LeatherArmor(Equippable):
         super().__init__(equipment_type=EquipmentType.ARMOR, defense_bonus=1, required_tags={"torso"}, equip_all_matching=True)
 
 
-class ChainMail(Equippable):
+# Chain mail
+
+class ChainMailHelmet(Equippable):
     def __init__(self) -> None:
-        super().__init__(equipment_type=EquipmentType.ARMOR, defense_bonus=3, required_tags={"torso"})
+        super().__init__(equipment_type=EquipmentType.HELMET, defense_bonus=3, required_tags={"head", "neck"})
+        
+class ChainMailArmor(Equippable):
+    def __init__(self) -> None:
+        super().__init__(equipment_type=EquipmentType.ARMOR, defense_bonus=5, required_tags={"torso"})
+
+class ChainMailLeggings(Equippable):
+    def __init__(self) -> None:
+        super().__init__(equipment_type=EquipmentType.LEGGINGS, defense_bonus=3, required_tags={"leg"})
+
 
 class devtool(Equippable):
     def __init__(self) -> None:

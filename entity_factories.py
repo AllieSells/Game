@@ -56,7 +56,7 @@ poison_potion = Item(
 
 
 lesser_health_potion = Item(
-    char="o",
+    char=chr(0xE0B0),
     color=(247, 143, 143),
     value=10,
     name="Lesser Health Potion",
@@ -73,7 +73,7 @@ lesser_health_potion = Item(
     weight=0.5
 )
 health_potion = Item(
-    char="!",
+    char=chr(0xE0B1),
     color=(242, 135, 135),
     value=15,
     name="Health Potion",
@@ -297,7 +297,7 @@ arrow = Item(
 )
 
 leather_cap = Item(
-    char="n",
+    char=chr(0xE070),
     color=(139, 69, 19),
     name="Leather Cap",
     equippable=equippable.LeatherCap(),
@@ -314,7 +314,7 @@ leather_cap = Item(
 )
 
 leather_armor = Item(
-    char="[",
+    char=chr(0xE071),
     color=(139, 69, 19),
     name="Leather Armor",
     equippable=equippable.LeatherArmor(),
@@ -331,7 +331,7 @@ leather_armor = Item(
 )
 
 leather_leggings = Item(
-    char="H",
+    char=chr(0xE072),
     color=(139, 69, 19),
     name="Leather Leggings",
     value = 10,
@@ -348,7 +348,7 @@ leather_leggings = Item(
 )
 
 leather_boot = Item(
-    char="v",
+    char=chr(0xE073),
     color=(139, 69, 19),
     name="Leather Boots",
     equippable=equippable.LeatherBoot(),
@@ -365,10 +365,54 @@ leather_boot = Item(
 )
 
 
-chain_mail = Item(
-    char="[", color=(139, 69, 19),
-    name="Chain Mail",
-    equippable=equippable.ChainMail(),
+chain_mail_helmet = Item(
+    char=chr(0xE074), color=(color.sprite_sheet),
+    name="Mail Coif",
+    equippable=equippable.ChainMailHelmet(),
+    description="A flexible hood of interlocking metal rings.",
+    value = 10,
+    equip_sound=sounds.play_chain_sound,
+    unequip_sound=sounds.play_chain_sound,
+    pickup_sound=sounds.play_chain_sound,
+    drop_sound=sounds.play_chain_sound,
+    rarity_color=color.uncommon,
+    tags = ["chain mail", "armor", "headgear", "medium armor"],
+    weight=2.0,
+    equip_sprite_cp=0xE084
+)
+
+chain_mail_armor = Item(
+    char=chr(0xE075),
+    color=(color.sprite_sheet),
+    equippable=equippable.ChainMailArmor(),
+    name="Chain Mail Shirt",
+    description="A shirt of interlocking metal rings.",
+    value = 30,
+    equip_sound=sounds.play_chain_sound,
+    unequip_sound=sounds.play_chain_sound,
+    pickup_sound=sounds.play_chain_sound,
+    drop_sound=sounds.play_chain_sound,
+    rarity_color=color.uncommon,
+    tags = ["chain mail", "armor", "body armor", "medium armor"],
+    weight=10.0,
+    equip_sprite_cp=0xE085
+)
+
+chain_mail_leggings = Item(
+    char=chr(0xE076),
+    color=(color.sprite_sheet),
+    equippable=equippable.ChainMailLeggings(),
+    name="Chain Mail Leggings",
+    description="A pair of leggings made from interlocking metal rings.",
+    value = 20,
+    equip_sound=sounds.play_chain_sound,
+    unequip_sound=sounds.play_chain_sound,
+    pickup_sound=sounds.play_chain_sound,
+    drop_sound=sounds.play_chain_sound,
+    rarity_color=color.uncommon,
+    tags = ["chain mail", "armor", "leggings", "medium armor"],
+    weight=5.0,
+    equip_sprite_cp=0xE086
 )
 
 dev_tool = Item(
@@ -433,12 +477,12 @@ import roman
 def generate_sigil_stone() -> Item:
     # Use current random state - no individual seeding needed
     unlocks_and_descriptions = {
-        'Teleport' : "Distort space around you",
-        "Darkvision": "Sight persists in darkness",
-        'Poison Spray': "Summon corrosive elements at your will",
-        'Fireball': 'Unleash flames upon your foes',
-        'Healing Word': 'Soothing light mends wounds',
-        'Inflict Wounds': 'Invoke necrotic forces upon your foes',
+        #'Teleport' : "Distort space around you",
+        #"Darkvision": "Sight persists in darkness",
+        #'Poison Spray': "Summon corrosive elements at your will",
+        #'Fireball': 'Unleash flames upon your foes',
+        #'Healing Word': 'Soothing light mends wounds',
+        #'Inflict Wounds': 'Invoke necrotic forces upon your foes',
         'Light': 'Illuminate the darkness around you',
     }
     
@@ -526,10 +570,13 @@ def get_random_fungus() -> Item:
 def get_random_coins(min_amount: int, max_amount: int) -> Item:
     import random
     amount = random.randint(min_amount, max_amount)
+    character = None
     if amount == 1:
+        character = chr(0xE0C0)
         def_name = "Coin (1)"
         def_description = "A shiny gold coin."
     else:
+        character = random.choice([chr(0xE0C1), chr(0xE0C2), chr(0xE0C3)])
         def_name = "Pile of Coins (" + str(amount) + ")"
         def_description = f"A pile of {amount} gold coins."
 
@@ -544,7 +591,7 @@ def get_random_coins(min_amount: int, max_amount: int) -> Item:
         def_pickup_sound = sounds.pick_up_manycoins_sound
         def_drop_sound = sounds.drop_manycoins_sound
     return Item(
-        char="$",
+        char=character,
         color=(255, 223, 0),    
         name=def_name,
         description=def_description,
@@ -915,3 +962,45 @@ light_orb = Actor(
 )
 light_orb.blocks_movement = False   # Orb floats — player can walk through it
 light_orb.render_order = RenderOrder.ITEM  # Renders under actors (players, enemies)
+
+# =====================================================
+# LOOT POOLS - items grouped by rarity tier
+# Each LootEntry holds an item template (or factory callable) and a relative weight.
+# Higher weight = more likely to be selected when rolling from the pool.
+# =====================================================
+
+class LootEntry:
+    """A weighted entry in a loot pool."""
+    def __init__(self, item_factory, weight: float):
+        self.item_factory = item_factory  # Item instance or zero-arg callable
+        self.weight = weight
+
+
+COMMON_POOL = [
+    LootEntry(torch,                10),
+    LootEntry(arrow,                 8),
+    LootEntry(dagger,                8),
+    LootEntry(shortsword,            6),
+    LootEntry(bow,                   5),
+    LootEntry(leather_cap,           8),
+    LootEntry(leather_armor,         8),
+    LootEntry(leather_leggings,      8),
+    LootEntry(leather_boot,          8),
+    LootEntry(lesser_health_potion,  10),
+    LootEntry(confusion_scroll,      6),
+    LootEntry(darkvision_scroll,     6),
+]
+
+UNCOMMON_POOL = [
+    LootEntry(health_potion,         10),
+    LootEntry(longsword,              7),
+    LootEntry(chain_mail_helmet,      8),
+    LootEntry(chain_mail_armor,       8),
+    LootEntry(chain_mail_leggings,    8),
+    LootEntry(lightning_scroll,       6),
+    LootEntry(fireball_scroll,        5),
+]
+
+RARE_POOL = [
+    LootEntry(generate_sigil_stone,  10),
+]

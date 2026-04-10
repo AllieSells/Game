@@ -193,9 +193,8 @@ class InteractAction(Action):
                     if not is_corpse:
                         sounds.play_chest_open_sound()
                     from input_handlers import ContainerEventHandler
-                    return ContainerEventHandler(self.engine, container)
-
-        # Read tile tuple for 'true' interactable property
+                    from inventory_ui import ContainerGridUI
+                    return ContainerGridUI(self.engine, container)
         tile = self.engine.game_map.tiles["interactable"][target_x, target_y]    
         if tile:
             # Get name for that tile
@@ -244,8 +243,8 @@ class PickupAction(Action):
 
         for item in self.engine.game_map.items:
             if actor_location_x == item.x and actor_location_y == item.y:
-                if len(inventory.items) >= inventory.capacity:
-                    raise exceptions.Impossible("Your inventory is full IDIOT")
+                if not inventory.can_carry(item):
+                    raise exceptions.Impossible("You are carrying too much to pick that up.")
             
                 # Bonfires cannot be picked up
                 if item.name == "Bonfire":
@@ -361,7 +360,8 @@ class OpenAction(Action):
                     if not is_corpse:
                         sounds.play_chest_open_sound()
                     from input_handlers import ContainerEventHandler
-                    return ContainerEventHandler(self.engine, container)
+                    from inventory_ui import ContainerGridUI
+                    return ContainerGridUI(self.engine, container)
         raise exceptions.Impossible("Nothing nearby to open.")
 class EquipAction(Action):
     def __init__(self, entity: Actor, item: Item):
@@ -815,7 +815,7 @@ class RangedAction(ActionWithDirection):
                     recovered_arrow = copy.deepcopy(arrow)
                     
                     # Add to target's inventory if there's space
-                    if len(target.inventory.items) < target.inventory.capacity:
+                    if len(target.inventory.items) < target.inventory.capacity and target.inventory.can_carry(recovered_arrow):
                         recovered_arrow.parent = target.inventory
                         target.inventory.items.append(recovered_arrow)
                 except Exception:

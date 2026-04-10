@@ -722,8 +722,8 @@ class TradeEventHandler(PopupEventHandler):
                     return self
                 else:
                     self.container.items.remove(item)
-                    if len(self.engine.player.inventory.items) > self.engine.player.inventory.capacity:
-                        self.engine.message_log.add_message("Your inventory is full.", color.error)
+                    if not self.engine.player.inventory.can_carry(item):
+                        self.engine.message_log.add_message("You are carrying too much.", color.error)
                         # Return item to container
                         self.container.items.append(item)
                     else:   
@@ -1453,7 +1453,7 @@ class ContainerEventHandler(PopupEventHandler):
             # Transfer from container to player
             try:
                 self.container.items.remove(item)
-                if len(self.engine.player.inventory.items) > self.engine.player.inventory.capacity:
+                if not self.engine.player.inventory.can_carry(item):
                     self.engine.message_log.add_message("Your inventory is full.", color.error)
                     # Return item to container
                     self.container.items.append(item)
@@ -2466,11 +2466,14 @@ class ItemContextMenu(EventHandler):
     # ------------------------------------------------------------------
     def _build_options(self) -> list[tuple[str, str]]:
         """Return (label, action_key) pairs for available actions."""
-        item = self.item
+        item   = self.item
         player = self.engine.player
         options: list[tuple[str, str]] = []
 
-        if getattr(item, "consumable", None) is not None:
+        # Only offer use/equip/drop if the item is in the player's own inventory.
+        in_player_inv = item in player.inventory.items
+
+        if in_player_inv and getattr(item, "consumable", None) is not None:
             name_lower = item.name.lower()
             if "potion" in name_lower:
                 options.append(("Quaff", "quaff"))
@@ -2479,15 +2482,18 @@ class ItemContextMenu(EventHandler):
             else:
                 options.append(("Use", "use"))
 
-        if getattr(item, "equippable", None) is not None:
+        if in_player_inv and getattr(item, "equippable", None) is not None:
             is_equipped = player.equipment.item_is_equipped(item)
             if is_equipped:
                 options.append(("Unequip", "equip"))
             else:
                 options.append(("Equip", "equip"))
 
-        options.append(("Throw", "throw"))
-        options.append(("Drop", "drop"))
+        if in_player_inv:
+            options.append(("Throw", "throw"))
+            options.append(("Drop", "drop"))
+        else:
+            options.append(("Take", "take"))
         return options
 
     # ------------------------------------------------------------------
@@ -2617,8 +2623,16 @@ class ItemContextMenu(EventHandler):
         elif action_key == "drop":
             try:
                 actions.DropItem(self.engine.player, item).perform()
+                if hasattr(self.parent_handler, 'refresh_item_groups'):
+                    self.parent_handler.refresh_item_groups()
             except exceptions.Impossible as exc:
                 self.engine.message_log.add_message(exc.args[0], color.impossible)
+            return self.parent_handler
+
+        elif action_key == "take":
+            # Item is in a container; transfer it to the player.
+            if hasattr(self.parent_handler, '_transfer_to_player'):
+                self.parent_handler._transfer_to_player(item)
             return self.parent_handler
 
         return self.parent_handler
@@ -4741,12 +4755,15 @@ class AreaRangedAttackHandler(SelectIndexHandler):
 
 class MainGameEventHandler(EventHandler):
 
+    _RESET_HOLD_DURATION = 1.5  # seconds R must be held to trigger reset
+
     def __init__(self, engine: Engine):
         super().__init__(engine)
         # Restore minimap mode saved before any popup menu was opened
         if hasattr(engine, '_pre_menu_minimap'):
             engine.show_minimap = engine._pre_menu_minimap
             del engine._pre_menu_minimap
+        self._r_press_time: Optional[float] = None  # time.monotonic() when R was first pressed
         self.engine.context_hints = [
             ("G", "Get"),
             ("RClick", "Interact"),
@@ -4784,17 +4801,15 @@ class MainGameEventHandler(EventHandler):
 
         return super().handle_events(event)
 
-
-
-
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
         if event.button == tcod.event.MouseButton.LEFT:
 
             if self.engine.mouse_ui_y == 40 and 36 <= self.engine.mouse_ui_x <= 50:
-                return InventoryActivateHandler(self.engine)
+                from inventory_ui import InventoryGridUI
+                return InventoryGridUI(self.engine)
             elif self.engine.mouse_ui_y == 40 and 52 <= self.engine.mouse_ui_x <= 64:
-                from equipment_ui import EquipmentUI
-                return EquipmentUI(self.engine)
+                from inventory_ui import InventoryGridUI
+                return InventoryGridUI(self.engine)
 
             preferred_target = getattr(self.engine.player, 'current_attack_type', None)
             dx = max(-1, min(1, self.engine.mouse_x - self.engine.player.x))
@@ -4918,6 +4933,8 @@ class MainGameEventHandler(EventHandler):
         if event.sym in (tcod.event.KeySym.LALT, tcod.event.KeySym.RALT):
             self.alt_held = False
             print(self.alt_held)
+        if event.sym == tcod.event.KeySym.R:
+            self._r_press_time = None
 
     def ev_keydown(
             self, event: tcod.event.KeyDown
@@ -5036,10 +5053,27 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.KeySym.G:
             action = PickupAction(player)
         elif key == tcod.event.KeySym.R:
-            pass
-            #return ScrollActivateHandler(self.engine)
+            import time as _time
+            if not event.repeat:
+                # First press — start the hold timer
+                self._r_press_time = _time.monotonic()
+            elif self._r_press_time is not None:
+                elapsed = _time.monotonic() - self._r_press_time
+                if elapsed >= self._RESET_HOLD_DURATION:
+                    # Hold threshold reached — quick reset to a fresh game
+                    self._r_press_time = None
+                    import setup_game
+                    import sounds as _sounds
+                    _sounds.stop_all_sounds()
+                    _sounds.stop_all_music()
+                    new_engine = setup_game.new_game()
+                    return CRTTransition(
+                        MainGameEventHandler(new_engine),
+                        post_fn=_sounds.start_dungeon_music,
+                    )
         elif key == tcod.event.KeySym.TAB:
-            return InventoryActivateHandler(self.engine)
+            from inventory_ui import InventoryGridUI
+            return InventoryGridUI(self.engine)
         # Throw Handler
         elif key == tcod.event.KeySym.T:
             pass
@@ -5048,9 +5082,9 @@ class MainGameEventHandler(EventHandler):
             pass
             #return CheatMaxLevel(self.engine)
         elif key == tcod.event.KeySym.E:
-            # Visual equipment interface
-            from equipment_ui import EquipmentUI
-            return EquipmentUI(self.engine)
+            # Combined inventory + equipment grid
+            from inventory_ui import InventoryGridUI
+            return InventoryGridUI(self.engine)
         # elif key == tcod.event.KeySym.U:
         #     return InventoryEquipHandler(self.engine)
         elif key == tcod.event.KeySym.Q:

@@ -184,8 +184,9 @@ class Equipment(BaseComponent):
                 except:
                     self.engine.debug_log(f"Cannot equip {equippable_item.name}: {reason}", handler=self.__class__.__name__, event="EquipError")
     
-    def equip_item(self, item: Item, add_message: bool = True) -> None:
-        """Equip an item using the modular system."""
+    def equip_item(self, item: Item, add_message: bool = True, preferred_hand: str = None) -> None:
+        """Equip an item using the modular system.
+        preferred_hand: 'right' or 'left' — overrides the default right-hand preference."""
         if not item.equippable:
             return
         
@@ -195,20 +196,34 @@ class Equipment(BaseComponent):
         if hasattr(self.parent, "body_parts"):
             equip_all = getattr(item.equippable, 'equip_all_matching', False)
             conflicting_items = set()
-            
-            # Find all body parts this item would cover
+
+            # Find which body part(s) this item will cover — respecting preferred_hand
+            # so that dual-wield doesn't evict the wrong hand.
             parts_to_cover = []
-            for part in self.parent.body_parts.get_all_parts().values():
-                if item.equippable.required_tags.issubset(part.tags):
-                    parts_to_cover.append(part)
-                    if not equip_all:
-                        break  # Only need first match if not equipping to all
-            
+            if not equip_all and "hand" in getattr(item.equippable, 'required_tags', set()):
+                _primary   = preferred_hand if preferred_hand in ("right", "left") else "right"
+                _secondary = "left" if _primary == "right" else "right"
+                for part in self.parent.body_parts.get_all_parts().values():
+                    if item.equippable.required_tags.issubset(part.tags) and _primary in part.tags:
+                        parts_to_cover.append(part)
+                        break
+                if not parts_to_cover:
+                    for part in self.parent.body_parts.get_all_parts().values():
+                        if item.equippable.required_tags.issubset(part.tags) and _secondary in part.tags:
+                            parts_to_cover.append(part)
+                            break
+            else:
+                for part in self.parent.body_parts.get_all_parts().values():
+                    if item.equippable.required_tags.issubset(part.tags):
+                        parts_to_cover.append(part)
+                        if not equip_all:
+                            break
+
             # Check for existing items on those parts
             for part in parts_to_cover:
                 if part.name in self.body_part_coverage:
                     conflicting_items.add(self.body_part_coverage[part.name])
-            
+
             # Unequip all conflicting items
             for conflicting_item in conflicting_items:
                 if conflicting_item != item:  # Don't unequip the item we're trying to equip
@@ -240,25 +255,25 @@ class Equipment(BaseComponent):
                         self.body_part_coverage[part.name] = item
                 #self.engine.debug_log(f"DEBUG: Equipping item: body_part_coverage after equip: {list(self.body_part_coverage.keys())}", handler=self.__class__.__name__, event="EquipDebug")
             else:
-                # Cover only one matching body part - prefer right hand over left hand for weapons
+                # Cover only one matching body part.
+                # Honour preferred_hand if provided, otherwise prefer right hand.
                 target_part = None
-                
-                # For hand-based items, prefer right hand
+
                 if "hand" in item.equippable.required_tags:
-                    # First try to find right hand
+                    primary   = preferred_hand if preferred_hand in ("right", "left") else "right"
+                    secondary = "left" if primary == "right" else "right"
+
                     for part in self.parent.body_parts.get_all_parts().values():
-                        if item.equippable.required_tags.issubset(part.tags) and "right" in part.tags:
+                        if item.equippable.required_tags.issubset(part.tags) and primary in part.tags:
                             target_part = part
                             break
-                    
-                    # If right hand not available, try left hand
+
                     if not target_part:
                         for part in self.parent.body_parts.get_all_parts().values():
-                            if item.equippable.required_tags.issubset(part.tags) and "left" in part.tags:
+                            if item.equippable.required_tags.issubset(part.tags) and secondary in part.tags:
                                 target_part = part
                                 break
                 else:
-                    # For non-hand items, just take the first match
                     for part in self.parent.body_parts.get_all_parts().values():
                         if item.equippable.required_tags.issubset(part.tags):
                             target_part = part

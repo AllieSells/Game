@@ -35,7 +35,7 @@ item_chances = {
     },
     6: {
         entity_factories.fireball_scroll: 25,
-        entity_factories.chain_mail: 15,
+        #entity_factories.chain_mail: 15,
     },
 }
 
@@ -155,9 +155,7 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int, b
     # Get scaled enemies using new system
     monsters = get_enemies_for_floor(floor_number, number_of_monsters, biome)
 
-    items: List[Entity] = get_entities_at_random(
-        item_chances, number_of_items, floor_number
-    )
+
 
     # Place chests based on floor
     for entity in range(random.randint(0, get_max_value_for_floor(max_chests_by_floor, floor_number))):
@@ -171,10 +169,10 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int, b
             x = room.x1+1 if random.random() < 0.5 else room.x2-1
             y = random.randint(room.y1+1, room.y2-1)
         if not any(e.x == x and e.y == y for e in dungeon.entities):
-            # Choose chest loot from loot table based on floor
+            # Choose chest loot from tiered pool based on floor
             import loot_tables
-            table_name = "basic_chest" if floor_number <= 3 else "advanced_chest"
-            loot = loot_tables.generate_loot_from_table(table_name)
+            chest_tier = "basic" if floor_number <= 3 else "advanced"
+            loot = loot_tables.generate_tiered_chest_loot(chest_tier)
             chest = entity_factories.make_chest_with_loot(loot, capacity=6)
             chest.spawn(dungeon, x, y)
 
@@ -349,7 +347,7 @@ def place_village_entities(building: Building, village: GameMap, floor_number: i
     if random.random() < 0.3:
         try:
             import loot_tables
-            loot = loot_tables.generate_loot_from_table("basic_chest")
+            loot = loot_tables.generate_tiered_chest_loot("basic")
             chest = entity_factories.make_chest_with_loot(loot, capacity=4)
             
             # Place chest against a wall
@@ -876,8 +874,8 @@ def place_entities_cave(floor_tiles: List[Tuple[int, int]], dungeon: GameMap, fl
     # Maybe place a chest (30% chance per section)
     if random.random() < 0.30:
         import loot_tables
-        table_name = "basic_chest" if floor_number <= 3 else "advanced_chest"
-        loot = loot_tables.generate_loot_from_table(table_name)
+        chest_tier = "basic" if floor_number <= 3 else "advanced"
+        loot = loot_tables.generate_tiered_chest_loot(chest_tier)
         chest = entity_factories.make_chest_with_loot(loot, capacity=6)
         for x, y in shuffled:
             if not any(e.x == x and e.y == y for e in dungeon.entities):
@@ -1081,8 +1079,7 @@ def generate_first_floor(
         # Starter chest on floor 1, placed adjacent to the player
     print("[GEN] starter chest placement start")
     import loot_tables
-    _loot = loot_tables.generate_loot_from_table("starter_chest")
-    _start_chest = entity_factories.make_chest_with_loot(_loot, capacity=15)
+    _start_chest = entity_factories.make_chest_with_loot(loot_tables.generate_starter_chest_loot(), capacity=15)
     _start_chest.spawn(dungeon, 46, 21)
 
     dungeon.tiles[58, 25] = tile_types.down_stairs
@@ -1307,11 +1304,8 @@ def generate_dungeon(
                 # Spawn a chest on first floor only
                 if _floor == 1:
                     print("[GEN] starter chest placement start")
-                    # Generate loot from table
                     import loot_tables
-                    loot = loot_tables.generate_loot_from_table("starter_chest")
-
-                    test_chest = entity_factories.make_chest_with_loot(loot, capacity=15)
+                    test_chest = entity_factories.make_chest_with_loot(loot_tables.generate_starter_chest_loot(), capacity=15)
                     cx, cy = new_room.center
                     chest_x, chest_y = min(dungeon.width - 1, cx + 1), cy
                     # Only place if empty

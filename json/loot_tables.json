@@ -5,20 +5,5 @@
     {"item": "leather_cap", "count": 1},
     {"item": "generate_sigil_stone", "count": 1},
     {"item": "lesser_health_potion", "count": 1}
-  ],
-  
-  "basic_chest": [
-    {"item": "lesser_health_potion", "count": 1, "chance": 35},
-    {"item": "shortsword", "count": 1, "chance": 15},
-    {"item": "longsword", "count": 1, "chance": 15},
-    {"item": "torch", "count": 1, "chance": 20},
-    {"item": "arrow", "count": 3, "chance": 15},
-    {"item": "generate_sigil_stone", "count": 1, "chance": 15}
-  ],
-
-  "advanced_chest": [
-    {"item": "fireball_scroll", "count": 1, "chance": 25},
-    {"item": "sword", "count": 1, "chance": 5},
-    {"item": "chain_mail", "count": 1, "chance": 15}
   ]
 }

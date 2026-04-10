@@ -901,6 +901,68 @@ def render_gpu_minimap_body(
     renderer.copy(tex, dest=(px0, py0, pw, ph))
 
 
+def render_gpu_reset_bar(
+    renderer,
+    handler,
+    window_w: int,
+    window_h: int,
+    console_renderer=None,
+    hud_dest_h: float = 0,
+) -> None:
+    """Draw the hold-R reset progress bar directly via the GPU renderer."""
+    from input_handlers import MainGameEventHandler
+    if not isinstance(handler, MainGameEventHandler):
+        return
+    press_time = getattr(handler, '_r_press_time', None)
+    if press_time is None:
+        return
+    hold_dur = getattr(handler, '_RESET_HOLD_DURATION', 1.5)
+    elapsed = time.monotonic() - press_time
+    progress = min(1.0, elapsed / hold_dur)
+
+    # Bar dimensions in pixels
+    bar_w = int(window_w * 0.35)
+    bar_h = max(6, int(window_h * 0.018))
+    bx = (window_w - bar_w) // 2
+    # Anchor just above the HUD strip, with a small gap
+    hud_top = window_h - int(hud_dest_h)
+    gap = max(4, int(window_h * 0.008))
+    by = hud_top - bar_h - gap
+
+    filled = int(bar_w * progress)
+
+    # Background strip (dark red)
+    bg = np.full((bar_h, bar_w, 4), (60, 10, 10, 200), dtype=np.uint8)
+    # Filled portion (bright red)
+    if filled > 0:
+        bg[:, :filled] = (220, 50, 50, 220)
+    # 1-px white border
+    bg[0, :] = (200, 200, 200, 180)
+    bg[-1, :] = (200, 200, 200, 180)
+    bg[:, 0] = (200, 200, 200, 180)
+    bg[:, -1] = (200, 200, 200, 180)
+
+    tex = renderer.upload_texture(bg)
+    tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+    renderer.copy(tex, dest=(bx, by, bar_w, bar_h))
+
+    # Text label above the bar using a small console + SDLConsoleRender
+    if console_renderer is not None:
+        label = "SURRENDER THIS WORLD?"
+        lbl_cols = len(label) + 2
+        lbl_console = tcod.console.Console(lbl_cols, 1, order="F")
+        lbl_console.print(1, 0, label, fg=(255, 100, 100), bg=(0, 0, 0))
+        lbl_tex = console_renderer.render(lbl_console)
+        lbl_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+        # Scale to 1 tile tall, centred on the bar
+        tile_h = window_h // 50  # approximate tile pixel height
+        lbl_dest_h = max(10, tile_h)
+        lbl_dest_w = lbl_dest_h * lbl_cols  # square tiles
+        lbl_dest_x = (window_w - lbl_dest_w) // 2
+        lbl_dest_y = by - lbl_dest_h - 2
+        renderer.copy(lbl_tex, dest=(lbl_dest_x, lbl_dest_y, lbl_dest_w, lbl_dest_h))
+
+
 def render_minimap_box(console: tcod.Console, engine: 'Engine') -> None:
     """Render the minimap / hints toggle panel (auto-flips left/right)."""
     BOX_X = get_minimap_origin_x(engine)

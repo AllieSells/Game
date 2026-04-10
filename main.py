@@ -446,8 +446,6 @@ def main() -> None:
     pixels_cursor_walk = np.array(cursor_walk_img, dtype=np.uint8)
     cursor_walk = tcod.sdl.mouse.new_color_cursor(pixels_cursor_walk, (0, 0))
 
-
-    # Start the main game loop
     import render_functions
     target_fps = 30
     frame_time = 1.0 / target_fps
@@ -457,11 +455,29 @@ def main() -> None:
     game_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
     ui_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
     debug_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
+    # Dedicated renderer for the 40×25 inventory grid (never shares state with game renderer)
+    inv_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
     debug_console = tcod.console.Console(40, 9, order="F")
     # 1×1 dim texture stretched over full screen for overlay fade (GPU-only, no CPU pixel work)
     dim_pixels = np.array([[[20, 20, 30, 100]]], dtype=np.uint8)
     dim_tex = renderer.upload_texture(dim_pixels)
     dim_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+    # 1×1 texture for the equipment panel background (_BG colour, fully opaque).
+    # Stretched over the eq_grid area before the body diagram PNG so background matches the panel.
+    _eq_bg_pixels = np.array([[[25, 18, 12, 255]]], dtype=np.uint8)
+    _eq_bg_tex = renderer.upload_texture(_eq_bg_pixels)
+    _eq_bg_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+    # Body diagram PNG — load RP/eqback.png as the equipment panel background art.
+    _body_diagram_tex = None
+    _body_diagram_path = get_data_path("RP/eqback.png")
+    if os.path.isfile(_body_diagram_path):
+        try:
+            _bdiag_img = Image.open(_body_diagram_path).convert("RGBA")
+            _bdiag_np  = np.array(_bdiag_img, dtype=np.uint8)
+            _body_diagram_tex = renderer.upload_texture(_bdiag_np)
+            _body_diagram_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+        except Exception as _e:
+            print(f"eqback.png failed to load: {_e}")
 
     # --- Regenerate procedural scanlines for current window size ---
     scanlines_np = generate_scanlines_texture(scanline_density, scanline_intensity)
@@ -801,6 +817,7 @@ def main() -> None:
                                       dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
                                             int(_mm_w * base_tile_w), int(_mm_h * base_tile_h)))
                         render_functions.render_gpu_minimap_body(renderer, active_engine, base_tile_w, base_tile_h)
+                    render_functions.render_gpu_reset_bar(renderer, handler, window_w, window_h, ui_console_renderer, hud_dest_h)
                     debug_console.clear()
                     render_functions.render_debug_overlay(
                         debug_console,
@@ -837,6 +854,7 @@ def main() -> None:
                                       dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
                                             int(_mm_w * base_tile_w), int(_mm_h * base_tile_h)))
                         render_functions.render_gpu_minimap_body(renderer, active_engine, base_tile_w, base_tile_h)
+                    render_functions.render_gpu_reset_bar(renderer, handler, window_w, window_h, ui_console_renderer, hud_dest_h)
                     _sb = getattr(active_engine, 'speech_bubble_ui_rect', None)
                     if _sb:
                         _sb_x, _sb_y, _sb_w, _sb_h = _sb
@@ -921,6 +939,16 @@ def main() -> None:
                         and handler._get_fade_alpha() < 1.0):
                     overlay_dirty = True
 
+                # Detect InventoryGridUI (either as direct handler or as parent of
+                # a context-menu overlay) so the scaled inventory stays visible.
+                _is_scaled_inv = getattr(handler, '_is_scaled_inventory', False)
+                _parent_handler = getattr(handler, 'parent_handler', None)
+                _scaled_inv_src = (handler if _is_scaled_inv
+                                   else _parent_handler if getattr(_parent_handler, '_is_scaled_inventory', False)
+                                   else None)
+                if _scaled_inv_src is not None and getattr(_scaled_inv_src, '_drag_item', None) is not None:
+                    overlay_dirty = True
+
                 if overlay_dirty or cached_overlay_handler is not handler:
                     ui_console.clear()
                     # Signal PopupEventHandler subclasses to skip redundant numpy fade
@@ -928,7 +956,8 @@ def main() -> None:
                     # needed for the BLEND fallback path below where the sub-console copy
                     # relies on near-black cells being made transparent).
                     _is_gpu_popup = (isinstance(handler, input_handlers.PopupEventHandler)
-                                     and not isinstance(handler, input_handlers.ItemContextMenu))
+                                     and not isinstance(handler, input_handlers.ItemContextMenu)
+                                     and not _is_scaled_inv)
                     if _is_gpu_popup and active_engine is not None:
                         active_engine._popup_overlay_active = True
                     handler.on_render(console=ui_console)
@@ -995,46 +1024,127 @@ def main() -> None:
                         # leaving gap cells with bg=(0,0,0). render_console_with_transparency
                         # + BLEND upload makes those cells transparent so the game shows through.
                         overlay_popup_src_rect = None
-                        _ch2 = ui_console.ch[:, :hud_top_row]
-                        _bg2 = ui_console.bg[:, :hud_top_row, :]
-                        _content = (_ch2 != ord(' ')) | np.any(_bg2 > 16, axis=2)
-                        _cells = np.where(_content)
-                        if _cells[0].size > 0:
-                            _mx1 = int(_cells[0].min())
-                            _my1 = int(_cells[1].min())
-                            _mx2 = int(_cells[0].max()) + 1
-                            _my2 = int(_cells[1].max()) + 1
-                            _sw, _sh = _mx2 - _mx1, _my2 - _my1
-                            if (overlay_popup_console is None
-                                    or overlay_popup_console.width  != _sw
-                                    or overlay_popup_console.height != _sh):
-                                overlay_popup_console = tcod.console.Console(_sw, _sh, order="F")
-                                overlay_popup_tex = None
-                            ui_console.blit(overlay_popup_console,
-                                            dest_x=0, dest_y=0,
-                                            src_x=_mx1, src_y=_my1,
-                                            width=_sw, height=_sh)
-                            _popup_pixels = render_console_with_transparency(overlay_popup_console)
-                            if overlay_popup_tex is None:
-                                overlay_popup_tex = renderer.upload_texture(_popup_pixels)
-                                overlay_popup_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
-                            else:
-                                overlay_popup_tex.update(_popup_pixels)
-                            overlay_popup_dest = (
-                                int(_mx1 * base_tile_w), int(_my1 * base_tile_h),
-                                int(_sw  * base_tile_w), int(_sh  * base_tile_h),
-                            )
-                        else:
+                        if _is_scaled_inv:
+                            # InventoryGridUI renders to its own console; nothing to blit here.
                             overlay_popup_tex  = None
                             overlay_popup_dest = None
-                        # Hints are included in the BLEND fallback bbox scan above
-                        overlay_hints_tex  = None
-                        overlay_hints_dest = None
+                            overlay_hints_tex  = None
+                            overlay_hints_dest = None
+                        else:
+                            _ch2 = ui_console.ch[:, :hud_top_row]
+                            _bg2 = ui_console.bg[:, :hud_top_row, :]
+                            _content = (_ch2 != ord(' ')) | np.any(_bg2 > 16, axis=2)
+                            _cells = np.where(_content)
+                            if _cells[0].size > 0:
+                                _mx1 = int(_cells[0].min())
+                                _my1 = int(_cells[1].min())
+                                _mx2 = int(_cells[0].max()) + 1
+                                _my2 = int(_cells[1].max()) + 1
+                                _sw, _sh = _mx2 - _mx1, _my2 - _my1
+                                if (overlay_popup_console is None
+                                        or overlay_popup_console.width  != _sw
+                                        or overlay_popup_console.height != _sh):
+                                    overlay_popup_console = tcod.console.Console(_sw, _sh, order="F")
+                                    overlay_popup_tex = None
+                                ui_console.blit(overlay_popup_console,
+                                                dest_x=0, dest_y=0,
+                                                src_x=_mx1, src_y=_my1,
+                                                width=_sw, height=_sh)
+                                _popup_pixels = render_console_with_transparency(overlay_popup_console)
+                                if overlay_popup_tex is None:
+                                    overlay_popup_tex = renderer.upload_texture(_popup_pixels)
+                                    overlay_popup_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                                else:
+                                    overlay_popup_tex.update(_popup_pixels)
+                                overlay_popup_dest = (
+                                    int(_mx1 * base_tile_w), int(_my1 * base_tile_h),
+                                    int(_sw  * base_tile_w), int(_sh  * base_tile_h),
+                                )
+                            else:
+                                overlay_popup_tex  = None
+                                overlay_popup_dest = None
+                            # Hints are included in the BLEND fallback bbox scan above
+                            overlay_hints_tex  = None
+                            overlay_hints_dest = None
 
                 # Render ui_console to GPU texture once — reused for both popup and HUD strip.
+
+                # ── Detect inventory grid handler ──────────────────────────────────────────────
+                _ph = getattr(handler, 'parent_handler', None)
+                _inv_grid_handler = (
+                    handler if hasattr(handler, '_grid_console')
+                    else _ph   if hasattr(_ph,  '_grid_console') else None
+                )
+                # _grid_is_direct: InventoryGridUI is the active handler (GPU-direct path).
+                # When False (context menu on top): render grid PRE-chrome so the BLEND
+                # layer (chrome with transparent hole + context menu) sits on top.
+                _grid_is_direct = _inv_grid_handler is not None and handler is _inv_grid_handler
+
+                # Pre-chrome grid render — context menu / BLEND overlay case only
+                if _inv_grid_handler is not None and not _grid_is_direct:
+                    _gdt = _inv_grid_handler._grid_dest_tiles
+                    _grid_item_tex = inv_console_renderer.render(_inv_grid_handler._grid_console)
+                    _grid_item_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                    renderer.copy(_grid_item_tex, dest=(
+                        int(_gdt[0] * base_tile_w), int(_gdt[1] * base_tile_h),
+                        int(_gdt[2] * base_tile_w), int(_gdt[3] * base_tile_h),
+                    ))
+                    if hasattr(_inv_grid_handler, '_qty_console'):
+                        _qty_tex = inv_console_renderer.render(_inv_grid_handler._qty_console)
+                        _qty_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                        renderer.copy(_qty_tex, dest=(
+                            int(_gdt[0] * base_tile_w), int(_gdt[1] * base_tile_h),
+                            int(_gdt[2] * base_tile_w), int(_gdt[3] * base_tile_h),
+                        ))
+                        _qty_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                    if hasattr(_inv_grid_handler, '_player_qty_console'):
+                        _pqty_tex = inv_console_renderer.render(_inv_grid_handler._player_qty_console)
+                        _pqty_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                        renderer.copy(_pqty_tex, dest=(
+                            int(_gdt[0] * base_tile_w), int(_gdt[1] * base_tile_h),
+                            int(_gdt[2] * base_tile_w), int(_gdt[3] * base_tile_h),
+                        ))
+                        _pqty_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                    if hasattr(_inv_grid_handler, '_container_grid_console'):
+                        _cgdt = _inv_grid_handler._container_grid_dest_tiles
+                        _cgrid_tex = inv_console_renderer.render(_inv_grid_handler._container_grid_console)
+                        _cgrid_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                        renderer.copy(_cgrid_tex, dest=(
+                            int(_cgdt[0] * base_tile_w), int(_cgdt[1] * base_tile_h),
+                            int(_cgdt[2] * base_tile_w), int(_cgdt[3] * base_tile_h),
+                        ))
+                    if hasattr(_inv_grid_handler, '_eq_grid_console'):
+                        _egdt = _inv_grid_handler._eq_grid_dest_tiles
+                        _eq_px = (int(_egdt[0]*base_tile_w), int(_egdt[1]*base_tile_h),
+                                  int(_egdt[2]*base_tile_w), int(_egdt[3]*base_tile_h))
+                        renderer.copy(_eq_bg_tex, dest=_eq_px)
+                        if _body_diagram_tex is not None:
+                            renderer.copy(_body_diagram_tex, dest=_eq_px)
+                        _eqgrid_tex = inv_console_renderer.render(_inv_grid_handler._eq_grid_console)
+                        _eqgrid_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                        renderer.copy(_eqgrid_tex, dest=_eq_px)
+                        _eqgrid_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                        if hasattr(_inv_grid_handler, '_eq_qty_console'):
+                            _eq_qty_tex = inv_console_renderer.render(_inv_grid_handler._eq_qty_console)
+                            _eq_qty_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                            renderer.copy(_eq_qty_tex, dest=_eq_px)
+                            _eq_qty_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+
                 _ov_tex = ui_console_renderer.render(ui_console)
 
-                if overlay_popup_src_rect is not None and overlay_popup_dest is not None:
+                if _scaled_inv_src is not None:
+                    # ── Scaled inventory path: full-window GPU layer ───────────────────────
+                    # Render the InventoryGridUI's dedicated 40×25 console via its own
+                    # renderer so it never shares a texture with game_console_renderer.
+                    # Dest = full window → each tile is (window_w/40) × (window_h/25) = 32×32 px
+                    # at the default 1280×800 resolution, giving clean 2× readable characters.
+                    _inv_tex = inv_console_renderer.render(_scaled_inv_src._inv_console)
+                    renderer.copy(_inv_tex, dest=(0, 0, window_w, window_h))
+                    # If a context menu is floating on top (handler != _scaled_inv_src),
+                    # draw it via the BLEND path so it appears over the inventory.
+                    if not _is_scaled_inv and overlay_popup_tex is not None and overlay_popup_dest is not None:
+                        renderer.copy(overlay_popup_tex, dest=overlay_popup_dest)
+                elif overlay_popup_src_rect is not None and overlay_popup_dest is not None:
                     # GPU-direct path: single source-rect copy, fully opaque (parchment fills bounds)
                     renderer.copy(_ov_tex, source=overlay_popup_src_rect, dest=overlay_popup_dest)
                     # Context hints (row 38) sit outside the parchment — render with BLEND transparency
@@ -1043,6 +1153,70 @@ def main() -> None:
                 elif overlay_popup_tex is not None and overlay_popup_dest is not None:
                     # BLEND path: transparency-aware copy for ItemContextMenu / fallback handlers
                     renderer.copy(overlay_popup_tex, dest=overlay_popup_dest)
+
+                # ── Post-chrome grid render — direct handler only (items on top of chrome) ───────
+                if _grid_is_direct:
+                    _gdt = _inv_grid_handler._grid_dest_tiles
+                    _grid_item_tex = inv_console_renderer.render(_inv_grid_handler._grid_console)
+                    _grid_item_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                    renderer.copy(_grid_item_tex, dest=(
+                        int(_gdt[0] * base_tile_w), int(_gdt[1] * base_tile_h),
+                        int(_gdt[2] * base_tile_w), int(_gdt[3] * base_tile_h),
+                    ))
+                    if hasattr(_inv_grid_handler, '_qty_console'):
+                        _qty_tex = inv_console_renderer.render(_inv_grid_handler._qty_console)
+                        _qty_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                        renderer.copy(_qty_tex, dest=(
+                            int(_gdt[0] * base_tile_w), int(_gdt[1] * base_tile_h),
+                            int(_gdt[2] * base_tile_w), int(_gdt[3] * base_tile_h),
+                        ))
+                        _qty_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                    if hasattr(_inv_grid_handler, '_player_qty_console'):
+                        _pqty_tex = inv_console_renderer.render(_inv_grid_handler._player_qty_console)
+                        _pqty_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                        renderer.copy(_pqty_tex, dest=(
+                            int(_gdt[0] * base_tile_w), int(_gdt[1] * base_tile_h),
+                            int(_gdt[2] * base_tile_w), int(_gdt[3] * base_tile_h),
+                        ))
+                        _pqty_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                    if hasattr(_inv_grid_handler, '_container_grid_console'):
+                        _cgdt = _inv_grid_handler._container_grid_dest_tiles
+                        _cgrid_tex = inv_console_renderer.render(_inv_grid_handler._container_grid_console)
+                        _cgrid_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                        renderer.copy(_cgrid_tex, dest=(
+                            int(_cgdt[0] * base_tile_w), int(_cgdt[1] * base_tile_h),
+                            int(_cgdt[2] * base_tile_w), int(_cgdt[3] * base_tile_h),
+                        ))
+                    if hasattr(_inv_grid_handler, '_eq_grid_console'):
+                        _egdt = _inv_grid_handler._eq_grid_dest_tiles
+                        _eq_px = (int(_egdt[0]*base_tile_w), int(_egdt[1]*base_tile_h),
+                                  int(_egdt[2]*base_tile_w), int(_egdt[3]*base_tile_h))
+                        renderer.copy(_eq_bg_tex, dest=_eq_px)
+                        if _body_diagram_tex is not None:
+                            renderer.copy(_body_diagram_tex, dest=_eq_px)
+                        _eqgrid_tex = inv_console_renderer.render(_inv_grid_handler._eq_grid_console)
+                        _eqgrid_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                        renderer.copy(_eqgrid_tex, dest=_eq_px)
+                        _eqgrid_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                        if hasattr(_inv_grid_handler, '_eq_qty_console'):
+                            _eq_qty_tex = inv_console_renderer.render(_inv_grid_handler._eq_qty_console)
+                            _eq_qty_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                            renderer.copy(_eq_qty_tex, dest=_eq_px)
+                            _eq_qty_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+
+                # ── Drag ghost (GPU 3×, ADD blend → black bg transparent, glyph glows) ────────
+                if (_inv_grid_handler is not None
+                        and getattr(_inv_grid_handler, '_drag_item', None) is not None):
+                    _ddt = _inv_grid_handler._drag_dest_tiles
+                    _drag_tex = inv_console_renderer.render(_inv_grid_handler._drag_console)
+                    _drag_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                    renderer.copy(_drag_tex, dest=(
+                        int(_ddt[0] * base_tile_w), int(_ddt[1] * base_tile_h),
+                        int(_ddt[2] * base_tile_w), int(_ddt[3] * base_tile_h),
+                    ))
+                    # Reset blend mode: inv_console_renderer reuses its texture, so ADD
+                    # would contaminate the next frame's grid render if not reset here.
+                    _drag_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
 
                 # HUD strip (from the same already-rendered GPU texture)
                 renderer.copy(_ov_tex,

@@ -110,71 +110,77 @@ class EquipmentUI(PopupEventHandler):
         
         # Available item groups for equipping - use display groups for stacking
         self.available_item_groups = []
-        
+        self.refresh_item_groups()
+    
+    def refresh_item_groups(self) -> None:
+        """Rebuild available_item_groups from the current inventory/equipment state."""
+        self.available_item_groups = []
+
         # Add item groups from inventory
-        inventory_groups = engine.player.inventory.get_display_groups()
+        inventory_groups = self.engine.player.inventory.get_display_groups()
         for group in inventory_groups:
             if hasattr(group['item'], 'equippable') and group['item'].equippable:
                 self.available_item_groups.append(group)
-        
+
         # Add equipped items (they might not be in inventory anymore)
-        equipment = engine.player.equipment
+        equipment = self.engine.player.equipment
         if equipment:
             # Add items from grasped_items
             for item in equipment.grasped_items.values():
                 if item and hasattr(item, 'equippable') and item.equippable:
-                    # Check if already in groups
                     already_present = False
                     for group in self.available_item_groups:
                         if item in group['items']:
                             already_present = True
                             break
                     if not already_present:
-                        # Add as single item group
                         self.available_item_groups.append({
                             'item': item,
                             'items': [item],
                             'quantity': 1,
                             'display_name': item.name
                         })
-            
-            # Add items from equipped_items  
+
+            # Add items from equipped_items
             for item in equipment.equipped_items.values():
                 if item and hasattr(item, 'equippable') and item.equippable:
-                    # Check if already in groups
                     already_present = False
                     for group in self.available_item_groups:
                         if item in group['items']:
                             already_present = True
                             break
                     if not already_present:
-                        # Add as single item group
                         self.available_item_groups.append({
                             'item': item,
                             'items': [item],
                             'quantity': 1,
                             'display_name': item.name
                         })
-            
+
             # Add items from body_part_coverage if it exists
             if hasattr(equipment, 'body_part_coverage'):
                 for item in equipment.body_part_coverage.values():
                     if item and hasattr(item, 'equippable') and item.equippable:
-                        # Check if already in groups
                         already_present = False
                         for group in self.available_item_groups:
                             if item in group['items']:
                                 already_present = True
                                 break
                         if not already_present:
-                            # Add as single item group
                             self.available_item_groups.append({
                                 'item': item,
                                 'items': [item],
                                 'quantity': 1,
                                 'display_name': item.name
                             })
-    
+
+        # Clamp selected_item to valid range
+        compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot]) if self.slots else []
+        if compatible_groups:
+            self.selected_item = max(0, min(self.selected_item, len(compatible_groups) - 1))
+        else:
+            self.selected_item = 0
+
     def _create_equipment_slots(self) -> List[EquipmentSlot]:
         """Create equipment slots for list display."""
         return [
