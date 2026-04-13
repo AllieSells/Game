@@ -672,7 +672,7 @@ class StatueAI(BaseAI):
     all swapped in-place so the entity reference stays valid on the game map.
     """
 
-    def __init__(self, entity: "Actor", animate_chance: float = 0.75):
+    def __init__(self, entity: "Actor", animate_chance: float = 0.5):
         super().__init__(entity)
         self.activated = False
         # Decided at spawn time: only this fraction of statues will ever animate

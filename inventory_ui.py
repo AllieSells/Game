@@ -83,8 +83,8 @@ _EQ_SLOT_GRID_POS: List[Tuple[int, int]] = [
     (3, 3),  # 1: L.Hand  — R4 col 3
     (5, 0),  # 2: Head    — R1 col 5
     (5, 2),  # 3: Torso   — R3 col 5
-    (3, 2),  # 4: L.Arm   — R3 col 3
-    (7, 2),  # 5: R.Arm   — R3 col 7
+    (4, 1),  # 4: L.Arm   — R2 col 4  (flanking head, shoulder position)
+    (6, 1),  # 5: R.Arm   — R2 col 6  (flanking head, shoulder position)
     (4, 5),  # 6: L.Leg   — R6 col 4
     (6, 5),  # 7: R.Leg   — R6 col 6
     (4, 7),  # 8: L.Foot  — R8 col 4
@@ -93,10 +93,29 @@ _EQ_SLOT_GRID_POS: List[Tuple[int, int]] = [
 ]
 _EQ_GRID_HIT: dict = {pos: i for i, pos in enumerate(_EQ_SLOT_GRID_POS)}
 
+# Maps each EQ slot index to the corresponding BodyPartType for damage display.
+# Import deferred to avoid circular dependency — used inside _fill_eq_grid_console.
+_EQ_SLOT_BODY_PART_NAME = [
+    "RIGHT_HAND",  # 0: R.Hand
+    "LEFT_HAND",   # 1: L.Hand
+    "HEAD",        # 2: Head
+    "TORSO",       # 3: Torso
+    "LEFT_ARM",    # 4: L.Arm
+    "RIGHT_ARM",   # 5: R.Arm
+    "LEFT_LEG",    # 6: L.Leg
+    "RIGHT_LEG",   # 7: R.Leg
+    "LEFT_FOOT",   # 8: L.Foot
+    "RIGHT_FOOT",  # 9: R.Foot
+    "TORSO",       # 10: Back (shares torso body part)
+]
+
 # Info strip (grid rows 3–29 = 27 rows, separator at 30, info at 31)
 _INFO_SEP_Y = 30    # separator row above info strip
 _INFO_Y     = 31    # first info content row
 #  rows 31-34 = info lines; row 35 = bottom frame edge
+
+# Persistent alt damage-view toggle — retained across inventory opens.
+_ALT_DAMAGE_VIEW: bool = False
 
 # ── Colour palette ───────────────────────────────────────────────────────────
 # Background layers
@@ -200,6 +219,7 @@ class InventoryGridUI(PopupEventHandler):
         self._drag_src_type: Optional[str]    = None   # 'inv' | 'eq'
         self._drag_src_idx:  Optional[int]    = None
         self._drag_tile:     Tuple[int, int]  = (0, 0) # last known 80×50 tile coord
+        self._drag_pixel:    Tuple[int, int]  = (0, 0) # sub-tile pixel coord
 
         # Tab-hit-test regions (rebuilt each render)
         self._tab_regions: List[Tuple[int, int, int]] = []  # [(x0, x1, cat_i), ...]
@@ -241,14 +261,20 @@ class InventoryGridUI(PopupEventHandler):
         dy = _clamp(dy, 0, 50 - _GRID_SCALE)
         return (dx, dy, _GRID_SCALE, _GRID_SCALE)
 
+    @property
+    def _drag_dest_pixels(self) -> Tuple[int, int, int, int]:
+        """Drag ghost pixel rect, centred on the actual pixel cursor position."""
+        px, py = self._drag_pixel
+        size   = _GRID_SCALE * 16  # 3 tiles × 16 px/tile = 48 px
+        return (px - size // 2, py - size // 2, size, size)
+
     def _fill_drag_console(self) -> None:
         """Write the dragged item glyph into the 1×1 drag console.
-        Background is black – combined with ADD blend mode in main.py the
-        background becomes transparent while the glyph colour is added (glows)."""
+        Black bg + ADD blend in main.py = transparent bg, glyph only."""
         if self._drag_item is None:
             return
         item_ch  = getattr(self._drag_item, "char", "?")
-        item_col = getattr(self._drag_item, "rarity_color", (255, 255, 255))
+        item_col = getattr(self._drag_item, "color", (200, 180, 100))
         self._drag_console.print(0, 0, item_ch, fg=item_col, bg=(0, 0, 0))
 
     @property
@@ -435,7 +461,7 @@ class InventoryGridUI(PopupEventHandler):
 
         # ── Scroll indicators (scroll already clamped by _fill_grid_console) ──────
         inv    = self.engine.player.inventory
-        inv.sync_slots()
+        self._resync_inv_slots()
         n_slots  = len(inv.item_slots)
         _max_s   = max(0, -(-n_slots // _GRID_COLS) - _GRID_ROWS)
         if self._scroll > 0:
@@ -485,7 +511,7 @@ class InventoryGridUI(PopupEventHandler):
         """Fill self._grid_console with item glyphs using slot-based positioning."""
         gc  = self._grid_console
         inv = self.engine.player.inventory
-        inv.sync_slots()
+        self._resync_inv_slots()
 
         n_slots    = len(inv.item_slots)
         total_rows = max(1, -(-n_slots // _GRID_COLS))
@@ -608,6 +634,17 @@ class InventoryGridUI(PopupEventHandler):
         gc.tiles_rgb["fg"][:, :] = (0, 0, 0)
         gc.tiles_rgb["ch"][:, :] = ord(" ")
 
+        # Build damage map from player body parts (0.0 = healthy, 1.0 = destroyed)
+        _bp_damage: dict = {}
+        try:
+            from components.body_parts import BodyPartType as _BPT
+            bp_comp = getattr(getattr(self.engine.player, 'body_parts', None), 'body_parts', None)
+            if bp_comp:
+                for _bpt, _bp in bp_comp.items():
+                    _bp_damage[_bpt.name] = _bp.damage_level_float
+        except Exception:
+            pass
+
         # Draw slot cells on top
         for i, (label, _) in enumerate(_EQ_SLOTS):
             col, row    = _EQ_SLOT_GRID_POS[i]
@@ -646,10 +683,15 @@ class InventoryGridUI(PopupEventHandler):
 
         if item is None:
             if slot_label is not None:
+                # Show empty slot info + body part damage
                 c.print(2, _INFO_Y, f"[{slot_label}]  — empty",
                         fg=_SLOT_EMPTY_V, bg=_BG)
-                c.print(2, _INFO_Y + 1, "Drag an item here to equip it",
-                        fg=_HINT_FG, bg=_BG)
+                _dmg_text, _dmg_col = self._get_slot_damage_info(self._sel_eq)
+                if _dmg_text:
+                    c.print(2, _INFO_Y + 1, _dmg_text, fg=_dmg_col, bg=_BG)
+                else:
+                    c.print(2, _INFO_Y + 1, "Drag an item here to equip it",
+                            fg=_HINT_FG, bg=_BG)
             else:
                 c.print(2, _INFO_Y, "Hover or click an item to inspect",
                         fg=_HINT_FG, bg=_BG)
@@ -683,6 +725,40 @@ class InventoryGridUI(PopupEventHandler):
         stat_str = "  ".join(parts)[:(_C_W - 4)]
         c.print(2, _INFO_Y + 1, stat_str, fg=_INFO_STAT, bg=_BG)
 
+        # Body-part damage (only shown for equipment slots)
+        if slot_label is not None:
+            _dmg_text, _dmg_col = self._get_slot_damage_info(self._sel_eq)
+            if _dmg_text:
+                c.print(2, _INFO_Y + 2, _dmg_text, fg=_dmg_col, bg=_BG)
+
+    def _get_slot_damage_info(self, slot_i: int):
+        """Return (text, colour) for body-part damage at eq slot index, or ('', None)."""
+        if slot_i < 0 or slot_i >= len(_EQ_SLOT_BODY_PART_NAME):
+            return '', None
+        part_name = _EQ_SLOT_BODY_PART_NAME[slot_i]
+        try:
+            bp_comp = getattr(getattr(self.engine.player, 'body_parts', None), 'body_parts', None)
+            if not bp_comp:
+                return '', None
+            from components.body_parts import BodyPartType as _BPT
+            bpt = _BPT[part_name]
+            bp  = bp_comp.get(bpt)
+            if bp is None:
+                return '', None
+            dmg_text  = bp.damage_level_text   # 'healthy' / 'damaged' / ... / 'destroyed'
+            dmg_ratio = bp.current_hp / bp.max_hp if bp.max_hp > 0 else 0.0
+            if dmg_text == 'healthy':
+                return f"● {part_name.replace('_',' ').title()}: healthy", (80, 160, 80)
+            colour = (
+                (220, 200, 60)  if dmg_ratio > 0.75 else
+                (220, 140, 40)  if dmg_ratio > 0.50 else
+                (200,  80, 20)  if dmg_ratio > 0.25 else
+                (190,  30, 20)
+            )
+            return f"● {part_name.replace('_',' ').title()}: {dmg_text}", colour
+        except Exception:
+            return '', None
+
     # ─────────────────────────────────────────────────────────────────────────
     # Event handlers
     # ─────────────────────────────────────────────────────────────────────────
@@ -690,7 +766,8 @@ class InventoryGridUI(PopupEventHandler):
     def ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:
         super().ev_mousemotion(event)
         tx, ty = int(event.tile.x), int(event.tile.y)
-        self._drag_tile = (tx, ty)
+        self._drag_tile  = (tx, ty)
+        self._drag_pixel = (int(event.pixel.x), int(event.pixel.y))
 
         # Update hover selection
         cell = self._hit_inv_cell(tx, ty)
@@ -721,6 +798,8 @@ class InventoryGridUI(PopupEventHandler):
 
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[object]:
         tx, ty = int(event.tile.x), int(event.tile.y)
+        ks    = tcod.event.get_keyboard_state()
+        shift = bool(ks[225] or ks[229])  # SDL_SCANCODE_LSHIFT=225, RSHIFT=229
 
         # ── Category tab ──────────────────────────────────────────────────────
         tab = self._hit_category_tab(tx, ty)
@@ -741,18 +820,21 @@ class InventoryGridUI(PopupEventHandler):
                 if event.button == tcod.event.BUTTON_RIGHT:
                     return ItemContextMenu(self, item, tx, ty)
                 if event.button == tcod.event.BUTTON_LEFT:
-                    self.engine.mouse_held = True
-                    self._sel_inv       = slot_idx
-                    self._sel_eq        = -1
-                    self._drag_item     = item
-                    self._drag_src_type = "inv"
-                    self._drag_src_idx  = slot_idx
-                    self._drag_tile     = (tx, ty)
-                    if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
-                        try:
-                            item.pickup_sound()
-                        except Exception:
-                            pass
+                    self._sel_inv = slot_idx
+                    self._sel_eq  = -1
+                    if shift and getattr(item, "equippable", None):
+                        self._shift_equip_item(item)
+                    else:
+                        self.engine.mouse_held = True
+                        self._drag_item     = item
+                        self._drag_src_type = "inv"
+                        self._drag_src_idx  = slot_idx
+                        self._drag_tile     = (tx, ty)
+                        if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
+                            try:
+                                item.pickup_sound()
+                            except Exception:
+                                pass
             return None
 
         # ── Equipment slot ────────────────────────────────────────────────────
@@ -762,10 +844,12 @@ class InventoryGridUI(PopupEventHandler):
             if event.button == tcod.event.BUTTON_RIGHT and item:
                 return ItemContextMenu(self, item, tx, ty)
             if event.button == tcod.event.BUTTON_LEFT:
-                self.engine.mouse_held = True
                 self._sel_eq  = slot_i
                 self._sel_inv = -1
-                if item:
+                if shift and item:
+                    self._unequip_to_first_slot(item)
+                elif item:
+                    self.engine.mouse_held = True
                     self._drag_item     = item
                     self._drag_src_type = "eq"
                     self._drag_src_idx  = slot_i
@@ -829,8 +913,8 @@ class InventoryGridUI(PopupEventHandler):
                 except Exception:
                     pass
                 inv = self.engine.player.inventory
-                inv.sync_slots()
-                # Find where the item landed after sync, then move it to dst_slot
+                self._resync_inv_slots()
+                # Find where the item landed after resync (slot 0), then move it to dst_slot
                 while len(inv.item_slots) <= dst_slot:
                     inv.item_slots.append(None)
                 for i, s in enumerate(inv.item_slots):
@@ -854,6 +938,8 @@ class InventoryGridUI(PopupEventHandler):
                         actions.EquipAction(self.engine.player, item).perform()
                 except Exception as exc:
                     self.engine.message_log.add_message(str(exc), color.impossible)
+                else:
+                    self._clear_from_item_slots(item)  # free slot; re-assigned on unequip
 
         else:
             # Released outside any valid drop target — drop to ground if outside UI border.
@@ -863,6 +949,110 @@ class InventoryGridUI(PopupEventHandler):
                     actions.DropItem(self.engine.player, item).perform()
                 except Exception as exc:
                     self.engine.message_log.add_message(str(exc), color.impossible)
+
+    def _clear_from_item_slots(self, item: "Item") -> None:
+        """Null out this item's slot entry.  _resync_inv_slots handles placement."""
+        inv = self.engine.player.inventory
+        if not hasattr(inv, "item_slots"):
+            return
+        for i, s in enumerate(inv.item_slots):
+            if s is item:
+                inv.item_slots[i] = None
+                return
+
+    def _resync_inv_slots(self) -> None:
+        """Keep item_slots consistent: equipped items invisible, drag positions
+        preserved, new items placed at first free slot from 0.
+
+        Phase 1 — clear/upgrade stale entries:
+          - Entry is still valid & un-equipped → keep it.
+          - Entry is stale but a same-type group exists (stack consumed) →
+            replace in-place so the stack stays in its slot.
+          - Entry is completely stale → null out.
+        Phase 2 — items not yet assigned a slot fill the first available None.
+        """
+        inv = self.engine.player.inventory
+        eq  = self.engine.player.equipment
+
+        if not hasattr(inv, 'item_slots') or inv.item_slots is None:
+            inv.item_slots = []
+
+        groups = inv.get_display_groups()
+        valid_unequipped = {id(g['item']): g for g in groups
+                            if not eq.item_is_equipped(g['item'])}
+
+        # Phase 1
+        slotted: set = set()
+        for i, s in enumerate(inv.item_slots):
+            if s is None:
+                continue
+            if id(s) in valid_unequipped:
+                slotted.add(id(s))
+            else:
+                # Stale entry — try in-place replacement with same display type
+                stale_key = inv._get_item_display_key(s)
+                replacement = None
+                for gid, g in valid_unequipped.items():
+                    if gid not in slotted and inv._get_item_display_key(g['item']) == stale_key:
+                        replacement = g['item']
+                        break
+                if replacement is not None:
+                    inv.item_slots[i] = replacement
+                    slotted.add(id(replacement))
+                else:
+                    inv.item_slots[i] = None
+
+        # Phase 2: place unslotted items at first free slot from 0
+        for gid, g in valid_unequipped.items():
+            rep = g['item']
+            if id(rep) in slotted:
+                continue
+            placed = False
+            for i in range(len(inv.item_slots)):
+                if inv.item_slots[i] is None:
+                    inv.item_slots[i] = rep
+                    slotted.add(id(rep))
+                    placed = True
+                    break
+            if not placed:
+                inv.item_slots.append(rep)
+                slotted.add(id(rep))
+
+    def _shift_equip_item(self, item: "Item") -> None:
+        """Equip item into the next available compatible slot.
+        Hand items prefer an empty hand; other types go straight to equip_item."""
+        eq = self.engine.player.equipment
+        is_hand = "hand" in getattr(item.equippable, "required_tags", set())
+        try:
+            if is_hand:
+                right_free = (eq.body_part_coverage.get("right hand") is None and
+                              eq.grasped_items.get("right hand") is None)
+                left_free  = (eq.body_part_coverage.get("left hand") is None and
+                              eq.grasped_items.get("left hand") is None)
+                if right_free:
+                    pref = "right"
+                elif left_free:
+                    pref = "left"
+                else:
+                    pref = "right"  # displace right-hand item
+                eq.equip_item(item, add_message=True, preferred_hand=pref)
+            else:
+                eq.equip_item(item, add_message=True)
+        except Exception as exc:
+            self.engine.message_log.add_message(str(exc), color.impossible)
+            return
+        # Free the slot — sync_slots will fill it if the item re-enters inventory
+        self._clear_from_item_slots(item)
+
+    def _unequip_to_first_slot(self, item: "Item") -> None:
+        """Unequip item; sync_slots places it at first free slot (from 0) next frame."""
+        try:
+            self.engine.player.equipment.unequip_item(item, add_message=True)
+        except Exception as exc:
+            self.engine.message_log.add_message(str(exc), color.impossible)
+            return
+        # Clear so sync_slots treats it as a newly-entered item
+        self._clear_from_item_slots(item)
 
     def _swap_inv_slots(self, src_slot: int, dst_slot: int) -> None:
         """Swap two slot positions in inventory.item_slots.
@@ -878,7 +1068,13 @@ class InventoryGridUI(PopupEventHandler):
         slots[src_slot], slots[dst_slot] = slots[dst_slot], slots[src_slot]
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[object]:
+        global _ALT_DAMAGE_VIEW
         key = event.sym
+
+        # Alt toggles the damage-view overlay (persistent across inventory opens)
+        if key in (tcod.event.KeySym.LALT, tcod.event.KeySym.RALT):
+            _ALT_DAMAGE_VIEW = not _ALT_DAMAGE_VIEW
+            return None
 
         if key == tcod.event.K_ESCAPE:
             return self.on_exit()
@@ -962,6 +1158,7 @@ class InventoryGridUI(PopupEventHandler):
                         actions.EquipAction(self.engine.player, item).perform()
                     except Exception as exc:
                         self.engine.message_log.add_message(str(exc), color.impossible)
+                    self._clear_from_item_slots(item)  # free slot regardless of equip/unequip
                     return None
 
         elif self._sel_eq >= 0:
@@ -971,6 +1168,8 @@ class InventoryGridUI(PopupEventHandler):
                     self.engine.player.equipment.unequip_item(item, add_message=True)
                 except Exception as exc:
                     self.engine.message_log.add_message(str(exc), color.impossible)
+                    return None
+                self._clear_from_item_slots(item)  # let sync_slots place at first free slot
                 return None
 
         return None
@@ -1030,7 +1229,46 @@ class ContainerGridUI(PopupEventHandler):
         self._grid_console           = tcod.console.Console(_CC_GRID_COLS, _CC_GRID_ROWS, order="F")
         self._container_grid_console = tcod.console.Console(_CC_GRID_COLS, _CC_GRID_ROWS, order="F")
         self._player_qty_console     = tcod.console.Console(_CC_GRID_COLS * _CC_GRID_SCALE, _CC_GRID_ROWS * _CC_GRID_SCALE, order="F")
+        self._container_qty_console  = tcod.console.Console(_CC_GRID_COLS * _CC_GRID_SCALE, _CC_GRID_ROWS * _CC_GRID_SCALE, order="F")
         self._drag_console           = tcod.console.Console(1, 1, order="F")
+
+        # Sparse slot list for the container panel: items at random positions,
+        # None = empty cell.  Persisted on the container object so the layout
+        # survives between opens.  Drag reorders in-place; transfers update it.
+        import random as _rand
+        n_grid = _CC_GRID_COLS * _CC_GRID_ROWS
+        if not hasattr(container, '_ui_slots'):
+            # First open: scatter items into random positions and remember them.
+            items = list(container.items)
+            if len(items) <= n_grid:
+                positions = _rand.sample(range(n_grid), len(items))
+                container._ui_slots = [None] * n_grid
+                for pos, item in zip(positions, items):
+                    container._ui_slots[pos] = item
+            else:
+                container._ui_slots = [None] * n_grid
+                for i, item in enumerate(items[:n_grid]):
+                    container._ui_slots[i] = item
+                container._ui_slots.extend(items[n_grid:])
+        else:
+            # Subsequent open: sync stale entries (items removed externally).
+            valid = set(id(it) for it in container.items)
+            for i, s in enumerate(container._ui_slots):
+                if s is not None and id(s) not in valid:
+                    container._ui_slots[i] = None
+            # Any item not yet in slots (added externally) → first free slot.
+            slotted = {id(s) for s in container._ui_slots if s is not None}
+            for it in container.items:
+                if id(it) not in slotted:
+                    placed = False
+                    for i in range(len(container._ui_slots)):
+                        if container._ui_slots[i] is None:
+                            container._ui_slots[i] = it
+                            placed = True
+                            break
+                    if not placed:
+                        container._ui_slots.append(it)
+        self._container_slots: list = container._ui_slots
 
         self._player_scroll: int    = 0
         self._container_scroll: int = 0
@@ -1043,6 +1281,7 @@ class ContainerGridUI(PopupEventHandler):
         self._drag_src_type: Optional[str]    = None   # "player" | "container"
         self._drag_src_idx:  Optional[int]    = None
         self._drag_tile:     Tuple[int, int]  = (0, 0)
+        self._drag_pixel:    Tuple[int, int]  = (0, 0)
 
         self._set_popup_bounds(_CC_BLIT_X, _CC_BLIT_Y, _CC_W, _CC_H)
 
@@ -1096,13 +1335,23 @@ class ContainerGridUI(PopupEventHandler):
         dy = _clamp(ty - _CC_GRID_SCALE // 2, 0, 50 - _CC_GRID_SCALE)
         return (dx, dy, _CC_GRID_SCALE, _CC_GRID_SCALE)
 
+    @property
+    def _drag_dest_pixels(self) -> Tuple[int, int, int, int]:
+        """Drag ghost pixel rect, centred on the actual pixel cursor position."""
+        px, py = self._drag_pixel
+        size   = _CC_GRID_SCALE * 16
+        return (px - size // 2, py - size // 2, size, size)
+
     # ── Data helpers ──────────────────────────────────────────────────────────
 
     def _get_player_groups(self):
         return self.engine.player.inventory.get_display_groups()
 
     def _get_container_groups(self):
-        return [{"item": it} for it in self.container.items]
+        """Return a sparse list mirroring _container_slots.
+        Entries are {"item": item} for filled slots, None for empty slots."""
+        return [{"item": s} if s is not None else None
+                for s in self._container_slots]
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
@@ -1118,6 +1367,9 @@ class ContainerGridUI(PopupEventHandler):
         self._container_grid_console.clear()
         self._fill_container_grid()
 
+        self._container_qty_console.clear()
+        self._fill_container_qty_console()
+
         if self._drag_item is not None:
             self._drag_console.clear()
             self._fill_drag_console()
@@ -1131,7 +1383,7 @@ class ContainerGridUI(PopupEventHandler):
         if self._drag_item is None:
             return
         item_ch  = getattr(self._drag_item, "char", "?")
-        item_col = getattr(self._drag_item, "color", (255, 255, 255))
+        item_col = getattr(self._drag_item, "color", (200, 180, 100))
         self._drag_console.print(0, 0, item_ch, fg=item_col, bg=(0, 0, 0))
 
     def _fill_player_qty_console(self) -> None:
@@ -1160,8 +1412,31 @@ class ContainerGridUI(PopupEventHandler):
                     gc.print(px, py + _CC_GRID_SCALE - 1, enc_label,
                              fg=(120, 200, 255), bg=(0, 0, 0))
 
+    def _fill_container_qty_console(self) -> None:
+        gc = self._container_qty_console
+        gc.tiles_rgb['bg'][:, :] = 0
+        gc.tiles_rgb['fg'][:, :] = 0
+        gc.tiles_rgb['ch'][:, :] = ord(' ')
+        for row in range(_CC_GRID_ROWS):
+            for col in range(_CC_GRID_COLS):
+                idx = self._cell_to_idx(col, row, self._container_scroll)
+                if idx >= len(self._container_slots):
+                    continue
+                item = self._container_slots[idx]
+                if item is None:
+                    continue
+                px  = col * _CC_GRID_SCALE
+                py  = row * _CC_GRID_SCALE
+                enc = getattr(item, 'enchantment_level', 0)
+                if enc and enc > 0:
+                    import roman as _roman
+                    enc_label = f"+{_roman.toRoman(enc)}".rjust(_CC_GRID_SCALE)
+                    gc.print(px, py + _CC_GRID_SCALE - 1, enc_label,
+                             fg=(120, 200, 255), bg=(0, 0, 0))
+
     def _fill_side_grid(self, gc, groups, sel: int, scroll: int, src_key: str) -> int:
-        """Fill one grid console; returns the clamped scroll value."""
+        """Fill one grid console; returns the clamped scroll value.
+        groups may be sparse (entries can be None for empty slots)."""
         total      = len(groups)
         max_scroll = max(0, -(-total // _CC_GRID_COLS) - _CC_GRID_ROWS)
         scroll     = _clamp(scroll, 0, max_scroll)
@@ -1169,13 +1444,14 @@ class ContainerGridUI(PopupEventHandler):
         for row in range(_CC_GRID_ROWS):
             for col in range(_CC_GRID_COLS):
                 idx         = (scroll + row) * _CC_GRID_COLS + col
-                is_filled   = idx < total
+                grp         = groups[idx] if idx < total else None
+                is_filled   = grp is not None
                 is_sel      = (idx == sel)
                 is_drag_src = (self._drag_src_type == src_key
                                and self._drag_src_idx == idx)
 
                 if is_filled:
-                    item        = groups[idx]["item"]
+                    item        = grp["item"]
                     is_equipped = (src_key == "player"
                                    and self.engine.player.equipment.item_is_equipped(item))
                 else:
@@ -1289,7 +1565,7 @@ class ContainerGridUI(PopupEventHandler):
                 item = groups[self._sel_player]["item"]
         elif self._sel_container >= 0:
             groups = self._get_container_groups()
-            if self._sel_container < len(groups):
+            if self._sel_container < len(groups) and groups[self._sel_container] is not None:
                 item = groups[self._sel_container]["item"]
 
         if item is None:
@@ -1321,7 +1597,8 @@ class ContainerGridUI(PopupEventHandler):
     def ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:
         super().ev_mousemotion(event)
         tx, ty = int(event.tile.x), int(event.tile.y)
-        self._drag_tile = (tx, ty)
+        self._drag_tile  = (tx, ty)
+        self._drag_pixel = (int(event.pixel.x), int(event.pixel.y))
 
         cell = self._hit_left_cell(tx, ty)
         if cell is not None:
@@ -1344,7 +1621,7 @@ class ContainerGridUI(PopupEventHandler):
             col, row = cell
             idx    = self._cell_to_idx(col, row, self._container_scroll)
             groups = self._get_container_groups()
-            if idx < len(groups):
+            if idx < len(groups) and groups[idx] is not None:
                 if idx != self._sel_container:
                     self._sel_container = idx
                     self._sel_player    = -1
@@ -1400,7 +1677,7 @@ class ContainerGridUI(PopupEventHandler):
             col, row = cell
             idx    = self._cell_to_idx(col, row, self._container_scroll)
             groups = self._get_container_groups()
-            if idx < len(groups):
+            if idx < len(groups) and groups[idx] is not None:
                 item = groups[idx]["item"]
                 if event.button == tcod.event.BUTTON_RIGHT:
                     return ItemContextMenu(self, item, tx, ty)
@@ -1492,6 +1769,15 @@ class ContainerGridUI(PopupEventHandler):
         except ValueError:
             return
         self.container.items.append(item)
+        # Place in first free slot of _container_slots
+        placed = False
+        for i in range(len(self._container_slots)):
+            if self._container_slots[i] is None:
+                self._container_slots[i] = item
+                placed = True
+                break
+        if not placed:
+            self._container_slots.append(item)
         try: item.parent = self.container
         except Exception: pass
         c_name = getattr(self.container.parent, "name", "container")
@@ -1508,6 +1794,11 @@ class ContainerGridUI(PopupEventHandler):
         if "coin" in item.name.lower():
             try: self.container.items.remove(item)
             except ValueError: return
+            # Clear from slot list
+            for i, s in enumerate(self._container_slots):
+                if s is item:
+                    self._container_slots[i] = None
+                    break
             self.engine.player.gold += getattr(item, "value", 0)
             self.engine.message_log.add_message("You pick up some coins.")
             if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
@@ -1518,6 +1809,11 @@ class ContainerGridUI(PopupEventHandler):
             self.container.items.remove(item)
         except ValueError:
             return
+        # Clear from container slot list
+        for i, s in enumerate(self._container_slots):
+            if s is item:
+                self._container_slots[i] = None
+                break
         self.engine.player.inventory.items.append(item)
         try: item.parent = self.engine.player.inventory
         except Exception: pass
@@ -1544,9 +1840,12 @@ class ContainerGridUI(PopupEventHandler):
             pass
 
     def _swap_container_items(self, src_idx: int, dst_idx: int) -> None:
-        items = self.container.items
-        if src_idx < len(items) and dst_idx < len(items):
-            items[src_idx], items[dst_idx] = items[dst_idx], items[src_idx]
+        slots = self._container_slots
+        # Grow if needed (dst beyond current length)
+        while len(slots) <= dst_idx:
+            slots.append(None)
+        if src_idx < len(slots):
+            slots[src_idx], slots[dst_idx] = slots[dst_idx], slots[src_idx]
 
     # ── Keyboard ──────────────────────────────────────────────────────────────
 
@@ -1579,7 +1878,8 @@ class ContainerGridUI(PopupEventHandler):
                         self._transfer_to_container(groups[self._sel_player]["item"])
                 elif self._sel_container >= 0:
                     groups = self._get_container_groups()
-                    if self._sel_container < len(groups):
+                    if (self._sel_container < len(groups)
+                            and groups[self._sel_container] is not None):
                         self._transfer_to_player(groups[self._sel_container]["item"])
             return None
 

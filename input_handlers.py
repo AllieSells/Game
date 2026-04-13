@@ -2615,6 +2615,9 @@ class ItemContextMenu(EventHandler):
                 actions.EquipAction(self.engine.player, item).perform()
             except exceptions.Impossible as exc:
                 self.engine.message_log.add_message(exc.args[0], color.impossible)
+            # Move item to first free slot so unequip/equip doesn't snap back to origin
+            if hasattr(self.parent_handler, '_clear_from_item_slots'):
+                self.parent_handler._clear_from_item_slots(item)
             return self.parent_handler
 
         elif action_key == "throw":

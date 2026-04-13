@@ -344,22 +344,29 @@ class Fighter(BaseComponent):
                 pass
     
     def _heal_body_parts(self, amount_recovered: int) -> bool:
-        """Heal damaged body parts proportionally to the player's HP recovery."""
+        """Heal damaged body parts so they track the player's overall HP ratio.
+
+        After any heal the player's current/max ratio is used as a floor:
+        body parts can be more damaged than average (from a targeted hit) but
+        cannot be less healthy than the player's overall condition.
+        """
         if not hasattr(self.parent, 'body_parts') or not self.parent.body_parts:
             return False
-        
-        # Calculate healing ratio: portion of missing HP actually restored
-        old_hp = self.hp - amount_recovered
-        missing_hp = self.max_hp - old_hp
-        healing_ratio = (amount_recovered / missing_hp) if missing_hp > 0 else 0
-        
+        if amount_recovered <= 0:
+            return False
+
+        # Overall health ratio after this heal (e.g. 0.67 when at 20/30 HP)
+        player_ratio = (self.hp / self.max_hp) if self.max_hp > 0 else 1.0
+
         parts_healed = False
         for part in self.parent.body_parts.body_parts.values():
-            part_missing = part.max_hp - part.current_hp
-            part_heal = int(part_missing * healing_ratio)
-            if part_heal > 0:
-                actual_healing = part.heal(part_heal)
-                if actual_healing > 0:
+            if part.current_hp >= part.max_hp:
+                continue
+            # Floor: part should be at least as healthy as the player overall
+            target_hp = round(player_ratio * part.max_hp)
+            if target_hp > part.current_hp:
+                actual = part.heal(target_hp - part.current_hp)
+                if actual > 0:
                     parts_healed = True
         return parts_healed
 

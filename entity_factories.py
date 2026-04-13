@@ -477,12 +477,12 @@ import roman
 def generate_sigil_stone() -> Item:
     # Use current random state - no individual seeding needed
     unlocks_and_descriptions = {
-        #'Teleport' : "Distort space around you",
-        #"Darkvision": "Sight persists in darkness",
-        #'Poison Spray': "Summon corrosive elements at your will",
-        #'Fireball': 'Unleash flames upon your foes',
-        #'Healing Word': 'Soothing light mends wounds',
-        #'Inflict Wounds': 'Invoke necrotic forces upon your foes',
+        'Teleport' : "Distort space around you",
+        "Darkvision": "Sight persists in darkness",
+        'Poison Spray': "Summon corrosive elements at your will",
+        'Fireball': 'Unleash flames upon your foes',
+        'Healing Word': 'Soothing light mends wounds',
+        'Inflict Wounds': 'Invoke necrotic forces upon your foes',
         'Light': 'Illuminate the darkness around you',
     }
     
@@ -497,6 +497,7 @@ def generate_sigil_stone() -> Item:
         name="Sigil Stone",
         description=description,
         rarity_color=color.rare,
+        weight=0.1,
         tags = ["sigil", "stone", "arcane", "magic"],
         consumable=consumable.SigilStoneConsumable(unlock_name=unlock_name),
         pickup_sound=sounds.play_stone_sound,

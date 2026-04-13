@@ -1,0 +1,549 @@
+{
+  "creation": {
+    "children": [
+      "time",
+      "space"
+    ],
+    "precluded": [
+      "destruction"
+    ]
+  },
+  "time": {
+    "children": [
+      "fate",
+      "erosion"
+    ],
+    "precluded": [
+      "void"
+    ]
+  },
+  "space": {
+    "children": [
+      "earth",
+      "fire",
+      "wind",
+      "water"
+    ],
+    "precluded": [
+      "void"
+    ]
+  },
+  "destruction": {
+    "children": [
+      "war",
+      "death"
+    ],
+    "precluded": [
+      "creation",
+      "life"
+    ]
+  },
+  "fate": {
+    "children": [
+      "time"
+    ],
+    "precluded": []
+  },
+  "erosion": {
+    "children": [
+      "earth"
+    ],
+    "precluded": []
+  },
+  "void": {
+    "children": [],
+    "precluded": []
+  },
+  "earth": {
+    "children": [
+      "stone",
+      "metal",
+      "structure"
+    ],
+    "precluded": [
+      "erosion"
+    ]
+  },
+  "fire": {
+    "children": [
+      "light",
+      "heat"
+    ],
+    "precluded": [
+      "water"
+    ]
+  },
+  "wind": {
+    "children": [
+      "sky"
+    ],
+    "precluded": []
+  },
+  "water": {
+    "children": [
+      "ocean",
+      "river",
+      "life"
+    ],
+    "precluded": [
+      "fire"
+    ]
+  },
+  "war": {
+    "children": [
+      "death",
+      "destruction"
+    ],
+    "precluded": [
+      "life"
+    ]
+  },
+  "death": {
+    "children": [
+      "disease",
+      "starvation",
+      "pain"
+    ],
+    "precluded": [
+      "life"
+    ]
+  },
+  "life": {
+    "children": [
+      "animals",
+      "plants",
+      "people",
+      "earth",
+      "water"
+    ],
+    "precluded": [
+      "death",
+      "war",
+      "destruction"
+    ]
+  },
+  "stone": {
+    "children": [
+      "structure",
+      "gems",
+      "ores",
+      "metal"
+    ],
+    "precluded": [
+      "water"
+    ]
+  },
+  "metal": {
+    "children": [
+      "smithing",
+      "fire"
+    ],
+    "precluded": []
+  },
+  "structure": {
+    "children": [
+      "society"
+    ],
+    "precluded": [
+      "chaos"
+    ]
+  },
+  "light": {
+    "children": [
+      "fire"
+    ],
+    "precluded": [
+      "dark"
+    ]
+  },
+  "heat": {
+    "children": [
+      "fire"
+    ],
+    "precluded": [
+      "cold"
+    ]
+  },
+  "sky": {
+    "children": [
+      "sun",
+      "moon",
+      "stars"
+    ],
+    "precluded": [
+      "earth"
+    ]
+  },
+  "ocean": {
+    "children": [
+      "fish",
+      "water",
+      "rivers"
+    ],
+    "precluded": [
+      "fire",
+      "earth"
+    ]
+  },
+  "river": {
+    "children": [
+      "water",
+      "fish"
+    ],
+    "precluded": [
+      "fire",
+      "earth"
+    ]
+  },
+  "disease": {
+    "children": [
+      "death"
+    ],
+    "precluded": []
+  },
+  "starvation": {
+    "children": [
+      "death"
+    ],
+    "precluded": []
+  },
+  "pain": {
+    "children": [
+      "death"
+    ],
+    "precluded": []
+  },
+  "animals": {
+    "children": [
+      "life",
+      "meat",
+      "society",
+      "structure"
+    ],
+    "precluded": [
+      "death"
+    ]
+  },
+  "plants": {
+    "children": [
+      "forests",
+      "water",
+      "earth",
+      "mushrooms"
+    ],
+    "precluded": [
+      "fire",
+      "death"
+    ]
+  },
+  "people": {
+    "children": [
+      "society",
+      "speech",
+      "life"
+    ],
+    "precluded": [
+      "death"
+    ]
+  },
+  "gems": {
+    "children": [
+      "wealth",
+      "society",
+      "stone"
+    ],
+    "precluded": []
+  },
+  "ores": {
+    "children": [
+      "wealth",
+      "smithing",
+      "earth"
+    ],
+    "precluded": []
+  },
+  "smithing": {
+    "children": [
+      "fire",
+      "heat",
+      "society"
+    ],
+    "precluded": []
+  },
+  "society": {
+    "children": [
+      "laws",
+      "people",
+      "life",
+      "war"
+    ],
+    "precluded": []
+  },
+  "chaos": {
+    "children": [],
+    "precluded": []
+  },
+  "dark": {
+    "children": [
+      "void"
+    ],
+    "precluded": []
+  },
+  "cold": {
+    "children": [
+      "ice"
+    ],
+    "precluded": []
+  },
+  "sun": {
+    "children": [
+      "heat",
+      "light"
+    ],
+    "precluded": []
+  },
+  "moon": {
+    "children": [
+      "dark",
+      "void"
+    ],
+    "precluded": []
+  },
+  "stars": {
+    "children": [
+      "void",
+      "space"
+    ],
+    "precluded": []
+  },
+  "fish": {
+    "children": [
+      "water",
+      "rivers",
+      "oceans"
+    ],
+    "precluded": []
+  },
+  "rivers": {
+    "children": [
+      "fish"
+    ],
+    "precluded": []
+  },
+  "meat": {
+    "children": [
+      "fish",
+      "animals",
+      "society"
+    ],
+    "precluded": []
+  },
+  "forests": {
+    "children": [
+      "wood",
+      "life"
+    ],
+    "precluded": []
+  },
+  "mushrooms": {
+    "children": [
+      "food",
+      "forests",
+      "life",
+      "nature"
+    ],
+    "precluded": []
+  },
+  "speech": {
+    "children": [
+      "society",
+      "people"
+    ],
+    "precluded": []
+  },
+  "wealth": {
+    "children": [
+      "greed",
+      "gems",
+      "ores"
+    ],
+    "precluded": []
+  },
+  "laws": {
+    "children": [
+      "hate",
+      "war"
+    ],
+    "precluded": [
+      "chaos"
+    ]
+  },
+  "ice": {
+    "children": [
+      "cold"
+    ],
+    "precluded": []
+  },
+  "oceans": {
+    "children": [
+      "fish"
+    ],
+    "precluded": []
+  },
+  "wood": {
+    "children": [
+      "forests",
+      "life",
+      "structure"
+    ],
+    "precluded": []
+  },
+  "food": {
+    "children": [
+      "fish",
+      "meat",
+      "animals",
+      "society",
+      "people"
+    ],
+    "precluded": []
+  },
+  "nature": {
+    "children": [
+      "forests",
+      "oceans",
+      "rivers",
+      "fish",
+      "animals"
+    ],
+    "precluded": []
+  },
+  "greed": {
+    "children": [
+      "laws",
+      "hate",
+      "war"
+    ],
+    "precluded": []
+  },
+  "hate": {
+    "children": [
+      "death",
+      "war"
+    ],
+    "precluded": []
+  },
+  "sand": {
+    "children": [
+      "nature",
+      "earth",
+      "wind",
+      "time",
+      "glass"
+    ],
+    "precluded": []
+  },
+  "glass": {
+    "children": [
+      "structure",
+      "beauty"
+    ],
+    "precluded": [
+      "strength"
+    ]
+  },
+  "beauty": {
+    "children": [
+      "art",
+      "gems",
+      "wealth",
+      "society",
+      "people"
+    ],
+    "precluded": [
+      "hate",
+      "war"
+    ]
+  },
+  "strength": {
+    "children": [
+      "war",
+      "society",
+      "love"
+    ],
+    "precluded": [
+      "weakness"
+    ]
+  },
+  "art": {
+    "children": [
+      "beauty",
+      "society",
+      "creation"
+    ],
+    "precluded": []
+  },
+  "love": {
+    "children": [
+      "people",
+      "structure",
+      "trust"
+    ],
+    "precluded": [
+      "war",
+      "hate"
+    ]
+  },
+  "weakness": {
+    "children": [],
+    "precluded": [
+      "strength"
+    ]
+  },
+  "trust": {
+    "children": [
+      "society",
+      "law",
+      "people",
+      "structure"
+    ],
+    "precluded": [
+      "lies"
+    ]
+  },
+  "law": {
+    "children": [
+      "society",
+      "people",
+      "order"
+    ],
+    "precluded": [
+      "hate",
+      "war",
+      "chaos"
+    ]
+  },
+  "lies": {
+    "children": [],
+    "precluded": [
+      "truth"
+    ]
+  },
+  "order": {
+    "children": [],
+    "precluded": [
+      "chaos"
+    ]
+  },
+  "truth": {
+    "children": [
+      "trust",
+      "structure",
+      "order"
+    ],
+    "precluded": [
+      "chaos",
+      "lies"
+    ]
+  }
+}

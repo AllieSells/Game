@@ -276,6 +276,7 @@ with open(get_data_path('logs/log.txt'), 'a') as log_file:
 start_time = time.time() # Track total loading
 show_loading_screen(context, ui_console, "Building inputs...")
 import input_handlers
+import inventory_ui
 str = (f"Loaded input_handlers module in {time.time() - start_time:.2f} seconds")
 print(str)
 with open(get_data_path('logs/log.txt'), 'a') as log_file:
@@ -478,6 +479,31 @@ def main() -> None:
             _body_diagram_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
         except Exception as _e:
             print(f"eqback.png failed to load: {_e}")
+
+    # Body-part damage overlay textures — one PNG per part in RP/body_parts/.
+    # Each PNG should be a white (255,255,255) silhouette on a transparent background.
+    # SDL color_mod tints the white pixels to the damage colour each frame;
+    # alpha_mod controls opacity so undamaged parts are invisible.
+    # Naming matches BodyPartType: HEAD.png, TORSO.png, LEFT_ARM.png, etc.
+    _BODY_PART_MASK_NAMES = [
+        "HEAD", "TORSO", "LEFT_ARM", "RIGHT_ARM",
+        "LEFT_HAND", "RIGHT_HAND",
+        "LEFT_LEG", "RIGHT_LEG",
+        "LEFT_FOOT", "RIGHT_FOOT",
+    ]
+    _body_part_texes: dict = {}  # {part_name: Texture}
+    _body_parts_dir = get_data_path("RP/body_parts")
+    for _bpn in _BODY_PART_MASK_NAMES:
+        _bpp = os.path.join(_body_parts_dir, f"{_bpn}.png")
+        if os.path.isfile(_bpp):
+            try:
+                _bpimg = Image.open(_bpp).convert("RGBA")
+                _bpnp  = np.array(_bpimg, dtype=np.uint8)
+                _bptex = renderer.upload_texture(_bpnp)
+                _bptex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                _body_part_texes[_bpn] = _bptex
+            except Exception as _e:
+                print(f"body_parts/{_bpn}.png failed: {_e}")
 
     # --- Regenerate procedural scanlines for current window size ---
     scanlines_np = generate_scanlines_texture(scanline_density, scanline_intensity)
@@ -1080,6 +1106,68 @@ def main() -> None:
                 # layer (chrome with transparent hole + context menu) sits on top.
                 _grid_is_direct = _inv_grid_handler is not None and handler is _inv_grid_handler
 
+                # ── Eq panel helper — called from both pre-chrome and post-chrome blocks ───────
+                # Normal : slots fully opaque (NONE blend) covering the body diagram.
+                # Alt held: slots first (opaque), then white body-part masks on top
+                #           tinted dim-grey (healthy) or amber→red (damaged).
+                #           The main body PNG is never rendered — it is black and cannot
+                #           be tinted, so the white per-part mask PNGs handle all body art.
+                def _render_eq_panel(_eq_px):
+                    _alt = inventory_ui._ALT_DAMAGE_VIEW
+                    # Build damage map once
+                    _bp_dmg: dict = {}
+                    try:
+                        _bp_comp = getattr(getattr(active_engine.player, 'body_parts', None),
+                                           'body_parts', None)
+                        if _bp_comp:
+                            _bp_dmg = {bpt.name: bp.damage_level_float
+                                       for bpt, bp in _bp_comp.items()}
+                    except Exception:
+                        pass
+                    def _draw_slot_layers():
+                        # ADD blend → black non-slot cells are transparent (show bg/masks),
+                        # coloured slot cells light up additively on top.
+                        _eqgrid_tex = inv_console_renderer.render(_inv_grid_handler._eq_grid_console)
+                        _eqgrid_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                        renderer.copy(_eqgrid_tex, dest=_eq_px)
+                        if hasattr(_inv_grid_handler, '_eq_qty_console'):
+                            _eq_qty_tex = inv_console_renderer.render(_inv_grid_handler._eq_qty_console)
+                            _eq_qty_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                            renderer.copy(_eq_qty_tex, dest=_eq_px)
+                    def _draw_body_diagram(bright: bool):
+                        # White per-part mask PNGs tinted by damage level.
+                        # bright=False (behind opaque slots): dim silhouette
+                        # bright=True  (Alt, no slots):       vivid, fully visible
+                        for _bpn, _bptex in _body_part_texes.items():
+                            _d = _bp_dmg.get(_bpn, 0.0)
+                            if _d > 0.02:
+                                # yellow(255,220,0) → orange(255,120,0) → dark red(160,0,0) → bright red(255,0,0)
+                                if _d < 0.33:
+                                    _t = _d / 0.33          # yellow → orange
+                                    _r = 255
+                                    _g = int(220 - _t * 100)
+                                elif _d < 0.66:
+                                    _t = (_d - 0.33) / 0.33  # orange → dark red
+                                    _r = int(255 - _t * 95)
+                                    _g = int(120 - _t * 120)
+                                else:
+                                    _t = (_d - 0.66) / 0.34  # dark red → bright red
+                                    _r = int(160 + _t * 95)
+                                    _g = 0
+                                _bptex.color_mod = (_r, _g, 0)
+                                _bptex.alpha_mod = min(255, int(80 + _d * 175)) if bright else min(220, int(40 + _d * 180))
+                            else:
+                                _bptex.color_mod = (80, 220, 100) if bright else (40, 45, 65)
+                                _bptex.alpha_mod = 220 if bright else 110
+                            renderer.copy(_bptex, dest=_eq_px)
+                    renderer.copy(_eq_bg_tex, dest=_eq_px)
+                    if _body_part_texes:
+                        _draw_body_diagram(bright=False)   # always behind slots
+                    if not _alt:
+                        _draw_slot_layers()                # opaque slots cover dim masks
+                    elif _body_part_texes:
+                        _draw_body_diagram(bright=True)    # Alt: bright diagram, no slots
+
                 # Pre-chrome grid render — context menu / BLEND overlay case only
                 if _inv_grid_handler is not None and not _grid_is_direct:
                     _gdt = _inv_grid_handler._grid_dest_tiles
@@ -1113,22 +1201,19 @@ def main() -> None:
                             int(_cgdt[0] * base_tile_w), int(_cgdt[1] * base_tile_h),
                             int(_cgdt[2] * base_tile_w), int(_cgdt[3] * base_tile_h),
                         ))
+                    if hasattr(_inv_grid_handler, '_container_qty_console'):
+                        _cqty_tex = inv_console_renderer.render(_inv_grid_handler._container_qty_console)
+                        _cqty_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                        renderer.copy(_cqty_tex, dest=(
+                            int(_cgdt[0] * base_tile_w), int(_cgdt[1] * base_tile_h),
+                            int(_cgdt[2] * base_tile_w), int(_cgdt[3] * base_tile_h),
+                        ))
+                        _cqty_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
                     if hasattr(_inv_grid_handler, '_eq_grid_console'):
                         _egdt = _inv_grid_handler._eq_grid_dest_tiles
                         _eq_px = (int(_egdt[0]*base_tile_w), int(_egdt[1]*base_tile_h),
                                   int(_egdt[2]*base_tile_w), int(_egdt[3]*base_tile_h))
-                        renderer.copy(_eq_bg_tex, dest=_eq_px)
-                        if _body_diagram_tex is not None:
-                            renderer.copy(_body_diagram_tex, dest=_eq_px)
-                        _eqgrid_tex = inv_console_renderer.render(_inv_grid_handler._eq_grid_console)
-                        _eqgrid_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
-                        renderer.copy(_eqgrid_tex, dest=_eq_px)
-                        _eqgrid_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
-                        if hasattr(_inv_grid_handler, '_eq_qty_console'):
-                            _eq_qty_tex = inv_console_renderer.render(_inv_grid_handler._eq_qty_console)
-                            _eq_qty_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
-                            renderer.copy(_eq_qty_tex, dest=_eq_px)
-                            _eq_qty_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                        _render_eq_panel(_eq_px)
 
                 _ov_tex = ui_console_renderer.render(ui_console)
 
@@ -1187,35 +1272,27 @@ def main() -> None:
                             int(_cgdt[0] * base_tile_w), int(_cgdt[1] * base_tile_h),
                             int(_cgdt[2] * base_tile_w), int(_cgdt[3] * base_tile_h),
                         ))
+                    if hasattr(_inv_grid_handler, '_container_qty_console'):
+                        _cqty_tex = inv_console_renderer.render(_inv_grid_handler._container_qty_console)
+                        _cqty_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
+                        renderer.copy(_cqty_tex, dest=(
+                            int(_cgdt[0] * base_tile_w), int(_cgdt[1] * base_tile_h),
+                            int(_cgdt[2] * base_tile_w), int(_cgdt[3] * base_tile_h),
+                        ))
+                        _cqty_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
                     if hasattr(_inv_grid_handler, '_eq_grid_console'):
                         _egdt = _inv_grid_handler._eq_grid_dest_tiles
                         _eq_px = (int(_egdt[0]*base_tile_w), int(_egdt[1]*base_tile_h),
                                   int(_egdt[2]*base_tile_w), int(_egdt[3]*base_tile_h))
-                        renderer.copy(_eq_bg_tex, dest=_eq_px)
-                        if _body_diagram_tex is not None:
-                            renderer.copy(_body_diagram_tex, dest=_eq_px)
-                        _eqgrid_tex = inv_console_renderer.render(_inv_grid_handler._eq_grid_console)
-                        _eqgrid_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
-                        renderer.copy(_eqgrid_tex, dest=_eq_px)
-                        _eqgrid_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
-                        if hasattr(_inv_grid_handler, '_eq_qty_console'):
-                            _eq_qty_tex = inv_console_renderer.render(_inv_grid_handler._eq_qty_console)
-                            _eq_qty_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
-                            renderer.copy(_eq_qty_tex, dest=_eq_px)
-                            _eq_qty_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                        _render_eq_panel(_eq_px)
 
-                # ── Drag ghost (GPU 3×, ADD blend → black bg transparent, glyph glows) ────────
+                # ── Drag icon (pixel-smooth, ADD blend → transparent bg, solid glyph) ─────
                 if (_inv_grid_handler is not None
                         and getattr(_inv_grid_handler, '_drag_item', None) is not None):
-                    _ddt = _inv_grid_handler._drag_dest_tiles
+                    _ddt = _inv_grid_handler._drag_dest_pixels
                     _drag_tex = inv_console_renderer.render(_inv_grid_handler._drag_console)
                     _drag_tex.blend_mode = tcod.sdl.render.BlendMode.ADD
-                    renderer.copy(_drag_tex, dest=(
-                        int(_ddt[0] * base_tile_w), int(_ddt[1] * base_tile_h),
-                        int(_ddt[2] * base_tile_w), int(_ddt[3] * base_tile_h),
-                    ))
-                    # Reset blend mode: inv_console_renderer reuses its texture, so ADD
-                    # would contaminate the next frame's grid render if not reset here.
+                    renderer.copy(_drag_tex, dest=_ddt)
                     _drag_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
 
                 # HUD strip (from the same already-rendered GPU texture)
