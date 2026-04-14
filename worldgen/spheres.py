@@ -12,7 +12,7 @@ import json
 import os
 import random
 
-_JSON_PATH = os.path.join(os.path.dirname(__file__), "json", "spheres.json")
+_JSON_PATH = os.path.join(os.path.dirname(__file__), "..", "json", "spheres.json")
 
 
 def _load() -> dict:
@@ -39,6 +39,12 @@ def children_of(key: str) -> list[str]:
 def precluded_by(key: str) -> list[str]:
     return list(SPHERES.get(key, {}).get("precluded", []))
 
+def hostility(key: str) -> float:
+    return SPHERES.get(key, {}).get("hostility", 0.0)
+
+def description(key: str) -> str:
+    return SPHERES.get(key, {}).get("description", "")
+
 
 # ---------------------------------------------------------------------------
 # World generation
@@ -47,9 +53,9 @@ def precluded_by(key: str) -> list[str]:
 def generate_world_spheres(
     target: int = 20,
     seeds: list[str] | None = None,
-    child_chance: float = 0.6,
+    child_chance: float = 0.75,
     link_chance: float = 0.5,
-    cross_link_chance: float = 0.5,
+    cross_link_chance: float = 0.1,
 ) -> dict[str, list[str]]:
     """
     Grow a world from a few seed spheres.
@@ -164,7 +170,7 @@ def generate_world_spheres(
 # ---------------------------------------------------------------------------
 # Demo
 # ---------------------------------------------------------------------------
-
+"""
 if __name__ == "__main__":
     if not SPHERES:
         print("No sphere data found. Run sphere_generator.py first.")
@@ -174,4 +180,6 @@ if __name__ == "__main__":
         for sphere, linked in world.items():
             linked_str = f"  → {linked}" if linked else ""
             print(f"  {sphere}{linked_str}")
+"""
+
 

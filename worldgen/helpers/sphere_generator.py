@@ -19,11 +19,13 @@ Commands (usable at any prompt)
   tree             — hierarchical view from root spheres
   show <name>      — details + parents for one sphere
   edit <name>      — add children / precluded to an existing sphere
+  expand <name>    — walk a sphere + all its descendants, offering to extend each
 
 Post-queue menu
 ---------------
   a — add a new sphere
   e — edit an existing sphere
+  x — expand a subtree (recursive edit walk)
   l — list all   |   t — tree view   |   q — quit
 """
 
@@ -32,7 +34,7 @@ import os
 import sys
 from collections import deque
 
-JSON_PATH = os.path.join(os.path.dirname(__file__), "json", "spheres.json")
+JSON_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "json", "spheres.json")
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +152,9 @@ def _handle_command(raw: str, data: dict, queue: deque, queued: set) -> bool:
         _edit_sphere(_normalise(parts[1]), data, queue, queued)
         save(data)
         return True
+    if cmd == "expand" and len(parts) == 2:
+        _expand_subtree(_normalise(parts[1]), data, queue, queued)
+        return True
     return False
 
 
@@ -188,6 +193,44 @@ def _edit_sphere(key: str, data: dict, queue: deque, queued: set) -> None:
                 print(f"  → queued '{p}'")
 
     print(f"  Updated — children: {v['children']}, precluded: {v['precluded']}")
+
+
+def _expand_subtree(root: str, data: dict, queue: deque, queued: set) -> bool:
+    """
+    BFS walk from `root` through all its descendants, offering to
+    add more children / precluded at each node.
+    Returns False when the user ends the session.
+    """
+    if root not in data:
+        print(f"  '{root}' is not defined yet — define it first.")
+        return True
+
+    visited: set[str] = set()
+    bfs: deque[str] = deque([root])
+
+    while bfs:
+        key = bfs.popleft()
+        if key in visited or key not in data:
+            continue
+        visited.add(key)
+
+        _display_show(key, data)
+        raw = input("  Expand this sphere? [y / skip / done]: ").strip().lower()
+        if raw in ("done", "q"):
+            save(data)
+            print("\nSession ended.")
+            return False
+        if raw == "y":
+            _edit_sphere(key, data, queue, queued)
+            save(data)
+
+        # Queue children for BFS (both pre-existing and newly added)
+        for child in data[key].get("children", []):
+            if child not in visited:
+                bfs.append(child)
+
+    print(f"  Finished expanding '{root}' subtree ({len(visited)} spheres visited).")
+    return True
 
 
 def _define_sphere(key: str, data: dict, queue: deque, queued: set) -> bool:
@@ -244,7 +287,7 @@ def build() -> None:
 
     if data:
         print(f"Resuming — {len(data)} spheres defined.")
-        print("  'list' or 'tree' to explore  |  'show <n>' for details  |  'edit <n>' to extend\n")
+        print("  'list' or 'tree' to explore  |  'show <n>' / 'edit <n>' / 'expand <n>'\n")
         for sphere_data in data.values():
             for ref in sphere_data.get("children", []) + sphere_data.get("precluded", []):
                 if ref not in data and ref not in queued:
@@ -271,7 +314,7 @@ def build() -> None:
         return
 
     # Post-queue interactive menu
-    MENU = "  [a] add new  [e] edit existing  [l] list  [t] tree  [q] quit\n> "
+    MENU = "  [a] add new  [e] edit existing  [x] expand subtree  [l] list  [t] tree  [q] quit\n> "
     while True:
         print(f"\nAll pending spheres defined. ({len(data)} total)")
         raw = input(MENU).strip()
@@ -297,6 +340,15 @@ def build() -> None:
                 continue
             _edit_sphere(_normalise(edit_raw), data, queue, queued)
             save(data)
+            if not _drain_queue(queue, queued, data):
+                return
+
+        elif raw.lower() == "x":
+            exp_raw = input("  Expand from sphere (or blank to cancel): ").strip()
+            if not exp_raw:
+                continue
+            if not _expand_subtree(_normalise(exp_raw), data, queue, queued):
+                return
             if not _drain_queue(queue, queued, data):
                 return
 
