@@ -93,7 +93,7 @@
   },
   "wind": {
     "children": [
-      "sky"
+      "the sky"
     ],
     "precluded": [],
     "hostility": 0.1,
@@ -201,10 +201,10 @@
     "hostility": -0.1,
     "description": "it radiates intense heat"
   },
-  "sky": {
+  "the sky": {
     "children": [
-      "sun",
-      "moon",
+      "suns",
+      "moons",
       "stars"
     ],
     "precluded": [
@@ -345,7 +345,7 @@
     "hostility": 0.1,
     "description": "it has an air of freezing around it"
   },
-  "sun": {
+  "suns": {
     "children": [
       "heat",
       "light"
@@ -354,7 +354,7 @@
     "hostility": -0.1,
     "description": "it shines brightly"
   },
-  "moon": {
+  "moons": {
     "children": [
       "darkness",
       "void"
