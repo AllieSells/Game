@@ -163,12 +163,15 @@ def load_extras(tileset, path: str = "RP/extras.png") -> int:
     return count
 
 
-def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_offset: int = 0, y_offset: int = 0, x_crop: int = 0, y_crop: int = 0, top_first_layer: bool = True) -> str:
+def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_offset: int = 0, y_offset: int = 0, x_crop: int = 0, y_crop: int = 0, top_first_layer: bool = True, layer_tints: list | None = None) -> str:
     """Alpha-composite multiple tile layers into a new tileset slot.
 
     Blends codepoints bottom-up (first = base, last = top layer) by default.
     If top_first_layer=False, the first layer is treated as the top, and all following
     layers are composed behind it.
+
+    layer_tints: optional list of (R,G,B) tuples (or None entries) to multiply
+    into each layer's pixels before compositing.  None = no tint (white).
 
     Caches results so identical combos reuse the same slot.
     Returns the chr() of the resulting codepoint.
@@ -182,12 +185,34 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
             raise RuntimeError("[sprite_manager] compose_sprite called before load_extras set the tileset.")
 
         normalized_scale = max(0.05, float(overlay_scale))
-        key = (tuple(layer_codepoints), round(normalized_scale, 4), x_offset, y_offset, x_crop, y_crop, top_first_layer)
+        # Normalise tints for cache key: None → (255,255,255)
+        norm_tints = None
+        if layer_tints is not None:
+            norm_tints = tuple(
+                (255, 255, 255) if t is None else tuple(int(v) for v in t)
+                for t in layer_tints
+            )
+        key = (tuple(layer_codepoints), round(normalized_scale, 4), x_offset, y_offset, x_crop, y_crop, top_first_layer, norm_tints)
         if key in _composite_cache:
             return chr(_composite_cache[key])
 
+        def _apply_tint(pixels: np.ndarray, tint) -> np.ndarray:
+            """Multiply RGB channels of pixel data by a (R,G,B) tint."""
+            if tint is None or tint == (255, 255, 255):
+                return pixels
+            t = np.array([tint[0], tint[1], tint[2], 255], dtype=np.float32) / 255.0
+            result = pixels.astype(np.float32)
+            result[..., :3] *= t[:3]
+            return result
+
+        def _tint_for(idx: int):
+            if norm_tints is None or idx >= len(norm_tints):
+                return None
+            return norm_tints[idx]
+
         # First layer (entity) is special: cropped and/or preserved as top if requested.
         first = _tileset.get_tile(layer_codepoints[0]).astype(np.float32).copy()
+        first = _apply_tint(first, _tint_for(0))
         if x_crop != 0 or y_crop != 0:
             first = _crop_overlay_tile(first, x_crop, y_crop).astype(np.float32)
 
@@ -230,6 +255,7 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
         else:
             for cp in overlay_layers:
                 overlay_pixels = _tileset.get_tile(cp)
+                overlay_pixels = _apply_tint(overlay_pixels, _tint_for(layer_codepoints.index(cp)))
                 if normalized_scale != 1.0:
                     overlay_pixels = _scale_overlay_tile(overlay_pixels, normalized_scale)
                 if x_offset != 0 or y_offset != 0:

@@ -2942,7 +2942,7 @@ class GPUStack:
         if self.crt_force_fast_path or active_engine is None:
             return
         game_map = getattr(active_engine, "game_map", None)
-        if game_map is None or getattr(game_map, "sunlit", False):
+        if game_map is None:
             return
         lm_np   = game_map.build_lightmap(game_console)
         lm_size = (lm_np.shape[1], lm_np.shape[0])

@@ -971,9 +971,10 @@ def render_minimap_box(console: tcod.Console, engine: 'Engine') -> None:
     IX, IY = BOX_X + 1, BOX_Y + 1  # interior origin
     IW, IH = BOX_W - 2, BOX_H - 2  # interior size
 
-    mode = getattr(engine, 'show_minimap', 0)  # 0=map, 1=keys, 2=minimized
-
-    if mode == 2:
+    mode = getattr(engine, 'show_minimap', 0)  # 0=map, 1=keys, 2=minimized, 3=hidden
+    if mode == 3:
+        return  # Hidden — draw nothing at all, no background or border
+    elif mode == 2:
         # Minimized — draw only a single-row tab strip at y=0.
         # Deliberately skip draw_rect/draw_frame so no full-box content
         # exists in the console (prevents popup bbox detector from picking it up).

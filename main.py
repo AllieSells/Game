@@ -837,7 +837,7 @@ def main() -> None:
                                       source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_th)),
                                       dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
                                             int(_mm_w * base_tile_w), int(base_tile_h)))
-                    else:
+                    elif _mm_mode != 3:
                         renderer.copy(hud_tex,
                                       source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_mm_h * _th)),
                                       dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
@@ -874,7 +874,7 @@ def main() -> None:
                                       source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_th)),
                                       dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
                                             int(_mm_w * base_tile_w), int(base_tile_h)))
-                    else:
+                    elif _mm_mode != 3:
                         renderer.copy(hud_tex,
                                       source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_mm_h * _th)),
                                       dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),

@@ -139,11 +139,13 @@ def get_current_seed() -> Optional[int]:
     return _current_seed
 
 
-
+    
 def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None) -> Engine:
     """Return a brand new game session as an Engine instance."""
-    map_width = 80
-    map_height = 40
+    map_width = 80    # dungeon map width
+    map_height = 40   # dungeon map height
+    overworld_width  = 100
+    overworld_height = 100
 
     room_max_size = 10
     room_min_size = 6
@@ -191,7 +193,7 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
     engine.message_log.add_message(
         f"Seed: {get_current_seed()}", color.welcome_text
     )
-
+    engine.show_minimap = 3  # Hidden — no minimap on overworld
     return engine
 
 def tutorial_game(game_seed = None, seed_string = None) -> Engine:

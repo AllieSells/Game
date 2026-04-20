@@ -10,6 +10,7 @@ from entity import Actor, Item
 from render_order import RenderOrder
 import color
 from liquid_system import LiquidSystem
+import sprite_manager
 
 if TYPE_CHECKING:
     from engine import Engine
@@ -86,6 +87,12 @@ class GameMap:
                         self.tiles[x, y] = tile_types.world_border
                     else:
                         self.tiles[x, y] = tile_types.random_wall_tile()
+        elif type == "overworld":
+            # Overworld starts as a blank grass field; generate_world fills it properly.
+            self.tiles = np.empty((width, height), dtype=tile_types.tile_dt, order="F")
+            for x in range(width):
+                for y in range(height):
+                    self.tiles[x, y] = tile_types.fill_random_grasses()
         else:
             # Preserve original behavior for other map types.
             self.tiles = np.full((width, height), fill_value=tile_types.wall, order="F")
@@ -258,6 +265,32 @@ class GameMap:
         _, _, view_width, view_height = self.get_viewport(console)
         return self.engine.world_to_screen(x, y, view_width, view_height)
 
+    def _render_entity(self, console: Console, entity) -> None:
+        """Print entity composited on top of the tile beneath it.
+
+        entity.color is baked into the entity layer pixels before compositing,
+        so the tile texture visible through transparent entity pixels is not
+        tinted by the entity colour.  The result is printed with white fg
+        (no additional tint) and the tile's own bg colour.
+        """
+        tile = self.tiles[entity.x, entity.y]
+        tile_cp = int(tile["light"]["ch"])
+        tile_fg = tuple(int(v) for v in tile["light"]["fg"])
+        tile_bg = tuple(int(v) for v in tile["light"]["bg"])
+        entity_cp = ord(entity.char)
+
+        try:
+            # Tint index 0 = tile layer (use tile's own fg), index 1 = entity layer (entity.color)
+            composed = sprite_manager.compose_sprite(
+                [tile_cp, entity_cp],
+                layer_tints=[tile_fg, entity.color],
+            )
+            self.screen_print(console, entity.x, entity.y, composed,
+                              fg=(255, 255, 255), bg=tile_bg)
+        except Exception:
+            self.screen_print(console, entity.x, entity.y, entity.char,
+                              fg=entity.color)
+
     def screen_print(
         self,
         console: Console,
@@ -364,7 +397,7 @@ class GameMap:
         out[..., 3] = 255
 
         if getattr(self, "sunlit", False):
-            out[..., :3] = 255
+            out[..., :3] = 150 # Overworld ambient dim — tune this value (0=black, 255=full bright)
             return out
 
         # self.tiles uses (width, height) F-order; transpose to (view_height, view_width).
@@ -436,17 +469,24 @@ class GameMap:
         # give independent wobble axes and intensity pulse per source.
         self.engine._torch_t = getattr(self.engine, "_torch_t", 0.0) + 0.2
 
-        # Read flicker setting once per frame (avoid repeated disk reads).
-        try:
-            import json as _json
-            with open("json/settings.json") as _sf:
-                _content = "\n".join(
-                    line for line in _sf.read().splitlines()
-                    if not line.lstrip().startswith("//")
-                )
-                _flicker_on = _json.loads(_content).get("light_flicker", True)
-        except Exception:
-            _flicker_on = True
+        # Read flicker setting at most once per second; never hit disk every frame.
+        import time as _time
+        _now = _time.monotonic()
+        if not hasattr(self.engine, '_flicker_setting_cache'):
+            self.engine._flicker_setting_cache = (True, 0.0)
+        _flicker_on, _flicker_ts = self.engine._flicker_setting_cache
+        if _now - _flicker_ts > 1.0:
+            try:
+                import json as _json
+                with open("json/settings.json") as _sf:
+                    _content = "\n".join(
+                        line for line in _sf.read().splitlines()
+                        if not line.lstrip().startswith("//")
+                    )
+                    _flicker_on = _json.loads(_content).get("light_flicker", True)
+            except Exception:
+                _flicker_on = True
+            self.engine._flicker_setting_cache = (_flicker_on, _now)
 
         def _wobble(t_offset: float = 0.0):
             """Return (dx, dy, di) flicker values for a light source.
@@ -464,90 +504,86 @@ class GameMap:
                 return float(noise.sample_mgrid(pt)[0, 0])
             return _s(t + 20.0) * 0.9, _s(t + 30.0) * 0.9, _s(t) * 0.08
 
-        if getattr(self, "sunlit", True):
+        _sunlit = getattr(self, "sunlit", True)
+        if _sunlit:
             self.tiles["light_level"][:] = 1.0  # Sunlit maps are fully lit
             if hasattr(self, '_white_light_level'):
                 self._white_light_level[:] = 1.0  # Sunlit = fully white light
-        
-        try:
-            player = self.engine.player
-            # Torch lighting: if player holds a Torch, light radius is 7
-            has_torch = False
+
+        if not _sunlit:
             try:
-                if player.equipment:
-                    has_torch = player.equipment.has_item_equipped("Torch")
-            except Exception:
+                player = self.engine.player
+                # Torch lighting: if player holds a Torch, light radius is 7
                 has_torch = False
+                try:
+                    if player.equipment:
+                        has_torch = player.equipment.has_item_equipped("Torch")
+                except Exception:
+                    has_torch = False
 
-            if has_torch:
+                if has_torch:
+                    px, py = player.x, player.y
+                    wdx, wdy, di = _wobble(0.0)
+                    self._add_light_source(px, py, radius=7, max_intensity=1.0,
+                                           wobble_dx=wdx, wobble_dy=wdy, di=di)
+
+                # Player always emits a subtle ambient glow so torchless players
+                # can still navigate.  Darkvision replaces this with a larger dim cone.
                 px, py = player.x, player.y
-                wdx, wdy, di = _wobble(0.0)
-                self._add_light_source(px, py, radius=7, max_intensity=1.0,
-                                       wobble_dx=wdx, wobble_dy=wdy, di=di)
+                has_darkvision = any(
+                    getattr(effect, "name", "") == "Darkvision"
+                    for effect in getattr(player, "effects", [])
+                )
+                if has_darkvision:
+                    self._add_light_source(px, py, radius=10, max_intensity=0.25)
+                elif not has_torch:
+                    # Faint personal glow: just enough to see immediately around the player.
+                    self._add_light_source(px, py, radius=3, max_intensity=0.4)
 
-            # Player always emits a subtle ambient glow so torchless players
-            # can still navigate.  Darkvision replaces this with a larger dim cone.
-            px, py = player.x, player.y
-            has_darkvision = any(
-                getattr(effect, "name", "") == "Darkvision"
-                for effect in getattr(player, "effects", [])
-            )
-            if has_darkvision:
-                self._add_light_source(px, py, radius=10, max_intensity=0.25)
-            elif not has_torch:
-                # Faint personal glow: just enough to see immediately around the player.
-                self._add_light_source(px, py, radius=3, max_intensity=0.4)
-
-            # Campfire and Bonfire lighting - doesn't affect FOV, only visual lighting
-            try:
-                for entity in self.entities:
-                    try:
-                        # Find entities with "Illuminated" effect
-                        if any(getattr(effect, "name", "") == "Illuminated" for effect in getattr(entity, "effects", [])):
-                            ex, ey = entity.x, entity.y
-                            # Only apply lighting if entity is within map bounds
-                            if not (0 <= ex < self.width and 0 <= ey < self.height):
-                                continue
-                            wdx, wdy, di = 0.0, 0.0, 0.0
-                            self._add_light_source(ex, ey, radius=5, max_intensity=1.0,
-                                                   wobble_dx=wdx, wobble_dy=wdy, di=di)
-                    except Exception as e:
-                        print(f"Error processing entity for lighting: {e}")
-                for item in getattr(self, "items", []):
-                    try:
-                        if item.name == "Campfire":
-                            cx, cy = item.x, item.y
-                            # Only apply lighting if item is within map bounds
-                            if not (0 <= cx < self.width and 0 <= cy < self.height):
-                                continue
-                            # Unique noise offset so each campfire flickers independently.
-                            wdx, wdy, di = _wobble(cx * 3.7 + cy * 5.3)
-                            self._add_light_source(cx, cy, radius=5, max_intensity=0.8,
-                                                   wobble_dx=wdx, wobble_dy=wdy, di=di)
-                        elif item.name == "Bonfire":
-                            bx, by = item.x, item.y
-                            # Only apply lighting if item is within map bounds
-                            if not (0 <= bx < self.width and 0 <= by < self.height):
-                                continue
-                            wdx, wdy, di = _wobble(bx * 3.7 + by * 5.3)
-                            self._add_light_source(bx, by, radius=15, max_intensity=1.0,
-                                                   wobble_dx=wdx, wobble_dy=wdy, di=di)
-                    except Exception:
-                        continue
+                # Campfire and Bonfire lighting - doesn't affect FOV, only visual lighting
+                try:
+                    for entity in self.entities:
+                        try:
+                            # Find entities with "Illuminated" effect
+                            if any(getattr(effect, "name", "") == "Illuminated" for effect in getattr(entity, "effects", [])):
+                                ex, ey = entity.x, entity.y
+                                # Only apply lighting if entity is within map bounds
+                                if not (0 <= ex < self.width and 0 <= ey < self.height):
+                                    continue
+                                wdx, wdy, di = 0.0, 0.0, 0.0
+                                self._add_light_source(ex, ey, radius=5, max_intensity=1.0,
+                                                       wobble_dx=wdx, wobble_dy=wdy, di=di)
+                        except Exception as e:
+                            print(f"Error processing entity for lighting: {e}")
+                    for item in getattr(self, "items", []):
+                        try:
+                            if item.name == "Campfire":
+                                cx, cy = item.x, item.y
+                                if not (0 <= cx < self.width and 0 <= cy < self.height):
+                                    continue
+                                wdx, wdy, di = _wobble(cx * 3.7 + cy * 5.3)
+                                self._add_light_source(cx, cy, radius=5, max_intensity=0.8,
+                                                       wobble_dx=wdx, wobble_dy=wdy, di=di)
+                            elif item.name == "Bonfire":
+                                bx, by = item.x, item.y
+                                if not (0 <= bx < self.width and 0 <= by < self.height):
+                                    continue
+                                wdx, wdy, di = _wobble(bx * 3.7 + by * 5.3)
+                                self._add_light_source(bx, by, radius=15, max_intensity=1.0,
+                                                       wobble_dx=wdx, wobble_dy=wdy, di=di)
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
             except Exception:
-                pass
-        except Exception:
-            self.tiles["light_level"][:] = 0.0
+                self.tiles["light_level"][:] = 0.0
 
-        # Find tile light sources 
-        for x in range(self.width):
-            for y in range(self.height):
-                if not (0 <= x < self.width and 0 <= y < self.height):
-                    continue
-                else:
-                    tile = self.tiles[x, y]
-                    if tile["name"] == "Window":
-                        self._add_light_source(x, y, radius=8, max_intensity=1.0, light_color=(255, 255, 255))
+            # Find tile light sources (Window tiles emit ambient light).
+            window_name = np.array("Window", dtype="U64")
+            window_positions = np.argwhere(self.tiles["name"] == window_name)
+            for wx, wy in window_positions:
+                self._add_light_source(int(wx), int(wy), radius=8, max_intensity=1.0,
+                                       light_color=(255, 255, 255))
 
         # Render tiles with gradient lighting based on light levels
         self._render_tiles_with_gradient(console)
@@ -575,8 +611,8 @@ class GameMap:
                 continue
             pos = (entity.x, entity.y)
             if self.visible[entity.x, entity.y]:
-                # Render at full color — GPU lightmap MOD pass in main.py handles dimming.
-                self.screen_print(console, entity.x, entity.y, entity.char, fg=entity.color)
+                # Composite entity sprite over the tile beneath it.
+                self._render_entity(console, entity)
                 drawn_positions.add(pos)
             else:
                 # If tile has been explored but is not currently visible, show a generic marker
@@ -611,12 +647,9 @@ class GameMap:
                 continue
             pos = (entity.x, entity.y)
             if self.visible[entity.x, entity.y]:
-                # Render at full color — GPU lightmap MOD pass in main.py handles dimming.
-                self.screen_print(console, entity.x, entity.y, entity.char, fg=entity.color)
+                # Composite entity sprite over the tile beneath it.
+                self._render_entity(console, entity)
                 drawn_positions.add(pos)
-            else:
-                # Do not show '*' for non-visible actors; items already handled above.
-                pass
         # Finally render priority 2 animations (above actors)
         if hasattr(self.engine, "animation_queue"):
             for anim in list(self.engine.animation_queue):
@@ -651,11 +684,15 @@ class GameWorld:
             room_min_size: int,
             room_max_size: int,
             current_floor: int = 0,
+            overworld_width: int = 200,
+            overworld_height: int = 200,
         ):
             self.engine = engine
 
             self.map_width = map_width
             self.map_height = map_height
+            self.overworld_width = overworld_width
+            self.overworld_height = overworld_height
 
             self.max_rooms = max_rooms
 
@@ -715,8 +752,19 @@ class GameWorld:
 
         return(t, e, v, w)
 
+
     def generate_world(self) -> None:
-        """Generate the starting floor."""
+
+        from procgen_world import generate_world
+
+        self.engine.game_map = generate_world(
+            map_width=self.overworld_width,
+            map_height=self.overworld_height,
+            engine=self.engine,
+            noise_vals = self.generate_noise(1)
+        )
+
+        """Generate the starting floor.
         from procgen import generate_dungeon
 
         self.engine.game_map = generate_dungeon(
@@ -731,6 +779,7 @@ class GameWorld:
         )
         self.current_floor = 1
 
+        """
 
     def generate_floor(self) -> None:
         from procgen import generate_dungeon, generate_village, generate_tutorial_floor
@@ -778,14 +827,41 @@ class GameWorld:
             # Generate dungeon (counter continues to accumulate)
             self.descend()  # Use the same generation method as normal descents
     def descend(self) -> None:
-        """Descend one level."""
-        # Save current floor to the up-stack so we can return to it.
+        """Descend one level, or enter a dungeon from the overworld."""
         current_map = self.engine.game_map
         player_pos = (self.engine.player.x, self.engine.player.y)
+
+        # ── Overworld → dungeon entrance ────────────────────────────────────
+        if current_map.type == "overworld":
+            entrances = getattr(current_map, "dungeon_entrances", {})
+            if player_pos not in entrances:
+                raise Exception("No dungeon entrance here.")
+            dungeon_seed = entrances[player_pos]
+            self.up_stack.append((current_map, player_pos, self.current_floor))
+            from procgen import generate_dungeon
+            self.current_floor = 1
+            new_map = generate_dungeon(
+                max_rooms=self.max_rooms,
+                room_min_size=self.room_min_size,
+                room_max_size=self.room_max_size,
+                map_width=self.map_width,
+                map_height=self.map_height,
+                engine=self.engine,
+                noise_vals=self.generate_noise(dungeon_seed),
+                floor_num=1,
+            )
+            self.engine.game_map = new_map
+            anim_q = getattr(self.engine, "animation_queue", None)
+            if anim_q is not None:
+                try:
+                    anim_q.clear()
+                except Exception:
+                    pass
+            return
+
+        # ── Normal dungeon descent ───────────────────────────────────────────
         self.up_stack.append((current_map, player_pos, self.current_floor))
 
-        # If we previously ascended from a floor below, reuse it instead of
-        # regenerating so the player returns to the same dungeon layout.
         if self.down_stack:
             next_map, next_player_pos, next_floor = self.down_stack.pop()
             self.current_floor = next_floor
@@ -806,7 +882,6 @@ class GameWorld:
                 floor_num=self.current_floor,
             )
             self.engine.game_map = new_map
-        # Clear stale animations from the previous floor.
         anim_q = getattr(self.engine, "animation_queue", None)
         if anim_q is not None:
             try:

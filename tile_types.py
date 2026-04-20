@@ -324,9 +324,53 @@ world_border = new_tile(
     name="World Border",
     walkable=False,
     transparent=False,
-    # Use a distinctive character and darker colors for world border
+    # Different border for worldmap
     dark=(ord("▓"), (255, 0, 0), (0, 0, 0)),
     light=(ord("▓"), (255, 0, 0), (255, 0, 0)),
+)
+
+
+overworld_deep_ocean = new_tile(
+    name="Deep Ocean",
+    walkable=False,
+    transparent=True,
+    dark=(0xE140, (0, 0, 0), (10, 10, 10)),
+    light=(0xE140, (190, 190, 190), (30, 110, 135)),
+)
+
+
+overworld_plains = new_tile(
+    name="Plains",
+    walkable=True,
+    transparent=True,
+    dark=(0xE150, (40, 90, 40), (20, 50, 20)),
+    light=(0xE150, (255, 255, 255), (30, 80, 30)),
+)
+
+overworld_forest = new_tile(
+    name="Forest",
+    walkable=True,
+    transparent=True,
+    dark=(0xE151, (20, 70, 20), (10, 40, 10)),
+    light=(0xE151, (255, 255, 255), (15, 60, 15)),
+)
+
+overworld_ocean = new_tile(
+    name="Ocean",
+    walkable=False,
+    transparent=True,
+    dark=(0xE140, (0, 0, 0), (10, 10, 10)),
+    light=(0xE140, (210, 210, 210), (30, 110, 135)),
+)
+
+
+
+overworld_dungeon = new_tile(
+    name="Dungeon Entrance",
+    walkable=True,
+    transparent=True,
+    dark=(ord("Ω"), (100, 60, 20), (30, 15, 5)),
+    light=(ord("Ω"), (220, 140, 50), (60, 30, 10)),
 )
 
 down_stairs = new_tile(
@@ -379,4 +423,177 @@ open_door = new_tile(
     dark=(0xE001, (60, 60, 60), (15, 15, 15)),
     light=(0xE001, (255, 255, 255), (0, 0, 0)),
     interactable=True
+)
+
+
+# Mountain tiles
+mountain_isolated = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(ord('^'), (150, 155, 165), (22, 25, 32)),
+    light=(ord('^'), (255, 255, 225), (75, 82, 97)),
+)
+
+# Two-stage mountain: core + directional slope chains.
+# ASCII placeholders — swap the codepoints for sprites later.
+mountain_peak = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE170, (150, 155, 165), (22, 25, 32)),
+    light=(0xE170, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_ridge = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE171, (150, 155, 165), (22, 25, 32)),
+    light=(0xE171, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_slope_e = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE173, (150, 155, 165), (22, 25, 32)),
+    light=(0xE173, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_slope_w = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE172, (150, 155, 165), (22, 25, 32)),
+    light=(0xE172, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_large_slope_w = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE174, (150, 155, 165), (22, 25, 32)),
+    light=(0xE174, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_large_slope_e = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE175, (150, 155, 165), (22, 25, 32)),
+    light=(0xE175, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_ridge_curve_w = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE176, (150, 155, 165), (22, 25, 32)),
+    light=(0xE176, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_ridge_curve_e = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE178, (150, 155, 165), (22, 25, 32)),
+    light=(0xE178, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_ridge_curve_w_merge = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE17D, (150, 155, 165), (22, 25, 32)),
+    light=(0xE17D, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_ridge_curve_e_merge = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE17A, (150, 155, 165), (22, 25, 32)),
+    light=(0xE17A, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_straight_valley = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE17E, (150, 155, 165), (22, 25, 32)),
+    light=(0xE17E, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_slope_end_s = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE177, (150, 155, 165), (22, 25, 32)),
+    light=(0xE177, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_peak_isolated = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE179, (150, 155, 165), (22, 25, 32)),
+    light=(0xE179, (255, 255, 255), (75, 82, 97)),
+)
+
+
+mountain_slope_flat_end_e = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE17B, (150, 155, 165), (22, 25, 32)),
+    light=(0xE17B, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_slope_flat_end_w = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE17C, (150, 155, 165), (22, 25, 32)),
+    light=(0xE17C, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_corner_slope_end_w = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE17F, (150, 155, 165), (22, 25, 32)),
+    light=(0xE17F, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_corner_slope_end_e = new_tile(
+    name = "Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE180, (150, 155, 165), (22, 25, 32)),
+    light=(0xE180, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_end = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE181, (150, 155, 165), (22, 25, 32)),
+    light=(0xE181, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_subpeak_base = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE182, (150, 155, 165), (22, 25, 32)),
+    light=(0xE182, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_subpeak_cap = new_tile(
+    name="Mountain",
+    walkable=False,
+    transparent=True,
+    dark=(0xE183, (150, 155, 165), (22, 25, 32)),
+    light=(0xE183, (255, 255, 255), (75, 82, 97)),
 )

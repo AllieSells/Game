@@ -381,6 +381,16 @@ class TakeStairsAction(Action):
         # Take the stairs, if they exist at its location
         pos = (self.entity.x, self.entity.y)
 
+        # Overworld dungeon entrance — descend into the linked dungeon
+        if self.engine.game_map.type == "overworld":
+            entrances = getattr(self.engine.game_map, "dungeon_entrances", {})
+            if pos in entrances:
+                self.engine.game_world.descend()
+                sounds.stairs_sound.play()
+                self.engine.message_log.add_message("You descend into the dungeon.", color.descend)
+                return
+            raise exceptions.Impossible("There is no dungeon entrance here.")
+
         # Descend if on the downstairs tile
         if pos == self.engine.game_map.downstairs_location:
             # Use GameWorld.descend helper if available, otherwise fall back

@@ -53,7 +53,7 @@ class Engine:
         self.debug = False
         self.cursor_hint = None 
         self.context_hints = []
-        self.show_minimap = 0  # 0=map, 1=keys, 2=minimized
+        self.show_minimap = 0  # 0=map, 1=keys, 2=minimized, 3=hidden
         self.hovered_inventory_button = None
         
         # Initialize turn manager for centralized turn processing
@@ -311,18 +311,20 @@ class Engine:
 
 
         # Generate grass waves that sweep across the visible area
+        # Disabled on the overworld — it uses a Dwarf Fortress-style tile map.
         try:
-            self.grass_wave_timer += 1
-         
-            # Start a new wave periodically
-            if self.grass_wave_timer >= self.grass_wave_cooldown:
-                self.grass_wave_timer = 0
-                # Create a new wave from a random edge
-                self._spawn_grass_wave()
-            
-            # Update existing waves
-            for wave in list(self.active_grass_waves):
-                self._update_grass_wave(wave)
+            if getattr(self.game_map, 'type', '') != 'overworld':
+                self.grass_wave_timer += 1
+             
+                # Start a new wave periodically
+                if self.grass_wave_timer >= self.grass_wave_cooldown:
+                    self.grass_wave_timer = 0
+                    # Create a new wave from a random edge
+                    self._spawn_grass_wave()
+                
+                # Update existing waves
+                for wave in list(self.active_grass_waves):
+                    self._update_grass_wave(wave)
                 
         except Exception:
             traceback.print_exc()
