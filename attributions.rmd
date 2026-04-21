@@ -1,1 +1,2 @@
 only.lurking - water animations and texture
+mcmagister - overworld tiles

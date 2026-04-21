@@ -202,6 +202,10 @@ def generate_world(
             break
 
     _placer.place(spawn_x, spawn_y, world)
+
+    # ── Forest autotile pass ───────────────────────────────────────────────
+    _apply_forest_autotile(world)
+
     return world
 
 
@@ -228,14 +232,91 @@ def _is_ocean_or_oob(world, x, y):
     return name in ("Ocean", "Deep Ocean")
 
 
+def _apply_forest_autotile(world) -> None:
+    """Replace every Forest tile with the correct 3x3 autotile variant,
+    composited over the plains biome sprite underneath.
+
+    Adjacency rule:
+      Row  – top: no N neighbor; mid: N+S neighbors; bot: no S neighbor
+      Col  – center: has E neighbor; right: W but no E; left: neither E nor W
+    """
+    W, H = world.width, world.height
+    # Collect forest positions first so adjacency reads are against the
+    # original placement, not partially-updated results.
+    forest_positions = [
+        (x, y)
+        for x in range(W)
+        for y in range(H)
+        if str(world.tiles[x, y]["name"]) == "Forest"
+    ]
+
+    plains_dark  = int(tile_types.overworld_plains["dark"]["ch"])
+    plains_light = int(tile_types.overworld_plains["light"]["ch"])
+
+    def _is_forest(x, y):
+        if x < 0 or x >= W or y < 0 or y >= H:
+            return False
+        return str(world.tiles[x, y]["name"]) == "Forest"
+
+    for x, y in forest_positions:
+        has_N  = _is_forest(x,     y - 1)
+        has_NE = _is_forest(x + 1, y - 1)
+        has_E  = _is_forest(x + 1, y    )
+        has_SE = _is_forest(x + 1, y + 1)
+        has_S  = _is_forest(x,     y + 1)
+        has_SW = _is_forest(x - 1, y + 1)
+        has_W  = _is_forest(x - 1, y    )
+        has_NW = _is_forest(x - 1, y - 1)
+        variant = tile_types.get_forest_tile(
+            has_N, has_NE, has_E, has_SE,
+            has_S, has_SW, has_W, has_NW,
+        )
+        # N+S-only tile whose S neighbour is strip_n (has N only, no S/E/W)
+        if has_N and has_S and not has_E and not has_W:
+            if not _is_forest(x, y + 2) and not _is_forest(x + 1, y + 1) and not _is_forest(x - 1, y + 1):
+                variant = tile_types.overworld_forest_ns_above_strip_n
+        # S+E-only tile whose S neighbour is strip_n (has N only, no S/E/W)
+        if has_S and has_E and not has_N and not has_W:
+            if not _is_forest(x, y + 2) and not _is_forest(x + 1, y + 1) and not _is_forest(x - 1, y + 1):
+                variant = tile_types.overworld_forest_ns_above_strip_n
+        # S-only tile whose S neighbour is mid_right (N+S+W, no E) → 0xE16B
+        if has_S and not has_N and not has_E and not has_W:
+            if _is_forest(x, y + 2) and _is_forest(x - 1, y + 1) and not _is_forest(x + 1, y + 1):
+                variant = tile_types.overworld_forest_ns_above_strip_n
+        # N-only tile whose N neighbour is mid_right (N+S+W, no E) → 0xE16B
+        if has_N and not has_S and not has_E and not has_W:
+            if _is_forest(x, y - 2) and _is_forest(x - 1, y - 1) and not _is_forest(x + 1, y - 1):
+                variant = tile_types.overworld_forest_ns_above_strip_n
+        result = variant.copy()
+        result["dark"]["ch"]  = ord(sprite_manager.compose_sprite(
+            [plains_dark,  int(variant["dark"]["ch"])]
+        ))
+        result["light"]["ch"] = ord(sprite_manager.compose_sprite(
+            [plains_light, int(variant["light"]["ch"])]
+        ))
+        world.tiles[x, y] = result
+
+
+# Tile names that mountains composite cleanly against.
+# Any other biome is replaced with plains before compositing.
+_MOUNTAIN_MERGE_ALLOWED = {"Plains"}
+
+
 def _mountain_on_biome(world, mx, my, mountain_tile, biome_cache):
     """Composite a mountain tile on top of the biome tile at (mx, my).
 
     Uses biome_cache to remember the original biome codepoint so that
     re-placements (e.g. subpeak overwriting flat_end) still composite
     against the original biome, not a previously composed mountain.
+
+    If the underlying tile is not in _MOUNTAIN_MERGE_ALLOWED (e.g. Forest)
+    it is first replaced with overworld_plains so the merge looks correct.
     """
     if (mx, my) not in biome_cache:
+        # Normalise to a merge-friendly tile if needed.
+        tile_name = str(world.tiles[mx, my]["name"])
+        if tile_name not in _MOUNTAIN_MERGE_ALLOWED:
+            world.tiles[mx, my] = tile_types.overworld_plains
         biome_cache[(mx, my)] = (
             int(world.tiles[mx, my]["dark"]["ch"]),
             int(world.tiles[mx, my]["light"]["ch"]),
@@ -444,6 +525,55 @@ def generate_range(world, x, y, mountain_tiles=None):
         placed_tiles.add((ex, ry))
 
     all_mountain |= east_border
+
+    # --- Foothills (southern base scatter) ---
+    # Build south_base only from THIS range's placed_tiles so previous ranges
+    # don't pollute the candidate rows.  For each x-column, find the
+    # southernmost tile placed by this call and scatter foothills one row below.
+    south_base: dict = {}
+    for fhx, fhy in placed_tiles:
+        if fhx not in south_base or fhy > south_base[fhx]:
+            south_base[fhx] = fhy
+
+    foothill_placed: set = set()   # track within this loop to handle L/R pairs
+
+    for fhx in sorted(south_base):
+        fhy = south_base[fhx] + 1
+        # Skip if already filled by mountain or foothill, out of bounds, or not open land
+        if (fhx, fhy) in all_mountain or (fhx, fhy) in foothill_placed:
+            continue
+        if not (0 <= fhx < world.width and 0 <= fhy < world.height):
+            continue
+        tile_name = str(world.tiles[fhx, fhy]["name"])
+        if tile_name in ("Ocean", "Deep Ocean", "Mountain", "Foothill"):
+            continue
+
+        roll = random.random()
+        fh_rx = fhx + 1
+
+        # ~30% chance: try L/R pair first
+        if roll < 0.30:
+            right_ok = (
+                (fh_rx, fhy) not in all_mountain
+                and (fh_rx, fhy) not in foothill_placed
+                and 0 <= fh_rx < world.width
+                and str(world.tiles[fh_rx, fhy]["name"]) not in ("Ocean", "Deep Ocean", "Mountain", "Foothill")
+                and south_base.get(fh_rx, -999) + 1 == fhy
+            )
+            if right_ok:
+                _mountain_on_biome(world, fhx,   fhy, tile_types.mountain_foothill_L, biome_cache)
+                _mountain_on_biome(world, fh_rx, fhy, tile_types.mountain_foothill_R, biome_cache)
+                placed_tiles.update([(fhx, fhy), (fh_rx, fhy)])
+                foothill_placed.update([(fhx, fhy), (fh_rx, fhy)])
+                continue
+            # Pair blocked — fall through to single
+
+        # ~45% chance: single foothill (covers original 30% + fallthrough from pair)
+        if roll < 0.75:
+            _mountain_on_biome(world, fhx, fhy, tile_types.mountain_foothill, biome_cache)
+            placed_tiles.add((fhx, fhy))
+            foothill_placed.add((fhx, fhy))
+        # else: empty gap (~25%)
 
     return placed_tiles
 

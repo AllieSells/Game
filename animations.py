@@ -785,6 +785,8 @@ class WaterMoveAnimation:
                 game_map.screen_print_lit(console, x, y, chr(0xE142), fg=color.shallow_water)
 
 
+
+
 class GlobalWaterAnimation:
     """Single persistent animation that oscillates all visible water tiles
     back and forth: 0→1→2→1→0→1→2→...
@@ -800,16 +802,48 @@ class GlobalWaterAnimation:
 
     def tick(self, console, game_map):
         self._tick += 1
-        # Ping-pong sequence: 0,1,2,1 repeating (length 4)
         sequence = [0, 1, 2, 1]
         idx = (self._tick // self.FRAME_DURATION) % len(sequence)
-        char = self.CHARS[sequence[idx]]
+        char_cp = ord(self.CHARS[sequence[idx]])
         try:
             import numpy as np
-            water_mask = (game_map.tiles["name"] == "Water") & game_map.visible
-            positions = np.argwhere(water_mask)
-            for xi, yi in positions:
-                game_map.screen_print_lit(console, int(xi), int(yi), char, fg=color.shallow_water)
+            origin_x, origin_y, view_width, view_height = game_map.get_viewport(console)
+            x_slice = slice(origin_x, origin_x + view_width)
+            y_slice = slice(origin_y, origin_y + view_height)
+            water_mask = (game_map.tiles["name"][x_slice, y_slice] == "Water") & game_map.visible[x_slice, y_slice]
+            console.tiles_rgb["ch"][:view_width, :view_height][water_mask] = char_cp
+            console.tiles_rgb["fg"][:view_width, :view_height][water_mask] = color.shallow_water
+        except Exception:
+            pass
+
+class GlobalOceanAnimation:
+    """Single persistent animation that loops all visible ocean tiles
+    forward: 0→1→2→3→4→0→1→2→3→4→...
+    """
+    CHARS = [chr(0xE160), chr(0xE161), chr(0xE162), chr(0xE163), chr(0xE164), chr(0xE165), chr(0xE166), chr(0xE167)]
+    # How many ticks each frame is held before advancing
+    FRAME_DURATION = 5
+
+    def __init__(self):
+        self.render_priority = 0
+        self.frames = 10 ** 9  # never expires
+        self._tick = 0
+
+    def tick(self, console, game_map):
+        self._tick += 1
+        idx = (self._tick // self.FRAME_DURATION) % len(self.CHARS)
+        char_cp = ord(self.CHARS[idx])
+        try:
+            import numpy as np
+            origin_x, origin_y, view_width, view_height = game_map.get_viewport(console)
+            x_slice = slice(origin_x, origin_x + view_width)
+            y_slice = slice(origin_y, origin_y + view_height)
+            ocean_mask = (game_map.tiles["name"][x_slice, y_slice] == "Ocean") & game_map.visible[x_slice, y_slice]
+            console.tiles_rgb["ch"][:view_width, :view_height][ocean_mask] = char_cp
+            console.tiles_rgb["fg"][:view_width, :view_height][ocean_mask] = color.shallow_water
+            deep_ocean_mask = (game_map.tiles["name"][x_slice, y_slice] == "Deep Ocean") & game_map.visible[x_slice, y_slice]
+            console.tiles_rgb["ch"][:view_width, :view_height][deep_ocean_mask] = char_cp
+            console.tiles_rgb["fg"][:view_width, :view_height][deep_ocean_mask] = color.deep_water
         except Exception:
             pass
 

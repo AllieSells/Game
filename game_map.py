@@ -397,7 +397,7 @@ class GameMap:
         out[..., 3] = 255
 
         if getattr(self, "sunlit", False):
-            out[..., :3] = 150 # Overworld ambient dim — tune this value (0=black, 255=full bright)
+            out[..., :3] = 165 # Overworld lightmap ambient dim — tune this value (0=black, 255=full bright)
             return out
 
         # self.tiles uses (width, height) F-order; transpose to (view_height, view_width).

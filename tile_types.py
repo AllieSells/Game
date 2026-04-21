@@ -334,8 +334,8 @@ overworld_deep_ocean = new_tile(
     name="Deep Ocean",
     walkable=False,
     transparent=True,
-    dark=(0xE140, (0, 0, 0), (10, 10, 10)),
-    light=(0xE140, (190, 190, 190), (30, 110, 135)),
+    dark=(0xE140, (90, 90, 90), (10, 10, 10)),
+    light=(0xE140, (255, 255, 255), (30, 110, 135)),
 )
 
 
@@ -347,20 +347,91 @@ overworld_plains = new_tile(
     light=(0xE150, (255, 255, 255), (30, 80, 30)),
 )
 
-overworld_forest = new_tile(
-    name="Forest",
-    walkable=True,
-    transparent=True,
-    dark=(0xE151, (20, 70, 20), (10, 40, 10)),
-    light=(0xE151, (255, 255, 255), (15, 60, 15)),
-)
+# ── Forest autotile – 9-tile 3×3 set ──────────────────────────────────────
+# Fill in the correct codepoint for each of the 9 tiles below.
+_F = dict(name="Forest", walkable=True, transparent=True)
+_FG = ((30, 60, 30), (15, 30, 15))
+_FL = ((255, 255, 255), (20, 50, 20))
+def _ft(cp): return new_tile(**_F, dark=(cp, *_FG), light=(cp, *_FL))
+
+overworld_forest_top_left        = _ft(0xE151)  # no N, has S+E
+overworld_forest_top_center      = _ft(0xE152)  # no N, has S+E+W
+overworld_forest_top_right       = _ft(0xE153)  # no N, has S+W
+overworld_forest_mid_left        = _ft(0xE154)  # has N+S+E, no W
+overworld_forest_mid_center      = _ft(0xE155)  # has all four cardinals, all diagonals
+overworld_forest_mid_right       = _ft(0xE156)  # has N+S+W, no E
+overworld_forest_bot_left        = _ft(0xE157)  # has N+E, no S
+overworld_forest_bot_center      = _ft(0xE158)  # has N+E+W, no S
+overworld_forest_bot_right       = _ft(0xE159)  # has N+W, no S
+overworld_forest_center_no_nw    = _ft(0xE15A)  # all four cardinals, NW missing
+overworld_forest_center_no_se    = _ft(0xE15B)  # all four cardinals, SE missing
+overworld_forest_isolated_tree   = _ft(0xE15C)  # no N neighbor (isolated/horiz edge)
+overworld_forest_strip_n         = _ft(0xE15D)  # has N neighbor, strip/partial column
+overworld_forest_center_no_diags = _ft(0xE15E)  # all four cardinals, both NW+SE missing
+overworld_forest_strip_s         = _ft(0xE15F)  # has S but no N, strip/partial column
+overworld_forest_strip_ns        = _ft(0xE168)  # has N+S but no E/W, vertical strip
+overworld_forest_s_above_mr      = _ft(0xE16A)  # S-only, S neighbour is mid_right (N+S+W)
+overworld_forest_ns_above_strip_n = _ft(0xE16B)  # N+S only, S neighbour is strip_n (N-only)
+
+# Marker tile for initial terrain assignment; replaced by the autotile pass.
+overworld_forest = overworld_forest_mid_center
+
+# LUT: all 16 cardinal combos mapped to nearest 9-tile match.
+_TL  = overworld_forest_top_left
+_TC  = overworld_forest_top_center
+_TR  = overworld_forest_top_right
+_ML  = overworld_forest_mid_left
+_MC  = overworld_forest_mid_center
+_MR  = overworld_forest_mid_right
+_BL  = overworld_forest_bot_left
+_BC  = overworld_forest_bot_center
+_BR  = overworld_forest_bot_right
+_IC  = overworld_forest_isolated_tree
+_SN  = overworld_forest_strip_n
+_SS  = overworld_forest_strip_s
+_NS  = overworld_forest_strip_ns
+
+_FOREST_AUTOTILE = {
+    # (  N      S      E      W   )
+    (False, False, False, False): _IC,  # isolated          → no-N tree
+    (False, False, True,  False): _IC,  # E only            → no-N tree
+    (False, False, False, True ): _IC,  # W only            → no-N tree
+    (False, False, True,  True ): _IC,  # E+W (horiz strip) → no-N tree
+    (False, True,  False, False): _SS,  # S only            → has-S strip
+    (False, True,  True,  False): _TL,  # S+E               → top_left   (exact)
+    (False, True,  True,  True ): _TC,  # S+E+W             → top_center (exact)
+    (False, True,  False, True ): _TR,  # S+W               → top_right  (exact)
+    (True,  False, False, False): _SN,  # N only            → has-N strip
+    (True,  False, True,  False): _BL,  # N+E               → bot_left   (exact)
+    (True,  False, True,  True ): _BC,  # N+E+W             → bot_center (exact)
+    (True,  False, False, True ): _BR,  # N+W               → bot_right  (exact)
+    (True,  True,  False, False): _NS,  # N+S (vert strip)  → vertical strip (exact)
+    (True,  True,  True,  False): _ML,  # N+S+E             → mid_left   (exact)
+    (True,  True,  True,  True ): _MC,  # all four          → mid_center (diagonal check below)
+    (True,  True,  False, True ): _MR,  # N+S+W             → mid_right  (exact)
+}
+
+def get_forest_tile(
+    has_N: bool, has_NE: bool, has_E: bool, has_SE: bool,
+    has_S: bool, has_SW: bool, has_W: bool, has_NW: bool,
+):
+    """Return the correct autotile variant.
+    When all four cardinals are present, NW and SE diagonals are checked for inner corners."""
+    if has_N and has_S and has_E and has_W:
+        if not has_NW and not has_SE:
+            return overworld_forest_center_no_diags
+        if not has_NW:
+            return overworld_forest_center_no_nw
+        if not has_SE:
+            return overworld_forest_center_no_se
+    return _FOREST_AUTOTILE[(has_N, has_S, has_E, has_W)]
 
 overworld_ocean = new_tile(
     name="Ocean",
     walkable=False,
     transparent=True,
-    dark=(0xE140, (0, 0, 0), (10, 10, 10)),
-    light=(0xE140, (210, 210, 210), (30, 110, 135)),
+    dark=(0xE140, (90, 90, 90), (10, 10, 10)),
+    light=(0xE140, (255, 255, 255), (30, 110, 135)),
 )
 
 
@@ -597,3 +668,28 @@ mountain_subpeak_cap = new_tile(
     dark=(0xE183, (150, 155, 165), (22, 25, 32)),
     light=(0xE183, (255, 255, 255), (75, 82, 97)),
 )
+
+mountain_foothill = new_tile(
+    name="Foothill",
+    walkable=True,
+    transparent=True,
+    dark=(0xE184, (150, 155, 165), (22, 25, 32)),
+    light=(0xE184, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_foothill_L = new_tile(
+    name="Foothill",
+    walkable=True,
+    transparent=True,
+    dark=(0xE185, (150, 155, 165), (22, 25, 32)),
+    light=(0xE185, (255, 255, 255), (75, 82, 97)),
+)
+
+mountain_foothill_R = new_tile(
+    name="Foothill",
+    walkable=True,
+    transparent=True,
+    dark=(0xE186, (150, 155, 165), (22, 25, 32)),
+    light=(0xE186, (255, 255, 255), (75, 82, 97)),
+)
+
