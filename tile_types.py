@@ -347,6 +347,14 @@ overworld_plains = new_tile(
     light=(0xE150, (255, 255, 255), (30, 80, 30)),
 )
 
+overworld_desert = new_tile(
+    name="Desert",
+    walkable=True,
+    transparent=True,
+    dark=(0xE15C, (160, 150, 100), (80, 70, 40)),
+    light=(0xE15C, (255, 255, 255), (180, 160, 90)),
+)
+
 # ── Forest autotile – 9-tile 3×3 set ──────────────────────────────────────
 # Fill in the correct codepoint for each of the 9 tiles below.
 _F = dict(name="Forest", walkable=True, transparent=True)
@@ -358,68 +366,39 @@ overworld_forest_top_left        = _ft(0xE151)  # no N, has S+E
 overworld_forest_top_center      = _ft(0xE152)  # no N, has S+E+W
 overworld_forest_top_right       = _ft(0xE153)  # no N, has S+W
 overworld_forest_mid_left        = _ft(0xE154)  # has N+S+E, no W
-overworld_forest_mid_center      = _ft(0xE155)  # has all four cardinals, all diagonals
+overworld_forest_mid_center      = _ft(0xE155)  # has all four cardinals
+overworld_forest_center_no_nw    = _ft(0xE15A)  # all four cardinals, NW missing
+overworld_forest_center_no_se    = _ft(0xE15B)  # all four cardinals, SE missing
 overworld_forest_mid_right       = _ft(0xE156)  # has N+S+W, no E
 overworld_forest_bot_left        = _ft(0xE157)  # has N+E, no S
 overworld_forest_bot_center      = _ft(0xE158)  # has N+E+W, no S
 overworld_forest_bot_right       = _ft(0xE159)  # has N+W, no S
-overworld_forest_center_no_nw    = _ft(0xE15A)  # all four cardinals, NW missing
-overworld_forest_center_no_se    = _ft(0xE15B)  # all four cardinals, SE missing
-overworld_forest_isolated_tree   = _ft(0xE15C)  # no N neighbor (isolated/horiz edge)
-overworld_forest_strip_n         = _ft(0xE15D)  # has N neighbor, strip/partial column
-overworld_forest_center_no_diags = _ft(0xE15E)  # all four cardinals, both NW+SE missing
-overworld_forest_strip_s         = _ft(0xE15F)  # has S but no N, strip/partial column
-overworld_forest_strip_ns        = _ft(0xE168)  # has N+S but no E/W, vertical strip
-overworld_forest_s_above_mr      = _ft(0xE16A)  # S-only, S neighbour is mid_right (N+S+W)
-overworld_forest_ns_above_strip_n = _ft(0xE16B)  # N+S only, S neighbour is strip_n (N-only)
 
 # Marker tile for initial terrain assignment; replaced by the autotile pass.
 overworld_forest = overworld_forest_mid_center
 
-# LUT: all 16 cardinal combos mapped to nearest 9-tile match.
-_TL  = overworld_forest_top_left
-_TC  = overworld_forest_top_center
-_TR  = overworld_forest_top_right
-_ML  = overworld_forest_mid_left
-_MC  = overworld_forest_mid_center
-_MR  = overworld_forest_mid_right
-_BL  = overworld_forest_bot_left
-_BC  = overworld_forest_bot_center
-_BR  = overworld_forest_bot_right
-_IC  = overworld_forest_isolated_tree
-_SN  = overworld_forest_strip_n
-_SS  = overworld_forest_strip_s
-_NS  = overworld_forest_strip_ns
-
+# LUT: all 9 valid cardinal combos (erosion guarantees only these occur).
 _FOREST_AUTOTILE = {
     # (  N      S      E      W   )
-    (False, False, False, False): _IC,  # isolated          → no-N tree
-    (False, False, True,  False): _IC,  # E only            → no-N tree
-    (False, False, False, True ): _IC,  # W only            → no-N tree
-    (False, False, True,  True ): _IC,  # E+W (horiz strip) → no-N tree
-    (False, True,  False, False): _SS,  # S only            → has-S strip
-    (False, True,  True,  False): _TL,  # S+E               → top_left   (exact)
-    (False, True,  True,  True ): _TC,  # S+E+W             → top_center (exact)
-    (False, True,  False, True ): _TR,  # S+W               → top_right  (exact)
-    (True,  False, False, False): _SN,  # N only            → has-N strip
-    (True,  False, True,  False): _BL,  # N+E               → bot_left   (exact)
-    (True,  False, True,  True ): _BC,  # N+E+W             → bot_center (exact)
-    (True,  False, False, True ): _BR,  # N+W               → bot_right  (exact)
-    (True,  True,  False, False): _NS,  # N+S (vert strip)  → vertical strip (exact)
-    (True,  True,  True,  False): _ML,  # N+S+E             → mid_left   (exact)
-    (True,  True,  True,  True ): _MC,  # all four          → mid_center (diagonal check below)
-    (True,  True,  False, True ): _MR,  # N+S+W             → mid_right  (exact)
+    (False, True,  True,  False): overworld_forest_top_left,
+    (False, True,  True,  True ): overworld_forest_top_center,
+    (False, True,  False, True ): overworld_forest_top_right,
+    (True,  True,  True,  False): overworld_forest_mid_left,
+    (True,  True,  True,  True ): overworld_forest_mid_center,
+    (True,  True,  False, True ): overworld_forest_mid_right,
+    (True,  False, True,  False): overworld_forest_bot_left,
+    (True,  False, True,  True ): overworld_forest_bot_center,
+    (True,  False, False, True ): overworld_forest_bot_right,
 }
 
 def get_forest_tile(
     has_N: bool, has_NE: bool, has_E: bool, has_SE: bool,
     has_S: bool, has_SW: bool, has_W: bool, has_NW: bool,
-):
-    """Return the correct autotile variant.
-    When all four cardinals are present, NW and SE diagonals are checked for inner corners."""
+) -> object:
+    """Return the correct 9-tile autotile variant.
+    Erosion guarantees only valid combos reach here.
+    When all four cardinals are present, NW and SE diagonals select inner-corner variants."""
     if has_N and has_S and has_E and has_W:
-        if not has_NW and not has_SE:
-            return overworld_forest_center_no_diags
         if not has_NW:
             return overworld_forest_center_no_nw
         if not has_SE:
@@ -434,14 +413,56 @@ overworld_ocean = new_tile(
     light=(0xE140, (255, 255, 255), (30, 110, 135)),
 )
 
+overworld_river = new_tile(
+    name="River",
+    walkable=True,
+    transparent=True,
+    dark=(0xE140, (100, 110, 120), (20, 40, 60)),
+    light=(0xE140, (255, 255, 255), (60, 170, 210)),
+)
+
+overworld_beach = new_tile(
+    name="Beach",
+    walkable=True,
+    transparent=True,
+    dark=(0xE15C, (160, 150, 100), (80, 70, 40)),
+    light=(0xE15C, (255, 255, 255), (180, 160, 90)),
+)
+
+# Shore tiles sit at the water's edge; visually ocean but named "Shore"
+# so the beach water animation can target them exactly.
+overworld_shore = new_tile(
+    name="Shore",
+    walkable=False,
+    transparent=True,
+    dark=(0xE140, (90, 90, 90), (10, 10, 10)),
+    light=(0xE140, (255, 255, 255), (30, 110, 135)),
+)
+
+# Grass-edge overlays composited onto beach tiles that touch land.
+# Each sprite shows grass bleeding in from that cardinal direction.
+_beach_grass_N = 0xE168
+_beach_grass_S = 0xE169
+_beach_grass_E = 0xE16B
+_beach_grass_W = 0xE16A# Corner overlays (composited under cardinal overlays) for two adjacent grass cardinals.
+_beach_grass_SW = 0xE16C
+_beach_grass_SE = 0xE16D
+_beach_grass_NE = 0xE16E
+_beach_grass_NW = 0xE16F
+
+# Sand-edge overlays composited onto beach/desert tiles that touch a river.
+_river_sand_N = 0xE187
+_river_sand_S = 0xE188
+_river_sand_W = 0xE189
+_river_sand_E = 0xE18A
 
 
 overworld_dungeon = new_tile(
     name="Dungeon Entrance",
     walkable=True,
     transparent=True,
-    dark=(ord("Ω"), (100, 60, 20), (30, 15, 5)),
-    light=(ord("Ω"), (220, 140, 50), (60, 30, 10)),
+    dark=(0xE14D, (100, 60, 20), (30, 15, 5)),
+    light=(0xE14D, (225, 255, 255), (60, 30, 10)),
 )
 
 down_stairs = new_tile(
@@ -476,7 +497,16 @@ locked_door = new_tile(
     transparent=False,
     dark=(0xE14B, (60, 60, 60), (15, 15, 15)),
     light=(0xE14B, (255, 255, 255), (0, 0, 0)),
-    interactable=False # For now
+    interactable=True
+)
+
+dungeon_exit = new_tile(
+    name="Dungeon Exit",
+    walkable=True,
+    transparent=False,
+    dark=(0xE14E, (60, 60, 60), (15, 15, 15)),
+    light=(0xE14E, (255, 255, 255), (0, 0, 0)),
+    interactable=False
 )
 
 closed_door = new_tile(

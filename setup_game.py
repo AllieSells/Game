@@ -155,7 +155,7 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
     _set_global_seed(game_seed=game_seed, seed_string=seed_string)
 
     player = copy.deepcopy(entity_factories.player)
-    
+    player.char = chr(0xE03B)
     # DEBUG: Set XP close to level up (350 needed for level 2)
     player.level.current_xp = 0
 

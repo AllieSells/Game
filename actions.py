@@ -215,6 +215,20 @@ class InteractAction(Action):
                 sounds.play_door_close_sound_at(target_x, target_y, self.engine.player, self.engine.game_map)
                 self.engine.message_log.add_message("You close the door.")
 
+            elif name == "Locked Door":
+                import tile_types
+                key_item = next(
+                    (item for item in self.entity.inventory.items if item.name == "Dungeon Key"),
+                    None
+                )
+                if key_item:
+                    self.engine.game_map.tiles[target_x, target_y] = tile_types.dungeon_exit
+                    self.entity.inventory.items.remove(key_item)
+                    sounds.play_door_open_sound_at(target_x, target_y, self.engine.player, self.engine.game_map)
+                    self.engine.message_log.add_message("You unlock the door.")
+                else:
+                    self.engine.message_log.add_message("The door won't budge.")
+
             else:
                 self.engine.message_log.add_message("There is nothing to interact with.")
         elif self.engine.game_map.get_actor_at_location(target_x, target_y):
@@ -387,6 +401,7 @@ class TakeStairsAction(Action):
             if pos in entrances:
                 self.engine.game_world.descend()
                 sounds.stairs_sound.play()
+                self.entity.char = self.entity.base_char
                 self.engine.message_log.add_message("You descend into the dungeon.", color.descend)
                 return
             raise exceptions.Impossible("There is no dungeon entrance here.")
@@ -1220,6 +1235,13 @@ class MovementAction(ActionWithDirection):
 
         # Track swimming state transitions based on tile content. This avoids per-frame sprite resets.
         self._update_swim_state(dest_x, dest_y)
+        if self.entity == self.engine.player:
+            tile_name = self.engine.game_map.tiles["name"][dest_x, dest_y]
+            if tile_name == "Dungeon Exit":
+                self.engine.game_world.ascend()
+                import color
+                self.engine.message_log.add_message("You surface from the dungeon", color.purple)
+                return
 
         # If not in view, display sound tile animation (for all entities)
         from animations import HeardSoundAnimation

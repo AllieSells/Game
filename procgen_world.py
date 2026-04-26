@@ -5,6 +5,7 @@ Separated from procgen.py so dungeon and world generation stay independent.
 from __future__ import annotations
 
 import random
+from collections import deque
 from typing import TYPE_CHECKING, Tuple
 
 import numpy as np
@@ -19,7 +20,7 @@ import sprite_manager
 if TYPE_CHECKING:
     from engine import Engine
 
-from setup_game import _current_seed
+import setup_game as _setup_game
 
 def generate_world(
         map_width: int,
@@ -34,32 +35,38 @@ def generate_world(
     Edit them freely to change the look of the world.
     """
     # ── Elevation (land vs water) ──────────────────────────────────────────
-    ELEV_SCALE        = 0.06   # base frequency (lower = larger continents)
+    ELEV_SCALE        = 0.02   # base frequency (lower = larger continents)
     ELEV_OCT2_SCALE   = 2.5    # 2nd octave frequency multiplier
     ELEV_OCT2_WEIGHT  = 0.45   # blend weight of 2nd octave
-    CONTINENT_FALLOFF = 2.8    # higher = smaller landmass
 
-    DEEP_OCEAN_THRESHOLD = -0.65   # elevation below this = deep ocean
-    OCEAN_THRESHOLD      = -0.30   # elevation below this = shallow ocean
+    # Domain-warp radial falloff (replaces Chebyshev square falloff)
+    WARP_SCALE        = 0.009   # warp noise frequency
+    WARP_STRENGTH     = 0.60    # warp amplitude — only warps noise sampling, not falloff
+    LAND_RADIUS       = 0.80    # unwarped falloff start; continent fills ~80% of half-map
+    LAND_TRANSITION   = 0.22    # falloff width; edge midpoints (dist=1.0) always deep ocean
+    LAND_FALLOFF_AMP  = 2.4     # ensures edges are crushed to deep ocean
 
-    BIOME_SCALE = 0.2   # lower = larger biome patches
+    DEEP_OCEAN_THRESHOLD = -0.55   # elevation below this = deep ocean
+    OCEAN_THRESHOLD      = -0.18   # elevation below this = shallow ocean
 
-    # Land biome bands: evaluated low-to-high on biome_noise value.
-    # To add a new land biome, insert a (threshold, tile) tuple here.
-    LAND_BANDS = [
-        ( 0.10, tile_types.overworld_plains),
-    ]
-    DEFAULT_LAND_TILE = tile_types.overworld_forest
+    BIOME_SCALE  = 0.13   # lower = larger forest/plains patches
+    DESERT_SCALE = 0.11   # lower = larger desert patches
 
-    MOUNTAIN_RANGES = 600    # ~ 1 mountain tile per N land tiles
+    # Independent biome thresholds (each on its own noise axis)
+    FOREST_THRESHOLD = 0.20   # biome_noise above this → forest, else plains
+    DESERT_THRESHOLD = 0.35   # desert_noise above this → desert (overrides plains, not forest)
+
+    MOUNTAIN_RANGES = 350    # ~ 1 mountain tile per N land tiles
     MOUNTAIN_COAST_BUFFER = 0.4  # elevation above OCEAN_THRESHOLD required for mountains
     MOUNTAIN_CLUSTER_COUNT = 4  # number of high-elevation cluster centres to attract ranges
+    MOUNTAIN_PLAINS_RADIUS = 5  # desert tiles within this Chebyshev radius become plains
 
     DUNGEON_DENSITY = 60   # ~1 dungeon entrance per N walkable tiles
+    RIVER_COUNT = 8         # number of rivers to attempt to carve
 
     _placer = player_proxy if player_proxy is not None else engine.player
 
-    seed = _current_seed if _current_seed is not None else 12345
+    seed = _setup_game._current_seed if _setup_game._current_seed is not None else random.randint(0, 2**31 - 1)
 
     world = GameMap(
         engine, map_width, map_height, entities=[_placer],
@@ -73,25 +80,46 @@ def generate_world(
     biome_noise = tcod.noise.Noise(
         dimensions=2, algorithm=tcod.noise.Algorithm.SIMPLEX, seed=seed + 33
     )
+    desert_noise = tcod.noise.Noise(
+        dimensions=2, algorithm=tcod.noise.Algorithm.SIMPLEX, seed=seed + 57
+    )
+    warp_noise = tcod.noise.Noise(
+        dimensions=2, algorithm=tcod.noise.Algorithm.SIMPLEX, seed=seed + 71
+    )
 
     xs = np.arange(map_width,  dtype=np.float32)
     ys = np.arange(map_height, dtype=np.float32)
     grid = np.stack(np.meshgrid(xs, ys, indexing="ij"), axis=0)  # (2, W, H)
 
-    # Elevation: two-octave simplex + continent falloff
-    e  = elev_noise.sample_mgrid(grid * ELEV_SCALE)
-    e += elev_noise.sample_mgrid(grid * ELEV_SCALE * ELEV_OCT2_SCALE) * ELEV_OCT2_WEIGHT
-    e /= (1.0 + ELEV_OCT2_WEIGHT)
+    # Domain warp: displace sample coordinates for organic coastline shape
     cx, cy = map_width / 2.0, map_height / 2.0
-    dist_x = np.abs(xs - cx) / cx
-    dist_y = np.abs(ys - cy) / cy
-    e -= np.maximum(dist_x[:, None], dist_y[None, :]) ** CONTINENT_FALLOFF
+    warp_u = warp_noise.sample_mgrid(grid * WARP_SCALE)
+    warp_v = warp_noise.sample_mgrid((grid + 47.3) * WARP_SCALE)
+    warped_grid = np.stack([
+        grid[0] + warp_u * (map_width  * 0.5 * WARP_STRENGTH),
+        grid[1] + warp_v * (map_height * 0.5 * WARP_STRENGTH),
+    ], axis=0)
 
-    # Biome: single-octave simplex, no falloff — purely spatial, seed-independent of elevation
+    # Elevation sampled at warped coords → organic peninsula/bay shapes
+    e  = elev_noise.sample_mgrid(warped_grid * ELEV_SCALE)
+    e += elev_noise.sample_mgrid(warped_grid * ELEV_SCALE * ELEV_OCT2_SCALE) * ELEV_OCT2_WEIGHT
+    e /= (1.0 + ELEV_OCT2_WEIGHT)
+
+    # Falloff on UNWARPED distance → border is always ocean, independent of warp strength
+    dx_n = (xs[:, None] - cx) / cx
+    dy_n = (ys[None, :] - cy) / cy
+    dist = np.sqrt(dx_n ** 2 + dy_n ** 2)
+    t_fall = np.clip((dist - LAND_RADIUS) / LAND_TRANSITION, 0.0, 1.0)
+    e -= t_fall * t_fall * (3.0 - 2.0 * t_fall) * LAND_FALLOFF_AMP
+
+    # Biome noise (forest vs plains) and independent desert noise
     b = biome_noise.sample_mgrid(grid * BIOME_SCALE)
+    d = desert_noise.sample_mgrid(grid * DESERT_SCALE)
 
     # ── Terrain assignment ─────────────────────────────────────────────────
-    # Elevation determines land vs water; biome noise determines land tile type.
+    # Elevation → water vs land.  Land biomes are two independent axes:
+    #   biome_noise (b) → forest vs plains
+    #   desert_noise (d) → desert overlay on plains only (never overwrites forest)
     for x in range(map_width):
         for y in range(map_height):
             ev = float(e[x, y])
@@ -101,12 +129,42 @@ def generate_world(
                 world.tiles[x, y] = tile_types.overworld_ocean
             else:
                 bv = float(b[x, y])
-                tile = DEFAULT_LAND_TILE
-                for threshold, t in LAND_BANDS:
-                    if bv < threshold:
-                        tile = t
-                        break
-                world.tiles[x, y] = tile
+                dv = float(d[x, y])
+                if bv > FOREST_THRESHOLD:
+                    world.tiles[x, y] = tile_types.overworld_forest
+                elif dv > DESERT_THRESHOLD:
+                    world.tiles[x, y] = tile_types.overworld_desert
+                else:
+                    world.tiles[x, y] = tile_types.overworld_plains
+
+    # ── Island pruning – keep only the largest connected landmass ──────────
+    _visited = np.zeros((map_width, map_height), dtype=bool)
+    _components: list = []
+    for _sx in range(map_width):
+        for _sy in range(map_height):
+            if world.tiles[_sx, _sy]["walkable"] and not _visited[_sx, _sy]:
+                _comp: list = []
+                _q: deque = deque()
+                _q.append((_sx, _sy))
+                _visited[_sx, _sy] = True
+                while _q:
+                    _px, _py = _q.popleft()
+                    _comp.append((_px, _py))
+                    for _ddx, _ddy in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+                        _nx, _ny = _px + _ddx, _py + _ddy
+                        if 0 <= _nx < map_width and 0 <= _ny < map_height:
+                            if world.tiles[_nx, _ny]["walkable"] and not _visited[_nx, _ny]:
+                                _visited[_nx, _ny] = True
+                                _q.append((_nx, _ny))
+                _components.append(_comp)
+    if _components:
+        _largest = max(_components, key=len)
+        _keep = set(map(id, [_largest]))
+        for _comp in _components:
+            if id(_comp) not in _keep:
+                for (_px, _py) in _comp:
+                    world.tiles[_px, _py] = tile_types.overworld_ocean
+    del _visited, _components
 
     # ── Mountain generation ─────────────────────────────────────────────────
     land_coords = [(lx, ly) for lx in range(map_width) for ly in range(map_height)
@@ -163,6 +221,19 @@ def generate_world(
                 mountain_tiles |= new_tiles
                 placed += 1
 
+    # ── Plains buffer around mountains (clear desert within radius) ────────
+    if mountain_tiles:
+        for mx, my in list(mountain_tiles):
+            for dx in range(-MOUNTAIN_PLAINS_RADIUS, MOUNTAIN_PLAINS_RADIUS + 1):
+                for dy in range(-MOUNTAIN_PLAINS_RADIUS, MOUNTAIN_PLAINS_RADIUS + 1):
+                    nx, ny = mx + dx, my + dy
+                    if 0 <= nx < map_width and 0 <= ny < map_height:
+                        if str(world.tiles[nx, ny]["name"]) == "Desert":
+                            world.tiles[nx, ny] = tile_types.overworld_plains
+
+
+    # ── River generation ──────────────────────────────────────────────────
+    _river_tiles = _apply_rivers(world, e, RIVER_COUNT, random.Random(seed + 113))
 
     # ── Dungeon entrances ──────────────────────────────────────────────────
     rng = random.Random(seed)
@@ -203,7 +274,54 @@ def generate_world(
 
     _placer.place(spawn_x, spawn_y, world)
 
+    # ── Beach pass ────────────────────────────────────────────────────────
+    _apply_beach(world, protected=_river_tiles)
+    # ── River bank overlays (must run after beach so Beach tiles exist) ────
+    _river_overlay_record: dict = {}
+    # Grass overlays ON river tile where it borders grass-land (not sand).
+    _apply_neighbor_overlay(world, _river_tiles,
+        {"Plains", "Forest", "Mountain", "Foothill"}, _BEACH_GRASS_OVERLAYS,
+        out_overlays=_river_overlay_record)
+    # Sand overlays ON river tile where it borders beach or desert.
+    _apply_neighbor_overlay(world, _river_tiles,
+        {"Beach", "Desert"}, _RIVER_SAND_OVERLAYS,
+        out_overlays=_river_overlay_record)
+    # Sand overlays ON beach/desert tiles that border river (reverse direction).
+    _sand_near_river = [
+        (x, y)
+        for x in range(map_width)
+        for y in range(map_height)
+        if str(world.tiles[x, y]["name"]) in ("Beach", "Desert")
+        and any(
+            0 <= x + dx < map_width and 0 <= y + dy < map_height
+            and str(world.tiles[x + dx, y + dy]["name"]) == "River"
+            for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0))
+        )
+    ]
+    _apply_neighbor_overlay(world, _sand_near_river, {"River"}, _RIVER_SAND_OVERLAYS)
+    # ── River animation map: ALL river tiles, overlaid frames pre-composed ─
+    _WAVE_FRAMES = list(range(0xE160, 0xE168))
+    world.river_anim = {}
+    for (rx, ry) in _river_tiles:
+        overlays = _river_overlay_record.get((rx, ry), [])
+        if overlays:
+            seq = tuple(
+                ord(sprite_manager.compose_sprite([f] + overlays))
+                for f in _WAVE_FRAMES
+            )
+        else:
+            seq = tuple(_WAVE_FRAMES)
+        world.river_anim[(rx, ry)] = seq
+    # ── Desert edge grass overlay ──────────────────────────────────────────
+    _desert_tiles = [
+        (x, y)
+        for x in range(map_width)
+        for y in range(map_height)
+        if str(world.tiles[x, y]["name"]) == "Desert"
+    ]
+    _apply_neighbor_overlay(world, _desert_tiles, {"Plains", "Forest"}, _BEACH_GRASS_OVERLAYS)
     # ── Forest autotile pass ───────────────────────────────────────────────
+    _clean_forest_blobs(world)
     _apply_forest_autotile(world)
 
     return world
@@ -230,6 +348,358 @@ def _is_ocean_or_oob(world, x, y):
         return True
     name = str(world.tiles[x, y]["name"])
     return name in ("Ocean", "Deep Ocean")
+
+
+_BEACH_RADIUS = 2
+_OCEAN_NAMES  = {"Ocean", "Deep Ocean"}
+_RIVER_NAMES  = {"River"}
+
+# Directional grass overlays used for both beach→land and river-bank edges.
+_BEACH_GRASS_OVERLAYS = {
+    'N':  tile_types._beach_grass_N,
+    'S':  tile_types._beach_grass_S,
+    'E':  tile_types._beach_grass_E,
+    'W':  tile_types._beach_grass_W,
+    'NE': tile_types._beach_grass_NE,
+    'NW': tile_types._beach_grass_NW,
+    'SE': tile_types._beach_grass_SE,
+    'SW': tile_types._beach_grass_SW,
+}
+
+# Sand-edge overlays for river tiles that border beach (cardinals only).
+_RIVER_SAND_OVERLAYS = {
+    'N': tile_types._river_sand_N,
+    'S': tile_types._river_sand_S,
+    'W': tile_types._river_sand_W,
+    'E': tile_types._river_sand_E,
+}
+
+
+
+
+def _apply_neighbor_overlay(world, candidates, neighbor_names, overlay_sprites, out_overlays=None) -> None:
+    """Composite directional edge overlays onto `candidates` where they border `neighbor_names` tiles.
+
+    overlay_sprites: dict mapping direction keys 'N','S','E','W','NE','NW','SE','SW'
+                     to integer sprite codepoints.  Missing keys are simply skipped.
+    Base codepoints are read from the current tile at each candidate position.
+    out_overlays: optional dict; if provided, records {(x,y): [overlay_cps]} for every
+                  tile that received at least one overlay (appends on repeated calls).
+    """
+    W, H = world.width, world.height
+    for x, y in candidates:
+        has_N = 0 <= y - 1 < H and str(world.tiles[x,     y - 1]["name"]) in neighbor_names
+        has_S = 0 <= y + 1 < H and str(world.tiles[x,     y + 1]["name"]) in neighbor_names
+        has_E = 0 <= x + 1 < W and str(world.tiles[x + 1, y    ]["name"]) in neighbor_names
+        has_W = 0 <= x - 1 < W and str(world.tiles[x - 1, y    ]["name"]) in neighbor_names
+
+        overlays = []
+        corner_N = corner_S = corner_E = corner_W = False
+        if has_S and has_W and 'SW' in overlay_sprites:
+            overlays.append(overlay_sprites['SW']); corner_S = corner_W = True
+        if has_S and has_E and 'SE' in overlay_sprites:
+            overlays.append(overlay_sprites['SE']); corner_S = corner_E = True
+        if has_N and has_E and 'NE' in overlay_sprites:
+            overlays.append(overlay_sprites['NE']); corner_N = corner_E = True
+        if has_N and has_W and 'NW' in overlay_sprites:
+            overlays.append(overlay_sprites['NW']); corner_N = corner_W = True
+        if has_N and not corner_N and 'N' in overlay_sprites:
+            overlays.append(overlay_sprites['N'])
+        if has_S and not corner_S and 'S' in overlay_sprites:
+            overlays.append(overlay_sprites['S'])
+        if has_E and not corner_E and 'E' in overlay_sprites:
+            overlays.append(overlay_sprites['E'])
+        if has_W and not corner_W and 'W' in overlay_sprites:
+            overlays.append(overlay_sprites['W'])
+        if not overlays:
+            continue
+        base_dark  = int(world.tiles[x, y]["dark"]["ch"])
+        base_light = int(world.tiles[x, y]["light"]["ch"])
+        result = world.tiles[x, y].copy()
+        result["dark"]["ch"]  = ord(sprite_manager.compose_sprite([base_dark]  + overlays))
+        result["light"]["ch"] = ord(sprite_manager.compose_sprite([base_light] + overlays))
+        world.tiles[x, y] = result
+        if out_overlays is not None:
+            if (x, y) in out_overlays:
+                out_overlays[(x, y)].extend(overlays)
+            else:
+                out_overlays[(x, y)] = list(overlays)
+
+
+def _apply_rivers(world, elev, num_rivers: int, rng: random.Random) -> None:
+    """Carve rivers from mountain-adjacent sources downhill to coast/ocean.
+
+    Each river is a greedy downhill walk on the elevation grid `elev`.
+    The resulting path is written as River tiles, then directional grass
+    overlays are composited onto every walkable neighbor tile.
+
+    Parameters
+    ----------
+    world       : GameMap being built
+    elev        : numpy array shape (W, H) of elevation values used for generation
+    num_rivers  : how many rivers to attempt
+    rng         : seeded Random instance for reproducibility
+    """
+    W, H = world.width, world.height
+    _LAND_WALKABLE = {"Plains", "Forest", "Desert", "Beach"}
+    _WATER_NAMES   = {"Ocean", "Deep Ocean", "Shore", "River"}
+
+    def _is_mountain(x, y):
+        if x < 0 or x >= W or y < 0 or y >= H:
+            return False
+        return str(world.tiles[x, y]["name"]) == "Mountain"
+
+    def _is_walkable_land(x, y):
+        if x < 0 or x >= W or y < 0 or y >= H:
+            return False
+        return str(world.tiles[x, y]["name"]) in _LAND_WALKABLE
+
+    def _is_water(x, y):
+        if x < 0 or x >= W or y < 0 or y >= H:
+            return True  # treat OOB as water/edge
+        return str(world.tiles[x, y]["name"]) in _WATER_NAMES
+
+    # Collect mountain-adjacent walkable land tiles as river source candidates
+    sources = []
+    for x in range(W):
+        for y in range(H):
+            if not _is_walkable_land(x, y):
+                continue
+            if any(_is_mountain(x + dx, y + dy)
+                   for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0))):
+                sources.append((x, y))
+
+    if not sources:
+        return
+
+    all_river_tiles: set = set()
+
+    for _ in range(num_rivers):
+        if not sources:
+            break
+        sx, sy = rng.choice(sources)
+        sources.remove((sx, sy))
+
+        path = []
+        cx, cy = sx, sy
+        visited = {(cx, cy)}
+        MAX_STEPS = max(W, H) * 3
+
+        for _step in range(MAX_STEPS):
+            path.append((cx, cy))
+            if _is_water(cx, cy + 1) or _is_water(cx - 1, cy) or _is_water(cx + 1, cy) or _is_water(cx, cy - 1):
+                # Reached coast — done
+                break
+            # Greedy downhill: pick lowest-elevation cardinal neighbor that
+            # is walkable land and not already in this path
+            nbrs = []
+            for dx, dy in ((0, 1), (1, 0), (-1, 0), (0, -1)):
+                nx, ny = cx + dx, cy + dy
+                if (nx, ny) not in visited and _is_walkable_land(nx, ny):
+                    nbrs.append((float(elev[nx, ny]), nx, ny))
+                elif (nx, ny) not in visited and _is_water(nx, ny):
+                    path.append((nx, ny))
+                    break
+            else:
+                if not nbrs:
+                    break  # stuck — abandon this river
+                # 10% chance to pick 2nd-lowest to add gentle bends
+                nbrs.sort()
+                if len(nbrs) >= 2 and rng.random() < 0.10:
+                    _, cx, cy = nbrs[1]
+                else:
+                    _, cx, cy = nbrs[0]
+                visited.add((cx, cy))
+                continue
+            break  # reached water via the inner break
+
+        if len(path) < 3:
+            continue  # too short — skip
+
+        for rx, ry in path:
+            if str(world.tiles[rx, ry]["name"]) not in _WATER_NAMES:
+                world.tiles[rx, ry] = tile_types.overworld_river
+                all_river_tiles.add((rx, ry))
+
+    return all_river_tiles
+
+
+def _apply_beach(world, protected=None) -> None:
+    """Replace land tiles within _BEACH_RADIUS of ocean with beach.
+    
+    protected: optional set of (x,y) positions that must not be overwritten.
+    """
+    W, H = world.width, world.height
+
+    def _is_ocean(x, y):
+        if x < 0 or x >= W or y < 0 or y >= H:
+            return False
+        return str(world.tiles[x, y]["name"]) in _OCEAN_NAMES
+
+    beach_candidates = set()
+    for x in range(W):
+        for y in range(H):
+            if not world.tiles[x, y]["walkable"]:
+                continue
+            name = str(world.tiles[x, y]["name"])
+            if name in _OCEAN_NAMES or name == "River":
+                continue
+            # Flood outward from ocean within radius using Chebyshev distance
+            for dx in range(-_BEACH_RADIUS, _BEACH_RADIUS + 1):
+                for dy in range(-_BEACH_RADIUS, _BEACH_RADIUS + 1):
+                    if _is_ocean(x + dx, y + dy):
+                        beach_candidates.add((x, y))
+                        break
+                else:
+                    continue
+                break
+
+    for x, y in beach_candidates:
+        if protected and (x, y) in protected:
+            continue
+        world.tiles[x, y] = tile_types.overworld_beach
+
+    # Remove beach blobs that are not cardinally connected to any land tile.
+    # Flood-fill each connected beach component; if none of its tiles touch land
+    # (cardinally), convert the whole component back to ocean.
+    _LAND_NAMES = {"Plains", "Forest", "Mountain", "Foothill", "Grassland", "Tundra", "Desert", "River"}
+    def _is_land(nx, ny):
+        if nx < 0 or nx >= W or ny < 0 or ny >= H:
+            return False
+        return str(world.tiles[nx, ny]["name"]) in _LAND_NAMES
+
+    beach_set = set(beach_candidates)
+    visited = set()
+    for start in list(beach_set):
+        if start in visited:
+            continue
+        # BFS over cardinally-connected beach tiles
+        component = []
+        queue = [start]
+        visited.add(start)
+        touches_land = False
+        while queue:
+            cx, cy = queue.pop()
+            component.append((cx, cy))
+            for dx, dy in ((0,-1),(0,1),(1,0),(-1,0)):
+                nx2, ny2 = cx+dx, cy+dy
+                if _is_land(nx2, ny2):
+                    touches_land = True
+                if (nx2, ny2) in beach_set and (nx2, ny2) not in visited:
+                    visited.add((nx2, ny2))
+                    queue.append((nx2, ny2))
+        if not touches_land:
+            for tx, ty in component:
+                world.tiles[tx, ty] = tile_types.overworld_ocean
+                beach_set.discard((tx, ty))
+    beach_candidates = beach_set
+
+    # Composite grass overlays onto beach tiles that border land.
+    _GRASS_NAMES = {"Plains", "Forest", "Mountain", "Foothill"}
+    _apply_neighbor_overlay(world, beach_candidates, _GRASS_NAMES, _BEACH_GRASS_OVERLAYS)
+
+    # Build per-tile water animation sequences for beach tiles that border ocean.
+    # SE = ocean S + ocean E (solid beach N+W).  SW = ocean S + ocean W, etc.
+    # Cardinals = exactly one cardinal ocean neighbor.
+    from animations import GlobalBeachWaterAnimation as _BWA
+    rng = random.Random(getattr(world, "seed", 0) + 7)
+    anim_map: dict = {}
+
+    def _ocean(nx, ny):
+        return 0 <= nx < W and 0 <= ny < H and str(world.tiles[nx, ny]["name"]) in _OCEAN_NAMES
+
+    for x, y in beach_candidates:
+        on = _ocean(x,   y-1)
+        os = _ocean(x,   y+1)
+        oe = _ocean(x+1, y  )
+        ow = _ocean(x-1, y  )
+        if os and oe:
+            anim_map[(x, y)] = _BWA.FRAMES_SE
+        elif os and ow:
+            anim_map[(x, y)] = _BWA.FRAMES_SW
+        elif on and oe:
+            anim_map[(x, y)] = _BWA.FRAMES_NE
+        elif on and ow:
+            anim_map[(x, y)] = _BWA.FRAMES_NW
+        elif on:
+            anim_map[(x, y)] = _BWA.FRAMES_N
+        elif os:
+            anim_map[(x, y)] = _BWA.FRAMES_S
+        elif oe:
+            anim_map[(x, y)] = _BWA.FRAMES_E if rng.random() < 0.5 else _BWA.FRAMES_E2
+        elif ow:
+            anim_map[(x, y)] = _BWA.FRAMES_W if rng.random() < 0.5 else _BWA.FRAMES_W2
+        else:
+            # No cardinal ocean neighbor: tile became beach via Chebyshev diagonal.
+            # Fill concave-corner gaps with the matching diagonal corner sprite.
+            if   _ocean(x-1, y-1): anim_map[(x, y)] = _BWA.FRAMES_NW
+            elif _ocean(x+1, y-1): anim_map[(x, y)] = _BWA.FRAMES_NE
+            elif _ocean(x-1, y+1): anim_map[(x, y)] = _BWA.FRAMES_SW
+            elif _ocean(x+1, y+1): anim_map[(x, y)] = _BWA.FRAMES_SE
+
+    # Cull animated tiles that don't touch a solid Beach tile cardinally.
+    # "Solid" means a beach_candidate that is NOT itself in anim_map.
+    # Other anim_map tiles don't count — they're all Shore, not solid backing.
+    shore_set = set(anim_map.keys())
+    solid_beach = set(beach_candidates) - shore_set
+
+    to_remove = [
+        (x, y) for (x, y) in anim_map
+        if not any((x+dx, y+dy) in solid_beach for dx, dy in ((0,-1),(0,1),(1,0),(-1,0)))
+    ]
+    for (x, y) in to_remove:
+        world.tiles[x, y] = tile_types.overworld_ocean
+        del anim_map[(x, y)]
+
+    # Convert every remaining animated tile to the dedicated Shore tile type.
+    # Shore is visually ocean but named "Shore" so the animation targets it exactly.
+    for (x, y) in anim_map:
+        world.tiles[x, y] = tile_types.overworld_shore
+
+    world.beach_water_anim = anim_map
+
+
+# The 9 cardinal combos that map exactly to one of the 3x3 autotile sprites.
+_FOREST_VALID_COMBOS = {
+    (False, True,  True,  False),  # S+E   → top_left
+    (False, True,  True,  True ),  # S+E+W → top_center
+    (False, True,  False, True ),  # S+W   → top_right
+    (True,  True,  True,  False),  # N+S+E → mid_left
+    (True,  True,  True,  True ),  # all 4 → mid_center
+    (True,  True,  False, True ),  # N+S+W → mid_right
+    (True,  False, True,  False),  # N+E   → bot_left
+    (True,  False, True,  True ),  # N+E+W → bot_center
+    (True,  False, False, True ),  # N+W   → bot_right
+}
+
+
+def _clean_forest_blobs(world) -> None:
+    """Erode forest tiles that don't fit the 3x3 autotile grid.
+    Iterates until stable: any tile whose cardinal-neighbor pattern isn't
+    one of the 9 valid combos is converted to plains."""
+    W, H = world.width, world.height
+
+    def _is_forest(x, y):
+        if x < 0 or x >= W or y < 0 or y >= H:
+            return False
+        return str(world.tiles[x, y]["name"]) == "Forest"
+
+    changed = True
+    while changed:
+        changed = False
+        for x in range(W):
+            for y in range(H):
+                if not _is_forest(x, y):
+                    continue
+                combo = (
+                    _is_forest(x,     y - 1),  # N
+                    _is_forest(x,     y + 1),  # S
+                    _is_forest(x + 1, y    ),  # E
+                    _is_forest(x - 1, y    ),  # W
+                )
+                if combo not in _FOREST_VALID_COMBOS:
+                    world.tiles[x, y] = tile_types.overworld_plains
+                    changed = True
 
 
 def _apply_forest_autotile(world) -> None:
@@ -271,22 +741,6 @@ def _apply_forest_autotile(world) -> None:
             has_N, has_NE, has_E, has_SE,
             has_S, has_SW, has_W, has_NW,
         )
-        # N+S-only tile whose S neighbour is strip_n (has N only, no S/E/W)
-        if has_N and has_S and not has_E and not has_W:
-            if not _is_forest(x, y + 2) and not _is_forest(x + 1, y + 1) and not _is_forest(x - 1, y + 1):
-                variant = tile_types.overworld_forest_ns_above_strip_n
-        # S+E-only tile whose S neighbour is strip_n (has N only, no S/E/W)
-        if has_S and has_E and not has_N and not has_W:
-            if not _is_forest(x, y + 2) and not _is_forest(x + 1, y + 1) and not _is_forest(x - 1, y + 1):
-                variant = tile_types.overworld_forest_ns_above_strip_n
-        # S-only tile whose S neighbour is mid_right (N+S+W, no E) → 0xE16B
-        if has_S and not has_N and not has_E and not has_W:
-            if _is_forest(x, y + 2) and _is_forest(x - 1, y + 1) and not _is_forest(x + 1, y + 1):
-                variant = tile_types.overworld_forest_ns_above_strip_n
-        # N-only tile whose N neighbour is mid_right (N+S+W, no E) → 0xE16B
-        if has_N and not has_S and not has_E and not has_W:
-            if _is_forest(x, y - 2) and _is_forest(x - 1, y - 1) and not _is_forest(x + 1, y - 1):
-                variant = tile_types.overworld_forest_ns_above_strip_n
         result = variant.copy()
         result["dark"]["ch"]  = ord(sprite_manager.compose_sprite(
             [plains_dark,  int(variant["dark"]["ch"])]
@@ -300,6 +754,11 @@ def _apply_forest_autotile(world) -> None:
 # Tile names that mountains composite cleanly against.
 # Any other biome is replaced with plains before compositing.
 _MOUNTAIN_MERGE_ALLOWED = {"Plains"}
+
+# Pre-composite overlays for mountain bases.
+# Structure: { base_biome_name: (neighbor_names_set, overlay_sprites_dict) }
+# Empty by default — mountains are always surrounded by plains (see MOUNTAIN_PLAINS_RADIUS).
+_MOUNTAIN_BIOME_PRE_OVERLAYS: dict = {}
 
 
 def _mountain_on_biome(world, mx, my, mountain_tile, biome_cache):
@@ -317,6 +776,11 @@ def _mountain_on_biome(world, mx, my, mountain_tile, biome_cache):
         tile_name = str(world.tiles[mx, my]["name"])
         if tile_name not in _MOUNTAIN_MERGE_ALLOWED:
             world.tiles[mx, my] = tile_types.overworld_plains
+            tile_name = "Plains"
+        # Apply any pre-composite neighbor overlays (e.g. sand edge on plains→desert border)
+        if tile_name in _MOUNTAIN_BIOME_PRE_OVERLAYS:
+            neighbor_names, overlay_sprites = _MOUNTAIN_BIOME_PRE_OVERLAYS[tile_name]
+            _apply_neighbor_overlay(world, [(mx, my)], neighbor_names, overlay_sprites)
         biome_cache[(mx, my)] = (
             int(world.tiles[mx, my]["dark"]["ch"]),
             int(world.tiles[mx, my]["light"]["ch"]),

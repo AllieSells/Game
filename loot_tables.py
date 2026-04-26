@@ -12,6 +12,7 @@ def _instantiate(factory):
 
 def generate_starter_chest_loot() -> list:
     return [
+        _instantiate(entity_factories.dungeon_key),
         _instantiate(entity_factories.torch),
         _instantiate(entity_factories.dagger),
         _instantiate(entity_factories.leather_cap),

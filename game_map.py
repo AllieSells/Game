@@ -729,7 +729,8 @@ class GameWorld:
 
     def generate_noise(self, floor_num: int) -> None:
         import tcod
-        from setup_game import _current_seed
+        import setup_game as _sg
+        _current_seed = _sg._current_seed
 
         self.noise_temperature = tcod.noise.Noise(dimensions=1, algorithm=tcod.noise.Algorithm.SIMPLEX, seed=_current_seed+1)
         self.noise_erosion = tcod.noise.Noise(dimensions=1, algorithm=tcod.noise.Algorithm.SIMPLEX, seed=_current_seed+2)

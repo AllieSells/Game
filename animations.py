@@ -847,6 +847,81 @@ class GlobalOceanAnimation:
         except Exception:
             pass
 
+class GlobalBeachWaterAnimation:
+    """Animates beach tiles that border water.
+    Each qualifying tile has a sequence of codepoints stored in
+    game_map.beach_water_anim[(x, y)] = (cp0, cp1, ..., cp7).
+    """
+    FRAME_DURATION = 5  # ticks per frame, matches ocean animation speed
+
+    # Frame sequences by border direction.
+    # E/W variants are chosen randomly per-tile during world generation.
+    FRAMES_N  = tuple(range(0xE190, 0xE198))
+    FRAMES_S  = tuple(range(0xE198, 0xE1A0))
+    FRAMES_W  = tuple(range(0xE1A0, 0xE1A8))
+    FRAMES_W2 = tuple(range(0xE1A8, 0xE1B0))
+    FRAMES_E  = tuple(range(0xE1B0, 0xE1B8))
+    FRAMES_E2 = tuple(range(0xE1B8, 0xE1C0))
+    FRAMES_SW = tuple(range(0xE1C0, 0xE1C8))
+    FRAMES_SE = tuple(range(0xE1C8, 0xE1D0))
+    FRAMES_NE = tuple(range(0xE1D0, 0xE1D8))
+    FRAMES_NW = tuple(range(0xE1D8, 0xE1E0))
+
+    def __init__(self):
+        self.render_priority = 0
+        self.frames = 10 ** 9  # never expires
+        self._tick = 0
+
+    def tick(self, console, game_map):
+        self._tick += 1
+        anim_map = getattr(game_map, "beach_water_anim", None)
+        if not anim_map:
+            return
+        idx = (self._tick // self.FRAME_DURATION) % 8
+        try:
+            import numpy as np
+            origin_x, origin_y, view_width, view_height = game_map.get_viewport(console)
+            for (x, y), seq in anim_map.items():
+                vx = x - origin_x
+                vy = y - origin_y
+                if 0 <= vx < view_width and 0 <= vy < view_height:
+                    if game_map.visible[x, y]:
+                        console.tiles_rgb["ch"][vx, vy] = seq[idx]
+        except Exception:
+            pass
+
+
+class GlobalRiverAnimation:
+    """Animates interior river tiles (not overlaid with bank sprites).
+
+    Uses the same ocean wave frames (0xE160-0xE167) at the same speed
+    but targets only tiles listed in game_map.river_anim.
+    """
+    FRAME_DURATION = 5
+
+    def __init__(self):
+        self.render_priority = 0
+        self.frames = 10 ** 9
+        self._tick = 0
+
+    def tick(self, console, game_map):
+        self._tick += 1
+        anim_map = getattr(game_map, "river_anim", None)
+        if not anim_map:
+            return
+        idx = (self._tick // self.FRAME_DURATION) % 8
+        try:
+            origin_x, origin_y, view_width, view_height = game_map.get_viewport(console)
+            for (x, y), seq in anim_map.items():
+                vx = x - origin_x
+                vy = y - origin_y
+                if 0 <= vx < view_width and 0 <= vy < view_height:
+                    if game_map.visible[x, y]:
+                        console.tiles_rgb["ch"][vx, vy] = seq[idx]
+        except Exception:
+            pass
+
+
 # ------------------------------- #
 # GPU ANIMS AND GPU PARTICLES
 # --------------------------------- #

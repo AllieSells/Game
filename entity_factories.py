@@ -90,6 +90,19 @@ health_potion = Item(
     weight=0.75
 )
 
+dungeon_key = Item(
+    char=chr(0xE0C4),
+    color=(255, 215, 0),
+    value=100,
+    name="Dungeon Key",
+    description="A mysterious key. It looks like it could unlock the entrance.",
+    pickup_sound=sounds.pickup_coin_sound,
+    drop_sound=sounds.play_unequip_coin_sound,
+    rarity_color=color.legendary,
+    tags = ["key", "dungeon", "metal"],
+    weight=0.1
+)
+
 darkvision_scroll = Item(
     char="~",
     color=color.dark_purple,
@@ -654,8 +667,11 @@ basic_entity_levelling = Level(
 # ACTORS - All actor definitions grouped together
 # =====================================================
 
+
+
 player = Actor(
     char=chr(0xE030),
+    travel_char = chr(0xE03B),
     color=(255, 255, 255),
     name = "Player",
     is_player=True,

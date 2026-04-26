@@ -20,7 +20,7 @@ from liquid_system import LiquidType
 from message_log import MessageLog
 import render_functions
 import sounds
-from animations import TextPopupAnimation, WaterMoveAnimation, GlobalWaterAnimation, GlobalOceanAnimation
+from animations import TextPopupAnimation, WaterMoveAnimation, GlobalWaterAnimation, GlobalOceanAnimation, GlobalBeachWaterAnimation, GlobalRiverAnimation
 import color
 
 if TYPE_CHECKING:
@@ -339,6 +339,12 @@ class Engine:
         if not any(type(a).__name__ == 'GlobalOceanAnimation' for a in self.animation_queue):
             from animations import GlobalOceanAnimation
             self.animation_queue.appendleft(GlobalOceanAnimation())
+        if not any(type(a).__name__ == 'GlobalBeachWaterAnimation' for a in self.animation_queue):
+            from animations import GlobalBeachWaterAnimation
+            self.animation_queue.appendleft(GlobalBeachWaterAnimation())
+        if not any(type(a).__name__ == 'GlobalRiverAnimation' for a in self.animation_queue):
+            from animations import GlobalRiverAnimation
+            self.animation_queue.appendleft(GlobalRiverAnimation())
 
         # Spawn directional light shaft particles for visible Window tiles.
         # Check north (y-1) and south (y+1) independently: if that side is open

@@ -5051,7 +5051,8 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.KeySym.V:
             return HistoryViewer(self.engine)
         elif key == tcod.event.KeySym.M:
-            self.engine.show_minimap = (getattr(self.engine, 'show_minimap', 0) + 1) % 3
+            if getattr(self.engine.game_map, 'type', None) != 'overworld':
+                self.engine.show_minimap = (getattr(self.engine, 'show_minimap', 0) + 1) % 3
             return None
         elif key == tcod.event.KeySym.G:
             action = PickupAction(player)

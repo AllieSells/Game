@@ -132,6 +132,7 @@ class Actor(Entity):
         x: int = 0,
         y: int = 0,
         char: str = "?",
+        travel_char: str = "?",
         is_player: bool = False,
         color: Tuple[int, int, int] = (255, 255, 255),
         name: str = "<Unnamed>",
