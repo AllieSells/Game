@@ -274,8 +274,15 @@ class GameMap:
         (no additional tint) and the tile's own bg colour.
         """
         tile = self.tiles[entity.x, entity.y]
-        tile_cp = int(tile["light"]["ch"])
-        tile_fg = tuple(int(v) for v in tile["light"]["fg"])
+        # Use the current animated frame codepoint if this is a water-edge tile,
+        # so entities composited here show the live water bite instead of the
+        # static floor sprite.
+        dw_current = getattr(self, 'dungeon_water_current', None)
+        if dw_current and (entity.x, entity.y) in dw_current:
+            tile_cp = dw_current[(entity.x, entity.y)]
+        else:
+            tile_cp = int(tile["light"]["ch"])
+        tile_fg = (255, 255, 255)  # composited tile already has colour baked in
         tile_bg = tuple(int(v) for v in tile["light"]["bg"])
         entity_cp = ord(entity.char)
 
@@ -333,8 +340,6 @@ class GameMap:
         tinting and dimming with bilinear sub-tile interpolation.
         Explored-but-not-visible tiles use their 'dark' variant as before.
         """
-        import tile_types
-
         origin_x, origin_y, view_width, view_height = self.get_viewport(console)
         x_slice = slice(origin_x, origin_x + view_width)
         y_slice = slice(origin_y, origin_y + view_height)
@@ -832,6 +837,8 @@ class GameWorld:
         """Descend one level, or enter a dungeon from the overworld."""
         current_map = self.engine.game_map
         player_pos = (self.engine.player.x, self.engine.player.y)
+        print(f"[DESCEND] called: map_type={current_map.type} floor={self.current_floor} "
+              f"pos={player_pos} down_stack={len(self.down_stack)}")
 
         # ── Overworld → dungeon entrance ────────────────────────────────────
         if current_map.type == "overworld":
@@ -843,9 +850,11 @@ class GameWorld:
             self.current_floor = 1
             if player_pos in self.dungeon_cache:
                 cached_map, cached_spawn = self.dungeon_cache[player_pos]
+                print(f"[DESCEND] Using cached dungeon map, spawn={cached_spawn}")
                 self.engine.game_map = cached_map
                 self.engine.player.place(cached_spawn[0], cached_spawn[1], cached_map)
             else:
+                print(f"[DESCEND] Generating new dungeon (seed={dungeon_seed})")
                 from procgen import generate_dungeon
                 new_map = generate_dungeon(
                     max_rooms=self.max_rooms,
@@ -864,6 +873,7 @@ class GameWorld:
                     anim_q.clear()
                 except Exception:
                     pass
+            print(f"[DESCEND] Overworld->dungeon done, now floor={self.current_floor}")
             return
 
         # ── Normal dungeon descent ───────────────────────────────────────────
@@ -871,13 +881,16 @@ class GameWorld:
 
         if self.down_stack:
             next_map, next_player_pos, next_floor = self.down_stack.pop()
+            print(f"[DESCEND] Popped from down_stack: floor={next_floor} spawn={next_player_pos}")
             self.current_floor = next_floor
             self.engine.game_map = next_map
             px, py = next_player_pos
             self.engine.player.place(px, py, next_map)
         else:
-            from procgen import generate_dungeon
+            prev_floor = self.current_floor
             self.current_floor += 1
+            print(f"[DESCEND] Generating new floor {self.current_floor} (was {prev_floor})")
+            from procgen import generate_dungeon
             new_map = generate_dungeon(
                 max_rooms=self.max_rooms,
                 room_min_size=self.room_min_size,
@@ -888,6 +901,7 @@ class GameWorld:
                 noise_vals=self.generate_noise(self.current_floor),
                 floor_num=self.current_floor,
             )
+            print(f"[DESCEND] New map generated: down={new_map.downstairs_location} up={getattr(new_map,'upstairs_location',None)}")
             self.engine.game_map = new_map
         anim_q = getattr(self.engine, "animation_queue", None)
         if anim_q is not None:
@@ -896,23 +910,30 @@ class GameWorld:
             except Exception:
                 while anim_q:
                     anim_q.popleft()
+        print(f"[DESCEND] Done, now floor={self.current_floor}")
 
     def ascend(self) -> None:
         """Ascend one level."""
         if len(self.up_stack) == 0:
             return
 
-        # Save current floor to the down-stack so descending again reuses it.
         current_map = self.engine.game_map
         player_pos = (self.engine.player.x, self.engine.player.y)
-        self.down_stack.append((current_map, player_pos, self.current_floor))
 
         # Restore previous floor
         prev_map, prev_player_pos, prev_floor = self.up_stack.pop()
 
-        # If returning to overworld, cache the dungeon keyed by the entrance position
+        # If returning to overworld, cache the dungeon entry floor and clear the
+        # down_stack so stale entries don't loop the player back to a previous
+        # tutorial/entry floor on their next re-entry.
         if getattr(prev_map, 'type', None) == 'overworld':
             self.dungeon_cache[prev_player_pos] = (current_map, player_pos)
+            self.down_stack.clear()
+            print(f"[ASCEND] Returning to overworld — down_stack cleared, cached entry floor at {prev_player_pos}")
+        else:
+            # Normal intra-dungeon ascent: save current floor so descending re-enters it.
+            self.down_stack.append((current_map, player_pos, self.current_floor))
+            print(f"[ASCEND] Intra-dungeon ascent to floor {prev_floor}, pushed floor {self.current_floor} to down_stack")
         self.engine.game_map = prev_map
         self.current_floor = prev_floor
         

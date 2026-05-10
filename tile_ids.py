@@ -28,3 +28,9 @@ COBWEB = chr(0xE003)  # Cobweb corner
 
 # Add more below as you draw them in extras.png:
 # SLOT_4 = chr(0xE004)
+
+# --- Animated targeting cursor: row 15, cols 6 & 7 ---
+# Row 15, col 6: slot = 15*16 + 6 = 246 -> 0xE0F6
+# Row 15, col 7: slot = 15*16 + 7 = 247 -> 0xE0F7
+CURSOR_0 = chr(0xE0F6)  # Cursor frame 0
+CURSOR_1 = chr(0xE0F7)  # Cursor frame 1

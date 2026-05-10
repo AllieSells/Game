@@ -39,7 +39,6 @@ class MessageLog:
         # Render this over the log. x,y, wid, height, is region rendered to console
         
         # Message log content renders within the bordered area
-        import color
         from render_functions import MenuRenderer
         
         # Draw parchment background for message log area

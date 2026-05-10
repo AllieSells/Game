@@ -1,51 +1,59 @@
-from ast import In
-
-from numpy import ma
-from numpy.char import capitalize
-
-from spheres import SPHERES, hostility, generate_world_spheres
+﻿import math
 import random
+from numpy.char import capitalize
+try:
+    from worldgen.spheres import SPHERES, hostility, generate_world_spheres
+except ImportError:
+    from spheres import SPHERES, hostility, generate_world_spheres
 
-
-
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 
 NUM_DEITIES = 13
 
-world_spheres = generate_world_spheres(target=NUM_DEITIES * 5)
+MIGRATION_POP_THRESHOLD = 0.45   # fraction of carrying capacity that triggers pressure
+MIGRATION_WEALTH_THRESHOLD = 200
+MIGRATION_CHANCE = 0.002         # 0.2% chance per year when thresholds are met
+MIGRATION_SITE_COOLDOWN = 40     # years a site must wait before sending migrants
+MIGRATION_CIV_COOLDOWN = 25      # years a civ must wait between any two migrations
+MAX_SITES_PER_CIV = 10
 
-class Diety:
+# ---------------------------------------------------------------------------
+# Pantheon
+# ---------------------------------------------------------------------------
+
+class Deity:
     def __init__(self, name: str, spheres: list[str]):
         self.name = name
         self.spheres = spheres
         self.hostility = round(sum(hostility(s) for s in spheres), 1)
 
 
-def generate_sphere_orientation(world):
-    world_spheres = list(world.keys())
-    available = [s for s in world_spheres if s not in TAKEN_SPHERES]
+world_spheres = generate_world_spheres(target=NUM_DEITIES * 5)
+TAKEN_SPHERES: set[str] = set()
+deities: dict[str, Deity] = {}
+
+
+def generate_sphere_orientation(world: dict) -> list[str]:
+    available = [s for s in world if s not in TAKEN_SPHERES]
     if not available:
         return []
 
     sphere_list: list[str] = []
     max_spheres = random.randint(1, min(3, len(available)))
 
-    # Pick a starting sphere
     start = random.choice(available)
     sphere_list.append(start)
     TAKEN_SPHERES.add(start)
     current = start
 
     for _ in range(max_spheres - 1):
-        # 1. Try world links from current sphere
-        candidates = [s for s in world.get(current, [])
-                      if s in world and s not in TAKEN_SPHERES]
-        # 2. Fall back to children in raw sphere graph
+        candidates = [s for s in world.get(current, []) if s in world and s not in TAKEN_SPHERES]
         if not candidates:
-            candidates = [s for s in SPHERES.get(current, {}).get("children", [])
-                          if s in world and s not in TAKEN_SPHERES]
-        # 3. Fall back to any untaken world sphere
+            candidates = [s for s in SPHERES.get(current, {}).get("children", []) if s in world and s not in TAKEN_SPHERES]
         if not candidates:
-            candidates = [s for s in world_spheres if s not in TAKEN_SPHERES]
+            candidates = [s for s in world if s not in TAKEN_SPHERES]
         if not candidates:
             break
         current = random.choice(candidates)
@@ -55,123 +63,91 @@ def generate_sphere_orientation(world):
     return sphere_list
 
 
-
-def gen_deities(num_deities: int = NUM_DEITIES) -> None:
-    attempts = 0
-    for x in range(num_deities):
-        attempts += 1
-        if attempts > num_deities * 10:
-            print("Warning: Too many attempts to generate deities. Consider increasing the number of available spheres.")
-            break
-        deity_name = f"Deity {x+1}"
+def gen_deities(num: int = NUM_DEITIES) -> None:
+    for i in range(num):
         spheres = generate_sphere_orientation(world_spheres)
-        try:
-            deity_name = f"the God of {capitalize(spheres[0])}" if len(spheres) == 1 else f"the God of {capitalize(spheres[0])} and {capitalize(spheres[1])}"
-        except IndexError:
-            pass
         if not spheres:
-            print(f"Warning: Could not assign spheres to {deity_name} due to exhaustion.")
             continue
-        diety = Diety(deity_name, spheres)
-        deities[deity_name] = diety
+        if len(spheres) == 1:
+            name = f"the God of {capitalize(spheres[0])}"
+        else:
+            name = f"the God of {capitalize(spheres[0])} and {capitalize(spheres[1])}"
+        deities[name] = Deity(name, spheres)
 
-    # Check for at least one hostile and one friendly diety
-    if not any(d.hostility > .25 for d in deities.values()):
-        print("Warning: No hostile deities generated. Regenerating with more aggressive parameters.")
-        deity_name = f"Deity {NUM_DEITIES + 1}"
-        spheres = generate_sphere_orientation(world_spheres)
-        if spheres:
-            # Check if any sphere has positive hostility
-            if any(hostility(s) > 0.25 for s in spheres):
-                diety = Diety(deity_name, spheres)
-                deities[deity_name] = diety
+    if not any(d.hostility > 0.25 for d in deities.values()):
+        print("Warning: No hostile deities generated.")
+        extra = generate_sphere_orientation(world_spheres)
+        if extra and any(hostility(s) > 0.25 for s in extra):
+            deities["Deity (extra hostile)"] = Deity("Deity (extra hostile)", extra)
 
 
+# Keep regenerating until the average hostility is non-zero (balanced pantheon)
 gen_attempts = 0
-
-# PANTHEON ASSEMBLY
-
 while True:
     gen_attempts += 1
-    TAKEN_SPHERES:set[str] = set()
-    deities = {}
-    gen_deities(13)
-    if (round(sum(d.hostility for d in deities.values()) / len(deities), 2)) == 0:
+    TAKEN_SPHERES.clear()
+    deities.clear()
+    gen_deities(NUM_DEITIES)
+    avg = sum(d.hostility for d in deities.values()) / len(deities)
+    if round(avg, 2) != 0:
         break
 
 print(f"Tried {gen_attempts} times to generate a balanced pantheon.")
-print("Deities and their spheres:")
-for deity, spheres in deities.items():
-    print(f"{deity}: {spheres.spheres} (Hostility: {spheres.hostility})")
-
+for name, deity in deities.items():
+    print(f"{name}: {deity.spheres} (Hostility: {deity.hostility})")
 print(f"AVERAGE HOSTILITY: {round(sum(d.hostility for d in deities.values()) / len(deities), 2)}")
 
-
-# == SPECIES GENERATION ==
-
-
-
-
-
-
-
+# ---------------------------------------------------------------------------
+# Species
+# ---------------------------------------------------------------------------
 
 class Species:
     def __init__(self, name: str, hostility_min: float, hostility_max: float,
-                 min_year_created: int = None, max_age: int = 100,
+                 min_year_created: int = 1, max_age: int = 100,
                  offspring_count: int = 2, reproduction_rate: float = 0.05,
-                 carrying_capacity: int = None, death_rate: float = None,
-                 maturity_age: int = None, founding_population: int = 50, can_have_culture: bool = False):
+                 carrying_capacity: int = 5000, death_rate: float = None,
+                 maturity_age: int = None, founding_population: int = 50,
+                 can_have_culture: bool = False):
         self.name = name
         self.can_have_culture = can_have_culture
         self.hostility_min = hostility_min
         self.hostility_max = hostility_max
-        self.creator = None
+        self.creator: str | None = None
         self.min_year_created = min_year_created
-        self.year_created = None
         self.offspring_count = offspring_count
-        # reproduction_rate = fraction of adults that breed per year
         self.reproduction_rate = reproduction_rate
         self.max_age = max_age
         self.carrying_capacity = carrying_capacity
-        # Default death rate: 1/max_age gives ~natural lifespan
         self.death_rate = death_rate if death_rate is not None else 1.0 / max_age
-        # Default maturity at ~20% of lifespan
         self.maturity_age = maturity_age if maturity_age is not None else max(1, max_age // 5)
         self.founding_population = founding_population
 
 
-
-
-# Species gen
-
-SPECIES = {
-    # reproduction_rate = fraction of adults that breed per year; offspring_count = young per breeding adult
-    # Spiders: short-lived r-strategists, many young, low survival                   maturity  founding
-    "giant spider": Species("giant spider", can_have_culture=False, hostility_min=0.1,   hostility_max=1, min_year_created=1,  offspring_count=10, max_age=5,   reproduction_rate=0.50, carrying_capacity=5000,  maturity_age=1,  founding_population=20),
-    "kobold":       Species("kobold",        can_have_culture=True, hostility_min=0.25,  hostility_max=1, min_year_created=5,  offspring_count=4,  max_age=50,  reproduction_rate=0.15, carrying_capacity=5000,  maturity_age=8,  founding_population=40),
-    "goblin":       Species("goblin",        can_have_culture=True, hostility_min=0.5,   hostility_max=1, min_year_created=1,  offspring_count=3,  max_age=100, reproduction_rate=0.10, carrying_capacity=5000,  maturity_age=12, founding_population=50),
-    "naga":         Species("naga",          can_have_culture=False, hostility_min=0.25,  hostility_max=1, min_year_created=1,  offspring_count=2,  max_age=200, reproduction_rate=0.05, carrying_capacity=5000,  maturity_age=30, founding_population=30),
-    "troll":        Species("troll",         can_have_culture=False, hostility_min=0.5,   hostility_max=1, min_year_created=1,  offspring_count=2,  max_age=150, reproduction_rate=0.06, carrying_capacity=5000,   maturity_age=20, founding_population=20),
-    "human":        Species("human",         can_have_culture=True, hostility_min=-1.0, hostility_max=0.0,  min_year_created=50, offspring_count=2,  max_age=80,  reproduction_rate=0.08, carrying_capacity=5000, maturity_age=15, founding_population=100),
+SPECIES: dict[str, Species] = {
+    "giant spider": Species("giant spider", can_have_culture=False, hostility_min=0.1,  hostility_max=1.0, min_year_created=1,  offspring_count=10, max_age=5,   reproduction_rate=0.50, carrying_capacity=5000, maturity_age=1,  founding_population=20),
+    "kobold":       Species("kobold",       can_have_culture=True,  hostility_min=0.25, hostility_max=1.0, min_year_created=5,  offspring_count=4,  max_age=50,  reproduction_rate=0.15, carrying_capacity=5000, maturity_age=8,  founding_population=40),
+    "goblin":       Species("goblin",       can_have_culture=True,  hostility_min=0.5,  hostility_max=1.0, min_year_created=1,  offspring_count=3,  max_age=100, reproduction_rate=0.10, carrying_capacity=5000, maturity_age=12, founding_population=50),
+    "naga":         Species("naga",         can_have_culture=False, hostility_min=0.25, hostility_max=1.0, min_year_created=1,  offspring_count=2,  max_age=200, reproduction_rate=0.05, carrying_capacity=5000, maturity_age=30, founding_population=30),
+    "troll":        Species("troll",        can_have_culture=False, hostility_min=0.5,  hostility_max=1.0, min_year_created=1,  offspring_count=2,  max_age=150, reproduction_rate=0.06, carrying_capacity=5000, maturity_age=20, founding_population=20),
+    "human":        Species("human",        can_have_culture=True,  hostility_min=-1.0, hostility_max=0.0, min_year_created=50, offspring_count=2,  max_age=80,  reproduction_rate=0.08, carrying_capacity=5000, maturity_age=15, founding_population=100),
 }
 
 for species in SPECIES.values():
-    prospective_deities = [
-        d for d in deities.values()
-        if species.hostility_min <= d.hostility <= species.hostility_max
-    ]
-    if prospective_deities:
-        species.creator = random.choice(prospective_deities).name
+    candidates = [d for d in deities.values() if species.hostility_min <= d.hostility <= species.hostility_max]
+    if candidates:
+        species.creator = random.choice(candidates).name
 
 print("\nSpecies and their creators:")
 for species in SPECIES.values():
     creator_hostility = deities[species.creator].hostility if species.creator else "N/A"
-    print(f"{species.name}: Created by {species.creator} | Creator hostility: {creator_hostility}")
+    print(f"  {species.name}: {species.creator} (hostility {creator_hostility})")
 
-print("\nSimulating world history and species emergence...")
+# ---------------------------------------------------------------------------
+# World objects
+# ---------------------------------------------------------------------------
 
-# Civ gen
+WORLD_W = 120
+WORLD_H = 40
 
 class Event:
     def __init__(self, name: str, year: int, description: str):
@@ -179,79 +155,158 @@ class Event:
         self.year = year
         self.description = description
 
-class Relationship:
-    value: float
-    war: bool
-    trade: bool 
 
-entities_test = []
-
-
-
-
-
-class Site():
-    def __init__(self, name: str, location: int, founding_year: int):
+class Site:
+    def __init__(self, name: str, x: int, y: int, founding_year: int, location_quality: float = None):
         self.name = name
-        self.location = location
-        
+        self.x = x
+        self.y = y
+        # Triangular distribution: most sites average quality, few prime or barren
+        self.location_quality = location_quality if location_quality is not None else round(random.triangular(0.05, 1.0, 0.45), 2)
         self.population = 0
         self.wealth = 0
         self.status = "active"
+        self.is_capital = False
+        self.last_migration_year = -999
         self.events: list[Event] = []
-    
+
+    @property
+    def site_type(self) -> str:
+        if self.is_capital:
+            return "Capital"
+        elif self.wealth >= 3_500:
+            return "City"
+        elif self.wealth >= 800:
+            return "Village"
+        elif self.wealth >= 150:
+            return "Outpost"
+        else:
+            return "Camp"
+
+    @property
+    def glyph(self) -> str:
+        return {"Capital": "@", "City": "#", "Village": "o", "Outpost": "*", "Camp": "."}.get(self.site_type, "?")
 
 
 class Civilization:
-    def __init__(self, name: str, populaiton: int, founding_year: int, relationships: dict[str, float], sites: list[str]):
+    def __init__(self, name: str, population: int, founding_year: int, species_name: str):
         self.name = name
-        self.population = populaiton
+        self.population = population
         self.founding_year = founding_year
-
-        self.relationships = relationships  # { other_civ_name: relationship_score }
+        self.species_name = species_name
+        self.site_count = 1
         self.sites: list[Site] = []
         self.events: list[Event] = []
+        self.last_migration_year = -999
+        self.relationships: dict[str, float] = {}  # civ_name -> -1.0 (war) .. 1.0 (ally)
 
     def establish_self(self, year: int):
-        self.events.append(Event(name="Established", year=year, description=f"In year {year}, {self.name} was founded."))
+        self.events.append(Event("Established", year, f"In year {year}, {self.name} was founded."))
 
     def establish_site(self, year: int):
         site_name = f"{self.name} Camp"
-        location = random.randint(0, 100)  # Placeholder for actual location logic
-        new_site = Site(site_name, location, year)
-        self.sites.append(new_site)
-        self.events.append(Event(name="Site Established", year=year, description=f"In year {year}, {self.name} established a new site: {site_name}."))
+        x = random.randint(2, WORLD_W - 3)
+        y = random.randint(2, WORLD_H - 3)
+        site = Site(site_name, x, y, year, location_quality=1.0)
+        site.population = self.population
+        self.sites.append(site)
+        self.events.append(Event("Site Established", year, f"In year {year}, {self.name} established {site_name}."))
 
+# ---------------------------------------------------------------------------
+# World seeding
+# ---------------------------------------------------------------------------
 
+world_civilizations: dict[str, Civilization] = {}
 
-
-
-world_civilizations = {}
-world_sites = {}
-
-# Seed world with civs
+print("\nSimulating world history...")
 
 for species in SPECIES.values():
-    if species.can_have_culture and species.creator:
-        for x in range(random.randint(1, 3)):
-            year_of_establishment = int(species.min_year_created * random.uniform(0.5, 1.5))
-            civ_name = f"{species.name.capitalize()} Civ {x+1}"
-            world_civilizations[civ_name] = Civilization(civ_name, int(species.founding_population*random.uniform(0.5, 1.5)), year_of_establishment, {}, [])
-            world_civilizations[civ_name].establish_self(year_of_establishment)
-            world_civilizations[civ_name].establish_site(year_of_establishment)
+    if not (species.can_have_culture and species.creator):
+        continue
+    for i in range(random.randint(1, 3)):
+        year = int(species.min_year_created * random.uniform(0.5, 1.5))
+        civ_name = f"{species.name.capitalize()} Civ {i + 1}"
+        pop = int(species.founding_population * random.uniform(0.5, 1.5))
+        civ = Civilization(civ_name, pop, year, species.name)
+        civ.establish_self(year)
+        civ.establish_site(year)
+        world_civilizations[civ_name] = civ
+
+# ---------------------------------------------------------------------------
+# Simulation
+# ---------------------------------------------------------------------------
+
+def tick_world(total_years: int = 1000) -> None:
+    for year in range(1, total_years + 1):
+        for civ in world_civilizations.values():
+            species = SPECIES.get(civ.species_name)
+            if species is None:
+                continue
+
+            new_sites: list[Site] = []
+            civ_migrated = False
+
+            for site in civ.sites:
+                net_growth = 0
+                if site.population > 0:
+                    effective_cap = max(1, int(species.carrying_capacity * site.location_quality))
+                    growth_pressure = 1.0 - (site.population / effective_cap)
+                    adults = max(0, site.population - species.maturity_age * site.population // species.max_age)
+                    births = int(adults * species.reproduction_rate * species.offspring_count * growth_pressure)
+                    deaths = int(site.population * species.death_rate)
+                    net_growth = births - deaths
+                    site.population = max(0, min(site.population + net_growth, effective_cap))
+
+                # Wealth: base from stable population + bonus from active growth
+                site.wealth = max(0, site.wealth + site.population // 500 + max(0, net_growth) // 2 + random.randint(0, 2))
+
+                # Migration
+                pop_threshold = int(species.carrying_capacity * MIGRATION_POP_THRESHOLD)
+                if (not civ_migrated
+                        and len(civ.sites) + len(new_sites) < MAX_SITES_PER_CIV
+                        and site.population > pop_threshold
+                        and site.wealth > MIGRATION_WEALTH_THRESHOLD
+                        and (year - site.last_migration_year) >= MIGRATION_SITE_COOLDOWN
+                        and (year - civ.last_migration_year) >= MIGRATION_CIV_COOLDOWN
+                        and random.random() < MIGRATION_CHANCE):
+
+                    migrant_pop = int(site.population * random.uniform(0.03, 0.08))
+                    site.population -= migrant_pop
+                    site.wealth -= int(site.wealth * random.uniform(0.10, 0.20))
+                    site.last_migration_year = year
+                    civ.last_migration_year = year
+                    civ_migrated = True
+
+                    civ.site_count += 1
+                    new_name = f"{civ.name} Settlement {civ.site_count}"
+                    _angle = random.uniform(0, 2 * math.pi)
+                    _radius = random.randint(3, 8)
+                    x = max(2, min(WORLD_W - 3, int(site.x + _radius * math.cos(_angle))))
+                    y = max(2, min(WORLD_H - 3, int(site.y + _radius * math.sin(_angle) / 3)))
+                    new_site = Site(new_name, x, y, year)
+                    new_site.population = migrant_pop
+                    new_site.wealth = random.randint(10, 50)
+                    new_sites.append(new_site)
+                    civ.events.append(Event(
+                        "Migration", year,
+                        f"In year {year}, {migrant_pop} settlers departed {site.name} to found {new_name}."
+                    ))
+
+            civ.sites.extend(new_sites)
+            civ.population = sum(s.population for s in civ.sites)
+
+            for s in civ.sites:
+                s.is_capital = False
+            if civ.sites:
+                max(civ.sites, key=lambda s: s.wealth).is_capital = True
 
 
-def tick_world(year: int, total_years: int = 1000) -> None:
-    for x in range(total_years):
-        year += 1
-
-
-
-year = 0
-tick_world(year)
+tick_world(1000)
 
 
 for civ in world_civilizations.values():
     print(f"\nCivilization: {civ.name} | Population: {civ.population} | Founded: {civ.founding_year}")
     for event in civ.events:
         print(f"  - {event.year}: {event.name} - {event.description}")
+    for site in civ.sites:
+        print(f"  [{site.site_type}] {site.name} | Pop: {site.population} | Wealth: {site.wealth} | Quality: {site.location_quality}")

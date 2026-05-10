@@ -1,12 +1,12 @@
 from __future__ import annotations
 from enum import unique
 from typing import Dict, Iterator, Tuple, List, TYPE_CHECKING
-from webbrowser import get
 import copy
 import tcod
 import random
 
 import engine
+import sprite_manager
 import entity_factories
 from game_map import GameMap
 from typing import Optional
@@ -20,6 +20,28 @@ from setup_game import _current_seed
 max_items_by_floor = {1: 2, 4: 2}
 max_chests_by_floor = {1: 1, 3: 2}
 max_flora_by_floor = {1: 3, 4: 5}
+
+# Tile names that should never have anything spawned on them.
+_NO_SPAWN_NAMES = {
+    "Water", "Foliage", "Mossy Floor",
+    "<purple>Down Stairs</purple>", "<purple>Up Stairs</purple>",
+}
+
+def _spawnable(dungeon: GameMap, x: int, y: int) -> bool:
+    """Return True only if (x, y) is a plain walkable tile with no entity and
+    no water-edge animation overlay, and not a special tile like stairs/foliage."""
+    tile = dungeon.tiles[x, y]
+    if not tile["walkable"]:
+        return False
+    if str(tile["name"]) in _NO_SPAWN_NAMES:
+        return False
+    # Exclude water-edge floor tiles that have animated bite overlays.
+    dw_anim = getattr(dungeon, "dungeon_water_anim", None)
+    if dw_anim and (x, y) in dw_anim:
+        return False
+    if any(e.x == x and e.y == y for e in dungeon.entities):
+        return False
+    return True
 
 item_chances = {
     0: {
@@ -159,39 +181,40 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int, b
 
     # Place chests based on floor
     for entity in range(random.randint(0, get_max_value_for_floor(max_chests_by_floor, floor_number))):
-        chest = entity_factories.chest
-
-        # Spawn chests in room, aligning to a wall if possible
-        if random.random() < 0.5: # Align to horizontal wall
-            x = random.randint(room.x1+1, room.x2-1)
-            y = room.y1+1 if random.random() < 0.5 else room.y2-1
-        else: # Align to vertical wall
-            x = room.x1+1 if random.random() < 0.5 else room.x2-1
-            y = random.randint(room.y1+1, room.y2-1)
-        if not any(e.x == x and e.y == y for e in dungeon.entities):
-            # Choose chest loot from tiered pool based on floor
-            import loot_tables
-            chest_tier = "basic" if floor_number <= 3 else "advanced"
-            loot = loot_tables.generate_tiered_chest_loot(chest_tier)
-            chest = entity_factories.make_chest_with_loot(loot, capacity=6)
-            chest.spawn(dungeon, x, y)
+        # Spawn chests in room, aligning to a wall if possible; retry up to 10 times.
+        for _ in range(10):
+            if random.random() < 0.5:
+                x = random.randint(room.x1+1, room.x2-1)
+                y = room.y1+1 if random.random() < 0.5 else room.y2-1
+            else:
+                x = room.x1+1 if random.random() < 0.5 else room.x2-1
+                y = random.randint(room.y1+1, room.y2-1)
+            if _spawnable(dungeon, x, y):
+                import loot_tables
+                chest_tier = "basic" if floor_number <= 3 else "advanced"
+                loot = loot_tables.generate_tiered_chest_loot(chest_tier)
+                chest = entity_factories.make_chest_with_loot(loot, capacity=6)
+                chest.spawn(dungeon, x, y)
+                break
 
     # Place flora
     game_world = dungeon.engine.game_world
     for entity in range(random.randint(0, get_max_value_for_floor(max_flora_by_floor, floor_number))):
         fungus = game_world.fungi[random.randint(0, len(game_world.fungi)-1)]
-        x = random.randint(room.x1+1, room.x2-1)
-        y = random.randint(room.y1+1, room.y2-1)
-        if not any(e.x == x and e.y == y for e in dungeon.entities):
-            fungus.spawn(dungeon, x, y)
+        for _ in range(10):
+            x = random.randint(room.x1+1, room.x2-1)
+            y = random.randint(room.y1+1, room.y2-1)
+            if _spawnable(dungeon, x, y):
+                fungus.spawn(dungeon, x, y)
+                break
 
     for entity in monsters:
-        x = random.randint(room.x1+1, room.x2-1)
-        y= random.randint(room.y1+1, room.y2-1)
-
-        if not any(entity.x == x and entity.y == y for entity in dungeon.entities):
-            # Spawn mob with equipment automatically applied via spawn()
-            entity.spawn(dungeon, x, y)
+        for _ in range(10):
+            x = random.randint(room.x1+1, room.x2-1)
+            y = random.randint(room.y1+1, room.y2-1)
+            if _spawnable(dungeon, x, y):
+                entity.spawn(dungeon, x, y)
+                break
 
     # Place campfire using centralized logic
     place_campfires(dungeon, "dungeon_room", room=room)
@@ -305,7 +328,6 @@ def place_village_entities(building: Building, village: GameMap, floor_number: i
         
         if not any(e.x == x and e.y == y for e in village.entities):
             # Create a unique copy of the villager with a new name
-            import copy
             from components import names
             if random.random() < .20:
             
@@ -587,7 +609,7 @@ def generate_village(
                     village.tiles[new_building.x1, y] = tile_types.random_wall_tile()
                     village.tiles[new_building.x2, y] = tile_types.random_wall_tile()
                 
-                village.tiles[new_building.inner] = tile_types.floor
+                village.tiles[new_building.inner] = tile_types.random_floor_tile()
                 
                 # Add entrance for fallback buildings too
                 bx, by = new_building.center
@@ -609,7 +631,7 @@ def generate_village(
                         entrance_y = new_building.y1
                 
                 # Create the entrance (gap in the wall)
-                village.tiles[entrance_x, entrance_y] = tile_types.floor
+                village.tiles[entrance_x, entrance_y] = tile_types.random_floor_tile()
                 
                 buildings.append(new_building)
         
@@ -661,7 +683,6 @@ def ensure_room_walls(dungeon: GameMap, rooms: list) -> None:
             for y in range(room.y1 - 1, room.y2 + 2):
                 # Check if this tile is on the border of the room
                 if (x == room.x1 - 1 or x == room.x2 + 1 or y == room.y1 - 1 or y == room.y2 + 1):
-                    #print(f"Ensuring wall at ({x}, {y}) for room at ({room.x1}, {room.y1}, {room.x2}, {room.y2})")
                     # Check if in bounds
                     if dungeon.in_bounds(x,y):
                         # If it's currently a floor, 40% chance to turn it into a wall
@@ -768,8 +789,6 @@ def determine_wall_tile(connections: Dict[str, bool], tile_type: Optional[str] =
     se = connections['southeast']
     sw = connections['southwest']
 
-    #print(tile_type, connections)
-
     if n and s and e and w and nw and sw and not ne and not se:
         return tile_types.get_wall_top_left(tile_type)
     
@@ -857,7 +876,6 @@ def place_entities_cave(floor_tiles: List[Tuple[int, int]], dungeon: GameMap, fl
         floor_tiles = random.sample(floor_tiles, max_rooms)
 
     number_of_monsters = get_enemy_count_for_floor(floor_number)
-    #print(f"Placing {number_of_monsters} monsters in cave section with {len(floor_tiles)} floor tiles for floor #{floor_number}")
     monsters = get_enemies_for_floor(floor_number, number_of_monsters, biome)
 
     shuffled = list(floor_tiles)
@@ -865,9 +883,8 @@ def place_entities_cave(floor_tiles: List[Tuple[int, int]], dungeon: GameMap, fl
 
     # Place monsters
     for entity in monsters:
-        print(f"[GEN] spawning: {len(monsters)} enemies total")
         for x, y in shuffled:
-            if not any(e.x == x and e.y == y for e in dungeon.entities):
+            if _spawnable(dungeon, x, y):
                 entity.spawn(dungeon, x, y)
                 break
 
@@ -878,14 +895,14 @@ def place_entities_cave(floor_tiles: List[Tuple[int, int]], dungeon: GameMap, fl
         loot = loot_tables.generate_tiered_chest_loot(chest_tier)
         chest = entity_factories.make_chest_with_loot(loot, capacity=6)
         for x, y in shuffled:
-            if not any(e.x == x and e.y == y for e in dungeon.entities):
+            if _spawnable(dungeon, x, y):
                 chest.spawn(dungeon, x, y)
                 break
 
     # Maybe place a campfire (15% chance per section)
     if random.random() < 0.15:
         for x, y in shuffled:
-            if not any(e.x == x and e.y == y for e in dungeon.entities):
+            if _spawnable(dungeon, x, y):
                 entity_factories.campfire.spawn(dungeon, x, y)
                 break
 
@@ -972,7 +989,6 @@ def join_caverns(dungeon: GameMap, width: int, height: int) -> None:
             break
 
     if center_ref is None:
-        print("[GEN] join_caverns: no floor tiles found, skipping")
         return  # No floor tiles — nothing to connect
 
     # Collect one representative point per distinct cave
@@ -983,8 +999,6 @@ def join_caverns(dungeon: GameMap, width: int, height: int) -> None:
                 root = ds.find((x, y))
                 if root not in cave_reps:
                     cave_reps[root] = (x, y)
-
-    print(f"[GEN] join_caverns: {len(cave_reps)} disconnected cave regions to merge")
 
     def get_dir(pt1: Tuple[int, int], pt2: Tuple[int, int]) -> Tuple[int, int]:
         h = 0 if pt1[0] == pt2[0] else (1 if pt2[0] > pt1[0] else -1)
@@ -1054,6 +1068,7 @@ def generate_first_floor(
     # Generate tutorial floor
 
     _placer = engine.player
+    _placer.char = chr(0xE030)  # human character for tutorial
 
     dungeon = GameMap(engine, map_width, map_height, entities=[_placer], type="dungeon", name="Dungeon", sunlit=False, biome="tutorial")
     rooms: List[RectangularRoom] = []
@@ -1069,21 +1084,22 @@ def generate_first_floor(
             # top and bottom walls, between x49 and x59
             if y == tut_room.y1 or y == tut_room.y2:
                 if x > tut_room.x1 + 1 and x < tut_room.x2 - 2:
-                    #print(tut_room.x1, tut_room.x2)
                     # every 3 tiles
                     if (x - (tut_room.x1 + 2)) % 3 == 0:
                         dungeon.tiles[x, y] = tile_types.window
-    dungeon.tiles[40, 24] = tile_types.locked_door
+    center_y = (tut_room.y1 + tut_room.y2) // 2
 
+    # Locked door on the west wall — the only exit, unlocked with a Dungeon Key
+    dungeon.tiles[tut_room.x1, center_y] = tile_types.locked_door
+    dungeon.upstairs_location = (tut_room.x1, center_y)
 
-        # Starter chest on floor 1, placed adjacent to the player
-    print("[GEN] starter chest placement start")
+    # Down stairs leading deeper into the dungeon
+    dungeon.tiles[tut_room.x2 - 2, center_y] = tile_types.down_stairs
+    dungeon.downstairs_location = (tut_room.x2 - 2, center_y)
+
     import loot_tables
     _start_chest = entity_factories.make_chest_with_loot(loot_tables.generate_starter_chest_loot(), capacity=15)
     _start_chest.spawn(dungeon, 46, 21)
-
-    dungeon.tiles[58, 25] = tile_types.down_stairs
-    dungeon.downstairs_location = (58, 25)
 
     #dungeon.tiles[56, 21] = tile_types.generate_foliage_tile()
     #dungeon.tiles[55, 21] = tile_types.generate_foliage_tile()
@@ -1096,10 +1112,28 @@ def generate_first_floor(
     rooms.append(tut_room)
 
     entity_factories.training_dummy.spawn(dungeon, 49, 21)
-    guide = entity_factories.tutorial_guide
-    guide.generate_villager()
+    guide = copy.deepcopy(entity_factories.tutorial_guide)
+    guide.generate_villager(
+        job="guide",
+        gendered_noun="man",
+        age=100,
+        hair_color="white",
+        hair_style="long",
+        facial_hair="long",
+        skin_tone="fair",
+        eye_color="blue",
+        clothing_style="formal",
+        head="cone hat",
+        torso="silk robe",
+        legs="silk trousers",
+        feet="leather shoes",
+        accessories="gold necklaces"
+    )
     guide.spawn(dungeon, 43, 28)
-    _placer.place(41, 24, dungeon)
+
+    player_start = (tut_room.x1 + 2, center_y)
+    _placer.place(*player_start, dungeon)
+    dungeon.player_start = player_start
 
     return dungeon
 
@@ -1125,11 +1159,6 @@ def generate_dungeon(
     _placer = player_proxy if player_proxy is not None else engine.player
     _floor = floor_num if floor_num is not None else engine.game_world.current_floor
 
-    if _floor == 1:
-        return generate_first_floor(map_width, map_height, engine)
-
-
-
     # Noise params
     temperature = noise_vals[0]
     erosion = noise_vals[1]
@@ -1152,7 +1181,6 @@ def generate_dungeon(
             dungeon.biome_str = "Caverns"
         else:
             pass  # Ruins biome is set later in mixed section after room/cave split
-        print("Generating cavern map with noise erosion value:", erosion)
         # Seed map: 40% floor, 60% wall
         for x in range(1, dungeon.width - 1):
             for y in range(1, dungeon.height - 1):
@@ -1164,7 +1192,6 @@ def generate_dungeon(
         # Cellular automata smoothing — 4 passes, double-buffered so each pass
         # reads cleanly from the previous iteration without in-place bias.
         for _pass in range(4):
-            print("Cavern smoothing pass", _pass + 1)
             new_tiles = dungeon.tiles.copy()
             for x in range(1, dungeon.width - 1):
                 for y in range(1, dungeon.height - 1):
@@ -1184,12 +1211,9 @@ def generate_dungeon(
             dungeon.tiles = new_tiles
 
         # Connect all disjoint cave regions into one traversable map
-        print("[GEN] join_caverns start")
         join_caverns(dungeon, map_width, map_height)
-        print("[GEN] join_caverns done")
 
         # Place player near map centre in the main (joined) cave
-        print("[GEN] player placement start")
         for _r in range(max(map_width, map_height)):
             _placed = False
             for _dx in range(-_r, _r + 1):
@@ -1206,11 +1230,7 @@ def generate_dungeon(
                     break
             if _placed:
                 break
-        print(f"[GEN] player placed at ({_placer.x}, {_placer.y})")
 
-
-
-        print("[GEN] cave entity spawning start")
         # Spawn entities in grid sections across the cave (skip player start section)
         _section_size = 20
         _player_sx = (_placer.x // _section_size) * _section_size
@@ -1225,12 +1245,9 @@ def generate_dungeon(
                     for _ty in range(_gy, min(_gy + _section_size, map_height - 1))
                     if dungeon.tiles[_tx, _ty]["walkable"]
                 ]
-                print("[GEN] placing entities in cave section at grid ({}, {}) with {} floor tiles".format(_gx // _section_size, _gy // _section_size, len(_section_tiles)))
                 place_entities_cave(_section_tiles, dungeon, _floor, max_rooms, dungeon.biome)
 
-        print("[GEN] cave entity spawning done")
         # Place stairs toward a corner of the map (far from player start)
-        print("[GEN] stair placement start")
         stair_candidates = [
             (map_width * 3 // 4, map_height * 3 // 4),
             (map_width // 4,     map_height * 3 // 4),
@@ -1257,11 +1274,13 @@ def generate_dungeon(
                     break
             if dungeon.downstairs_location != (0, 0):
                 break
-        print(f"[GEN] stairs placed at {dungeon.downstairs_location}")
 
-    
+        # Place up stairs at player start for cavern-only floors
+        if erosion > 2.0:
+            dungeon.tiles[_placer.x, _placer.y] = tile_types.up_stairs
+            dungeon.upstairs_location = (_placer.x, _placer.y)
+
     # Dungeon Type
-    print(f"[GEN] dungeon-room block check: erosion={erosion:.3f}, will_run={(erosion < -2.0 or (-2.0 <= erosion <= 2.0))}")
     if erosion < -2.0 or (-2.0 <= erosion <= 2.0):
         if erosion < -2.0:
             dungeon.biome = "dungeon"
@@ -1290,27 +1309,14 @@ def generate_dungeon(
             y = random.randint(min_y, max_y)
 
             new_room = RectangularRoom(x, y, room_width, room_height)
-            print(f"[GEN] attempting to place room {r+1}/{max_rooms} at ({x}, {y}) with size ({room_width}x{room_height})")
             if any(new_room.intersects(other_room) for other_room in rooms):
-                print(f"[GEN] room {r+1} rejected due to intersection")
                 continue
 
             if len(rooms) == 0:
-                print(f"[GEN] placing first room at ({x}, {y}) with size ({room_width}x{room_height})")
                 # First room, where player starts
                 _placer.place(*new_room.center, dungeon)
                 # Guaranteed campfire in first room
                 place_campfires(dungeon, "dungeon_first_room", room=new_room, player_pos=new_room.center)
-                # Spawn a chest on first floor only
-                if _floor == 1:
-                    print("[GEN] starter chest placement start")
-                    import loot_tables
-                    test_chest = entity_factories.make_chest_with_loot(loot_tables.generate_starter_chest_loot(), capacity=15)
-                    cx, cy = new_room.center
-                    chest_x, chest_y = min(dungeon.width - 1, cx + 1), cy
-                    # Only place if empty
-                    if not any(e.x == chest_x and e.y == chest_y for e in dungeon.entities):
-                        test_chest.place(chest_x, chest_y, dungeon)
             else:
                 for x, y in tunnel_between(rooms[-1].center, new_room.center):
                     dungeon.tiles[x,y] = tile_types.random_floor_tile()
@@ -1337,14 +1343,13 @@ def generate_dungeon(
                 place_entities(new_room, dungeon, _floor, dungeon.biome)
   
     # Place stairs in the center of the last room (rectangular dungeon)
-    print(f"[GEN] rectangular stair placement: rooms={len(rooms)}")
     if rooms:
         center_of_last_room = rooms[-1].center
         dungeon.tiles[center_of_last_room] = tile_types.down_stairs
         dungeon.downstairs_location = center_of_last_room
 
-    # If not first floor, place up stairs in the center of the first room
-    if _floor > 1 and rooms:
+    # Always place up stairs in the first room so the player can return to the overworld
+    if rooms:
         center_of_first_room = rooms[0].center
         dungeon.tiles[center_of_first_room] = tile_types.up_stairs
         dungeon.upstairs_location = center_of_first_room
@@ -1406,72 +1411,70 @@ def generate_dungeon(
                 elif tile["walkable"]:
                     if random.random() < (vegetation/6)**2:
                         # Ensure tile is not a stair
-                        if tile["name"] not in ["Down Stairs", "Up Stairs"]:
+                        if tile["name"] not in ["<purple>Down Stairs</purple>", "<purple>Up Stairs</purple>"]:
                             dungeon.tiles[x, y] = tile_types.random_mossy_floor_tile()
 
     print("[GEN] mossification done")
     # Water pool post-processing
-    if -4 < temperature < 4:
-        water_pool_count = random.randint(1, 3)
+    def _noise_pool_tiles(cx: int, cy: int, base_radius: float, noise_amp: float, seed: int) -> list:
+        """Return floor-tile positions inside a noise-perturbed circle.
+        Boundary is determined per-angle so the edge is smooth and organic,
+        not the staircase pattern a random walk produces."""
+        rng = np.random.default_rng(seed)
+        n_ctrl = 14
+        angles_ctrl = np.linspace(0.0, 2.0 * np.pi, n_ctrl + 1)
+        radii_ctrl  = base_radius + rng.uniform(-noise_amp, noise_amp, n_ctrl + 1)
+        radii_ctrl[-1] = radii_ctrl[0]   # make periodic
+        max_r = int(base_radius + noise_amp) + 1
+        tiles = []
+        for dx in range(-max_r, max_r + 1):
+            for dy in range(-max_r, max_r + 1):
+                angle = np.arctan2(dy, dx) % (2.0 * np.pi)
+                thresh = float(np.interp(angle, angles_ctrl, radii_ctrl))
+                dist   = (dx * dx + dy * dy) ** 0.5
+                if dist <= thresh:
+                    nx, ny = cx + dx, cy + dy
+                    if 2 <= nx < dungeon.width - 2 and 2 <= ny < dungeon.height - 2:
+                        tiles.append((nx, ny))
+        return tiles
+
+    if 0 == 0:#-4 < temperature < 4:
+        water_pool_count = random.randint(10, 10)
         print(f"Generating {water_pool_count} water pools with noise temperature value: {temperature}")
         for _ in range(water_pool_count):
-            # Generate random pool shape using random walk
-            pool_size = random.randint(5, 15)
-            pool_tiles = set()
+            base_radius = random.uniform(2.0, 4.5)
+            noise_amp   = random.uniform(0.6, 1.4)
             start_x = random.randint(2, dungeon.width - 3)
             start_y = random.randint(2, dungeon.height - 3)
-            pool_tiles.add((start_x, start_y))
-            for _ in range(pool_size):
-                current_x, current_y = random.choice(list(pool_tiles))
-                dx, dy = random.choice([(1,0), (-1,0), (0,1), (0,-1)])
-                new_x, new_y = current_x + dx, current_y + dy
-                if 2 <= new_x < dungeon.width - 2 and 2 <= new_y < dungeon.height - 2:
-                    pool_tiles.add((new_x, new_y))
-            # Carve out the pool
+            pool_seed = random.getrandbits(32)
+            pool_tiles = _noise_pool_tiles(start_x, start_y, base_radius, noise_amp, pool_seed)
+            # Only overwrite walkable tiles so pools don't erase walls
             for x, y in pool_tiles:
                 if dungeon.tiles[x, y]["walkable"]:
                     dungeon.tiles[x, y] = tile_types.water
     print("[GEN] water pools done")
 
-    # Water-edge overlay: replace floor tiles that border water with directional edge tiles.
-    _FLOOR_NAMES = {"Floor", "Mossy Floor"}
-    _WATER_EDGE = {
-        'S': tile_types.dungeon_water_edge_S,
-        'N': tile_types.dungeon_water_edge_N,
-        'W': tile_types.dungeon_water_edge_W,
-        'E': tile_types.dungeon_water_edge_E,
-    }
-    for x in range(1, dungeon.width - 1):
-        for y in range(1, dungeon.height - 1):
-            if str(dungeon.tiles[x, y]["name"]) not in _FLOOR_NAMES:
-                continue
-            water_S = str(dungeon.tiles[x,     y + 1]["name"]) == "Water"
-            water_N = str(dungeon.tiles[x,     y - 1]["name"]) == "Water"
-            water_W = str(dungeon.tiles[x - 1, y    ]["name"]) == "Water"
-            water_E = str(dungeon.tiles[x + 1, y    ]["name"]) == "Water"
-            if water_S:
-                dungeon.tiles[x, y] = _WATER_EDGE['S']
-            elif water_N:
-                dungeon.tiles[x, y] = _WATER_EDGE['N']
-            elif water_W:
-                dungeon.tiles[x, y] = _WATER_EDGE['W']
-            elif water_E:
-                dungeon.tiles[x, y] = _WATER_EDGE['E']
+    # Build composited water animation frames (floor-edge bitmask compositing).
+    # Must run while the tileset is available (deferred mode is active during
+    # background gen, so sprites are queued and flushed on the main thread).
+    import sprite_manager as _sm_procgen
+    _sm_procgen.build_dungeon_water_anim(dungeon)
 
-    # Foliage post processing
+    # Foliage post processing (must run BEFORE water edge overlay so foliage
+    # fg colours don't tint the water composites)
     if vegetation > 0:
         for x in range(dungeon.width):
             for y in range(dungeon.height):
                 tile = dungeon.tiles[x, y]
                 if tile["walkable"] and random.random() < (2**(vegetation/20)-1) and random.randint(1,3) == 1:
-                    dungeon.tiles[x, y] = tile_types.generate_foliage_tile()
+                    if tile["name"] not in ["<purple>Down Stairs</purple>", "<purple>Up Stairs</purple>"]:
+                        dungeon.tiles[x, y] = tile_types.generate_foliage_tile()
     print("[GEN] foliage done")
     if vegetation > 4:
         dungeon.biome = "lush"
         dungeon.biome_str = "Lush " + dungeon.biome_str
     elif vegetation > 2:
         dungeon.biome_str = "Overgrown " + dungeon.biome_str
-     
 
     print("[GEN] generate_dungeon complete")
     return dungeon

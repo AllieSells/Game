@@ -256,27 +256,21 @@ class AudioMixer:
                 # Get the audio data for this block
                 end_pos = min(sound_info['position'] + frames, len(sound_info['data']))
                 audio_chunk = sound_info['data'][sound_info['position']:end_pos]
-                
-                # Apply volume
-                if sound_info['volume'] != 1.0:
-                    audio_chunk = audio_chunk * sound_info['volume']
-                
-                # Handle mono to stereo conversion
-                if len(audio_chunk.shape) == 1:
-                    # Mono - duplicate to both channels
-                    chunk_len = len(audio_chunk)
-                    stereo_chunk = np.zeros((chunk_len, 2), dtype=np.float32)
-                    stereo_chunk[:, 0] = audio_chunk
-                    stereo_chunk[:, 1] = audio_chunk
-                    audio_chunk = stereo_chunk
+                vol = sound_info['volume']
+                n = min(len(audio_chunk), len(outdata))
+
+                # Mix into output, handling mono→stereo inline to avoid extra allocations
+                if audio_chunk.ndim == 1:
+                    scaled = audio_chunk[:n] * vol
+                    outdata[:n, 0] += scaled
+                    outdata[:n, 1] += scaled
                 elif audio_chunk.shape[1] == 1:
-                    # Mono in 2D array - convert to stereo
-                    audio_chunk = np.repeat(audio_chunk, 2, axis=1)
-                
-                # Mix into output (add to existing audio)
-                output_len = min(len(audio_chunk), len(outdata))
-                outdata[:output_len] += audio_chunk[:output_len]
-                
+                    scaled = audio_chunk[:n, 0] * vol
+                    outdata[:n, 0] += scaled
+                    outdata[:n, 1] += scaled
+                else:
+                    outdata[:n] += audio_chunk[:n] * vol
+
                 sound_info['position'] = end_pos
             
             # Remove finished sounds
@@ -302,26 +296,21 @@ class AudioMixer:
                     chunk_size = min(frames_needed, remaining_in_loop)
                     end_pos = sound_info['position'] + chunk_size
                     audio_chunk = sound_info['data'][sound_info['position']:end_pos]
-                    
-                    # Apply volume
-                    if sound_info['volume'] != 1.0:
-                        audio_chunk = audio_chunk * sound_info['volume']
-                    
-                    # Handle mono to stereo conversion
-                    if len(audio_chunk.shape) == 1:
-                        chunk_len = len(audio_chunk)
-                        stereo_chunk = np.zeros((chunk_len, 2), dtype=np.float32)
-                        stereo_chunk[:, 0] = audio_chunk
-                        stereo_chunk[:, 1] = audio_chunk
-                        audio_chunk = stereo_chunk
+                    vol = sound_info['volume']
+                    actual_len = min(len(audio_chunk), len(outdata) - output_pos)
+
+                    # Mix into output, handling mono→stereo inline
+                    if audio_chunk.ndim == 1:
+                        scaled = audio_chunk[:actual_len] * vol
+                        outdata[output_pos:output_pos + actual_len, 0] += scaled
+                        outdata[output_pos:output_pos + actual_len, 1] += scaled
                     elif audio_chunk.shape[1] == 1:
-                        audio_chunk = np.repeat(audio_chunk, 2, axis=1)
-                    
-                    # Mix into output
-                    output_end = min(output_pos + len(audio_chunk), len(outdata))
-                    actual_len = output_end - output_pos
-                    outdata[output_pos:output_end] += audio_chunk[:actual_len]
-                    
+                        scaled = audio_chunk[:actual_len, 0] * vol
+                        outdata[output_pos:output_pos + actual_len, 0] += scaled
+                        outdata[output_pos:output_pos + actual_len, 1] += scaled
+                    else:
+                        outdata[output_pos:output_pos + actual_len] += audio_chunk[:actual_len] * vol
+
                     sound_info['position'] = end_pos
                     frames_needed -= actual_len
                     output_pos += actual_len
@@ -595,15 +584,25 @@ class LoopingSound:
             self.playing = False
 
 
+_settings_cache: dict = {}
+_settings_cache_time: float = 0.0
+_SETTINGS_CACHE_TTL: float = 2.0  # Refresh settings at most every 2 seconds
+
 def load_settings():
-    """Load settings from JSON file."""
+    """Load settings from JSON file (cached for up to 2 seconds)."""
+    global _settings_cache, _settings_cache_time
+    now = time.monotonic()
+    if _settings_cache and (now - _settings_cache_time) < _SETTINGS_CACHE_TTL:
+        return _settings_cache
     try:
         with open("settings.json", 'r') as f:
             content = f.read()
             # Remove JSON comments
             lines = [line for line in content.split('\n') if not line.strip().startswith('//')]
             clean_content = '\n'.join(lines)
-            return json.loads(clean_content)
+            _settings_cache = json.loads(clean_content)
+            _settings_cache_time = now
+            return _settings_cache
     except (FileNotFoundError, json.JSONDecodeError):
         return {"fullscreen": False, "audio": 50, "graphics": "high"}
 
@@ -747,7 +746,7 @@ def play_boot_sound():
 def play_floppy_seek_sound():
     """Floppy disk seek/read — same source as boot sound but pitched lower and quieter,
     giving the characteristic slow mechanical clunk of a drive head seeking a new cylinder."""
-    play_sound_with_pitch_variation(Sound("RP/sfx/boot.mp3"), pitch_range=(0.58, 0.72), volume=0.30)
+    play_sound_with_pitch_variation(Sound("RP/sfx/boot_read.mp3"), pitch_range=(0.8, 0.9), volume=0.5)
 
 quaff_sound = Sound("RP/sfx/quaff.wav")
 
@@ -832,16 +831,7 @@ def play_death_sound():
     death_sound = Sound("RP/sfx/death/humanoid_death.mp3")
     play_sound_with_pitch_variation(death_sound, volume=0.25)
 
-# Menu Sounds
-def play_ui_move_sound():
-    menu_move_sounds = [
-        #Sound("RP/sfx/buttons/button1.wav"),
-        Sound("RP/sfx/buttons/button2.wav"),
-    ]
-    sound = random.choice(menu_move_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.15), volume=1)
-
-#UI move sound
+# Menu Sounds / UI move sound
 def play_ui_move_sound():
     sound = Sound("RP/sfx/buttons/UI/button1.wav")
     play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.5), volume=1.0)
@@ -872,9 +862,8 @@ stairs_sound = Sound("RP/sfx/stairs.wav")
 
 # Dark entity spawn sound
 def play_darkness_spawn_sound():
-    darkness_spawn_sound = Sound("RP/sfx/darkness_spawn/darkness_spawn.mp3")
-    # Note: fade_ms not supported with pitch variation, using normal volume
-    play_sound_with_pitch_variation(darkness_spawn_sound, pitch_range=(0.8, 1.2), volume=0.25)
+    dark_spawn = Sound("RP/sfx/darkness_spawn/darkness_spawn.mp3")
+    play_sound_with_pitch_variation(dark_spawn, pitch_range=(0.8, 1.2), volume=0.25)
 
 def play_torch_pull_sound():
     torch_pull_sounds = [
@@ -886,11 +875,7 @@ def play_torch_pull_sound():
     play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.1))
 
 def play_torch_extinguish_sound():
-    torch_extinguish_sounds = [
-        Sound("RP/sfx/burn_out.wav")
-    ]
-    sound = random.choice(torch_extinguish_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.1))
+    play_sound_with_pitch_variation(Sound("RP/sfx/burn_out.wav"), pitch_range=(0.9, 1.1))
     
 
 lightning_sound = Sound("RP/sfx/lightning_sound.wav")
@@ -926,77 +911,34 @@ def play_transfer_item_sound():
     sound = random.choice(transfer_item_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.95, 1.2))
 
-def play_moss_walk_sound(entity_x=0, entity_y=0):
-    if random.random() < 0.3:
-        return  # 30% chance to not play a sound for variety
-    
-    # Add unique stagger delay per entity using position as seed
-    # Each entity gets a different delay based on their coordinates
-    entity_seed = (entity_x * 31 + entity_y * 17) % 1000  # Create unique value per position
-    delay = (entity_seed / 1000.0) * 0.1  # Convert to 0-100ms delay
-    
-    if delay > 0:
-        threading.Timer(delay, _delayed_moss_walk_sound).start()
-    else:
-        _delayed_moss_walk_sound()
+_STONE_WALK_FILES  = [f"RP/sfx/walk/stone/walk{i}.wav" for i in range(1, 11)]
+_GRASS_WALK_FILES  = ["RP/sfx/walk/grass/walk1.wav", "RP/sfx/walk/grass/walk2.wav"]
+_MOSS_WALK_FILES   = [f"RP/sfx/walk/moss/walk{i}.mp3" for i in range(1, 5)]
+_LIQUID_WALK_FILES = [f"RP/sfx/walk/liquid/walk{i}.wav" for i in range(1, 5)]
 
-def _delayed_moss_walk_sound():
-    """Internal function for delayed moss walk sound playback."""
-    moss_sounds = [
-        Sound("RP/sfx/walk/moss/walk1.mp3"),
-        Sound("RP/sfx/walk/moss/walk2.mp3"),
-        Sound("RP/sfx/walk/moss/walk3.mp3"),
-        Sound("RP/sfx/walk/moss/walk4.mp3")
-    ]
-    sound = random.choice(moss_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.5), volume=0.5)
+
+def _play_delayed_footstep(files, volume, pitch_range, entity_x=0, entity_y=0, delay_scale=0.05, skip_chance=0.3):
+    """Pick a random sound file, apply per-entity stagger delay, and play with pitch variation."""
+    if random.random() < skip_chance:
+        return
+    entity_seed = (entity_x * 31 + entity_y * 17) % 1000
+    delay = (entity_seed / 1000.0) * delay_scale
+    def _play():
+        play_sound_with_pitch_variation(Sound(random.choice(files)), pitch_range=pitch_range, volume=volume)
+    if delay > 0:
+        threading.Timer(delay, _play).start()
+    else:
+        _play()
+
+
+def play_moss_walk_sound(entity_x=0, entity_y=0):
+    _play_delayed_footstep(_MOSS_WALK_FILES, 0.5, (0.9, 1.5), entity_x, entity_y, delay_scale=0.1)
 
 def play_grass_walk_sound(entity_x=0, entity_y=0):
-    if random.random() < 0.3:
-        return  # 30% chance to not play a sound for variety
-    
-    # Add unique stagger delay per entity using position as seed
-    # Each entity gets a different delay based on their coordinates
-    entity_seed = (entity_x * 31 + entity_y * 17) % 1000  # Create unique value per position
-    delay = (entity_seed / 1000.0) * 0.1  # Convert to 0-100ms delay
-    
-    if delay > 0:
-        threading.Timer(delay, _delayed_grass_walk_sound).start()
-    else:
-        _delayed_grass_walk_sound()
-
-def _delayed_grass_walk_sound():
-    """Internal function for delayed grass walk sound playback."""
-    walk_sounds = [
-        Sound("RP/sfx/walk/grass/walk1.wav"),
-        Sound("RP/sfx/walk/grass/walk2.wav"),
-    ]
-    sound = random.choice(walk_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.5), volume=0.5)
+    _play_delayed_footstep(_GRASS_WALK_FILES, 0.5, (0.9, 1.5), entity_x, entity_y, delay_scale=0.1)
 
 def play_liquid_walk_sound(entity_x=0, entity_y=0):
-    if random.random() < 0.3:
-        return  # 30% chance to not play a sound for variety
-    
-    # Add unique stagger delay per entity using position as seed
-    entity_seed = (entity_x * 31 + entity_y * 17) % 1000
-    delay = (entity_seed / 1000.0) * 0.08  # Convert to 0-80ms delay
-    
-    if delay > 0:
-        threading.Timer(delay, _delayed_liquid_walk_sound).start()
-    else:
-        _delayed_liquid_walk_sound()
-
-def _delayed_liquid_walk_sound():
-    """Internal function for delayed liquid walk sound playback."""
-    liquid_sounds = [
-        Sound("RP/sfx/walk/liquid/walk1.wav"),
-        Sound("RP/sfx/walk/liquid/walk2.wav"),
-        Sound("RP/sfx/walk/liquid/walk3.wav"),
-        Sound("RP/sfx/walk/liquid/walk4.wav"),
-    ]
-    sound = random.choice(liquid_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.2)
+    _play_delayed_footstep(_LIQUID_WALK_FILES, 0.2, (0.8, 1.2), entity_x, entity_y, delay_scale=0.08)
 
 def play_swim_sound():
     swim_sounds = [
@@ -1005,39 +947,10 @@ def play_swim_sound():
         Sound("RP/sfx/walk/swim/swim3.mp3")
     ]
     sound = random.choice(swim_sounds)
-    print("Playing swim sound with pitch variation")
     play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.3)
 
 def play_walk_sound(entity_x=0, entity_y=0):
-    if random.random() < 0.3:
-        return  # 30% chance to not play a sound for variety
-    
-    # Add unique stagger delay per entity using position as seed
-    # Each entity gets a different delay based on their coordinates
-    entity_seed = (entity_x * 31 + entity_y * 17) % 1000  # Create unique value per position
-    delay = (entity_seed / 1000.0) * 0.05  # Convert to 0-50ms delay
-    
-    if delay > 0:
-        threading.Timer(delay, _delayed_walk_sound).start()
-    else:
-        _delayed_walk_sound()
-
-def _delayed_walk_sound():
-    """Internal function for delayed walk sound playback."""
-    walk_sounds = [
-        Sound("RP/sfx/walk/stone/walk1.wav"),
-        Sound("RP/sfx/walk/stone/walk2.wav"),
-        Sound("RP/sfx/walk/stone/walk3.wav"),
-        Sound("RP/sfx/walk/stone/walk4.wav"),
-        Sound("RP/sfx/walk/stone/walk5.wav"),
-        Sound("RP/sfx/walk/stone/walk6.wav"),
-        Sound("RP/sfx/walk/stone/walk7.wav"),
-        Sound("RP/sfx/walk/stone/walk8.wav"),
-        Sound("RP/sfx/walk/stone/walk9.wav"),
-        Sound("RP/sfx/walk/stone/walk10.wav"),
-    ]
-    sound = random.choice(walk_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.9, 1.5), volume=0.5)
+    _play_delayed_footstep(_STONE_WALK_FILES, 0.5, (0.9, 1.5), entity_x, entity_y, delay_scale=0.05)
 
 def play_block_sound():
     block_sounds = [
@@ -1080,230 +993,107 @@ def play_miss_sound():
     play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.5)
     
 def play_attack_sound_weapon_to_no_armor():
-    #swing_sounds = [
-    #    Sound("RP/sfx/weapon_swing/swing1.wav"),
-    #    Sound("RP/sfx/weapon_swing/swing2.wav"),
-    #    Sound("RP/sfx/weapon_swing/swing3.wav"),
-    #]
-
     attack_sounds = [
         Sound("RP/sfx/hit_weapon_no_armor/hit1.wav"),
         Sound("RP/sfx/hit_weapon_no_armor/hit2.wav"),
         Sound("RP/sfx/hit_weapon_no_armor/hit3.wav"),
     ]
-
-    #sound = random.choice(swing_sounds)
-    #sound.play()
     sound = random.choice(attack_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.25))
 
 
 def play_attack_sound_weapon_to_armor():
-    #swing_sounds = [
-    #    Sound("RP/sfx/weapon_swing/swing1.wav"),
-    #    Sound("RP/sfx/weapon_swing/swing2.wav"),
-    #    Sound("RP/sfx/weapon_swing/swing3.wav"),
-    #]
     attack_sounds = [
         Sound("RP/sfx/hit_weapon_armor/hit1.wav"),
         Sound("RP/sfx/hit_weapon_armor/hit2.wav"),
         Sound("RP/sfx/hit_weapon_armor/hit3.wav"),
     ]
-    #sound = random.choice(swing_sounds)
-    #sound.play()
-
     sound = random.choice(attack_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.25))
 
 def play_glass_break_sound():
-    glass_break_sounds = [
-        Sound("RP/sfx/materials/glass/break1.mp3")
-    ]
-    sound = random.choice(glass_break_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.25), volume=0.5)
+    play_sound_with_pitch_variation(Sound("RP/sfx/materials/glass/break1.mp3"), pitch_range=(0.8, 1.25), volume=0.5)
 
 def play_throw_sound():
-    throw_sounds = [
-        Sound("RP/sfx/throw.mp3")
-    ]
-    sound = random.choice(throw_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.25), volume=0.5)
+    play_sound_with_pitch_variation(Sound("RP/sfx/throw.mp3"), pitch_range=(0.8, 1.25), volume=0.5)
 
 ## EQUIP
 
 # Leather equip
 
 def play_equip_leather_sound():
-    equip_leather_sounds = [
-        Sound("RP/sfx/equip/leather/equip1.mp3")
-    ]
-    sound = random.choice(equip_leather_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=0.25)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/leather/equip1.mp3"), pitch_range=(0.8, 1.5), volume=0.25)
 
 def play_unequip_leather_sound():
-    unequip_leather_sounds = [
-        Sound("RP/sfx/equip/leather/unequip1.mp3")
-    ]
-    sound = random.choice(unequip_leather_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=0.25)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/leather/unequip1.mp3"), pitch_range=(0.8, 1.5), volume=0.25)
 
 def pick_up_leather_sound():
-    pick_up_leather_sounds = [
-        # Use unequip sound for pickup as well, since we don't have a separate pickup sound for leather items
-        Sound("RP/sfx/equip/leather/unequip1.mp3")
-    ]
-    sound = random.choice(pick_up_leather_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(1.0, 1.5), volume=0.25)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/leather/unequip1.mp3"), pitch_range=(1.0, 1.5), volume=0.25)
 
 def drop_leather_sound():
-    drop_leather_sounds = [
-        Sound("RP/sfx/equip/leather/unequip1.mp3")
-    ]
-    sound = random.choice(drop_leather_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=0.25)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/leather/unequip1.mp3"), pitch_range=(0.8, 1.5), volume=0.25)
 # Acid sounds
 def play_poison_burn_sound():
-    acid_sounds = [
-        Sound("RP/sfx/materials/acid/burn1.mp3"),
-    ]
-    sound = random.choice(acid_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=0.5)
+    play_sound_with_pitch_variation(Sound("RP/sfx/materials/acid/burn1.mp3"), pitch_range=(0.8, 1.5), volume=0.5)
 
 # Glass equip
 def play_equip_glass_sound():
-    equip_glass_sounds = [
-        Sound("RP/sfx/equip/glass/equip1.mp3")
-    ]
-    sound = random.choice(equip_glass_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=1.0)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/glass/equip1.mp3"), pitch_range=(0.8, 1.5), volume=1.0)
 
 def play_unequip_glass_sound():
-    unequip_glass_sounds = [
-        Sound("RP/sfx/equip/glass/unequip1.mp3")
-    ]
-    sound = random.choice(unequip_glass_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=1.0)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/glass/unequip1.mp3"), pitch_range=(0.8, 1.5), volume=1.0)
 
 def pick_up_glass_sound():
-    pick_up_glass_sounds = [
-        # Use unequip sound for pickup as well, since we don't have a separate pickup sound for glass items
-        Sound("RP/sfx/equip/glass/equip1.mp3")
-    ]
-    sound = random.choice(pick_up_glass_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(1.0, 1.5), volume=1.0)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/glass/equip1.mp3"), pitch_range=(1.0, 1.5), volume=1.0)
 
 def drop_glass_sound():
-    drop_glass_sounds = [
-        Sound("RP/sfx/equip/glass/unequip1.mp3")
-    ]
-    sound = random.choice(drop_glass_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=0.5)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/glass/unequip1.mp3"), pitch_range=(0.8, 1.5), volume=0.5)
     
 # Paper equip
 def play_equip_paper_sound():
-    equip_paper_sounds = [
-        Sound("RP/sfx/equip/paper/equip1.mp3")
-    ]
-    sound = random.choice(equip_paper_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=3)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/paper/equip1.mp3"), pitch_range=(0.8, 1.5), volume=3)
 
 def play_unequip_paper_sound():
-    unequip_paper_sounds = [
-        Sound("RP/sfx/equip/paper/unequip1.mp3")
-    ]
-    sound = random.choice(unequip_paper_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=3)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/paper/unequip1.mp3"), pitch_range=(0.8, 1.5), volume=3)
 
 def pick_up_paper_sound():
-    pick_up_paper_sounds = [
-        # Use unequip sound for pickup as well, since we don't have a separate pickup sound for paper items
-        Sound("RP/sfx/equip/paper/equip1.mp3")
-    ]
-    sound = random.choice(pick_up_paper_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(1.0, 1.5), volume=3)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/paper/equip1.mp3"), pitch_range=(1.0, 1.5), volume=3)
 
 def drop_paper_sound():
-    drop_paper_sounds = [
-        Sound("RP/sfx/equip/paper/equip1.mp3")
-    ]
-    sound = random.choice(drop_paper_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=3)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/paper/equip1.mp3"), pitch_range=(0.8, 1.5), volume=3)
 
 # coin equip
 def play_equip_coin_sound():
-    equip_coin_sounds = [
-        Sound("RP/sfx/equip/coin/1coin.mp3")
-    ]
-    sound = random.choice(equip_coin_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=1.0)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/coin/1coin.mp3"), pitch_range=(0.8, 1.5), volume=1.0)
 
 def play_unequip_coin_sound():
-    unequip_coin_sounds = [
-        Sound("RP/sfx/equip/coin/1coin.mp3")
-    ]
-    sound = random.choice(unequip_coin_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=1.0)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/coin/1coin.mp3"), pitch_range=(0.8, 1.5), volume=1.0)
 
 def pick_up_coin_sound():
-    pick_up_coin_sounds = [
-        # Use unequip sound for pickup as well, since we don't have a separate pickup sound for coin items
-        Sound("RP/sfx/equip/coin/1coin.mp3")
-    ]
-    sound = random.choice(pick_up_coin_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(1.0, 1.5), volume=1.0)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/coin/1coin.mp3"), pitch_range=(1.0, 1.5), volume=1.0)
 
 def drop_coin_sound():
-    drop_coin_sounds = [
-        Sound("RP/sfx/equip/coin/1coin.mp3")
-    ]
-    sound = random.choice(drop_coin_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=1.0)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/coin/1coin.mp3"), pitch_range=(0.8, 1.5), volume=1.0)
 
 # many coins
 def play_equip_manycoins_sound():
-    equip_manycoins_sounds = [
-        Sound("RP/sfx/equip/coin/manycoins.mp3")
-    ]
-    sound = random.choice(equip_manycoins_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=1.0)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/coin/manycoins.mp3"), pitch_range=(0.8, 1.5), volume=1.0)
 
 def play_unequip_manycoins_sound():
-    unequip_manycoins_sounds = [
-        Sound("RP/sfx/equip/coin/manycoins.mp3")
-    ]
-    sound = random.choice(unequip_manycoins_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=1.0)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/coin/manycoins.mp3"), pitch_range=(0.8, 1.5), volume=1.0)
 
 def pick_up_manycoins_sound():
-    pick_up_manycoins_sounds = [
-        # Use unequip sound for pickup as well, since we don't have a separate pickup sound for many coins items
-        Sound("RP/sfx/equip/coin/manycoins.mp3")
-    ]
-    sound = random.choice(pick_up_manycoins_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(1.0, 1.5), volume=1.0)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/coin/manycoins.mp3"), pitch_range=(1.0, 1.5), volume=1.0)
 
 def drop_manycoins_sound():
-    drop_manycoins_sounds = [
-        Sound("RP/sfx/equip/coin/manycoins.mp3")
-    ]
-    sound = random.choice(drop_manycoins_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=1.0)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/coin/manycoins.mp3"), pitch_range=(0.8, 1.5), volume=1.0)
 
 # Wood sounds
 def pick_up_wood_sound():
-    pick_up_wood_sounds = [
-        # Use unequip sound for pickup as well, since we don't have a separate pickup sound for wood items
-        Sound("RP/sfx/equip/wood/pickup1.mp3")
-    ]
-    sound = random.choice(pick_up_wood_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(1.0, 1.5), volume=.25)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/wood/pickup1.mp3"), pitch_range=(1.0, 1.5), volume=.25)
 
 def drop_wood_sound():
-    drop_wood_sounds = [
-        Sound("RP/sfx/equip/wood/drop1.mp3")
-    ]
-    sound = random.choice(drop_wood_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.1), volume=.25)
+    play_sound_with_pitch_variation(Sound("RP/sfx/equip/wood/drop1.mp3"), pitch_range=(0.8, 1.1), volume=.25)
 
 # Blade sounds
 def pick_up_blade_sound():
@@ -1804,20 +1594,12 @@ def apply_muffling_to_audio(audio_data: np.ndarray, cutoff: float = 800, sampler
         normalized_cutoff = min(cutoff / nyquist, 0.99)
         
         # Design Butterworth low-pass filter
-        from scipy.signal import butter, lfilter
         b, a = butter(4, normalized_cutoff, btype='low')
         
-        # Apply filter
-        if len(audio_data.shape) == 1:
-            # Mono
-            filtered = lfilter(b, a, audio_data)
-        else:
-            # Stereo - filter each channel separately
-            filtered = np.zeros_like(audio_data)
-            for channel in range(audio_data.shape[1]):
-                filtered[:, channel] = lfilter(b, a, audio_data[:, channel])
+        # Apply filter along sample axis (works for both mono and stereo)
+        filtered = lfilter(b, a, audio_data, axis=0)
         
-        return filtered.astype(np.float32)
+        return filtered.astype(np.float32, copy=False)
         
     except Exception as e:
         with open(get_data_path('logs/log.txt'), 'a') as log_file:
@@ -1923,17 +1705,8 @@ def play_muffled_sound(sound_func, cutoff=800):
     pitch = random.uniform(0.9, 1.5)
     if abs(pitch - 1.0) >= 0.02:  # Only if significant change
         try:
-            if len(muffled_data.shape) == 1:
-                # Mono
-                new_length = int(len(muffled_data) / pitch)
-                muffled_data = signal.resample(muffled_data, new_length)
-            else:
-                # Stereo
-                new_length = int(len(muffled_data) / pitch)
-                pitched_data = np.zeros((new_length, muffled_data.shape[1]), dtype=np.float32)
-                for channel in range(muffled_data.shape[1]):
-                    pitched_data[:, channel] = signal.resample(muffled_data[:, channel], new_length)
-                muffled_data = pitched_data
+            new_length = int(len(muffled_data) / pitch)
+            muffled_data = signal.resample(muffled_data, new_length, axis=0).astype(np.float32, copy=False)
         except Exception as e:
             with open(get_data_path('logs/log.txt'), 'a') as log_file:
                 log_file.write(f"Pitch variation error: {e}\n")
@@ -1976,29 +1749,19 @@ def play_positional_sound_with_pitch(sound, pitch_range, source_x, source_y, pla
 
 # Wrapper functions for common positional sounds
 
-def play_door_open_sound_at(x, y, player, game_map):
-    """Play door opening sound with positional muffling."""
-    # Add blue door animation for sounds within range
+def _play_door_sound_at(sound_func, x, y, player, game_map):
     from animations import HeardDoorAnimation
     dx = x - player.x
     dy = y - player.y
-    distance = (dx * dx + dy * dy) ** 0.5
-    if distance <= 10 and not game_map.visible[x, y]:
+    if (dx * dx + dy * dy) ** 0.5 <= 10 and not game_map.visible[x, y]:
         game_map.engine.animation_queue.append(HeardDoorAnimation((x, y), player))
-    
-    play_positional_sound(play_door_open_sound, x, y, player, game_map, muffled_cutoff=600)
+    play_positional_sound(sound_func, x, y, player, game_map, muffled_cutoff=600)
+
+def play_door_open_sound_at(x, y, player, game_map):
+    _play_door_sound_at(play_door_open_sound, x, y, player, game_map)
 
 def play_door_close_sound_at(x, y, player, game_map):
-    """Play door closing sound with positional muffling."""
-    # Add blue door animation for sounds within range  
-    from animations import HeardDoorAnimation
-    dx = x - player.x
-    dy = y - player.y
-    distance = (dx * dx + dy * dy) ** 0.5
-    if distance <= 10 and not game_map.visible[x, y]:
-        game_map.engine.animation_queue.append(HeardDoorAnimation((x, y), player))
-    
-    play_positional_sound(play_door_close_sound, x, y, player, game_map, muffled_cutoff=600)
+    _play_door_sound_at(play_door_close_sound, x, y, player, game_map)
 
 def play_combat_sound_at(sound_func, x, y, player, game_map):
     """Play combat sound with positional muffling."""
@@ -2103,17 +1866,8 @@ def play_muffled_sound_with_coords(sound_func, cutoff=800, entity_x=0, entity_y=
     pitch = random.uniform(0.9, 1.5)
     if abs(pitch - 1.0) >= 0.02:  # Only if significant change
         try:
-            if len(muffled_data.shape) == 1:
-                # Mono
-                new_length = int(len(muffled_data) / pitch)
-                muffled_data = signal.resample(muffled_data, new_length)
-            else:
-                # Stereo
-                new_length = int(len(muffled_data) / pitch)
-                pitched_data = np.zeros((new_length, muffled_data.shape[1]), dtype=np.float32)
-                for channel in range(muffled_data.shape[1]):
-                    pitched_data[:, channel] = signal.resample(muffled_data[:, channel], new_length)
-                muffled_data = pitched_data
+            new_length = int(len(muffled_data) / pitch)
+            muffled_data = signal.resample(muffled_data, new_length, axis=0).astype(np.float32, copy=False)
         except Exception as e:
             with open(get_data_path('logs/log.txt'), 'a') as log_file:
                 log_file.write(f"Pitch variation error: {e}\n")

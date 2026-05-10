@@ -922,6 +922,49 @@ class GlobalRiverAnimation:
             pass
 
 
+class GlobalDungeonWaterAnimation:
+    """Animates dungeon water tiles using precomposed neighbor-masked frames.
+
+    Reads game_map.dungeon_water_anim, built by
+    sprite_manager.build_dungeon_water_anim().  Each entry holds a tuple of
+    5 codepoints — one per animation frame — that already contain the correct
+    floor-edge compositing for that tile position.
+    """
+    FRAME_DURATION = 5  # ticks per frame, matches ocean animation speed
+    N_FRAMES = 5        # must match len(sprite_manager._WATER_FRAME_CPS)
+
+    def __init__(self):
+        self.render_priority = 0
+        self.frames = 10 ** 9  # never expires
+        self._tick = 0
+
+    def tick(self, console, game_map):
+        self._tick += 1
+        anim_map = getattr(game_map, 'dungeon_water_anim', None)
+        if not anim_map:
+            return
+        idx = (self._tick // self.FRAME_DURATION) % self.N_FRAMES
+        # Keep a current-frame lookup so _render_entity can composite entities
+        # against the animated tile base rather than the static floor codepoint.
+        current: dict = {}
+        try:
+            origin_x, origin_y, view_width, view_height = game_map.get_viewport(console)
+            for (x, y), seq in anim_map.items():
+                cp = seq[idx]
+                current[(x, y)] = cp
+                vx = x - origin_x
+                vy = y - origin_y
+                if 0 <= vx < view_width and 0 <= vy < view_height:
+                    if game_map.visible[x, y]:
+                        console.tiles_rgb["ch"][vx, vy] = cp
+                        # Use white fg so the composited RGBA sprite isn't tinted
+                        # by the floor tile's original fg colour.
+                        console.tiles_rgb["fg"][vx, vy] = (255, 255, 255)
+        except Exception:
+            pass
+        game_map.dungeon_water_current = current
+
+
 # ------------------------------- #
 # GPU ANIMS AND GPU PARTICLES
 # --------------------------------- #

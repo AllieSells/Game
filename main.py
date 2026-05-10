@@ -549,6 +549,9 @@ def main() -> None:
     overlay_popup_tex     = None   # BLEND-mode GPU texture for fallback path
     overlay_popup_dest    = None   # screen dest rect for popup
     overlay_popup_src_rect = None   # source rect in ui_tex (pixel coords) for GPU-direct path
+    # Dialogue portrait texture cache — lazy-loaded when a dialogue opens
+    _dialogue_portrait_tex  = None   # GPU BLEND texture for NPC portrait PNG
+    _dialogue_portrait_path = None   # file path used to build _dialogue_portrait_tex
     overlay_hints_console = None   # 1-row sub-console for context hints (GPU-direct path)
     overlay_hints_tex     = None   # BLEND-mode GPU texture for hints row
     overlay_hints_dest    = None   # screen dest rect for hints row
@@ -557,9 +560,18 @@ def main() -> None:
     # mouse_location changes so render_ui_overlay() isn't called every frame.
     inspect_ui_tex          = None  # BLEND-mode GPU texture of last UI render
     inspect_ui_cursor_cache = None  # (cursor_x, cursor_y) that produced that texture
+    inspect_sub_console     = None  # small 35×30 console for sidebar-only pixel conversion
+    inspect_hints_console   = None  # 1-row console for context hints BLEND texture
+    inspect_hints_tex       = None  # BLEND-mode GPU texture for context hints row
+    inspect_preview_tex     = None  # GPU texture for the scaled 7x7 inspect preview console
+    _inspect_preview_dest   = None  # screen dest rect for the scaled preview texture
+    _inspect_sidebar_dest   = None  # screen dest rect for sidebar panel
     _prev_inspect_overlay   = False # True when previous frame was inspect_overlay_view
     overlay_dirty = True
     _last_dirty_ui_tile = None  # track tile under cursor to avoid per-pixel dirty
+    # SelectIndexHandler animated cursor — BLEND SDL texture drawn after lightmap.
+    _map_cursor_tex     = None  # BLEND-mode GPU texture (32×32 cursor sprite)
+    _map_cursor_last_cp = -1    # cursor codepoint currently baked into _map_cursor_tex
 
     # Precompute texture source sizes for curvature helper
     _game_tex_w = game_console.width * tileset.tile_width
@@ -736,9 +748,11 @@ def main() -> None:
                     handler.start_generation()
                     _gen_bar_start_time = time.monotonic()
                     if isinstance(handler, setup_game.LoadingScreen):
+                        sounds.play_video_mode_switch_sound()
                         sounds.play_floppy_seek_sound()  # immediate seek on spin-up
                 # Render the BIOS-style loading screen on black (LoadingScreen only;
                 # CRTTransition just holds black for one frame then falls to the elif branch)
+                
                 renderer.draw_color = (0, 0, 0, 255)
                 renderer.clear()
                 if isinstance(handler, setup_game.LoadingScreen) and _gen_bar_start_time is not None:
@@ -888,12 +902,13 @@ def main() -> None:
                     _mm_x = render_functions.get_minimap_origin_x(active_engine)
                     _mm_y, _mm_w, _mm_h = render_functions._MM_Y, render_functions._MM_W, render_functions._MM_H
                     _mm_mode = getattr(active_engine, 'show_minimap', 0)
-                    if _mm_mode == 2:
+                    _mm_on_overworld = getattr(getattr(active_engine, 'game_map', None), 'type', '') == 'overworld'
+                    if _mm_mode == 2 and not _mm_on_overworld:
                         renderer.copy(hud_tex,
                                       source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_th)),
                                       dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
                                             int(_mm_w * base_tile_w), int(base_tile_h)))
-                    elif _mm_mode != 3:
+                    elif _mm_mode != 3 and not _mm_on_overworld:
                         renderer.copy(hud_tex,
                                       source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_mm_h * _th)),
                                       dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
@@ -925,12 +940,13 @@ def main() -> None:
                     _mm_x = render_functions.get_minimap_origin_x(active_engine)
                     _mm_y, _mm_w, _mm_h = render_functions._MM_Y, render_functions._MM_W, render_functions._MM_H
                     _mm_mode = getattr(active_engine, 'show_minimap', 0)
-                    if _mm_mode == 2:
+                    _mm_on_overworld = getattr(getattr(active_engine, 'game_map', None), 'type', '') == 'overworld'
+                    if _mm_mode == 2 and not _mm_on_overworld:
                         renderer.copy(hud_tex,
                                       source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_th)),
                                       dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
                                             int(_mm_w * base_tile_w), int(base_tile_h)))
-                    elif _mm_mode != 3:
+                    elif _mm_mode != 3 and not _mm_on_overworld:
                         renderer.copy(hud_tex,
                                       source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_mm_h * _th)),
                                       dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
@@ -956,6 +972,12 @@ def main() -> None:
                 if _prev_inspect_overlay and not inspect_overlay_view:
                     inspect_ui_tex          = None
                     inspect_ui_cursor_cache = None
+                    inspect_sub_console     = None
+                    inspect_hints_console   = None
+                    inspect_hints_tex       = None
+                    inspect_preview_tex     = None
+                    _inspect_preview_dest   = None
+                    _inspect_sidebar_dest   = None
                     overlay_popup_tex       = None
                     overlay_popup_dest      = None
                 _prev_inspect_overlay = inspect_overlay_view
@@ -972,11 +994,42 @@ def main() -> None:
                 renderer.copy(game_tex, dest=(0, 0, int(game_dest_w), int(game_dest_h)))
                 _apply_lightmap()
 
-                ui_console.clear()
-                active_engine.render_ui(ui_console)
+                # GPU game-layer animations (same pass as fast_main_view)
+                if not _crt_force_fast_path and active_engine is not None and (gpu.gpu_anim_registry or gpu.gpu_anim_nobloom_registry):
+                    gpu.ensure_gpu_anim_layer(game_dest_w, game_dest_h)
+                    gpu.run_gpu_anim_passes(active_engine, game_dest_w, game_dest_h)
+
+                # ── Animated targeting cursor (BLEND sprite over game view) ───────────
+                # Drawn after lightmap so it's always at full brightness regardless of
+                # local tile lighting.  Reads cursor codepoint + screen position that
+                # render_game_overlay() stored on the handler without touching the console.
+                _cpos = getattr(handler, '_cursor_screen_pos', None)
+                _ccp  = getattr(handler, '_cursor_cp', 0xE0F6)
+                if _cpos is not None:
+                    try:
+                        import sprite_manager as _sm
+                        _cpx = _sm._get_tile(_ccp)
+                        if _map_cursor_tex is None or _map_cursor_last_cp != _ccp:
+                            _cpx_c = np.ascontiguousarray(_cpx)
+                            if _map_cursor_tex is None:
+                                _map_cursor_tex = renderer.upload_texture(_cpx_c)
+                                _map_cursor_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                            else:
+                                _map_cursor_tex.update(_cpx_c)
+                            _map_cursor_last_cp = _ccp
+                        _cs_x, _cs_y = _cpos
+                        _ctw = base_tile_w * 2  # game tiles are rendered at 2× scale
+                        _cth = base_tile_h * 2
+                        renderer.copy(_map_cursor_tex, dest=(
+                            int(_cs_x * _ctw), int(_cs_y * _cth),
+                            int(_ctw), int(_cth),
+                        ))
+                    except Exception as _cursor_err:
+                        print(f"[cursor render] ERROR: {_cursor_err}")
+
                 if inspect_overlay_view:
-                    # Rebuild the inspect UI texture when the cursor tile OR handler
-                    # display state (tab, scroll, selected item) changes.
+                    # Rebuild textures only when cursor tile OR handler state changes.
+                    # Game is paused in look mode — skip UI render entirely on cache-hit frames.
                     cur_cursor = (
                         tuple(getattr(active_engine, 'mouse_location',
                                       active_engine.mouse_location)),
@@ -986,15 +1039,70 @@ def main() -> None:
                     )
                     if inspect_ui_cursor_cache != cur_cursor or inspect_ui_tex is None:
                         inspect_ui_cursor_cache = cur_cursor
+                        # Full UI rebuild only on cache miss (game paused, HUD static)
+                        ui_console.clear()
+                        active_engine.render_ui(ui_console)
                         handler.render_ui_overlay(ui_console)
-                        ui_pixels = render_console_with_transparency(ui_console)
+                        # HUD strip — GPU opaque path, no numpy needed
+                        hud_tex = ui_console_renderer.render(ui_console)
+                        # Context hints row — small 1-row BLEND texture
+                        _hints_row = hud_top_row - 1
+                        if inspect_hints_console is None:
+                            inspect_hints_console = tcod.Console(screen_width, 1, order="F")
+                        ui_console.blit(inspect_hints_console, dest_x=0, dest_y=0,
+                                        src_x=0, src_y=_hints_row,
+                                        width=screen_width, height=1)
+                        _hints_px = render_console_with_transparency(inspect_hints_console)
+                        if inspect_hints_tex is None:
+                            inspect_hints_tex = renderer.upload_texture(_hints_px)
+                            inspect_hints_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                        else:
+                            inspect_hints_tex.update(_hints_px)
+                        # Sidebar — blit only the sub-region the handler reported
+                        _sb_x = getattr(handler, '_sidebar_x', 0)
+                        _sb_y = getattr(handler, '_sidebar_y', 0)
+                        _sb_w = getattr(handler, '_sidebar_w', 35)
+                        _sb_h = getattr(handler, '_sidebar_h', 30)
+                        if (inspect_sub_console is None
+                                or inspect_sub_console.width  != _sb_w
+                                or inspect_sub_console.height != _sb_h):
+                            inspect_sub_console = tcod.Console(_sb_w, _sb_h, order="F")
+                            inspect_ui_tex = None  # force texture re-upload on size change
+                        ui_console.blit(inspect_sub_console, dest_x=0, dest_y=0,
+                                        src_x=_sb_x, src_y=_sb_y,
+                                        width=_sb_w, height=_sb_h)
+                        ui_pixels = render_console_with_transparency(inspect_sub_console)
                         if inspect_ui_tex is None:
                             inspect_ui_tex = renderer.upload_texture(ui_pixels)
                             inspect_ui_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
                         else:
                             inspect_ui_tex.update(ui_pixels)
-                    renderer.copy(inspect_ui_tex, dest=(0, 0, window_w, window_h))
+                        inspect_preview_tex = None
+                        _inspect_preview_dest = None
+                        _inspect_sidebar_dest = (
+                            int(_sb_x * base_tile_w), int(_sb_y * base_tile_h),
+                            int(_sb_w * base_tile_w), int(_sb_h * base_tile_h),
+                        )
+                    # Render HUD strip (GPU opaque — reuses last hud_tex, valid since game paused)
+                    if hud_tex is not None:
+                        renderer.copy(hud_tex,
+                                      source=(0, int(hud_source_y), int(_ui_tex_w), int(hud_source_h)),
+                                      dest=(0, int(window_h - hud_dest_h), window_w, int(hud_dest_h)))
+                    # Render context hints row (BLEND, preserves game view underneath)
+                    if inspect_hints_tex is not None:
+                        _hints_row = hud_top_row - 1
+                        renderer.copy(inspect_hints_tex, dest=(
+                            0, int(_hints_row * base_tile_h),
+                            window_w, int(base_tile_h),
+                        ))
+                    # Render sidebar panel
+                    if inspect_ui_tex is not None and _inspect_sidebar_dest is not None:
+                        renderer.copy(inspect_ui_tex, dest=_inspect_sidebar_dest)
+                    if inspect_preview_tex is not None and _inspect_preview_dest is not None:
+                        renderer.copy(inspect_preview_tex, dest=_inspect_preview_dest)
                 else:
+                    ui_console.clear()
+                    active_engine.render_ui(ui_console)
                     hud_tex = ui_console_renderer.render(ui_console)
                     renderer.copy(hud_tex,
                                   source=(0, int(hud_source_y), int(_ui_tex_w), int(hud_source_h)),
@@ -1004,6 +1112,12 @@ def main() -> None:
                 if _prev_inspect_overlay:
                     inspect_ui_tex          = None
                     inspect_ui_cursor_cache = None
+                    inspect_sub_console     = None
+                    inspect_hints_console   = None
+                    inspect_hints_tex       = None
+                    inspect_preview_tex     = None
+                    _inspect_preview_dest   = None
+                    _inspect_sidebar_dest   = None
                     overlay_dirty           = True   # force popup re-render this frame
                 _prev_inspect_overlay = False
 
@@ -1360,6 +1474,8 @@ def main() -> None:
                 if _prev_inspect_overlay:
                     inspect_ui_tex          = None
                     inspect_ui_cursor_cache = None
+                    inspect_preview_tex     = None
+                    _inspect_preview_dest   = None
                 _prev_inspect_overlay = False
                 cached_overlay_handler = None
                 overlay_dirty = True
@@ -1459,9 +1575,27 @@ def main() -> None:
             # AGC oversaturation/bloom-wash while the wobble is active)
             gpu.blit_post_crt(_wx, _wy)
 
+            # ── Dialogue portrait: drawn AFTER blit_post_crt so bloom never touches it ──
+            _dlg_port_dest = getattr(handler, '_portrait_dest_tiles', None)
+            _dlg_port_path = getattr(handler, '_portrait_path', None)
+            if _dlg_port_dest is not None and _dlg_port_path is not None:
+                if _dialogue_portrait_path != _dlg_port_path or _dialogue_portrait_tex is None:
+                    try:
+                        _dp_img = Image.open(_dlg_port_path).convert("RGBA")
+                        _dp_np  = np.array(_dp_img, dtype=np.uint8)
+                        _dialogue_portrait_tex  = renderer.upload_texture(_dp_np)
+                        _dialogue_portrait_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                        _dialogue_portrait_path = _dlg_port_path
+                    except Exception as _dpe:
+                        print(f"[portrait] load failed: {_dpe}")
+                if _dialogue_portrait_tex is not None:
+                    _dpx, _dpy, _dpw, _dph = _dlg_port_dest
+                    renderer.copy(_dialogue_portrait_tex, dest=(
+                        int(_dpx * base_tile_w), int(_dpy * base_tile_h),
+                        int(_dpw * base_tile_w), int(_dph * base_tile_h),
+                    ))
+
             if not _crt_force_fast_path:
-
-
 
                 # Advance + draw CRT glitch effects (jitter band, vertical roll)
                 gpu.tick_crt_glitches(1.0 / target_fps)

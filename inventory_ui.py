@@ -684,7 +684,7 @@ class InventoryGridUI(PopupEventHandler):
         if item is None:
             if slot_label is not None:
                 # Show empty slot info + body part damage
-                c.print(2, _INFO_Y, f"[{slot_label}]  — empty",
+                c.print(2, _INFO_Y, f"[{slot_label}]: empty",
                         fg=_SLOT_EMPTY_V, bg=_BG)
                 _dmg_text, _dmg_col = self._get_slot_damage_info(self._sel_eq)
                 if _dmg_text:
@@ -693,10 +693,8 @@ class InventoryGridUI(PopupEventHandler):
                     c.print(2, _INFO_Y + 1, "Drag an item here to equip it",
                             fg=_HINT_FG, bg=_BG)
             else:
-                c.print(2, _INFO_Y, "Hover or click an item to inspect",
-                        fg=_HINT_FG, bg=_BG)
                 c.print(2, _INFO_Y + 1,
-                        "RClick: options  |  Drag to organise  |  Esc: close",
+                        "RClick: context  |  Esc: close",
                         fg=_HINT_FG, bg=_BG)
             return
 
@@ -716,7 +714,7 @@ class InventoryGridUI(PopupEventHandler):
             if getattr(eq, "power_bonus",   0): parts.append(f"Pwr:{eq.power_bonus:+}")
             if getattr(eq, "defense_bonus", 0): parts.append(f"Def:{eq.defense_bonus:+}")
             is_e = self.engine.player.equipment.item_is_equipped(item)
-            parts.append("equipped" if is_e else "not equipped")
+            parts.append("Equipped" if is_e else "Not Equipped")
         elif getattr(item, "consumable", None):
             parts.append("Consumable — Enter/RClick to use")
         else:
@@ -748,7 +746,7 @@ class InventoryGridUI(PopupEventHandler):
             dmg_text  = bp.damage_level_text   # 'healthy' / 'damaged' / ... / 'destroyed'
             dmg_ratio = bp.current_hp / bp.max_hp if bp.max_hp > 0 else 0.0
             if dmg_text == 'healthy':
-                return f"● {part_name.replace('_',' ').title()}: healthy", (80, 160, 80)
+                return f"{part_name.replace('_',' ').title()}: healthy", (80, 160, 80)
             colour = (
                 (220, 200, 60)  if dmg_ratio > 0.75 else
                 (220, 140, 40)  if dmg_ratio > 0.50 else
@@ -1584,7 +1582,7 @@ class ContainerGridUI(PopupEventHandler):
             if getattr(eq, "power_bonus",   0): parts.append(f"Pwr:{eq.power_bonus:+}")
             if getattr(eq, "defense_bonus", 0): parts.append(f"Def:{eq.defense_bonus:+}")
             is_e = self.engine.player.equipment.item_is_equipped(item)
-            parts.append("equipped" if is_e else "not equipped")
+            parts.append("Equipped" if is_e else "Not Equipped")
         elif getattr(item, "consumable", None):
             parts.append("Consumable")
         else:

@@ -320,7 +320,6 @@ class HostileEnemy(BaseAI):
         # Chase player if visible
         if self.can_see_actor(target):
             if self.last_saw_player < 0:
-                print(self.last_saw_player)
                 if self.last_saw_player < -99999:
                     if random.random() < 0.5:
                         self.say("observe")

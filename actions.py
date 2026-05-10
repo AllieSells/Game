@@ -197,26 +197,24 @@ class InteractAction(Action):
                     return ContainerGridUI(self.engine, container)
         tile = self.engine.game_map.tiles["interactable"][target_x, target_y]    
         if tile:
+            import tile_types
             # Get name for that tile
             name = self.engine.game_map.tiles["name"][target_x, target_y]
 
             # If it's a door, toggle open/closed state
             if name == "Door":
                 # Convert "Door" tile to "Open Door" tile
-                import tile_types
                 self.engine.game_map.tiles[target_x, target_y] = tile_types.open_door
                 sounds.play_door_open_sound_at(target_x, target_y, self.engine.player, self.engine.game_map)
                 self.engine.message_log.add_message("You open the door.")
 
             elif name == "Open Door":
                 # Convert "Open Door" tile to "Door" tile
-                import tile_types
                 self.engine.game_map.tiles[target_x, target_y] = tile_types.closed_door
                 sounds.play_door_close_sound_at(target_x, target_y, self.engine.player, self.engine.game_map)
                 self.engine.message_log.add_message("You close the door.")
 
             elif name == "Locked Door":
-                import tile_types
                 key_item = next(
                     (item for item in self.entity.inventory.items if item.name == "Dungeon Key"),
                     None
@@ -394,12 +392,20 @@ class TakeStairsAction(Action):
     def perform(self) -> None:
         # Take the stairs, if they exist at its location
         pos = (self.entity.x, self.entity.y)
+        gm = self.engine.game_map
+        gw = self.engine.game_world
+        print(f"[STAIRS] pos={pos} map_type={gm.type} floor={gw.current_floor} "
+              f"down={getattr(gm,'downstairs_location',None)} "
+              f"up={getattr(gm,'upstairs_location',None)} "
+              f"up_stack={len(gw.up_stack)} down_stack={len(gw.down_stack)}")
 
         # Overworld dungeon entrance — descend into the linked dungeon
-        if self.engine.game_map.type == "overworld":
-            entrances = getattr(self.engine.game_map, "dungeon_entrances", {})
+        if gm.type == "overworld":
+            entrances = getattr(gm, "dungeon_entrances", {})
             if pos in entrances:
-                self.engine.game_world.descend()
+                # Restore last dungeon minimap state when entering a level
+                self.engine.show_minimap = getattr(self.engine, '_dungeon_minimap_state', 2)
+                gw.descend()
                 sounds.stairs_sound.play()
                 import sprite_manager as _sm; _sm.refresh_actor_sprite(self.entity)
                 self.engine.message_log.add_message("You descend into the dungeon.", color.descend)
@@ -407,30 +413,47 @@ class TakeStairsAction(Action):
             raise exceptions.Impossible("There is no dungeon entrance here.")
 
         # Descend if on the downstairs tile
-        if pos == self.engine.game_map.downstairs_location:
-            # Use GameWorld.descend helper if available, otherwise fall back
-            self.engine.game_world.descend()
+        if pos == gm.downstairs_location:
+            print(f"[STAIRS] Descending from floor {gw.current_floor}")
+            try:
+                gw.descend()
+                print(f"[STAIRS] Now on floor {gw.current_floor}, map={self.engine.game_map}")
+            except Exception as _e:
+                import traceback as _tb
+                print(f"[STAIRS] descend() raised: {_e}")
+                _tb.print_exc()
+                raise
             sounds.stairs_sound.play()
             self.engine.message_log.add_message("You descend the staircase.", color.descend)
             return
 
         # Ascend if on an upstairs tile
-        if hasattr(self.engine.game_map, "upstairs_location") and pos == self.engine.game_map.upstairs_location:
+        if hasattr(gm, "upstairs_location") and pos == gm.upstairs_location:
+            print(f"[STAIRS] Ascending from floor {gw.current_floor}")
             # Call ascend on the GameWorld if available; if not, try map-level ascend
             try:
-                self.engine.game_world.ascend()
+                gw.ascend()
+                print(f"[STAIRS] Now on floor {gw.current_floor}, map={self.engine.game_map}")
                 sounds.stairs_sound.play()
+                # If we ascended back to the overworld, save dungeon state and hide minimap
+                if getattr(self.engine.game_map, 'type', '') == 'overworld':
+                    self.engine._dungeon_minimap_state = getattr(self.engine, 'show_minimap', 2)
+                    self.engine.show_minimap = 3
                 self.engine.message_log.add_message("You ascend the staircase.", color.ascend)
                 return
-            except Exception:
+            except Exception as _e:
+                import traceback as _tb
+                print(f"[STAIRS] ascend() raised: {_e}")
+                _tb.print_exc()
                 try:
                     # Some older code may expect engine.game_map.ascend
                     self.engine.game_map.ascend()
                     self.engine.message_log.add_message("You ascend the staircase.", color.ascend)
                     return
-                except Exception:
-                    pass
+                except Exception as _e2:
+                    print(f"[STAIRS] fallback ascend() raised: {_e2}")
 
+        print(f"[STAIRS] No matching stair found at {pos}. tile_name={str(gm.tiles['name'][pos[0],pos[1]])}")
         raise exceptions.Impossible("There are no stairs here.")
 
 class ActionWithDirection(Action):
@@ -607,6 +630,9 @@ class RangedAction(ActionWithDirection):
         if not bow_item or not projectile_item:
             raise exceptions.Impossible("You need a bow and an arrow readied to fire.")
 
+        import tcod.los
+        from animations import ThrowAnimation
+
         # Store projectile info before consuming it
         projectile_char = projectile_item.char
         projectile_color = projectile_item.color
@@ -631,20 +657,16 @@ class RangedAction(ActionWithDirection):
             # Hit an actor - proceed with normal combat
             self._handle_actor_hit(target, shot_verb)
             # Add projectile animation
-            import tcod.los
             path = list(tcod.los.bresenham((self.entity.x, self.entity.y), collision_pos).tolist())
-            from animations import ThrowAnimation
             self.engine.animation_queue.append(ThrowAnimation(path, projectile_char, projectile_color))
         elif collision_type == 'obstacle':
             # Hit an obstacle - 50/50 chance to break or fall
             break_chance = random.random() < 0.5
             
             # Add projectile animation to collision point
-            import tcod.los
             obstacle_x = collision_pos[0] + self.dx
             obstacle_y = collision_pos[1] + self.dy
             path = list(tcod.los.bresenham((self.entity.x, self.entity.y), (obstacle_x, obstacle_y)).tolist())
-            from animations import ThrowAnimation
             self.engine.animation_queue.append(ThrowAnimation(path, projectile_char, projectile_color))
             
             sounds.play_throw_sound()  # Use throw sound for projectile hitting obstacle
@@ -655,16 +677,12 @@ class RangedAction(ActionWithDirection):
                 self._drop_projectile_at(collision_pos, None)
         elif collision_type == 'out_of_bounds':
             # Add projectile animation to edge of map
-            import tcod.los
             path = list(tcod.los.bresenham((self.entity.x, self.entity.y), collision_pos).tolist())
-            from animations import ThrowAnimation
             self.engine.animation_queue.append(ThrowAnimation(path, projectile_char, projectile_color))
             self.engine.message_log.add_message("Your arrow flies out of sight.", color.gray)
         elif collision_type == 'max_range':
             # Add projectile animation to max range
-            import tcod.los
             path = list(tcod.los.bresenham((self.entity.x, self.entity.y), collision_pos).tolist())
-            from animations import ThrowAnimation
             self.engine.animation_queue.append(ThrowAnimation(path, projectile_char, projectile_color))
             self.engine.message_log.add_message("Your arrow lands in the distance.", color.gray)
             self._drop_projectile_at(collision_pos, None)
@@ -675,7 +693,6 @@ class RangedAction(ActionWithDirection):
     def _drop_projectile_at(self, pos: tuple[int, int], original_projectile) -> None:
         """Drop a copy of the projectile at the specified position."""
         try:
-            import copy
             from entity_factories import arrow  # Assuming there's a basic arrow template
             
             # Create a new arrow at the collision position
@@ -1372,6 +1389,8 @@ class ThrowItem(ItemAction):
             return
         
         else:
+            import tcod.los
+            from animations import ThrowAnimation
             self.entity.inventory.drop(self.item)
             self.item.drop_sound()
             # Place item on the ground at target location
@@ -1379,9 +1398,7 @@ class ThrowItem(ItemAction):
             self.item.x, self.item.y = self.target_xy
             
             # Queue a projectile animation from entity to target location
-            import tcod.los
             path = list(tcod.los.bresenham((self.entity.x, self.entity.y), self.target_xy).tolist())
-            from animations import ThrowAnimation
             self.engine.animation_queue.append(ThrowAnimation(path, self.item.char, self.item.color))
 
 

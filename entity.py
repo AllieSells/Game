@@ -231,6 +231,7 @@ class Actor(Entity):
         self.knowledge = {
             "name": self.name,
         }
+        self.portrait = None
         self.tradable = False
         self.job = None
         self.description = description
@@ -261,6 +262,7 @@ class Actor(Entity):
         self.quickcast_slots = [None] * 9  # Quick cast spell slots (1-9)
         self.dodge_cooldown = 0
         self.dodge_cooldown_max = 5  # Cooldown in turns
+        self._portrait_path: Optional[str] = None  # set by generate_portrait()
 
     
     def add_effect(self, effect: Effect) -> None:
@@ -309,7 +311,27 @@ class Actor(Entity):
     def is_alive(self) -> bool:
         return bool(self.ai)
     
-    def generate_villager(self) -> None:
+    def generate_villager(
+        self,
+        *,
+        job: Optional[str] = None,
+        gendered_noun: Optional[str] = None,
+        age: Optional[int] = None,
+        hair_color: Optional[str] = None,
+        hair_style: Optional[str] = None,
+        facial_hair: Optional[str] = None,
+        skin_tone: Optional[str] = None,
+        build: Optional[str] = None,
+        marks: Optional[str] = None,
+        posture: Optional[str] = None,
+        eye_color: Optional[str] = None,
+        clothing_style: Optional[str] = None,
+        head: Optional[str] = None,
+        torso: Optional[str] = None,
+        legs: Optional[str] = None,
+        feet: Optional[str] = None,
+        accessories: Optional[str] = None,
+    ) -> None:
         
         jobs = {
             'Farmer': 30,
@@ -322,6 +344,8 @@ class Actor(Entity):
         }
 
         self.job = random.choices(list(jobs.keys()), weights=list(jobs.values()), k=1)[0]
+        if job is not None:
+            self.job = job
         #self.engine.debug_log(f"Generating villager attributes... {self.job}: {self.job}", handler=type(self).__name__, event="generate_villager")
         trade_supply = random.randint(2,5)
         import entity_factories
@@ -361,7 +385,6 @@ class Actor(Entity):
                     entity_factories.dagger,
                     entity_factories.shortsword,
                     entity_factories.longsword,
-                    entity_factories.chain_mail,
                     entity_factories.arrow
                 ]))
                 if hasattr(item, 'roll_for_enchantment'):
@@ -388,6 +411,8 @@ class Actor(Entity):
             "person": 5,
         }
         self.knowledge["gendered_noun"] = random.choices(list(gender_noun.keys()), weights=list(gender_noun.values()), k=1)[0]
+        if gendered_noun is not None:
+            self.knowledge["gendered_noun"] = gendered_noun
 
         # Pronouns based on gendered noun
         if self.knowledge["gendered_noun"] == "man":
@@ -417,7 +442,7 @@ class Actor(Entity):
         # Get name
 
         # Get age
-        age = random.randint(16, 80)
+        age = age if age is not None else random.randint(16, 80)
         self.knowledge["age"] = age
 
         # Get hair color
@@ -456,6 +481,8 @@ class Actor(Entity):
             hair_colors = {
                 "hairless": 100}
             self.knowledge["hair_color"] = None
+        if hair_color is not None:
+            self.knowledge["hair_color"] = hair_color
         if self.knowledge["hair_color"] == "bald" or self.knowledge["hair_color"] == "hairless":
             self.knowledge["hair_style"] = ""
         else:
@@ -468,6 +495,8 @@ class Actor(Entity):
                 "wavy",
             ]
             self.knowledge["hair_style"] = random.choice(hair_styles)
+        if hair_style is not None:
+            self.knowledge["hair_style"] = hair_style
 
         # Facial hair
         if self.knowledge["gender"] == "Male" and age >= 18 or self.knowledge["gender"] == "Androgynous" and age >= 18:
@@ -483,18 +512,15 @@ class Actor(Entity):
                 self.knowledge["facial_hair"] = None
         else:
             self.knowledge["facial_hair"] = None
+        if facial_hair is not None:
+            self.knowledge["facial_hair"] = facial_hair
         
         # Get complexion from dictionary (nested dicts with realistic weights)
         complexions = {
             "skin_tone": {
-                "very pale": 5,
-                "pale": 15,
                 "fair": 25,
-                "light olive": 10,
-                "tan": 20,
                 "brown": 15,
                 "dark": 8,
-                "very dark": 2,
             },
             "build": {
                 " very slim": 8,
@@ -551,6 +577,17 @@ class Actor(Entity):
         eye_choices = list(complexions["eye_color"].keys())
         eye_weights = list(complexions["eye_color"].values())
         self.knowledge["eye_color"] = random.choices(eye_choices, weights=eye_weights, k=1)[0]
+        # Apply explicit appearance overrides
+        if skin_tone is not None:
+            self.knowledge["skin_tone"] = skin_tone
+        if build is not None:
+            self.knowledge["build"] = build
+        if marks is not None:
+            self.knowledge["marks"] = marks
+        if posture is not None:
+            self.knowledge["posture"] = posture
+        if eye_color is not None:
+            self.knowledge["eye_color"] = eye_color
 
         # Clothing style
         clothing_styles = {
@@ -560,7 +597,7 @@ class Actor(Entity):
         }
         clothing_choices = list(clothing_styles.keys())
         clothing_weights = list(clothing_styles.values())
-        self.knowledge["clothing_style"] = random.choices(clothing_choices, weights=clothing_weights, k=1)[0]
+        self.knowledge["clothing_style"] = clothing_style if clothing_style is not None else random.choices(clothing_choices, weights=clothing_weights, k=1)[0]
 
         # clothing generation
         if self.knowledge["clothing_style"] == "casual":
@@ -597,8 +634,7 @@ class Actor(Entity):
         elif self.knowledge["clothing_style"] == "formal":
             clothing_options = {
                 "head": {
-                    "silk hat": 50,
-                    "felt hat": 30,
+                    "cone hat": 50,
                     None: 70,
                 },
                 "torso": {
@@ -643,7 +679,7 @@ class Actor(Entity):
                     None: 60,
                 },
                 "accessories": {
-                    "broken neckalces": 50,
+                    "broken necklaces": 50,
                     "frayed belts": 50,
                     None: 80,
                 },
@@ -670,6 +706,15 @@ class Actor(Entity):
                 color_weights = list(clothing_colors.values())
                 picked_color = random.choices(color_choices, weights=color_weights, k=1)[0]
                 self.knowledge[slot] = f"{picked_color} {picked_item}"
+
+        # Apply explicit clothing slot overrides
+        _clothing_overrides = {
+            "head": head, "torso": torso, "legs": legs,
+            "feet": feet, "accessories": accessories,
+        }
+        for _slot, _val in _clothing_overrides.items():
+            if _val is not None:
+                self.knowledge[_slot] = _val
 
 
 
@@ -740,8 +785,16 @@ class Actor(Entity):
         self.knowledge["description"] += "."
 
 
+        self.portrait = None
+
+        self.generate_portrait()
+
         return self.knowledge["description"]
-                
+
+    def generate_portrait(self) -> None:
+        """Composite portrait_parts layers into a cached PNG and set self._portrait_path."""
+        import sprite_manager
+        sprite_manager.compose_portrait(self)
 
 
 class Item(Entity):
@@ -842,7 +895,6 @@ class Item(Entity):
     
     def _distort_description(self) -> str:
         """Create a distorted version of the description."""
-        import random
         import hashlib
         
         # Create a consistent seed based on the item's name and description

@@ -43,9 +43,7 @@ class Consumable(BaseComponent):
         #removes consumed item from inventory
         entity = self.parent
         inventory = entity.parent
-        print("Inventory:", inventory, type(inventory), entity)
         if isinstance(inventory, components.inventory.Inventory):
-            print("Consuming item:", entity.name)
             inventory.items.remove(entity)
 
 class ConfusionConsumable(Consumable):
@@ -170,7 +168,6 @@ class SigilStoneConsumable(Consumable):
                     spell_found = True
                     break
         elif self.unlock_name in spell_names:
-            print("test")
             consumer.mana = min(consumer.mana + 10, consumer.mana_max)
             consumer.level.add_xp({'arcana': 10})
             self.engine.message_log.add_message(
@@ -208,7 +205,6 @@ class LightningDamageConsumable(Consumable):
         for actor in self.engine.game_map.actors:
             if actor is not consumer and self.parent.gamemap.visible[actor.x, actor.y]:
                 distance = consumer.distance(actor.x, actor.y)
-                #print(distance)
                 if distance < closest_distance:
                     target = actor
                     closest_distance = distance

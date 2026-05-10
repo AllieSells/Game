@@ -100,8 +100,8 @@ class Fighter(BaseComponent):
                     except Exception:
                         try:
                             gm.entities.discard(self.parent)
-                        except Exception as e:
-                            print(f"Error removing entity from gamemap entities: {e}")
+                        except Exception:
+                            pass
             except Exception:
                 pass
 
@@ -240,16 +240,16 @@ class Fighter(BaseComponent):
         if amount_recovered > 0 and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
             try:
                 self.parent.gamemap.engine.animation_queue.append(gpu_stack.HealthParticle((self.parent.x, self.parent.y), self.parent))
-            except Exception as e:
-                print(e)
+            except Exception:
+                pass
         if body_parts_healed and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
             try:
                 self.parent.gamemap.engine.message_log.add_message(
                     f"Your injuries begin to mend.",
                     color.light_green
                 )
-            except Exception as e:
-                print(e)
+            except Exception:
+                pass
 
         return amount_recovered
     
@@ -273,7 +273,6 @@ class Fighter(BaseComponent):
         
         # Add blood spilling when taking damage (only if causes_bleeding is True)
         if self.can_bleed:
-            print(self.can_bleed)
             if (causes_bleeding and hasattr(self.parent, 'gamemap') and 
                 hasattr(self.parent.gamemap, 'liquid_system')):
                 from liquid_system import LiquidType
@@ -291,6 +290,23 @@ class Fighter(BaseComponent):
             hasattr(self.parent.gamemap, 'engine') and
             self.parent is self.parent.gamemap.engine.player):
             self.parent.gamemap.engine.trigger_damage_indicator()
+            if amount > 0:
+                try:
+                    from gpu_stack import DamageNumberParticle
+                    self.parent.gamemap.engine.animation_queue.append(
+                        DamageNumberParticle((self.parent.x, self.parent.y), amount, color=(220, 220, 0))
+                    )
+                except Exception:
+                    pass
+        elif amount > 0 and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
+            # Spawn a floating damage number above the hit enemy
+            try:
+                from gpu_stack import DamageNumberParticle
+                self.parent.gamemap.engine.animation_queue.append(
+                    DamageNumberParticle((self.parent.x, self.parent.y), amount)
+                )
+            except Exception:
+                pass
         
     
     def _check_weapon_drop(self, damaged_part) -> None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import lzma
 import pickle
-import trace
 import traceback
 from typing import TYPE_CHECKING, Optional
 import os
@@ -20,7 +19,7 @@ from liquid_system import LiquidType
 from message_log import MessageLog
 import render_functions
 import sounds
-from animations import TextPopupAnimation, WaterMoveAnimation, GlobalWaterAnimation, GlobalOceanAnimation, GlobalBeachWaterAnimation, GlobalRiverAnimation
+from animations import TextPopupAnimation, WaterMoveAnimation, GlobalWaterAnimation, GlobalOceanAnimation, GlobalBeachWaterAnimation, GlobalRiverAnimation, GlobalDungeonWaterAnimation
 import color
 
 if TYPE_CHECKING:
@@ -31,7 +30,7 @@ import time
 from animations import FireFlicker, BonefireFlicker, FlameAnimation
 from gpu_stack import SmokeCloudParticle, EmberParticle, DripParticle, LightShaftParticles, BurningParticle
 import sprite_manager
-
+import tcod.noise
 
 
 class Engine:
@@ -53,7 +52,8 @@ class Engine:
         self.debug = False
         self.cursor_hint = None 
         self.context_hints = []
-        self.show_minimap = 0  # 0=map, 1=keys, 2=minimized, 3=hidden
+        self.show_minimap = 1  # 0=map, 1=keys, 2=minimized, 3=hidden
+        self._dungeon_minimap_state = 1  # Last minimap state used in a dungeon/level
         self.hovered_inventory_button = None
         
         # Initialize turn manager for centralized turn processing
@@ -63,6 +63,7 @@ class Engine:
         # Damage indicator system
         self.damage_indicator_timer = 0
         self.damage_indicator_duration = 20  # frames to show damage indicator
+        self.pending_damage_glitch = False   # set True when player takes damage; consumed by main.py
         
         # Movement sound system
         self.last_movement_time = 0
@@ -77,7 +78,6 @@ class Engine:
         self.grass_wave_timer = 0
         self.grass_wave_cooldown = 180  # Ticks between waves (about 3 seconds at 60fps)
         self.active_grass_waves = []
-        self.dropped_stone_dummy_var = False
         # Store speech bubble anims
         self.speech_bubbles: list = []
         # Store swimming anims
@@ -99,9 +99,8 @@ class Engine:
         # Persistent Simplex noise generator for torch/fire flicker.
         # Stored on the engine (not per-map) so the animation is continuous
         # across floor transitions and is preserved in save files.
-        import tcod.noise as _tcod_noise
-        self._noise_gen = _tcod_noise.Noise(
-            dimensions=2, algorithm=_tcod_noise.Algorithm.PERLIN
+        self._noise_gen = tcod.noise.Noise(
+            dimensions=2, algorithm=tcod.noise.Algorithm.PERLIN
         )
         # Scrolling time variable that advances 0.2 per frame, matching the
         # libtcod demo's fov_torchx.  Used to derive per-source wobble (dx, dy)
@@ -153,7 +152,6 @@ class Engine:
 
     def should_play_movement_sound(self) -> bool:
         """Check if movement sound should play (prevents rapid-fire from holding keys)."""
-        import time
         current_time = time.time()
         
         # Check if enough time has passed since the last movement sound
@@ -205,34 +203,29 @@ class Engine:
 
         if "start" not in self.tutorial_checkpoints:
             self.tutorial_checkpoints.append("start")
-            print("Tutorial: Starting tutorial sequence.")
             guide.ai.say(custom="Welcome adventurer. Use WASD or right click to move. Try it out a bit!")
         else:
             if "moved" not in self.tutorial_checkpoints:
                 if self.turn_count > 5:
                     self.tutorial_checkpoints.append("moved")
-                    print("Tutorial: Detected player movement.")
                     guide.ai.say(custom="Excellent. Now, move to that chest northward, and right click on it to get some basic equipment.")
             else:
                 if "looted" not in self.tutorial_checkpoints:
                     if len(self.player.inventory.items) > 0:
                         self.tutorial_checkpoints.append("looted")
-                        print("Tutorial: Detected player looting chest.")
-                        guide.ai.say(custom="Well done. Equip items using the (E) equipment menu. Try defeating that training dummy by moving into it, or left clicking it.")
+                        guide.ai.say(custom="Well done. Equip items using the (TAB) inventory. Try defeating that training dummy by moving into it, or left clicking it.")
                 else:
                     if "defeat" not in self.tutorial_checkpoints:
                         dummy = next((e for e in self.game_map.entities if getattr(e, "name", None) == "Training Dummy"), None)
                         if not dummy or (dummy.fighter and dummy.fighter.hp <= 0):
                             self.tutorial_checkpoints.append("defeat")
-                            print("Tutorial: Detected training dummy defeat.")
                             guide.ai.say(custom="That was a real challenge. You will gain levels as you hone your skills (F). Open your inventory (TAB) and use the sigil stone from the chest.")
                     else:
                         if "stoneused" not in self.tutorial_checkpoints:
                             # check if player has level 2 arcana
                             if self.player.level and self.player.level.traits['arcana']['level'] >= 2:
                                 self.tutorial_checkpoints.append("stoneused")
-                                print("Tutorial: Detected sigil stone use and arcana level.")
-                                guide.ai.say(custom="Well done. Access the controls menu (M) if you need a refresher. Descend (>) the stairs to the east, and best of luck traveller.")
+                                guide.ai.say(custom="Well done. Access the controls menu (M) if you need a refresher. Ascend (>) the stairs to the west, and best of luck traveller.")
 
 
     
@@ -272,7 +265,6 @@ class Engine:
         auto_path = getattr(self, 'auto_move_path', None)
         if auto_path and getattr(self, 'turn_manager', None):
             self.cursor_hint = "walk"
-            import color as _color
             now_am = time.monotonic()
             if now_am - self._last_auto_move_time >= 0.05:
                 enemy_visible = any(
@@ -282,7 +274,7 @@ class Engine:
                 if enemy_visible:
                     self.auto_move_path = []
                     self.cursor_hint = None
-                    self.message_log.add_message("No longer pathing, spotted an enemy.", _color.yellow)
+                    self.message_log.add_message("No longer pathing, spotted an enemy.", color.yellow)
                 else:
                     next_pos = auto_path.pop(0)
                     dx = next_pos[0] - self.player.x
@@ -302,7 +294,7 @@ class Engine:
                     except exceptions.Impossible as exc:
                         self.auto_move_path = []
                         self.cursor_hint = None
-                        self.message_log.add_message(exc.args[0], _color.impossible)
+                        self.message_log.add_message(exc.args[0], color.impossible)
 
         # Handle tutorial-specific ticking for tutorial maps
         if hasattr(self, 'game_map') and getattr(self.game_map, 'biome', None) == "tutorial":
@@ -345,6 +337,9 @@ class Engine:
         if not any(type(a).__name__ == 'GlobalRiverAnimation' for a in self.animation_queue):
             from animations import GlobalRiverAnimation
             self.animation_queue.appendleft(GlobalRiverAnimation())
+        if not any(type(a).__name__ == 'GlobalDungeonWaterAnimation' for a in self.animation_queue):
+            from animations import GlobalDungeonWaterAnimation
+            self.animation_queue.appendleft(GlobalDungeonWaterAnimation())
 
         # Spawn directional light shaft particles for visible Window tiles.
         # Check north (y-1) and south (y+1) independently: if that side is open
@@ -530,32 +525,8 @@ class Engine:
                     except Exception:
                         pass
         
-            # Torch ember sparks for the player when a torch is equipped
-            if self.animations_enabled:
-                try:
-                    has_torch_equipped = (
-                        self.player.equipment
-                        and self.player.equipment.has_item_equipped("Torch")
-                    )
-                    if has_torch_equipped and random.random() < 0.06:
-                        torch_pos = (self.player.x, self.player.y)
-                        torch_ember_count = sum(
-                            1 for a in self.animation_queue
-                            if isinstance(a, EmberParticle)
-                            and int(round(a.fx)) == float(self.player.x + 0.75)
-                            and int(round(a.fy)) == self.player.y
-                        )
-                        if torch_ember_count < 3:
-                            #self.animation_queue.append(EmberParticle(torch_pos))
-                            pass
-                except Exception:
-                    pass
-
             # Update ambient sounds based on player proximity
-            import sounds
-
             sounds.update_all_ambient_sounds(self.player, self.game_map.entities, self.game_map)
-            #print(self.game_map.biome)
         except Exception:
             traceback.print_exc()
             pass
@@ -577,22 +548,12 @@ class Engine:
             # Write game savename 
             f.write(filename.encode('utf-8'))
     
-    def handle_enemy_turns(self) -> None:
-        """Legacy method - use turn_manager.process_player_turn_end() instead."""
-        for entity in set(self.game_map.actors) - {self.player}:
-            if entity.ai:
-                try:
-                    entity.ai.perform()
-                except exceptions.Impossible:
-                    pass # Ignore
 
 
     def _find_dark_spawn_pos(self, max_radius: int = 8, min_radius: int = 2):
         """Return a random (x,y) near the player that is walkable, empty and not visible.
         Returns None if none found.
         """
-        import random
-
         player = getattr(self, "player", None)
         gm = getattr(self, "game_map", None)
         if player is None or gm is None:
@@ -663,7 +624,6 @@ class Engine:
         """Try to spawn an enemy when the player is in darkness.
         This is defensive and will no-op if factories or map API are unavailable.
         """
-        import random
         import copy
         from components.effect import Darkness
 
@@ -755,20 +715,11 @@ class Engine:
         """Create a new grass wave ripple from a random point in the visible area"""
         if not hasattr(self.game_map, 'visible'):
             return
-            
-        # Find all visible grass tiles
-        grass_tiles = []
-        for x in range(self.game_map.width):
-            for y in range(self.game_map.height):
-                if (self.game_map.visible[x, y] and 
-                    self.game_map.tiles["name"][x, y] == "Grass"):
-                    grass_tiles.append((x, y))
-        
-        if not grass_tiles:
+
+        coords = np.argwhere(self.game_map.visible & (self.game_map.tiles["name"] == "Grass"))
+        if not len(coords):
             return
-            
-        # Pick a random grass tile as the wave origin
-        origin_x, origin_y = random.choice(grass_tiles)
+        origin_x, origin_y = coords[random.randrange(len(coords))]
         
         wave = {
             'origin': (origin_x, origin_y),
@@ -1040,15 +991,17 @@ class Engine:
             if self.mouse_ui_y <= 38:
                 # Get entities at mouse location
                 for ent in self.game_map.entities:
-                    # Check if interactable
-                    if hasattr(ent, "container") and ent.container and (
-                        ent.x == self.mouse_x and ent.y == self.mouse_y
-                    ):
+                    if ent.x != self.mouse_x or ent.y != self.mouse_y:
+                        continue
+                    # Friendly NPCs are interactable, not fightable
+                    if hasattr(ent, "ai") and getattr(ent.ai, "type", None) == "Friendly":
+                        interactable = True
+                        continue
+                    # Check if interactable container
+                    if hasattr(ent, "container") and ent.container:
                         interactable = True
                     # Check if enemy, has hp, and NOT player
-                    if hasattr(ent, "fighter") and ent.fighter and ent.fighter.hp > 0 and ent.fighter != self.player.fighter and (
-                        ent.x == self.mouse_x and ent.y == self.mouse_y
-                    ):
+                    elif hasattr(ent, "fighter") and ent.fighter and ent.fighter.hp > 0 and ent.fighter != self.player.fighter:
                         fightable = True
             if interactable:
                 self.cursor_hint = "interact"
@@ -1074,13 +1027,7 @@ class Engine:
         self.render_ui(console)
 
     def trigger_damage_indicator(self):
-        """Trigger the damage indicator visual effect"""
         self.damage_indicator_timer = self.damage_indicator_duration
-        # Debug: Add a message to see if this is being called
-        #if hasattr(self, 'message_log'):
-        #    self.message_log.add_message("Damage indicator triggered!", (255, 255, 0))  # Yellow debug message
     
     def render_damage_indicator(self, console):
-        """Render red corners on screen edges when player takes damage"""
-        # Calculate fade effect based on remaining timer
-        return # Out dated code TODO
+        return

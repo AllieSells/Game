@@ -156,7 +156,6 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
 
     player = copy.deepcopy(entity_factories.player)
     player.char = chr(0xE03B)
-    # DEBUG: Set XP close to level up (350 needed for level 2)
     player.level.current_xp = 0
 
     engine = Engine(player=player)
@@ -184,6 +183,32 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
     
     # Generate world noise 
     engine.game_world.generate_world()
+    
+    from pathlib import Path
+    cache = Path("portrait_cache")
+    if not cache.exists():
+        cache.mkdir()
+    for item in cache.iterdir():
+        if item.is_file():
+            try:
+                item.unlink()
+            except Exception:
+                print("ERROR: Failed to clear portrait cache:", item)
+
+    # Enter the tutorial floor directly, pushing the overworld onto the up_stack.
+    # The player starts inside the first dungeon; the locked door is the only exit.
+    tut_loc = getattr(engine.game_map, 'tutorial_dungeon_entrance', None)
+    if tut_loc is not None:
+        from procgen import generate_first_floor
+        overworld_map = engine.game_map
+        tut_map = generate_first_floor(map_width, map_height, engine)
+        # Cache the tutorial map so re-entry (after ascending) reuses it
+        player_start = getattr(tut_map, 'player_start', (42, 24))
+        engine.game_world.dungeon_cache[tut_loc] = (tut_map, player_start)
+        engine.game_world.up_stack.append((overworld_map, tut_loc, 0))
+        engine.game_world.current_floor = 1
+        engine.game_map = tut_map
+
     engine.update_fov()
     
     # Clear world generation flag after generation is complete
@@ -193,7 +218,7 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
     engine.message_log.add_message(
         f"Seed: {get_current_seed()}", color.welcome_text
     )
-    engine.show_minimap = 3  # Hidden — no minimap on overworld
+    engine.show_minimap = 1  # Show controls by default — player spawns inside dungeon
     return engine
 
 def tutorial_game(game_seed = None, seed_string = None) -> Engine:
@@ -210,8 +235,6 @@ def tutorial_game(game_seed = None, seed_string = None) -> Engine:
     _set_global_seed(game_seed=game_seed, seed_string=seed_string)
 
     player = copy.deepcopy(entity_factories.player)
-    
-    # DEBUG: Set XP close to level up (350 needed for level 2)
     player.level.current_xp = 0
 
     engine = Engine(player=player)
@@ -597,7 +620,6 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             self.current_step = len(self.generation_steps)
             self.game_load = True
             self.engine = None
-            import traceback
             traceback.print_exc()
         finally:
             _sm.set_deferred_mode(False)
@@ -725,7 +747,6 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
                 option_y = menu_start_y + i
                 
                 # Format save info with date
-                import time
                 date_str = time.strftime("%m/%d/%y %H:%M", time.localtime(mtime))
                 save_text = f"{display_name} ({date_str})"
                 

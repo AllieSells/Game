@@ -216,7 +216,6 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
     Note: x_crop/y_crop apply to the first layer only.
     """
     try:
-        #print(f"[sprite_manager] Composing sprite from layers {[hex(c) for c in layer_codepoints]} with scale {overlay_scale} and offset ({x_offset}, {y_offset})")
         global _composite_next, _tileset
         if _tileset is None:
             raise RuntimeError("[sprite_manager] compose_sprite called before load_extras set the tileset.")
@@ -311,7 +310,6 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
             _tileset.set_tile(cp, result)
         _composite_cache[key] = cp
         _composite_next += 1
-        #print(f"[sprite_manager] Composed sprite 0x{cp:04X} from layers {[hex(c) for c in layer_codepoints]}")
         return chr(cp)
     except Exception as e:
         print(f"[sprite_manager] Error composing sprite from layers {[hex(c) for c in layer_codepoints]}: {e}")
@@ -343,6 +341,460 @@ def refresh_actor_sprite(actor) -> None:
         actor.char = actor.base_char
     else:
         actor.char = compose_sprite(unique_layers, overlay_scale=overlay_scale)
+
+
+_WATER_FRAME_CPS = [0xE140, 0xE141, 0xE142, 0xE143, 0xE144]
+
+# ---------------------------------------------------------------------------
+# Dungeon water compositor
+# ---------------------------------------------------------------------------
+# Neighbor-mask bit assignments (cardinal directions).
+_DW_N, _DW_E, _DW_S, _DW_W = 1, 2, 4, 8
+
+# Tuning constants for 32×32 tiles.
+# BLOB_R  – radius (pixels) of the semicircular water blob on each edge.
+#           A circle of this radius is centred on the midpoint of the edge;
+#           only the inward half is visible, giving a natural semicircle bite.
+#           Adjacent edge blobs overlap at corners, naturally forming a larger
+#           rounded blob — no triangle, no explicit arc formula needed.
+# FEATHER – soft-blend width at the blob boundary (pixels).
+_DW_BLOB_R  = 15   # ~47% of tile width; large enough to always cover the full edge
+_DW_FEATHER = 4
+# Floor sprite variants (kept for potential future use).
+_DW_FLOOR_VARIANTS = list(range(0xE1E0, 0xE1E7))
+
+
+def _dungeon_water_bite_mask(neighbor_mask: int) -> np.ndarray:
+    """Return a (TILE_H, TILE_W) float32 array — 1.0 = water, 0.0 = floor.
+
+    Each water-neighboring edge contributes a semicircle blob centred on the
+    midpoint of that edge.  Adjacent blobs overlap via np.maximum, producing
+    larger compound blobs at corners without any triangular narrowing.
+    """
+    W, H = TILE_W, TILE_H
+    R       = float(_DW_BLOB_R)
+    FEATHER = max(1.0, float(_DW_FEATHER))
+
+    has_N = bool(neighbor_mask & _DW_N)
+    has_E = bool(neighbor_mask & _DW_E)
+    has_S = bool(neighbor_mask & _DW_S)
+    has_W = bool(neighbor_mask & _DW_W)
+
+    rows = np.arange(H, dtype=np.float32)
+    cols = np.arange(W, dtype=np.float32)
+    dist_N = rows[:, None]            # distance from top edge
+    dist_S = (H - 1 - rows)[:, None] # distance from bottom edge
+    dist_W = cols[None, :]            # distance from left edge
+    dist_E = (W - 1 - cols)[None, :] # distance from right edge
+
+    half_W = (W - 1) / 2.0
+    half_H = (H - 1) / 2.0
+    # Offset from the horizontal / vertical tile centre axis
+    cols_c = cols[None, :] - half_W   # (1, W)
+    rows_c = rows[:, None] - half_H   # (H, 1)
+
+    water_alpha = np.zeros((H, W), dtype=np.float32)
+
+    def _ramp(signed_dist: np.ndarray) -> np.ndarray:
+        """signed_dist > 0 = inside blob; returns smooth [0,1] alpha."""
+        return np.clip(signed_dist / FEATHER + 1.0, 0.0, 1.0)
+
+    # Each bite is a circle of radius R centred on the midpoint of the edge
+    # (row=0, col=half_W for North, etc.).  Only pixels inside the tile receive
+    # non-zero alpha, so only the inward semicircle is ever visible.
+    if has_N:
+        water_alpha = np.maximum(water_alpha, _ramp(R - np.hypot(dist_N, cols_c)))
+    if has_S:
+        water_alpha = np.maximum(water_alpha, _ramp(R - np.hypot(dist_S, cols_c)))
+    if has_W:
+        water_alpha = np.maximum(water_alpha, _ramp(R - np.hypot(dist_W, rows_c)))
+    if has_E:
+        water_alpha = np.maximum(water_alpha, _ramp(R - np.hypot(dist_E, rows_c)))
+
+    return water_alpha
+
+
+def compose_dungeon_water(floor_cp: int, water_cp: int, neighbor_mask: int) -> str:
+    """Composite animated water biting into a floor tile.
+
+    neighbor_mask encodes which cardinal directions HAVE water neighbors.
+    Water pixels are alpha-blended over floor pixels in the bite region.
+    Returns chr() of the resulting cached codepoint.
+    """
+    global _composite_next, _tileset
+    if _tileset is None:
+        return chr(floor_cp)
+
+    key = ('_dw', floor_cp, water_cp, neighbor_mask)
+    if key in _composite_cache:
+        return chr(_composite_cache[key])
+
+    floor_pixels = _get_tile(floor_cp).astype(np.uint8)
+    water_pixels = _get_tile(water_cp).astype(np.uint8)
+
+    if neighbor_mask == 0:
+        # No water neighbors — return the plain floor tile.
+        result = floor_pixels.copy()
+    else:
+        # water_alpha [0,1]: 1.0 = full water, 0.0 = full floor.
+        # Soft feathered boundary makes animation appear to wash against the shore.
+        water_alpha = _dungeon_water_bite_mask(neighbor_mask)  # (H, W) float32
+        floor_f = floor_pixels.astype(np.float32)
+        water_f = water_pixels.astype(np.float32)
+        a = water_alpha[:, :, np.newaxis]                      # broadcast over RGBA
+        result = np.clip(floor_f * (1.0 - a) + water_f * a, 0, 255).astype(np.uint8)
+
+    cp = _composite_next
+    if _deferred_mode:
+        _deferred_pixel_store[cp] = result
+        _deferred_tiles.append((cp, result))
+    else:
+        _tileset.set_tile(cp, result)
+    _composite_cache[key] = cp
+    _composite_next += 1
+    return chr(cp)
+
+
+def build_dungeon_water_anim(game_map) -> None:
+    """Pre-compose animated water-bite frames for floor tiles that border water.
+
+    For each walkable non-water tile adjacent to at least one water tile,
+    compose 5 frames (one per water animation frame) where the water sprite
+    bites into the floor tile from the water-neighboring edges.
+
+    Central water tiles are left alone — GlobalWaterAnimation handles them.
+    This means the composited edge blends use the exact same water sprites as
+    the centre, so there is no seam.
+
+    Stores game_map.dungeon_water_anim = {(x, y): (cp0, cp1, cp2, cp3, cp4)}.
+    Safe to call inside deferred mode (background gen thread).
+    """
+    W, H = game_map.width, game_map.height
+    tiles = game_map.tiles
+    anim_map: dict = {}
+
+    for x in range(W):
+        for y in range(H):
+            tile = tiles[x, y]
+            # Only process walkable non-water floor tiles.
+            if str(tile["name"]) == "Water" or not tile["walkable"]:
+                continue
+
+            # Neighbor mask: bit set for each cardinal direction that HAS water.
+            nmask = 0
+            if y > 0 and str(tiles[x, y - 1]["name"]) == "Water":
+                nmask |= _DW_N
+            if x < W - 1 and str(tiles[x + 1, y]["name"]) == "Water":
+                nmask |= _DW_E
+            if y < H - 1 and str(tiles[x, y + 1]["name"]) == "Water":
+                nmask |= _DW_S
+            if x > 0 and str(tiles[x - 1, y]["name"]) == "Water":
+                nmask |= _DW_W
+
+            if nmask == 0:
+                continue  # no water neighbors, skip
+
+            # Use the tile's own light codepoint as the floor base.
+            floor_cp = int(tile["light"]["ch"])
+
+            frames = tuple(
+                ord(compose_dungeon_water(floor_cp, wcp, nmask))
+                for wcp in _WATER_FRAME_CPS
+            )
+            anim_map[(x, y)] = frames
+
+    game_map.dungeon_water_anim = anim_map
+    print(f"[sprite_manager] Built dungeon water anim for {len(anim_map)} floor-edge tiles.")
+
+
+def apply_neighbor_overlay(
+    tilemap,
+    candidates,
+    neighbor_names,
+    overlay_sprites: dict,
+    overlay_tint_light=None,
+    overlay_tint_dark=None,
+    out_overlays=None,
+) -> None:
+    """Composite directional edge overlays onto tiles in *candidates* where they
+    border tiles whose names are in *neighbor_names*.
+
+    overlay_sprites maps direction string keys → integer codepoints.  Recognised keys:
+
+      Cardinal  : 'N', 'S', 'E', 'W'
+        Applied when that cardinal neighbour is in neighbor_names.
+
+      Inner corners : 'NW', 'NE', 'SW', 'SE'
+        Applied when BOTH adjacent cardinals are present; those two cardinals are
+        then suppressed (the corner sprite covers them).
+
+      Outer corners : 'NW_outer', 'NE_outer', 'SW_outer', 'SE_outer'
+        Applied when ONLY the diagonal is present (convex corner nub); neither
+        adjacent cardinal may match.
+
+    Missing keys in overlay_sprites are simply skipped.
+
+    overlay_tint_light / overlay_tint_dark : optional (R, G, B) tuples to
+      multiply into every overlay pixel when compositing the light / dark state.
+      None means no tint (white pass-through).
+
+    out_overlays : optional dict {(x, y): [codepoints]}; if provided, every
+      codepoint applied at each position is recorded here (appended on repeat
+      calls to the same position).
+    """
+    W = tilemap.width
+    H = tilemap.height
+    for x, y in candidates:
+        has_N  = 0 <= y - 1 < H and str(tilemap.tiles[x,     y - 1]["name"]) in neighbor_names
+        has_S  = 0 <= y + 1 < H and str(tilemap.tiles[x,     y + 1]["name"]) in neighbor_names
+        has_E  = 0 <= x + 1 < W and str(tilemap.tiles[x + 1, y    ]["name"]) in neighbor_names
+        has_W  = 0 <= x - 1 < W and str(tilemap.tiles[x - 1, y    ]["name"]) in neighbor_names
+        has_NE = 0 <= x + 1 < W and 0 <= y - 1 < H and str(tilemap.tiles[x + 1, y - 1]["name"]) in neighbor_names
+        has_NW = 0 <= x - 1 < W and 0 <= y - 1 < H and str(tilemap.tiles[x - 1, y - 1]["name"]) in neighbor_names
+        has_SE = 0 <= x + 1 < W and 0 <= y + 1 < H and str(tilemap.tiles[x + 1, y + 1]["name"]) in neighbor_names
+        has_SW = 0 <= x - 1 < W and 0 <= y + 1 < H and str(tilemap.tiles[x - 1, y + 1]["name"]) in neighbor_names
+
+        overlays: list[int] = []
+        corner_N = corner_S = corner_E = corner_W = False
+
+        # Inner corners: both adjacent cardinals present → one combined sprite
+        if has_S and has_W and "SW" in overlay_sprites:
+            overlays.append(overlay_sprites["SW"])
+            corner_S = corner_W = True
+        if has_S and has_E and "SE" in overlay_sprites:
+            overlays.append(overlay_sprites["SE"])
+            corner_S = corner_E = True
+        if has_N and has_E and "NE" in overlay_sprites:
+            overlays.append(overlay_sprites["NE"])
+            corner_N = corner_E = True
+        if has_N and has_W and "NW" in overlay_sprites:
+            overlays.append(overlay_sprites["NW"])
+            corner_N = corner_W = True
+
+        # Cardinal edges (not already handled by an inner corner)
+        if has_N and not corner_N and "N" in overlay_sprites:
+            overlays.append(overlay_sprites["N"])
+        if has_S and not corner_S and "S" in overlay_sprites:
+            overlays.append(overlay_sprites["S"])
+        if has_E and not corner_E and "E" in overlay_sprites:
+            overlays.append(overlay_sprites["E"])
+        if has_W and not corner_W and "W" in overlay_sprites:
+            overlays.append(overlay_sprites["W"])
+
+        # Outer corners: only diagonal present, neither adjacent cardinal
+        if has_SW and not has_S and not has_W and "SW_outer" in overlay_sprites:
+            overlays.append(overlay_sprites["SW_outer"])
+        if has_SE and not has_S and not has_E and "SE_outer" in overlay_sprites:
+            overlays.append(overlay_sprites["SE_outer"])
+        if has_NW and not has_N and not has_W and "NW_outer" in overlay_sprites:
+            overlays.append(overlay_sprites["NW_outer"])
+        if has_NE and not has_N and not has_E and "NE_outer" in overlay_sprites:
+            overlays.append(overlay_sprites["NE_outer"])
+
+        if not overlays:
+            continue
+
+        base_dark  = int(tilemap.tiles[x, y]["dark"]["ch"])
+        base_light = int(tilemap.tiles[x, y]["light"]["ch"])
+        tints_light = ([None] + [overlay_tint_light] * len(overlays)) if overlay_tint_light is not None else None
+        tints_dark  = ([None] + [overlay_tint_dark]  * len(overlays)) if overlay_tint_dark  is not None else None
+        result = tilemap.tiles[x, y].copy()
+        result["dark"]["ch"]  = ord(compose_sprite([base_dark]  + overlays, layer_tints=tints_dark))
+        result["light"]["ch"] = ord(compose_sprite([base_light] + overlays, layer_tints=tints_light))
+        tilemap.tiles[x, y] = result
+        if out_overlays is not None:
+            if (x, y) in out_overlays:
+                out_overlays[(x, y)].extend(overlays)
+            else:
+                out_overlays[(x, y)] = list(overlays)
+
+
+# ---------------------------------------------------------------------------
+# Portrait compositor
+# ---------------------------------------------------------------------------
+
+_PORTRAIT_CACHE_DIR = os.path.join(os.path.dirname(__file__), "portrait_cache")
+_PORTRAIT_PARTS_DIR = os.path.join(os.path.dirname(__file__), "components", "portrait_parts")
+# Bump this string to invalidate all cached portraits (e.g. after changing tints or layers)
+_PORTRAIT_CACHE_VERSION = "v2"
+
+# Hair-color → (R, G, B) multiply tint
+_HAIR_TINTS: dict = {
+    "black":  (30,  20,  20),
+    "brown":  (80,  50,  30),
+    "blonde": (220, 190, 100),
+    "red":    (180, 60,  30),
+    "gray":   (150, 150, 150),
+    "grey":   (150, 150, 150),
+    "white":  (230, 225, 215),
+}
+
+# Clothing color word → (R, G, B) multiply tint
+_CLOTH_TINTS: dict = {
+    "white":  (240, 240, 240),
+    "black":  (40,  40,  40),
+    "brown":  (100, 65,  35),
+    "gray":   (140, 140, 140),
+    "grey":   (140, 140, 140),
+    "blue":   (50,  80,  180),
+    "red":    (180, 40,  40),
+    "green":  (40,  140, 50),
+    "yellow": (220, 200, 50),
+    "purple": (120, 50,  170),
+    "linen":  (210, 195, 155),
+    "thread": (180, 170, 140),
+    "cloth":  (160, 155, 140),
+    "leather":(120, 85,  50),
+    "silk":   (200, 185, 215),
+    "velvet": (100, 60,  120),
+    "felt":   (90,  85,  80),
+    "torn":   (110, 100, 90),
+    "dirty":  (90,  80,  60),
+    "worn":   (100, 90,  70),
+    "ragged": (100, 90,  70),
+    "broken": (100, 80,  50),
+    "frayed": (110, 95,  70),
+    "gold":   (210, 170, 40),
+    "silver": (190, 195, 200),
+    "simple": (155, 145, 130),
+}
+
+# Skin-tone → base sub-folder key
+_SKIN_TO_BASE: dict = {
+    "very pale":  "white",
+    "pale":       "white",
+    "fair":       "white",
+    "light olive":"brown",
+    "tan":        "brown",
+    "brown":      "brown",
+    "dark":       "black",
+    "very dark":  "black",
+}
+
+
+def _tint_pil(img, tint_rgb: tuple):
+    """Return a tinted copy of a PIL RGBA image (multiply each RGB channel)."""
+    arr = np.array(img, dtype=np.float32)
+    for c, t in enumerate(tint_rgb[:3]):
+        arr[..., c] = arr[..., c] * (t / 255.0)
+    from PIL import Image as _PILImage
+    return _PILImage.fromarray(arr.clip(0, 255).astype(np.uint8), "RGBA")
+
+
+def _extract_cloth_tint(description: str) -> tuple | None:
+    """Return the tint for the first recognised word in a clothing slot string."""
+    if not description:
+        return None
+    for word in description.lower().split():
+        if word in _CLOTH_TINTS:
+            return _CLOTH_TINTS[word]
+    return None
+
+
+def compose_portrait(actor) -> str | None:
+    """Build a composited 32×32 portrait PNG for *actor* from portrait_parts layers.
+
+    Reads actor.knowledge for skin_tone, gender, hair_color, hair_style,
+    facial_hair, torso, head and accessories slots.
+
+    Results are cached on disk in portrait_cache/<hash>.png.
+    Sets actor._portrait_path and returns the path, or None on failure.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        print("[sprite_manager] Pillow not installed — portrait skipped.")
+        return None
+
+    know = getattr(actor, "knowledge", {})
+
+    # ── Base layer ────────────────────────────────────────────────────────────
+    skin       = know.get("skin_tone", "fair")
+    gender     = know.get("gender", "Male")
+    base_key   = _SKIN_TO_BASE.get(skin, "white")
+    gender_key = "female" if gender == "Female" else "male"
+    base_path  = os.path.join(_PORTRAIT_PARTS_DIR, "base", f"{base_key}_{gender_key}.png")
+    if not os.path.isfile(base_path):
+        base_path = os.path.join(_PORTRAIT_PARTS_DIR, "base", "white_male.png")
+    if not os.path.isfile(base_path):
+        return None
+
+    # ── Cache key ─────────────────────────────────────────────────────────────
+    import hashlib, json as _json
+    _cache_fields = ["skin_tone", "gender", "hair_color", "hair_style",
+                     "facial_hair", "torso", "head", "accessories"]
+    cache_data  = {k: know.get(k) for k in _cache_fields}
+    cache_data["_v"] = _PORTRAIT_CACHE_VERSION
+    cache_hash  = hashlib.md5(_json.dumps(cache_data, sort_keys=True).encode()).hexdigest()[:12]
+    os.makedirs(_PORTRAIT_CACHE_DIR, exist_ok=True)
+    out_path = os.path.join(_PORTRAIT_CACHE_DIR, f"{cache_hash}.png")
+
+    if os.path.isfile(out_path):
+        actor._portrait_path = out_path
+        return out_path
+
+    # ── Build composite ───────────────────────────────────────────────────────
+    _log = [f"base={base_key}_{gender_key}"]
+    canvas = Image.open(base_path).convert("RGBA")
+
+    def _overlay(rel_path: str, tint=None) -> None:
+        nonlocal canvas
+        full = os.path.join(_PORTRAIT_PARTS_DIR, rel_path)
+        if not os.path.isfile(full):
+            _log.append(f"MISSING:{rel_path}")
+            return
+        layer = Image.open(full).convert("RGBA")
+        if tint:
+            layer = _tint_pil(layer, tint)
+        merged = canvas.copy()
+        merged.alpha_composite(layer)
+        canvas = merged
+        _log.append(f"{rel_path} tint={tint}")
+
+    hair_color = know.get("hair_color")
+    hair_tint  = _HAIR_TINTS.get(hair_color) if hair_color else None
+    hair_style = know.get("hair_style", "short")
+
+    # Torso clothing layer (below hair)
+    torso_desc  = know.get("torso") or ""
+    torso_lower = torso_desc.lower()
+    torso_tint  = _extract_cloth_tint(torso_desc)
+    if "robe" in torso_lower:
+        _overlay("robe/robe.png", torso_tint)
+    elif any(w in torso_lower for w in ("tunic", "shirt", "jerkin")):
+        _overlay(f"tunic/{gender_key}.png", torso_tint)
+
+    # Hair
+    if hair_tint and hair_color not in ("bald", "hairless"):
+        _overlay("hair/long.png", hair_tint)  # only long.png exists; extend as more are added
+
+    # Facial hair / beard
+    facial_hair = know.get("facial_hair")
+    if facial_hair and hair_tint:
+        beard_file = "beards/long.png" if "beard" in facial_hair else "beards/normal.png"
+        _overlay(beard_file, hair_tint)
+
+    # Head gear  (on top of hair)
+    head_desc  = know.get("head") or ""
+    head_lower = head_desc.lower()
+    head_tint  = _extract_cloth_tint(head_desc)
+    if "hood" in head_lower:
+        _overlay("hood/hood.png", head_tint)
+    elif "cap" in head_lower:
+        _overlay("cap/cap.png", head_tint)
+    elif "hat" in head_lower:
+        _overlay("cone_hat/cone_hat.png", head_tint)
+
+    # Accessories — necklace
+    acc_desc  = know.get("accessories") or ""
+    acc_tint  = _extract_cloth_tint(acc_desc)
+    if "necklace" in acc_desc.lower():
+        _overlay("necklace/necklace.png", acc_tint)
+
+    canvas.save(out_path, "PNG")
+    print(f"[portrait] {getattr(actor, 'name', '?')} → {cache_hash}.png | layers: {', '.join(_log)}")
+    actor._portrait_path = out_path
+    return out_path
 
 
 def save_composites_sheet(path: str = "RP/composites.png") -> None:

@@ -194,6 +194,50 @@ class HealthParticle:
         self.fy -= 0.02  # rise speed
         self.frames -= 1
 
+class DamageNumberParticle:
+    """Rising damage number that floats up from a damaged entity.
+
+    Rendered by GPUStack._damage_number_render (bloom pass).
+    Displays the damage amount as small pixel-art digits in orange-red.
+    """
+
+    # Minimal 3-wide × 5-tall pixel font (list of (col, row) 'on' cells)
+    _PIXEL_DIGITS: dict = {
+        '0': [(0,0),(1,0),(2,0),(0,1),(2,1),(0,2),(2,2),(0,3),(2,3),(0,4),(1,4),(2,4)],
+        '1': [(1,0),(1,1),(1,2),(1,3),(1,4)],
+        '2': [(0,0),(1,0),(2,0),(2,1),(0,2),(1,2),(2,2),(0,3),(0,4),(1,4),(2,4)],
+        '3': [(0,0),(1,0),(2,0),(2,1),(1,2),(2,2),(2,3),(0,4),(1,4),(2,4)],
+        '4': [(0,0),(2,0),(0,1),(2,1),(0,2),(1,2),(2,2),(2,3),(2,4)],
+        '5': [(0,0),(1,0),(2,0),(0,1),(0,2),(1,2),(2,3),(0,4),(1,4),(2,4)],
+        '6': [(0,0),(1,0),(2,0),(0,1),(0,2),(1,2),(2,2),(0,3),(2,3),(0,4),(1,4),(2,4)],
+        '7': [(0,0),(1,0),(2,0),(2,1),(2,2),(2,3),(2,4)],
+        '8': [(0,0),(1,0),(2,0),(0,1),(2,1),(0,2),(1,2),(2,2),(0,3),(2,3),(0,4),(1,4),(2,4)],
+        '9': [(0,0),(1,0),(2,0),(0,1),(2,1),(0,2),(1,2),(2,2),(2,3),(0,4),(1,4),(2,4)],
+    }
+
+    def __init__(self, position: tuple, number: int, color: tuple = (0, 225, 0)):
+        x, y = position
+        # Offset to one side so numbers don't sit directly on the entity
+        side = random.choice((-1, 1))
+        self.fx = float(x) + side * random.uniform(0.35, 0.6)
+        self.fy = float(y) - 0.3          # spawn just above the entity's tile
+        self.vx = side * random.uniform(0.03, 0.06)  # arc outward
+        self.vy = random.uniform(-0.10, -0.07)        # initial upward pop
+        self.number = str(number)
+        self.color = color                 # (r, g, b) base colour
+        self.frames = 28                   # shorter lifetime — less time in the way
+        self.total_frames = self.frames
+        self.render_priority = 2
+
+    def tick(self, console, game_map) -> None:
+        if self.frames <= 0:
+            return
+        self.vy += 0.012    # gravity — pulls the number back down after the pop
+        self.fx += self.vx
+        self.fy += self.vy
+        self.frames -= 1
+
+
 class BurningParticle:
     """A single short-lived flame spark that rises upward from a burning entity.
 
@@ -341,7 +385,6 @@ class CRTBleedAnim:
         if self.frames <= 0:
             return
         self.frames -= 1
-        #print("ticking")
 
 
 class EmberParticle:
@@ -1605,6 +1648,7 @@ class GPUStack:
         self.gpu_anim_registry.append(self._slash_render)            # bloom
         self.gpu_anim_registry.append(self._gpu_drip_render)  # bloom ? (exact color)
         self.gpu_anim_registry.append(self._heal_render)  # bloom ? (exact color)
+        self.gpu_anim_registry.append(self._damage_number_render)     # bloom
         self.gpu_anim_registry.append(self._space_distort_spell_render)    # bloom
         self.gpu_anim_registry.append(self._illuminated_render)            # bloom
 
@@ -2285,6 +2329,84 @@ class GPUStack:
                                     float(sz * 2), float(sz // 2)))
                 renderer.fill_rect((float(px - sz // 4), float(py - sz),
                                     float(sz // 2), float(sz * 2)))
+                drew = True
+
+        return drew
+
+    def _damage_number_render(self, active_engine) -> bool:
+        """Draw floating damage numbers for each DamageNumberParticle (bloom pass).
+
+        Renders orange-red pixel-art digits that rise from a hit entity and fade out.
+        """
+        nums = [a for a in active_engine.animation_queue
+                if isinstance(a, DamageNumberParticle) and a.frames > 0]
+        if not nums:
+            return False
+
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        game_map  = active_engine.game_map
+        renderer  = self.renderer
+        drew      = False
+
+        with renderer.set_render_target(self._gal_src):
+            for num in nums:
+                world_xi = int(round(num.fx))
+                world_yi = int(round(num.fy))
+                if not game_map.in_bounds(world_xi, world_yi):
+                    continue
+                if not game_map.visible[world_xi, world_yi]:
+                    continue
+
+                scr_x = num.fx - origin_x
+                scr_y = num.fy - origin_y
+                # Allow slightly off-screen vertically so numbers rising upward stay visible
+                if not (-1.0 <= scr_x < self.game_view_width and
+                        -2.0 <= scr_y < self.game_view_height):
+                    continue
+
+                cx = int(scr_x * tile_px_w + tile_px_w * 0.5)
+                cy = int(scr_y * tile_px_h + tile_px_h * 0.5)
+
+                age = 1.0 - (num.frames / float(num.total_frames))
+                # Ramp up briefly then fade — avoids a hard bright flash at spawn
+                if age < 0.12:
+                    alpha = int(120 * (age / 0.12))
+                elif age < 0.30:
+                    alpha = 120
+                else:
+                    alpha = int(120 * (1.0 - (age - 0.30) / 0.70))
+                if alpha < 8:
+                    continue
+
+                # Colour: lerp from full base colour toward a slightly lighter shade
+                br, bg, bb_base = num.color
+                rr = min(255, int(br + (255 - br) * age * 0.3))
+                gg = min(255, int(bg + (255 - bg) * age * 0.15))
+                bb = min(255, int(bb_base + (255 - bb_base) * age * 0.1))
+
+                # Pixel font: each cell is sz × sz pixels
+                sz = max(1, int(min(tile_px_w, tile_px_h) * 0.10))
+                n_chars  = len(num.number)
+                char_w   = 3   # digit grid width
+                gap      = 1   # one-cell gap between digits
+                total_w  = (n_chars * char_w + max(0, n_chars - 1) * gap) * sz
+                start_x  = cx - total_w // 2
+
+                for i, ch in enumerate(num.number):
+                    dots = DamageNumberParticle._PIXEL_DIGITS.get(ch)
+                    if dots is None:
+                        continue
+                    dx_off = i * (char_w + gap) * sz
+                    for (dc, dr) in dots:
+                        px   = start_x + dx_off + dc * sz
+                        py_d = cy + dr * sz
+                        if 0 <= px < self._gal_w - sz and 0 <= py_d < self._gal_h - sz:
+                            renderer.draw_color = (rr, gg, bb, alpha)
+                            renderer.fill_rect((float(px), float(py_d),
+                                                float(sz), float(sz)))
                 drew = True
 
         return drew

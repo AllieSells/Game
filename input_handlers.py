@@ -151,10 +151,6 @@ class BaseEventHandler(tcod.event.EventDispatch[ActionOrHandler]):
         else:
             self.engine.hovered_inventory_button = None
 
-
-
-        #print(self.engine.mouse_x, self.engine.mouse_y)
-        
         return None
 
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
@@ -822,6 +818,19 @@ class DialogueEventHandler(PopupEventHandler):
         else:
             self.npc.dialogue_context = self.current_dialogue[1]
 
+        # Portrait: prefer composited _portrait_path, then .portrait, then default
+        import os as _os
+        _npc_portrait = getattr(self.npc, '_portrait_path', None) or getattr(self.npc, 'portrait', None)
+        if _npc_portrait and _os.path.isfile(_npc_portrait):
+            _portrait_default = _npc_portrait
+        else:
+            _portrait_default = _os.path.join("chargen", "processed", "white_male_base.png")
+        self._portrait_path = _portrait_default if _os.path.isfile(_portrait_default) else None
+        self._portrait_dest_tiles = None  # (col, row, w, h) tile coords — set in on_render
+        self._dlg_opt_y = None  # first option row — set in on_render, read by mouse handlers
+        self._dlg_box_y = None
+        self._dlg_box_h = None
+
     def update_menu_title(self):
         """Update the main menu title when NPC becomes known."""
         knows_name = self.npc.name if self.npc.is_known else self.npc.unknown_name
@@ -829,69 +838,91 @@ class DialogueEventHandler(PopupEventHandler):
     
     def on_render(self, console: tcod.Console) -> None:
         super().on_render(console)
-        
-        # Draw the dialogue box
-        width = 40
-        height = 20
-        x = (self.engine.game_map.width - width) // 2
-        y = (self.engine.game_map.height - height) // 2
-        self._set_popup_bounds(x, y, width, height)
-        
-        # Fade the background except for the dialogue area
-        super().render_faded(console, x, y, width, height)
+
+        BOX_W  = 50
+        PORT_W = 6   # portrait area width  in tiles (square: keep == PORT_H)
+        PORT_H = 6   # portrait area height in tiles
+        # layout rows: top_border(1) + portrait(PORT_H) + divider(1) + blank(1)
+        #              + options(_max_opts) + blank(1) + instructions(1) + bot_border(1)
+        _max_opts = max(len(m["options"]) for m in self.menu_structure.values())
+        BOX_H  = PORT_H + _max_opts + 6
+
+        # Centre in 80-wide console; keep inside the 40-row game area
+        x = (80 - BOX_W) // 2
+        y = max(1, (40 - BOX_H) // 2)
+
+        self._set_popup_bounds(x, y, BOX_W, BOX_H)
+        super().render_faded(console, x, y, BOX_W, BOX_H)
 
         current_menu_data = self.menu_structure[self.current_menu]
-        
-        # Draw parchment background and ornate border
-        MenuRenderer.draw_parchment_background(console, x, y, width, height)
-        MenuRenderer.draw_ornate_border(console, x, y, width, height, current_menu_data["title"])
-        
-        # Display current dialogue if available
+
+        # ── Background & outer border ─────────────────────────────────────────
+        MenuRenderer.draw_parchment_background(console, x, y, BOX_W, BOX_H)
+        MenuRenderer.draw_ornate_border(console, x, y, BOX_W, BOX_H, current_menu_data["title"])
+
+        # ── Portrait zone: black bg so the GPU PNG sits cleanly on top ────────
+        PORT_X = x + 1
+        PORT_Y = y + 1
+        console.draw_rect(PORT_X, PORT_Y, PORT_W, PORT_H, ch=ord(' '), bg=color.parchment_dark)
+        # Expose tile rect so main.py knows where to blit the portrait texture
+        self._portrait_dest_tiles = (PORT_X, PORT_Y, PORT_W, PORT_H)
+
+        # ── Vertical separator between portrait zone and text zone ────────────
+        VSEP_X = x + PORT_W + 1
+        for _row in range(PORT_Y, PORT_Y + PORT_H):
+            console.print(VSEP_X, _row, '│', fg=color.bronze_border, bg=color.parchment_dark)
+        # Connect separator to top border
+        console.print(VSEP_X, y, '┬', fg=color.bronze_border, bg=color.parchment_dark)
+
+        # ── Dialogue text (right of the separator) ────────────────────────────
+        TEXT_X = VSEP_X + 1
+        TEXT_W = BOX_W - PORT_W - 3   # from TEXT_X to right border (exclusive)
         if hasattr(self, 'current_dialogue') and self.current_dialogue:
-            dialogue_text = self.current_dialogue[0]
-            # Use wrap_colored_text to get properly wrapped lines, then print each line
             from text_utils import wrap_colored_text, print_colored_text
-            max_dialogue_width = width - 4  # Account for dialogue box margins
-            wrapped_lines = wrap_colored_text(dialogue_text, max_dialogue_width, default_color=color.teal)
-            
-            current_y = y + 2
-            for line_parts in wrapped_lines:
-                if current_y >= y + height - 3:  # Don't overflow the dialogue box
+            wrapped = wrap_colored_text(
+                self.current_dialogue[0], TEXT_W, default_color=color.teal
+            )
+            curr_y = PORT_Y
+            for line_parts in wrapped:
+                if curr_y >= PORT_Y + PORT_H:
                     break
-                print_colored_text(console, x + 2, current_y, line_parts)
-                current_y += 1
-        
-        # Display menu options in inventory-style format
-        start_y = y + 5
+                print_colored_text(console, TEXT_X, curr_y, line_parts)
+                curr_y += 1
+
+        # ── Horizontal divider below portrait / text ──────────────────────────
+        DIV_Y = y + PORT_H + 1
+        console.print(x,           DIV_Y, '├', fg=color.bronze_border, bg=color.parchment_dark)
+        console.print(VSEP_X,      DIV_Y, '┴', fg=color.bronze_border, bg=color.parchment_dark)
+        console.print(x + BOX_W - 1, DIV_Y, '┤', fg=color.bronze_border, bg=color.parchment_dark)
+        for _dx in range(1, BOX_W - 1):
+            if x + _dx != VSEP_X:
+                console.print(x + _dx, DIV_Y, '─', fg=color.bronze_border, bg=color.parchment_dark)
+
+        # ── Options ───────────────────────────────────────────────────────────
+        OPT_Y   = DIV_Y + 2   # blank row between divider and first option
+        # Store for mouse handlers
+        self._dlg_opt_y = OPT_Y
+        self._dlg_box_y = y
+        self._dlg_box_h = BOX_H
         options = current_menu_data["options"]
-        
         for i, option in enumerate(options):
-            option_y = start_y + i
-            if option_y >= y + height - 3:  # Leave room for instructions
+            option_y = OPT_Y + i
+            if option_y >= y + BOX_H - 3:   # leave blank row before instructions
                 break
-            
-            # Generate letter key for this option
+            marker      = ">" if i == self.selected_index else " "
             option_text = f"• {option['text']}"
-            
-            # Draw selection marker for arrow navigation (like inventory)
-            marker = ">" if i == self.selected_index else " "
-            
-            # Highlight selected option with white background and black text
             if i == self.selected_index:
-                # Draw white background for the entire line
-                line_width = len(marker + option_text) + 2  # Extra space for padding
+                line_width = min(len(marker + option_text) + 2, BOX_W - 2)
                 for j in range(line_width):
                     console.print(x + 1 + j, option_y, " ", fg=color.white, bg=color.selected_bronze)
-                # Draw the text on top with black text
-                console.print(x + 1, option_y, marker, fg=color.white, bg=color.selected_bronze)
+                console.print(x + 1, option_y, marker,      fg=color.white, bg=color.selected_bronze)
                 console.print(x + 2, option_y, option_text, fg=color.white, bg=color.selected_bronze)
             else:
                 console.print(x + 1, option_y, marker)
                 console.print(x + 2, option_y, option_text, fg=color.white)
-        
-        # Instructions
-        instructions_y = y + height - 3
-        console.print(x + 1, instructions_y+1, "↑↓: Navigate  Enter: Select  Esc: Exit", fg=color.grey)
+
+        # ── Instructions ──────────────────────────────────────────────────────
+        console.print(x + 1, y + BOX_H - 2, "↑↓: Navigate  Enter: Select  Esc: Exit", fg=color.grey)
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         sounds.play_ui_move_sound()
@@ -927,7 +958,47 @@ class DialogueEventHandler(PopupEventHandler):
         return None
         
         return None
-    
+
+    def on_left_click(self, mx: int, my: int) -> Optional[ActionOrHandler]:
+        """Handle left-clicks: hover selects, click activates the option."""
+        current_menu_data = self.menu_structure[self.current_menu]
+        options = current_menu_data["options"]
+
+        OPT_Y = getattr(self, '_dlg_opt_y', None)
+        y     = getattr(self, '_dlg_box_y', None)
+        BOX_H = getattr(self, '_dlg_box_h', None)
+        if OPT_Y is None:
+            return None
+
+        clicked_index = my - OPT_Y
+        if 0 <= clicked_index < len(options):
+            opt_row = OPT_Y + clicked_index
+            if opt_row < y + BOX_H - 2:
+                self.selected_index = clicked_index
+                sounds.play_ui_move_sound()
+                return self.handle_menu_selection()
+        return None
+
+    def ev_mousemotion(self, event: tcod.event.MouseMotion) -> Optional[ActionOrHandler]:
+        """Hover over options to highlight them."""
+        current_menu_data = self.menu_structure[self.current_menu]
+        options = current_menu_data["options"]
+
+        OPT_Y = getattr(self, '_dlg_opt_y', None)
+        y     = getattr(self, '_dlg_box_y', None)
+        BOX_H = getattr(self, '_dlg_box_h', None)
+        if OPT_Y is None:
+            return None
+
+        mx, my = int(event.tile.x), int(event.tile.y)
+        hovered = my - OPT_Y
+        if 0 <= hovered < len(options):
+            opt_row = OPT_Y + hovered
+            if opt_row < y + BOX_H - 2 and hovered != self.selected_index:
+                self.selected_index = hovered
+                sounds.play_ui_move_sound()
+        return None
+
     def handle_menu_selection(self) -> Optional[ActionOrHandler]:
         """Handle the selected menu option."""
         current_menu_data = self.menu_structure[self.current_menu]
@@ -2659,15 +2730,19 @@ class SelectIndexHandler(AskUserEventHandler):
         AskUserEventHandler.ev_mousemotion(self, event)
         self.engine.mouse_location = int(self.engine.mouse_x), int(self.engine.mouse_y)
 
+    # Cursor overlay state — read by main.py to draw the sprite as a BLEND SDL texture
+    # after the game console + lightmap have been composited to the screen.
+    _cursor_screen_pos: tuple = None  # (screen_x, screen_y) in game-console space
+    _cursor_cp: int = 0xE0F6          # active cursor codepoint (alternates each frame)
+
     def render_game_overlay(self, console: tcod.Console) -> None:
+        """Store cursor position/frame for main.py's GPU BLEND overlay pass."""
+        import time
         x, y = self.engine.mouse_location
         x, y = int(x), int(y)
         screen_position = self.engine.world_to_screen(x, y, console.width, console.height)
-        if screen_position is None:
-            return
-        screen_x, screen_y = screen_position
-        console.rgb["bg"][screen_x, screen_y] = color.white
-        console.rgb["fg"][screen_x, screen_y] = color.black
+        self._cursor_screen_pos = screen_position
+        self._cursor_cp = 0xE0F6 if int(time.time() * 4) % 2 == 0 else 0xE0F7
 
     def render_ui_overlay(self, console: tcod.Console) -> None:
         return None
@@ -3762,9 +3837,12 @@ class LookHandler(SelectIndexHandler):
         self.engine.context_hints = [
             ("Mouse/Arrows", "Look"),
             ("Tab", "Switch Tabs"),
+            ("Scroll", "Switch Items"),
+            ("Shift+Scroll", "Scroll Text"),
             ("Esc", "Exit"),
         ]
         self.alt_held = False
+        self._shift_held = False
         self.detail_index = 0  # Index for cycling through items at location
         self.scroll_offset = 0  # For scrolling through text
         self.current_tab = LookHandler.last_selected_tab  # Start with remembered tab
@@ -3775,8 +3853,16 @@ class LookHandler(SelectIndexHandler):
         self._cache_tab: int = -1
         self._cache_detail_index: int = -1
         self._cache_tab_content: list = []
-        # Pre-built entity position map used by render_visual_preview
+        # Entity pos map built once on first render; entities don't change in look mode.
         self._entity_pos_map: dict = {}
+        # 7×7 sub-console for the minimap preview — only redrawn when cursor tile changes.
+        self._preview_console: tcod.Console = tcod.Console(7, 7, order="F")
+        self._preview_dirty: bool = True
+        # Sidebar screen position — set each render so main.py can extract a sub-console.
+        self._sidebar_x: int = 0
+        self._sidebar_y: int = 0
+        self._sidebar_w: int = 35
+        self._sidebar_h: int = 30
 
     def on_index_selected(self, x: int, y: int) -> Optional[ActionOrHandler]:
         """Return to main handler when location is selected."""
@@ -3795,7 +3881,6 @@ class LookHandler(SelectIndexHandler):
         super().render_game_overlay(console)
 
     def render_ui_overlay(self, console: tcod.Console) -> None:
-        self.render_faded(console)
         self.render_detailed_sidebar(console)
 
     def get_displayed_cursor_position(self, console: tcod.Console) -> tuple[int, int]:
@@ -3811,130 +3896,128 @@ class LookHandler(SelectIndexHandler):
 
     def render_detailed_sidebar(self, console: tcod.Console) -> None:
         """Render detailed information sidebar."""
+        _BG         = color.parchment_bg
+        _BORDER_FG  = color.bronze_border
+        _TAB_ACT_BG = color.selected_bronze
+        _TAB_IN_BG  = color.parchment_very_dark
+
         x, y = self.engine.mouse_location
         x, y = int(x), int(y)
-        
+
         # Re-query items/entities only when the cursor has actually moved
         if (x, y) != self._cache_location:
             self._cache_location = (x, y)
             self._cache_items_entities = self.get_items_and_entities_at(x, y)
-            # Rebuild position map for preview rendering
-            gm = self.engine.game_map
-            pos_map: dict = {}
-            for entity in gm.entities:
-                key = (entity.x, entity.y)
-                if key not in pos_map:
-                    pos_map[key] = []
-                pos_map[key].append(entity)
-            self._entity_pos_map = pos_map
-            # Invalidate tab content too
+            # Build entity pos map once — entities don't change during look mode.
+            if not self._entity_pos_map:
+                pos_map: dict = {}
+                for entity in self.engine.game_map.entities:
+                    key = (entity.x, entity.y)
+                    if key not in pos_map:
+                        pos_map[key] = []
+                    pos_map[key].append(entity)
+                self._entity_pos_map = pos_map
+            # Invalidate preview and tab content caches.
+            self._preview_dirty = True
             self._cache_tab = -1
 
         items_and_entities = self._cache_items_entities
         if not items_and_entities:
             return
-            
+
         # Clamp detail_index to valid range
         self.detail_index = max(0, min(self.detail_index, len(items_and_entities) - 1))
         current_item = items_and_entities[self.detail_index]
-        
-        # Determine sidebar position based on cursor location to avoid blocking it
+
+        # Cursor position in UI-layer tile space
         cursor_x, cursor_y = self.get_displayed_cursor_position(console)
-        sidebar_width = 35  # Increased width to accommodate both text and preview
+        sidebar_width  = 35
         sidebar_height = 30
-        
-        # Position sidebar to avoid cursor - prefer right side, but use left if cursor is on right
+        self._sidebar_w = sidebar_width
+        self._sidebar_h = sidebar_height
+
+        # Place on the opposite horizontal half from the cursor (no external overflow)
         if cursor_x < console.width // 2:
-            # Cursor on left side, put sidebar on right
-            sidebar_x = console.width - sidebar_width
+            sidebar_x = console.width - sidebar_width   # right side
         else:
-            # Cursor on right side, put sidebar on left
-            sidebar_x = 0
-            
-        # Position vertically with a gap so the panel stays clear of the cursor.
+            sidebar_x = 0                               # left side
+
+        # Vertical: prefer below cursor, then above, then clamp
         below_cursor_y = cursor_y + 2
         above_cursor_y = cursor_y - sidebar_height - 2
-        max_sidebar_y = max(2, console.height - sidebar_height - 2)
+        max_sidebar_y  = max(1, console.height - sidebar_height - 1)
         if below_cursor_y <= max_sidebar_y:
             sidebar_y = below_cursor_y
-        elif above_cursor_y >= 2:
+        elif above_cursor_y >= 1:
             sidebar_y = above_cursor_y
         else:
-            sidebar_y = max(2, min(max_sidebar_y, cursor_y - sidebar_height // 2))
-        
-        # Draw sidebar frame with parchment styling
+            sidebar_y = max(1, min(max_sidebar_y, cursor_y - sidebar_height // 2))
+
+        # ── Parchment background + ornate border (matches other menus) ────────
+        self._sidebar_x = sidebar_x
+        self._sidebar_y = sidebar_y
         MenuRenderer.draw_parchment_background(console, sidebar_x, sidebar_y, sidebar_width, sidebar_height)
-        tab_title = f"Inspect - {self.tab_names[self.current_tab]}"
-        MenuRenderer.draw_ornate_border(console, sidebar_x, sidebar_y, sidebar_width, sidebar_height, tab_title)
-        
-        # Draw binder-style tabs sticking out from the appropriate side
-        for i, tab_name in enumerate(self.tab_names):
-            tab_y_pos = sidebar_y + 5 + i * 3  # Spacing between tabs
-            
-            # Position tabs consistently based on sidebar location
-            if sidebar_x == 0:  # Sidebar on left side
-                tab_x_pos = sidebar_x + sidebar_width  # Right edge of sidebar
-            else:  # Sidebar on right side  
-                tab_x_pos = sidebar_x - 9  # Left side, ensure they fit onscreen
-            
+        item_name = current_item['name'][:sidebar_width - 6]
+        MenuRenderer.draw_ornate_border(console, sidebar_x, sidebar_y, sidebar_width, sidebar_height, item_name)
+
+        # ── Inline tab row (row +2, below the ornate title row) ──────────────
+        tab_display = ["Glance", "Damage", "Coating", "Inspect"]
+        tab_row_y = sidebar_y + 2
+        tx = sidebar_x + 1
+        for i, dname in enumerate(tab_display):
+            if i > 0:
+                console.print(tx, tab_row_y, "|", fg=_BORDER_FG, bg=_BG)
+                tx += 1
             if i == self.current_tab:
-                # Active tab - draw a small bordered box
-                console.draw_frame(
-                    x=tab_x_pos, y=tab_y_pos, 
-                    width=9, height=3,
-                    clear=True, fg=color.yellow, bg=(60, 50, 30)
-                )
-                # Centered text in active tab
-                console.print(tab_x_pos + 1, tab_y_pos + 1, tab_name[:7], fg=color.yellow, bg=(60, 50, 30))
+                console.print(tx, tab_row_y, dname, fg=color.gold_accent, bg=_TAB_ACT_BG)
             else:
-                # Inactive tab - same size as active tab
-                console.draw_frame(
-                    x=tab_x_pos, y=tab_y_pos, 
-                    width=9, height=3,
-                    clear=True, fg=color.grey, bg=(30, 25, 15)
-                )
-                # Centered text in inactive tab
-                console.print(tab_x_pos + 1, tab_y_pos + 1, tab_name[:7], fg=color.grey, bg=(30, 25, 15))
-        
-        # Show current item info at the top
-        info_y = sidebar_y + 2
-        
+                console.print(tx, tab_row_y, dname, fg=color.fantasy_text, bg=_TAB_IN_BG)
+            tx += len(dname)
+        # Item counter at far right of tab row
         if len(items_and_entities) > 1:
-            # Center the item counter without adding extra line spacing
-            counter_text = f"{self.detail_index + 1} of {len(items_and_entities)}"
-            counter_x = sidebar_x + (sidebar_width - len(counter_text)) // 2
-            console.print(counter_x, info_y, counter_text, fg=color.grey, bg=(45, 35, 25))
-            # Don't increment info_y here to avoid extra spacing
-            
-        # Center the visual preview horizontally in the sidebar
-        preview_size = 7  # Size of the preview area
+            counter = f"{self.detail_index + 1}/{len(items_and_entities)}"
+            console.print(
+                sidebar_x + sidebar_width - len(counter) - 2,
+                tab_row_y, counter, fg=color.grey, bg=_BG,
+            )
+
+        # ── Separator (row +3) ────────────────────────────────────────────────
+        sep_y = sidebar_y + 3
+        console.ch[sidebar_x + 1 : sidebar_x + sidebar_width - 1, sep_y] = ord('─')
+        console.fg[sidebar_x + 1 : sidebar_x + sidebar_width - 1, sep_y] = _BORDER_FG
+        console.bg[sidebar_x + 1 : sidebar_x + sidebar_width - 1, sep_y] = _BG
+
+        # ── Minimap preview (7×7) ──────────────────────────────────────────
+        preview_size = self._preview_console.width
         preview_x = sidebar_x + (sidebar_width - preview_size) // 2
-        preview_y = info_y + 1
-        self.render_visual_preview(console, current_item, x, y, preview_x, preview_y)
-        
-        # Build scrollable text content below the preview
-        text_details_y = preview_y + preview_size + 2  # Leave some space after preview
-        text_area_width = sidebar_width - 2  # Use full width minus margins
-        
-        # Reserve space for compact controls (only 2 lines needed now)
+        preview_y = sidebar_y + 4
+        if self._preview_dirty:
+            self._preview_console.clear()
+            self.render_visual_preview(self._preview_console, current_item, x, y, 0, 0)
+            self._preview_dirty = False
+        self._preview_console.blit(console, dest_x=preview_x, dest_y=preview_y)
+
+        # ── Scrollable text content ───────────────────────────────────────────
+        text_details_y  = preview_y + preview_size + 1
+        text_area_width = sidebar_width - 2
         controls_height = 2
-        text_area_height = sidebar_height - (text_details_y - sidebar_y) - controls_height - 1  # Leave space for instructions + margin
-        
-        # Build complete text content based on current tab (cache by tab + item)
+        text_area_height = sidebar_height - (text_details_y - sidebar_y) - controls_height - 1
+
         if (self._cache_tab != self.current_tab or
                 self._cache_detail_index != self.detail_index):
-            self._cache_tab = self.current_tab
+            self._cache_tab          = self.current_tab
             self._cache_detail_index = self.detail_index
-            self._cache_tab_content = self.build_tabbed_content(current_item, text_area_width, x, y)
-        full_text = self._cache_tab_content
-        
-        # Render scrollable text with strict height limit
-        self.render_scrollable_text(console, full_text, sidebar_x, text_details_y, text_area_width, text_area_height)
-            
-        # Show compact navigation instructions
+            self._cache_tab_content  = self.build_tabbed_content(current_item, text_area_width, x, y)
+
+        self.render_scrollable_text(
+            console, self._cache_tab_content,
+            sidebar_x, text_details_y, text_area_width, text_area_height,
+        )
+
+        # ── Instructions (bottom) ─────────────────────────────────────────────
         instructions_y = sidebar_y + sidebar_height - controls_height - 1
-        console.print(sidebar_x + 2, instructions_y, "Alt+↑↓: Tabs  Alt+←→: Items", fg=color.grey, bg=(45, 35, 25))
-        console.print(sidebar_x + 2, instructions_y + 1, "Shift+↑↓: Scroll  Enter: Exit", fg=color.grey, bg=(45, 35, 25))
+        console.print(sidebar_x + 2, instructions_y,     "Tab:next tab  Shift+A/D:item",      fg=color.fantasy_text, bg=_BG)
+        console.print(sidebar_x + 2, instructions_y + 1, "Shift+↑↓:scroll    Esc:exit",          fg=color.fantasy_text, bg=_BG)
 
     def render_visual_preview(self, console: tcod.Console, current_item: dict, look_x: int, look_y: int, preview_x: int, preview_y: int) -> None:
         """Render a visual preview of the object being inspected."""
@@ -3949,7 +4032,7 @@ class LookHandler(SelectIndexHandler):
             x=frame_x, y=frame_y,
             width=preview_size + 2, height=preview_size + 2,
             title="", clear=True,
-            fg=color.white, bg=color.black
+            fg=(139, 105, 60), bg=(30, 22, 14),
         )
         
         # Center position in the preview frame (inside the frame borders)
@@ -4010,30 +4093,21 @@ class LookHandler(SelectIndexHandler):
                         if hasattr(entity, 'char') and hasattr(entity, 'color'):
                             console.print(px, py, entity.char, fg=entity.color)
         
-        # Highlight the current object being inspected with a subtle border instead of background
-        obj = current_item['object']
-        if current_item['type'] == 'entity' and hasattr(obj, 'char') and hasattr(obj, 'color'):
-            # Draw with brighter color to make it stand out
-            console.print(center_x, center_y, obj.char, fg=color.white)
-            # Add subtle corner markers around it
-            console.print(center_x - 1, center_y - 1, "┌", fg=color.cyan)
-            console.print(center_x + 1, center_y - 1, "┐", fg=color.cyan) 
-            console.print(center_x - 1, center_y + 1, "└", fg=color.cyan)
-            console.print(center_x + 1, center_y + 1, "┘", fg=color.cyan)
-        elif current_item['type'] == 'item' and hasattr(obj, 'char') and hasattr(obj, 'color'):
-            # Draw with brighter color
-            console.print(center_x, center_y, obj.char, fg=color.white)
-            # Add subtle corner markers
-            console.print(center_x - 1, center_y - 1, "┌", fg=color.cyan)
-            console.print(center_x + 1, center_y - 1, "┐", fg=color.cyan)
-            console.print(center_x - 1, center_y + 1, "└", fg=color.cyan)
-            console.print(center_x + 1, center_y + 1, "┘", fg=color.cyan)
-        elif current_item['type'] == 'tile':
-            # Just add corner markers for tiles
-            console.print(center_x - 1, center_y - 1, "┌", fg=color.cyan)
-            console.print(center_x + 1, center_y - 1, "┐", fg=color.cyan)
-            console.print(center_x - 1, center_y + 1, "└", fg=color.cyan)
-            console.print(center_x + 1, center_y + 1, "┘", fg=color.cyan)
+        # Highlight the current object with the same sprite-based target effect used in map targeting.
+        # This composites the animated blue-corner overlay directly into the preview tile.
+        try:
+            import time
+            import sprite_manager
+
+            target_cp = 0xE0F6 if int(time.time() * 4) % 2 == 0 else 0xE0F7
+            base_cp = int(console.ch[center_x, center_y])
+            base_fg = tuple(int(v) for v in console.rgb["fg"][center_x, center_y])
+            composed = sprite_manager.compose_sprite([base_cp, target_cp], layer_tints=[base_fg, None])
+            console.ch[center_x, center_y] = ord(composed)
+            console.rgb["fg"][center_x, center_y] = color.white
+        except Exception:
+            # Fallback: if sprite composition fails, keep a visible center highlight.
+            console.rgb["fg"][center_x, center_y] = color.white
 
     def build_tabbed_content(self, current_item: dict, max_width: int, tile_x: int = 0, tile_y: int = 0) -> list:
         """Build content for the current tab."""
@@ -4660,42 +4734,63 @@ class LookHandler(SelectIndexHandler):
         return results
     
     def ev_mousewheel(self, event: tcod.event.MouseWheel) -> Optional[ActionOrHandler]:
-        if event.y > 0:
-            print("scroll up")
-            # Scroll text up
-            self.scroll_offset = max(0, self.scroll_offset - 1)
-            return None
-        elif event.y < 0:
-            # Scroll text down (limit will be handled in render)
-            self.scroll_offset += 1
-            return None
+        if self._shift_held:
+            # Shift+scroll: scroll the text content
+            if event.y > 0:
+                self.scroll_offset = max(0, self.scroll_offset - 1)
+            elif event.y < 0:
+                self.scroll_offset += 1
+        else:
+            # Plain scroll: cycle through items at the current tile
+            items = self._cache_items_entities
+            if items:
+                if event.y > 0:
+                    self.detail_index = (self.detail_index - 1) % len(items)
+                else:
+                    self.detail_index = (self.detail_index + 1) % len(items)
+                self.scroll_offset = 0
+                sounds.play_ui_move_sound()
+        return None
+
+    def ev_keyup(self, event: tcod.event.KeyUp) -> Optional[ActionOrHandler]:
+        if event.sym in (tcod.event.KeySym.LSHIFT, tcod.event.KeySym.RSHIFT):
+            self._shift_held = False
+        return None
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         """Handle keyboard input for inspection interface."""
         key = event.sym
         modifier = event.mod
-        #print(modifier)
-        if key == tcod.event.KeySym.TAB and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT):
-            #print("T")
-            self.current_tab = (self.current_tab - 1) % len(self.tab_names)
+
+        if key in (tcod.event.KeySym.LSHIFT, tcod.event.KeySym.RSHIFT):
+            self._shift_held = True
+
+        # Shift+A / Shift+D: cycle through items at the current tile
+        if (
+            modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT)
+            and key in (tcod.event.KeySym.A, tcod.event.KeySym.D)
+        ):
+            items = self._cache_items_entities
+            if items:
+                if key == tcod.event.KeySym.A:
+                    self.detail_index = (self.detail_index - 1) % len(items)
+                else:
+                    self.detail_index = (self.detail_index + 1) % len(items)
+                self.scroll_offset = 0
+                sounds.play_ui_move_sound()
+            return None
+
+        # Tab: cycle through info tabs
+        elif key == tcod.event.KeySym.TAB:
+            self.current_tab = (self.current_tab + 1) % len(self.tab_names)
             LookHandler.last_selected_tab = self.current_tab
             self.scroll_offset = 0
             sounds.play_ui_move_sound()
             return None
 
-        # Handle tab switching
-        elif key == tcod.event.KeySym.TAB:
-            # Switch to previous tab and reset scroll
-            self.current_tab = (self.current_tab + 1) % len(self.tab_names)
-            LookHandler.last_selected_tab = self.current_tab  # Remember for next time
-            self.scroll_offset = 0
-            sounds.play_ui_move_sound()  # Play menu navigation sound
-            return None
         elif key == tcod.event.KeySym.ESCAPE:
             # Exit inspection mode
             return MainGameEventHandler(self.engine)
-
-            
 
         
         # Use parent handler for normal movement (arrow keys without modifiers)
@@ -4993,11 +5088,8 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.KeySym.LALT or key == tcod.event.KeySym.RALT:
             self.alt_held = True
             return LookHandler(self.engine)
-            print(self.alt_held)
         
         # Interact action (Right click) checks if within reach of player
-        #elif self.engine.mouse_held and self.engine.mouse_location:
-        #    print("Mouse held at:", self.engine.mouse_location)
         elif key in MOVE_KEYS and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT):
             dx, dy = MOVE_KEYS[key]
             return actions.DodgeAction(player, dx*2, dy*2)

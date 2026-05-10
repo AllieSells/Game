@@ -107,24 +107,6 @@ def fill_random_grasses() -> np.ndarray:
     )
 
 
-def random_floor_tile():
-    """Generate a random floor tile with varied appearance."""
-    # Don't re-seed to avoid breaking main generation flow
-    
-    # Use the existing random_floor_char function
-    char = random_floor_char()
-    
-    return new_tile(
-        name="Floor",
-        walkable=True,
-        transparent=True,
-        # Use the random character for both dark and light
-        # Dark grey fg
-        dark=(char, ((40+random.randint(-10,-10)), (40+random.randint(-10,-10)), (40+random.randint(-10,-10))), (25, 25, 25)),
-        light=(char, ((90+random.randint(-10, 10)), (90+random.randint(-10, 10)), (90+random.randint(-10, 10))), (80, 80, 80)),
-    )
-
-
 def random_wall_tile():
     """Generate a random wall tile by sampling a base tile (wall or mossy)
     and constructing a fresh tile with small variations applied. Building a
@@ -151,25 +133,29 @@ moss_floor = new_tile(
 )
 
 def random_mossy_floor_tile():
-    char = random.choice([0xE12C, 0xE12D, 0xE12E, 0xE12F])
-    color_mod = random.randint(-10, 10)
+    floor_cp = random.choice(range(0xE1E0, 0xE1E7))
+    moss_cp = random.choice([0xE12C, 0xE12D, 0xE12E, 0xE12F])
+    composed = ord(sprite_manager.compose_sprite([floor_cp, moss_cp]))
     return new_tile(
         name="Mossy Floor",
         walkable=True,
         transparent=True,
-        dark=(char, (40 + color_mod, 40 + color_mod, 40 + color_mod), (25, 25, 25)),
-        light=(char, (245 + color_mod, 245 + color_mod, 245 + color_mod), (80, 80, 80)),
+        dark=(composed, (255, 255, 255), (25, 25, 25)),
+        light=(composed, (255, 255, 255), (80, 80, 80)),
     )
 
 
-floor = new_tile(
-    name="Floor",
-    walkable=True,
-    transparent=True,
-    # Dark = much darker grey, Light = darker grey for lit floors
-    dark=(ord(" "), (255, 255, 255), (25, 25, 25)),
-    light=(ord(" "), (255, 255, 255), (80, 80, 80)),
-)
+def random_floor_tile():
+    char = random.choice(range(0xE1E0, 0xE1E7))  # 0xE1E0–0xE1E6 (7 variants, row 30 col 0-6)
+    return new_tile(
+        name="Floor",
+        walkable=True,
+        transparent=True,
+        dark=(char, (255, 255, 255), (25, 25, 25)),
+        light=(char, (255, 255, 255), (80, 80, 80)),
+    )
+
+floor = random_floor_tile()
 
 wooden_floor = new_tile(
     name="Fungal Floor",
@@ -219,36 +205,6 @@ water = new_tile(
     light=(0xE140, (255, 255, 255), (30, 110, 135)),
 )
 
-# Dungeon water-edge floor tiles (CP18B–E).
-# These replace floor tiles that border a water pool on one cardinal side.
-dungeon_water_edge_S = new_tile(   # CP18B — water touching bottom
-    name="Floor",
-    walkable=True,
-    transparent=True,
-    dark=(0xE141, (255, 255, 255), (25, 25, 25)),
-    light=(0xE141, (255, 255, 255), (80, 80, 80)),
-)
-dungeon_water_edge_N = new_tile(   # CP18C — water touching top
-    name="Floor",
-    walkable=True,
-    transparent=True,
-    dark=(0xE142, (255, 255, 255), (25, 25, 25)),
-    light=(0xE142, (255, 255, 255), (80, 80, 80)),
-)
-dungeon_water_edge_W = new_tile(   # CP18D — water touching left
-    name="Floor",
-    walkable=True,
-    transparent=True,
-    dark=(0xE143, (255, 255, 255), (25, 25, 25)),
-    light=(0xE143, (255, 255, 255), (80, 80, 80)),
-)
-dungeon_water_edge_E = new_tile(   # CP18E — water touching right
-    name="Floor",
-    walkable=True,
-    transparent=True,
-    dark=(0xE144, (255, 255, 255), (25, 25, 25)),
-    light=(0xE144, (255, 255, 255), (80, 80, 80)),
-)
 
 
 def generate_foliage_tile():
@@ -460,6 +416,14 @@ overworld_beach = new_tile(
     light=(0xE15C, (255, 255, 255), (180, 160, 90)),
 )
 
+overworld_road = new_tile(
+    name="Road",
+    walkable=True,
+    transparent=True,
+    dark=(0xE15C, (100, 80, 55), (50, 38, 22)),
+    light=(0xE15C, (180, 145, 95), (110, 85, 50)),
+)
+
 # Shore tiles sit at the water's edge; visually ocean but named "Shore"
 # so the beach water animation can target them exactly.
 overworld_shore = new_tile(
@@ -487,6 +451,26 @@ _river_sand_S = 0xE188
 _river_sand_W = 0xE189
 _river_sand_E = 0xE18A
 
+# Dungeon water-edge overlays composited onto floor tiles that border a water pool.
+_dungeon_water_S  = 0xE18B  # CP18B — water touching bottom
+_dungeon_water_N  = 0xE18C  # CP18C — water touching top
+_dungeon_water_W  = 0xE18D  # CP18D — water touching left
+_dungeon_water_E  = 0xE18E  # CP18E — water touching right
+# Corner overlays for floor tiles that only touch water diagonally (outer pool corners).
+# CP1E0–CP1E3 immediately follow the beach-water animation range (0xE190–0xE1DF).
+_dungeon_water_SW = 0xE1E0  # CP1E0 — water to south-west
+_dungeon_water_SE = 0xE1E1  # CP1E1 — water to south-east
+_dungeon_water_NW = 0xE1E2  # CP1E2 — water to north-west
+_dungeon_water_NE = 0xE1E3  # CP1E3 — water to north-east
+
+
+tutorial_house = new_tile(
+    name="Home",
+    walkable=True,
+    transparent=True,
+    dark=(0xE14F, (100, 60, 20), (30, 15, 5)),
+    light=(0xE14F, (225, 255, 255), (60, 30, 10))
+)
 
 overworld_dungeon = new_tile(
     name="Dungeon Entrance",

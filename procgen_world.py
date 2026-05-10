@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Tuple
 import numpy as np
 import tcod
 import tcod.noise
+import tcod.path
 
 import tile_types
 from game_map import GameMap
@@ -235,6 +236,58 @@ def generate_world(
     # ── River generation ──────────────────────────────────────────────────
     _river_tiles = _apply_rivers(world, e, RIVER_COUNT, random.Random(seed + 113))
 
+
+
+    # ── Beach pass ────────────────────────────────────────────────────────
+    _apply_beach(world, protected=_river_tiles)
+    # ── River bank overlays (must run after beach so Beach tiles exist) ────
+    _river_overlay_record: dict = {}
+    # Grass overlays ON river tile where it borders grass-land (not sand).
+    sprite_manager.apply_neighbor_overlay(world, _river_tiles,
+        {"Plains", "Forest", "Mountain", "Foothill"}, _BEACH_GRASS_OVERLAYS,
+        out_overlays=_river_overlay_record)
+    # Sand overlays ON river tile where it borders beach or desert.
+    sprite_manager.apply_neighbor_overlay(world, _river_tiles,
+        {"Beach", "Desert"}, _RIVER_SAND_OVERLAYS,
+        out_overlays=_river_overlay_record)
+    # Sand overlays ON beach/desert tiles that border river (reverse direction).
+    _sand_near_river = [
+        (x, y)
+        for x in range(map_width)
+        for y in range(map_height)
+        if str(world.tiles[x, y]["name"]) in ("Beach", "Desert")
+        and any(
+            0 <= x + dx < map_width and 0 <= y + dy < map_height
+            and str(world.tiles[x + dx, y + dy]["name"]) == "River"
+            for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0))
+        )
+    ]
+    sprite_manager.apply_neighbor_overlay(world, _sand_near_river, {"River"}, _RIVER_SAND_OVERLAYS)
+    # ── River animation map: ALL river tiles, overlaid frames pre-composed ─
+    _WAVE_FRAMES = list(range(0xE160, 0xE168))
+    world.river_anim = {}
+    for (rx, ry) in _river_tiles:
+        overlays = _river_overlay_record.get((rx, ry), [])
+        if overlays:
+            seq = tuple(
+                ord(sprite_manager.compose_sprite([f] + overlays))
+                for f in _WAVE_FRAMES
+            )
+        else:
+            seq = tuple(_WAVE_FRAMES)
+        world.river_anim[(rx, ry)] = seq
+    # ── Desert edge grass overlay ──────────────────────────────────────────
+    _desert_tiles = [
+        (x, y)
+        for x in range(map_width)
+        for y in range(map_height)
+        if str(world.tiles[x, y]["name"]) == "Desert"
+    ]
+    sprite_manager.apply_neighbor_overlay(world, _desert_tiles, {"Plains", "Forest"}, _BEACH_GRASS_OVERLAYS)
+    # ── Forest autotile pass ───────────────────────────────────────────────
+    _clean_forest_blobs(world)
+    _apply_forest_autotile(world)
+
     # ── Dungeon entrances ──────────────────────────────────────────────────
     rng = random.Random(seed)
     world.dungeon_entrances: dict[tuple, int] = {}
@@ -248,8 +301,156 @@ def generate_world(
     num_entrances = max(1, len(candidates) // DUNGEON_DENSITY)
     chosen = rng.sample(candidates, min(num_entrances, len(candidates)))
     for (x, y) in chosen:
-        world.tiles[x, y] = tile_types.overworld_dungeon
+        # Composite dungeon tile
+        dungeon = tile_types.overworld_dungeon
+        tile = world.tiles[x,y]
+        tile_cp = int(tile["light"]["ch"])
+        dungeon_cp = int(dungeon["light"]["ch"])
+        sprite = sprite_manager.compose_sprite([tile_cp, dungeon_cp])
+        composed_cp = ord(sprite)
+        result = world.tiles[x, y].copy()
+        result["light"]["ch"] = composed_cp
+        result["dark"]["ch"]  = composed_cp
+        world.tiles[x, y] = result
         world.dungeon_entrances[(x, y)] = rng.randint(0, 2**31 - 1)
+
+    # ── Civilization sites and roads ──────────────────────────────────────
+    world.civ_data: dict[tuple, tuple] = {}
+    try:
+        import sys as _sys; import os as _os
+        _worldgen_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "worldgen")
+        if _worldgen_dir not in _sys.path: _sys.path.insert(0, _worldgen_dir)
+        from worldgen.history import (world_civilizations as _civs, WORLD_W as _HW, WORLD_H as _HH)
+        _sx = map_width / _HW
+        _sy = map_height / _HH
+        print(f"[GEN] History loaded: {len(_civs)} civs, {sum(len(c.sites) for c in _civs.values())} sites")
+        _SITE_OCEAN_NAMES = {"Ocean", "Deep Ocean", "Shore", "Beach"}
+        def _nearest_land(wx, wy, exclude=set()):
+            for r in range(max(map_width, map_height)):
+                for ddx in range(-r, r + 1):
+                    for ddy in range(-r, r + 1):
+                        if abs(ddx) != r and abs(ddy) != r: continue
+                        nx, ny = wx + ddx, wy + ddy
+                        if not (0 <= nx < map_width and 0 <= ny < map_height): continue
+                        if (nx, ny) in exclude: continue
+                        if str(world.tiles[nx, ny]["name"]) not in _SITE_OCEAN_NAMES: return nx, ny
+            return None
+        _site_pos = {}; _used = set()
+        for _civ in _civs.values():
+            for _site in _civ.sites:
+                _rx = max(0, min(map_width - 1, int(_site.x * _sx)))
+                _ry = max(0, min(map_height - 1, int(_site.y * _sy)))
+                _pos = _nearest_land(_rx, _ry, _used)
+                if _pos is None: print(f"[GEN]   SKIP (no land) {_site.name!r}")
+                else: _site_pos[id(_site)] = _pos; _used.add(_pos)
+        print(f"[GEN] Sites resolved: {len(_site_pos)}")
+        _road_cost = np.where(world.tiles["walkable"], 2, 0).astype(np.int8)
+        _road_cost[world.tiles["name"] == "River"] = 4
+        _road_ok = 0; _road_fail = 0
+        def _place_road(rx, ry, _c=_road_cost):
+            _res = world.tiles[rx, ry].copy(); _res["name"] = "Road"
+            world.tiles[rx, ry] = _res; _c[rx, ry] = 1
+        def _road_path(ax, ay, bx, by, _c=_road_cost):
+            try:
+                _g = tcod.path.SimpleGraph(cost=_c, cardinal=2, diagonal=0)
+                _pf = tcod.path.Pathfinder(_g); _pf.add_root((ax, ay))
+                _raw = _pf.path_to((bx, by))
+                return [(int(p[0]), int(p[1])) for p in _raw[:-1]]
+            except Exception:
+                return []
+        _road_pairs = set()
+        for _civ in _civs.values():
+            _cap = next((s for s in _civ.sites if s.is_capital), None)
+            _cap_pos = _site_pos.get(id(_cap)) if _cap else None
+            if not _cap_pos:
+                _placed = [(s, _site_pos[id(s)]) for s in _civ.sites if id(s) in _site_pos]
+                if _placed: _cap, _cap_pos = max(_placed, key=lambda t: t[0].wealth)
+            if _cap_pos:
+                for _site in _civ.sites:
+                    if _site is _cap: continue
+                    _sp = _site_pos.get(id(_site))
+                    if not _sp: continue
+                    _pair = frozenset({_cap_pos, _sp})
+                    if _pair in _road_pairs: continue
+                    _road_pairs.add(_pair)
+                    _pts = _road_path(_cap_pos[0], _cap_pos[1], _sp[0], _sp[1])
+                    if _pts:
+                        _road_ok += 1
+                        for _rx, _ry in _pts:
+                            if str(world.tiles[_rx, _ry]["name"]) != "Road": _place_road(_rx, _ry)
+                    else: _road_fail += 1; print(f"[GEN]   ROAD FAIL {_cap_pos}->{_sp}")
+            for _oname, _rel in _civ.relationships.items():
+                if _rel < 0.5: continue
+                _other = _civs.get(_oname)
+                if not _other: continue
+                _ocap = next((s for s in _other.sites if s.is_capital), None)
+                _ocap_pos = _site_pos.get(id(_ocap)) if _ocap else None
+                if not _cap_pos or not _ocap_pos: continue
+                _pair = frozenset({_cap_pos, _ocap_pos})
+                if _pair in _road_pairs: continue
+                _road_pairs.add(_pair)
+                _pts = _road_path(_cap_pos[0], _cap_pos[1], _ocap_pos[0], _ocap_pos[1])
+                if _pts:
+                    _road_ok += 1
+                    for _rx, _ry in _pts:
+                        if str(world.tiles[_rx, _ry]["name"]) != "Road": _place_road(_rx, _ry)
+                else: _road_fail += 1
+        print(f"[GEN] Roads: {_road_ok} ok, {_road_fail} fail")
+        # Road autotile
+        _ROAD_LUT = {
+            (False, False, False, False): 0xE1F2,
+            (True,  True,  False, False): 0xE1F0,
+            (False, False, True,  True ): 0xE1F1,
+            (False, False, True,  False): 0xE1F3,
+            (False, False, False, True ): 0xE1F4,
+            (True,  False, False, False): 0xE1F5,
+            (False, True,  False, False): 0xE1F6,
+            (True,  False, True,  False): 0xE1F7,
+            (False, True,  False, True ): 0xE1F8,
+            (False, True,  True,  False): 0xE1F9,
+            (True,  False, False, True ): 0xE1FA,
+            (True,  True,  True,  False): 0xE1FB,
+            (True,  True,  False, True ): 0xE1FC,
+            (True,  False, True,  True ): 0xE1FD,
+            (False, True,  True,  True ): 0xE1FE,
+            (True,  True,  True,  True ): 0xE1FF,
+        }
+        _road_positions = [(x, y) for x in range(map_width) for y in range(map_height)
+                           if str(world.tiles[x, y]["name"]) == "Road"]
+        for _rx, _ry in _road_positions:
+            _rN = 0 <= _ry - 1 and str(world.tiles[_rx, _ry - 1]["name"]) == "Road"
+            _rS = _ry + 1 < map_height and str(world.tiles[_rx, _ry + 1]["name"]) == "Road"
+            _rE = _rx + 1 < map_width and str(world.tiles[_rx + 1, _ry]["name"]) == "Road"
+            _rW = 0 <= _rx - 1 and str(world.tiles[_rx - 1, _ry]["name"]) == "Road"
+            _rcp = _ROAD_LUT.get((_rN, _rS, _rE, _rW), 0xE1F2)
+            _res = world.tiles[_rx, _ry].copy()
+            _res["dark"]["ch"]  = ord(sprite_manager.compose_sprite([int(_res["dark"]["ch"]),  _rcp]))
+            _res["light"]["ch"] = ord(sprite_manager.compose_sprite([int(_res["light"]["ch"]), _rcp]))
+            world.tiles[_rx, _ry] = _res
+        # Site placement
+        _SITE_GLYPHS = {"Capital": 0xE14F, "City": ord('#'), "Village": ord('o'), "Outpost": ord('*'), "Camp": ord('.')}
+        _SITE_FG     = {"Capital": (255, 220, 80), "City": (220, 200, 160), "Village": (160, 200, 120), "Outpost": (160, 160, 160), "Camp": (120, 100, 80)}
+        _SITE_BG     = {"Capital": (140, 80, 0),   "City": (90, 60, 30),    "Village": (50, 80, 30),    "Outpost": (50, 50, 50),     "Camp": (35, 25, 15)}
+        for _civ in _civs.values():
+            for _site in _civ.sites:
+                _pos = _site_pos.get(id(_site))
+                if not _pos: continue
+                _px, _py = _pos; _stype = _site.site_type
+                _glyph_cp = _SITE_GLYPHS.get(_stype, ord('?'))
+                _fg = _SITE_FG.get(_stype, (255, 255, 255)); _bg = _SITE_BG.get(_stype, (0, 0, 0))
+                _terrain_cp = int(world.tiles[_px, _py]["light"]["ch"])
+                _composed = ord(sprite_manager.compose_sprite([_terrain_cp, _glyph_cp]))
+                _res = world.tiles[_px, _py].copy()
+                _res["light"]["ch"] = _composed; _res["dark"]["ch"] = _composed
+                _res["light"]["fg"] = _fg; _res["dark"]["fg"] = tuple(max(0, c // 3) for c in _fg)
+                _res["light"]["bg"] = _bg; _res["dark"]["bg"] = tuple(max(0, c // 3) for c in _bg)
+                _res["name"] = _stype; world.tiles[_px, _py] = _res
+                world.civ_data[_pos] = (_civ.name, _stype, _site.name)
+                print(f"[GEN]   Placed {_stype:8s} {_site.name!r:40s} pop={_site.population} wealth={_site.wealth} map={_pos}")
+        print(f"[GEN] Civ placement complete: {len(world.civ_data)} sites")
+        del _nearest_land, _site_pos, _used, _road_pairs, _road_cost, _road_path, _place_road
+    except Exception:
+        import traceback as _tb; print("[GEN] ERROR:"); _tb.print_exc()
 
     # ── Spawn player near map centre on first walkable non-ocean tile ──────
     spawn_x, spawn_y = int(cx), int(cy)
@@ -272,57 +473,16 @@ def generate_world(
         if found:
             break
 
-    _placer.place(spawn_x, spawn_y, world)
-
-    # ── Beach pass ────────────────────────────────────────────────────────
-    _apply_beach(world, protected=_river_tiles)
-    # ── River bank overlays (must run after beach so Beach tiles exist) ────
-    _river_overlay_record: dict = {}
-    # Grass overlays ON river tile where it borders grass-land (not sand).
-    _apply_neighbor_overlay(world, _river_tiles,
-        {"Plains", "Forest", "Mountain", "Foothill"}, _BEACH_GRASS_OVERLAYS,
-        out_overlays=_river_overlay_record)
-    # Sand overlays ON river tile where it borders beach or desert.
-    _apply_neighbor_overlay(world, _river_tiles,
-        {"Beach", "Desert"}, _RIVER_SAND_OVERLAYS,
-        out_overlays=_river_overlay_record)
-    # Sand overlays ON beach/desert tiles that border river (reverse direction).
-    _sand_near_river = [
-        (x, y)
-        for x in range(map_width)
-        for y in range(map_height)
-        if str(world.tiles[x, y]["name"]) in ("Beach", "Desert")
-        and any(
-            0 <= x + dx < map_width and 0 <= y + dy < map_height
-            and str(world.tiles[x + dx, y + dy]["name"]) == "River"
-            for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0))
+    # Place player at the dungeon entrance nearest to the overworld spawn point
+    if world.dungeon_entrances:
+        tut_entrance = min(
+            world.dungeon_entrances.keys(),
+            key=lambda pos: abs(pos[0] - spawn_x) + abs(pos[1] - spawn_y),
         )
-    ]
-    _apply_neighbor_overlay(world, _sand_near_river, {"River"}, _RIVER_SAND_OVERLAYS)
-    # ── River animation map: ALL river tiles, overlaid frames pre-composed ─
-    _WAVE_FRAMES = list(range(0xE160, 0xE168))
-    world.river_anim = {}
-    for (rx, ry) in _river_tiles:
-        overlays = _river_overlay_record.get((rx, ry), [])
-        if overlays:
-            seq = tuple(
-                ord(sprite_manager.compose_sprite([f] + overlays))
-                for f in _WAVE_FRAMES
-            )
-        else:
-            seq = tuple(_WAVE_FRAMES)
-        world.river_anim[(rx, ry)] = seq
-    # ── Desert edge grass overlay ──────────────────────────────────────────
-    _desert_tiles = [
-        (x, y)
-        for x in range(map_width)
-        for y in range(map_height)
-        if str(world.tiles[x, y]["name"]) == "Desert"
-    ]
-    _apply_neighbor_overlay(world, _desert_tiles, {"Plains", "Forest"}, _BEACH_GRASS_OVERLAYS)
-    # ── Forest autotile pass ───────────────────────────────────────────────
-    _clean_forest_blobs(world)
-    _apply_forest_autotile(world)
+        _placer.place(tut_entrance[0], tut_entrance[1], world)
+        world.tutorial_dungeon_entrance = tut_entrance
+    else:
+        _placer.place(spawn_x, spawn_y, world)
 
     return world
 
@@ -377,53 +537,7 @@ _RIVER_SAND_OVERLAYS = {
 
 
 
-def _apply_neighbor_overlay(world, candidates, neighbor_names, overlay_sprites, out_overlays=None) -> None:
-    """Composite directional edge overlays onto `candidates` where they border `neighbor_names` tiles.
 
-    overlay_sprites: dict mapping direction keys 'N','S','E','W','NE','NW','SE','SW'
-                     to integer sprite codepoints.  Missing keys are simply skipped.
-    Base codepoints are read from the current tile at each candidate position.
-    out_overlays: optional dict; if provided, records {(x,y): [overlay_cps]} for every
-                  tile that received at least one overlay (appends on repeated calls).
-    """
-    W, H = world.width, world.height
-    for x, y in candidates:
-        has_N = 0 <= y - 1 < H and str(world.tiles[x,     y - 1]["name"]) in neighbor_names
-        has_S = 0 <= y + 1 < H and str(world.tiles[x,     y + 1]["name"]) in neighbor_names
-        has_E = 0 <= x + 1 < W and str(world.tiles[x + 1, y    ]["name"]) in neighbor_names
-        has_W = 0 <= x - 1 < W and str(world.tiles[x - 1, y    ]["name"]) in neighbor_names
-
-        overlays = []
-        corner_N = corner_S = corner_E = corner_W = False
-        if has_S and has_W and 'SW' in overlay_sprites:
-            overlays.append(overlay_sprites['SW']); corner_S = corner_W = True
-        if has_S and has_E and 'SE' in overlay_sprites:
-            overlays.append(overlay_sprites['SE']); corner_S = corner_E = True
-        if has_N and has_E and 'NE' in overlay_sprites:
-            overlays.append(overlay_sprites['NE']); corner_N = corner_E = True
-        if has_N and has_W and 'NW' in overlay_sprites:
-            overlays.append(overlay_sprites['NW']); corner_N = corner_W = True
-        if has_N and not corner_N and 'N' in overlay_sprites:
-            overlays.append(overlay_sprites['N'])
-        if has_S and not corner_S and 'S' in overlay_sprites:
-            overlays.append(overlay_sprites['S'])
-        if has_E and not corner_E and 'E' in overlay_sprites:
-            overlays.append(overlay_sprites['E'])
-        if has_W and not corner_W and 'W' in overlay_sprites:
-            overlays.append(overlay_sprites['W'])
-        if not overlays:
-            continue
-        base_dark  = int(world.tiles[x, y]["dark"]["ch"])
-        base_light = int(world.tiles[x, y]["light"]["ch"])
-        result = world.tiles[x, y].copy()
-        result["dark"]["ch"]  = ord(sprite_manager.compose_sprite([base_dark]  + overlays))
-        result["light"]["ch"] = ord(sprite_manager.compose_sprite([base_light] + overlays))
-        world.tiles[x, y] = result
-        if out_overlays is not None:
-            if (x, y) in out_overlays:
-                out_overlays[(x, y)].extend(overlays)
-            else:
-                out_overlays[(x, y)] = list(overlays)
 
 
 def _apply_rivers(world, elev, num_rivers: int, rng: random.Random) -> None:
@@ -596,7 +710,7 @@ def _apply_beach(world, protected=None) -> None:
 
     # Composite grass overlays onto beach tiles that border land.
     _GRASS_NAMES = {"Plains", "Forest", "Mountain", "Foothill"}
-    _apply_neighbor_overlay(world, beach_candidates, _GRASS_NAMES, _BEACH_GRASS_OVERLAYS)
+    sprite_manager.apply_neighbor_overlay(world, beach_candidates, _GRASS_NAMES, _BEACH_GRASS_OVERLAYS)
 
     # Build per-tile water animation sequences for beach tiles that border ocean.
     # SE = ocean S + ocean E (solid beach N+W).  SW = ocean S + ocean W, etc.
@@ -780,7 +894,7 @@ def _mountain_on_biome(world, mx, my, mountain_tile, biome_cache):
         # Apply any pre-composite neighbor overlays (e.g. sand edge on plains→desert border)
         if tile_name in _MOUNTAIN_BIOME_PRE_OVERLAYS:
             neighbor_names, overlay_sprites = _MOUNTAIN_BIOME_PRE_OVERLAYS[tile_name]
-            _apply_neighbor_overlay(world, [(mx, my)], neighbor_names, overlay_sprites)
+            sprite_manager.apply_neighbor_overlay(world, [(mx, my)], neighbor_names, overlay_sprites)
         biome_cache[(mx, my)] = (
             int(world.tiles[mx, my]["dark"]["ch"]),
             int(world.tiles[mx, my]["light"]["ch"]),

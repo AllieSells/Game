@@ -1,4 +1,3 @@
-from re import T
 from components import equipment
 from components.ai import DarkHostileEnemy, Friendly, HostileEnemy, BaseAI, StatueAI, FollowerAI
 from components import equippable
@@ -533,7 +532,6 @@ def get_random_scroll() -> Item:
 
 def get_random_fungus() -> Item:
     # Use current random state
-    import random
     fungus_types = {
             "prefix": ["Cap", "Spot", "Gill", "Twist", "Iron", "Glow", "Silent", "Blood", "Red", "Blue", "Yellow",
                        "Purple", "Green", "Black", "White", "Silver", "Golden", "Shiny", "Smoke", "Dust", "Oak", "Pine", "Birch", "Maple",
@@ -582,7 +580,6 @@ def get_random_fungus() -> Item:
     )
 
 def get_random_coins(min_amount: int, max_amount: int) -> Item:
-    import random
     amount = random.randint(min_amount, max_amount)
     character = None
     if amount == 1:
@@ -921,7 +918,7 @@ tutorial_guide = Actor(
     char=chr(0xE035),
     color=(255, 255, 255),
     name="The Guide",
-    ai_cls=BaseAI,
+    ai_cls=Friendly,
     equipment=Equipment(),
     fighter=Fighter(hp=999999999999, base_defense=0, base_power=0),
     inventory=Inventory(capacity=26),

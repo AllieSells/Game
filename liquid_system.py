@@ -22,7 +22,6 @@ import random
 import numpy as np
 from components.effect import BurningEffect, PoisonEffect
 import sounds
-from random import randint
 
 if TYPE_CHECKING:
     from game_map import GameMap

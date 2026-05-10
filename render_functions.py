@@ -82,7 +82,6 @@ class SwimmingAnimation:
         sequence = [0, 1, 2, 3, 4, 3, 2, 1]
 
         idx = (self._tick_count // self.FRAME_DURATION) % len(sequence)
-        #print(idx)
         frame_index = self.CHARS[sequence[idx]]
 
         # Refresh base render (keeps equipped layers) before applying water splash.
@@ -909,7 +908,6 @@ def render_gpu_loading_bar(
     console_renderer=None,
 ) -> None:
     """Draw a DOA OS BIOS-style world-gen loading screen matching the initial boot screen."""
-    import tcod
     progress = max(0.0, min(1.0, progress))
     pct = int(progress * 100)
 
@@ -1067,6 +1065,9 @@ def render_gpu_reset_bar(
 
 def render_minimap_box(console: tcod.Console, engine: 'Engine') -> None:
     """Render the minimap / hints toggle panel (auto-flips left/right)."""
+    # Never render minimap on the overworld
+    if getattr(getattr(engine, 'game_map', None), 'type', '') == 'overworld':
+        return
     BOX_X = get_minimap_origin_x(engine)
     BOX_Y = _MM_Y
     BOX_W, BOX_H = _MM_W, _MM_H
