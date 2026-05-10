@@ -401,7 +401,7 @@ class TakeStairsAction(Action):
             if pos in entrances:
                 self.engine.game_world.descend()
                 sounds.stairs_sound.play()
-                self.entity.char = self.entity.base_char
+                import sprite_manager as _sm; _sm.refresh_actor_sprite(self.entity)
                 self.engine.message_log.add_message("You descend into the dungeon.", color.descend)
                 return
             raise exceptions.Impossible("There is no dungeon entrance here.")

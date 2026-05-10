@@ -129,6 +129,7 @@ from gpu_stack import (
     DegaussAnimation,
     CRTSwitchAnimation,
     VHSGlitchAnimation,
+    VideoModeSwitchAnimation,
 )
 
 # --- Procedural scanlines ---
@@ -223,28 +224,58 @@ def get_game_screen_tile(position: tuple[float, float], window_w: float, window_
 
 boot_str = []
 def show_loading_screen(context, console, status: str) -> None:
-    """Display a loading screen with progress bar."""
+    """Display a DOS BIOS-style boot loading screen."""
     # Pump the SDL event queue so the OS doesn't mark the window as
     # non-responsive during heavy loading pauses.  Events are discarded
     # because no input is processed on the loading screen.
     for _ in tcod.event.get():
         pass
     console.clear()
-    # Add str to list
     global boot_str
     boot_str.append(status)
-    # Title
-    title = """
-DOA OS (C) 1998 LOXEN, INC
-BIOS DATE 11/19/98 12:40:36 VER: 18.23.00
-CPU: Intel(R) CPU 330 @ 40 MHz
-SPEED: 40MHz
 
-BOOT LOG:
-"""
-    console.print(5, 15, title, fg=color.white)
-    for i, x in enumerate(boot_str):
-        console.print(5, 21 + i, x, fg=color.white)
+    W      = (200, 200, 200)
+    DIM    = (100, 100, 100)
+    BG     = (0,   0,   0  )
+    BAR_BG = (0,   170, 170)
+    BAR_FG = (0,   0,   0  )
+    SEP    = (160, 160, 160)
+    COLS   = console.width
+
+    # ── Header bar (row 0) ──────────────────────────────────────────────
+    console.draw_rect(0, 0, COLS, 1, ord(' '), fg=BAR_FG, bg=BAR_BG)
+    console.print(0, 0, " DOA BIOS v18.23.00", fg=BAR_FG, bg=BAR_BG)
+    cr = "(C) 1998 Loxen Inc. "
+    console.print(COLS - len(cr), 0, cr, fg=BAR_FG, bg=BAR_BG)
+
+    # ── Separator ────────────────────────────────────────────────────────
+    console.print(0, 1, chr(0x2550) * COLS, fg=SEP, bg=BG)
+
+    # ── System info block ────────────────────────────────────────────────
+    console.print(2, 3, "Dungeons of Aerrok: The Divine Stone", fg=W, bg=BG)
+    console.print(2, 4, "BIOS DATE 11/19/98 12:40:36  |  VER: 18.23.00", fg=DIM, bg=BG)
+    console.print(2, 5, "CPU: Intel(R) 330 @ 40 MHz  |  SPEED: 40MHz", fg=DIM, bg=BG)
+
+    # ── Separator ────────────────────────────────────────────────────────
+    console.print(0, 7, chr(0x2550) * COLS, fg=SEP, bg=BG)
+
+    # ── Boot log section ─────────────────────────────────────────────────
+    console.print(2, 9, "BOOT LOG:", fg=W, bg=BG)
+    for i, msg in enumerate(boot_str):
+        row = 11 + i
+        if row >= console.height - 2:
+            break
+        console.print(4, row, msg, fg=W, bg=BG)
+
+    # Blinking block cursor after last message
+    cursor_row = 11 + len(boot_str)
+    if cursor_row < console.height - 2:
+        console.print(4, cursor_row, chr(0x2588), fg=W, bg=BG)
+
+    # ── Footer bar ───────────────────────────────────────────────────────
+    console.draw_rect(0, console.height - 1, COLS, 1, ord(' '), fg=BAR_FG, bg=BAR_BG)
+    console.print(0, console.height - 1, "  Loading...", fg=BAR_FG, bg=BAR_BG)
+
     # context.present() renders the console AND calls SDL_RenderPresent internally.
     # Do NOT call renderer.present() afterwards — that would be a second
     # SDL_RenderPresent on an undefined backbuffer while vsync=True, which
@@ -252,7 +283,7 @@ BOOT LOG:
     context.present(console)
 
 # Show loading screen immediately
-show_loading_screen(context, ui_console, "Starting...")
+show_loading_screen(context, ui_console, "Initializing hardware...")
 
 
 
@@ -266,7 +297,7 @@ start_time = time.time() # Track total loading
 # Continue with module imports
 
 
-show_loading_screen(context, ui_console, "Avoiding glitches...")
+show_loading_screen(context, ui_console, "Checking extended memory... OK")
 import exceptions
 str = (f"Loaded exceptions module in {time.time() - start_time:.2f} seconds")
 print(str)
@@ -274,7 +305,7 @@ with open(get_data_path('logs/log.txt'), 'a') as log_file:
     log_file.write(str + "\n")
 
 start_time = time.time() # Track total loading
-show_loading_screen(context, ui_console, "Building inputs...")
+show_loading_screen(context, ui_console, "Loading device drivers...")
 import input_handlers
 import inventory_ui
 str = (f"Loaded input_handlers module in {time.time() - start_time:.2f} seconds")
@@ -283,7 +314,7 @@ with open(get_data_path('logs/log.txt'), 'a') as log_file:
     log_file.write(str + "\n")
 
 start_time = time.time() # Track total loading
-show_loading_screen(context, ui_console, "Setting up dungeons...")
+show_loading_screen(context, ui_console, "Drive A: detected. Insert game disk and press any key...")
 import setup_game
 str = (f"Loaded setup_game module in {time.time() - start_time:.2f} seconds")
 print(str)
@@ -291,7 +322,7 @@ with open(get_data_path('logs/log.txt'), 'a') as log_file:
     log_file.write(str + "\n")
 
 start_time = time.time() # Track total loading
-show_loading_screen(context, ui_console, "Importing bananas...")
+show_loading_screen(context, ui_console, "Reading from A:\\...")
 import tcod.sdl.video
 import traceback
 
@@ -393,16 +424,16 @@ def main() -> None:
     transition_frame_counter = 0
     transition_cooldown_frames = 0
     # Continue with actual loading operations
-    show_loading_screen(context, ui_console, "Loading game settings...")
+    show_loading_screen(context, ui_console, "A:\\SYSTEM.DAT loaded OK")
     settings = load_settings()
     setting_fullscreen = settings.get("fullscreen", False)
     reload_crt_settings()
     time.sleep(0.3)
-    show_loading_screen(context, ui_console, "Initializing main menu...")
+    show_loading_screen(context, ui_console, "A:\\MENU.EXE found. Launching...")
     handler: input_handlers.BaseEventHandler = setup_game.MainMenu()
     time.sleep(0.3)
     
-    show_loading_screen(context, ui_console, "Finalizing setup...")
+    show_loading_screen(context, ui_console, "Allocating memory blocks...")
     # Update context title
     context.sdl_window.title = "DoA: Dungeons of Ærrok"
     time.sleep(0.3)
@@ -412,7 +443,7 @@ def main() -> None:
         window.fullscreen = True
         print("DEBUG: Set initial fullscreen mode from settings")
 
-    show_loading_screen(context, ui_console, "Ready!")
+    show_loading_screen(context, ui_console, "Ready. Type A:\\GAME to play.")
     str = (f"Finished loading in {time.time() - initial_time:.2f} seconds")
     print(str)
     with open(get_data_path('logs/log.txt'), 'a') as log_file:
@@ -581,6 +612,7 @@ def main() -> None:
     _gen_scene_tex          = None   # TARGET texture — last pre-gen post-CRT frame
     _gen_scene_tex_size     = (0, 0) # (w, h) of _gen_scene_tex
     _suppress_degauss_once  = False  # skip auto-degauss after CRT-switch entry
+    _gen_bar_start_time     = None   # monotonic time when gen thread started
     # CRT power-on capture: after gen, we flip to MainGameEventHandler first,
     # then let the game render one full frame, capture it, and reveal it via play_on.
     _crt_on_capture_pending = False  # waiting to capture the first real game frame
@@ -642,6 +674,7 @@ def main() -> None:
             _loading_in_progress = (
                 hasattr(handler, 'game_load')
                 and not handler.game_load
+                and isinstance(handler, setup_game.LoadingScreen)
             )
             has_game_view = (
                 active_engine is not None
@@ -665,7 +698,10 @@ def main() -> None:
                 transition_frame_counter = 0
                 _rlog(f"TRANSITION: entering game view (handler={type(handler).__name__})")
                 _suppress_degauss_once = False
-            _gen_in_progress = _loading_in_progress
+            _gen_in_progress = _loading_in_progress or (
+                isinstance(handler, input_handlers.CRTTransition)
+                and not handler.game_load
+            )
             if has_game_view and transition_frame_counter < transition_cooldown_frames:
                 transition_frame_counter += 1
                 _crt_force_fast_path = True
@@ -692,63 +728,72 @@ def main() -> None:
             #           allowing the main loop to transition to MainGameEventHandler.
             _rlog(f"CRT_STATE frame={_render_frame} gen={_gen_in_progress} off={_crt_off_played} on={_crt_on_played} snap={'yes' if _gen_scene_tex is not None else 'no'} handler={type(handler).__name__} gen_complete={getattr(handler,'game_load',None)}")
             if _gen_in_progress:
-                if not _crt_off_played:
-                    if _gen_scene_tex is not None:
-                        # Play the screen-OFF animation BEFORE starting the generation
-                        # thread.  Running the blocking render loop while the gen thread
-                        # is active caused SDL/GPU state corruption that froze the
-                        # renderer inside renderer.present().
-                        _rlog(f"CRT: playing screen-OFF animation")
-                        _crt_off_played = True
-                        sounds.play_crt_off_sound()
-                        _sw_anim = CRTSwitchAnimation(renderer, window_w, window_h)
-                        _sw_anim.play_off(_gen_scene_tex, event_pump=tcod.event.get, glare_tex=glare_tex)
-                        del _sw_anim
-                        _rlog(f"CRT: screen-OFF done")
-                        # Now it is safe to start the generation thread — renderer is
-                        # fully idle and will only draw solid-black frames until gen
-                        # completes.
-                        if hasattr(handler, 'generation_started') and not handler.generation_started:
-                            _rlog(f"CRT: starting generation thread")
-                            handler.generation_started = True
-                            handler.start_generation()
-                    else:
-                        # No snapshot yet: start the thread immediately (no blocking
-                        # animation to collide with) and wait for the snap.
-                        if hasattr(handler, 'generation_started') and not handler.generation_started:
-                            _rlog(f"CRT: starting generation thread (no snap yet)")
-                            handler.generation_started = True
-                            handler.start_generation()
-                        _rlog(f"CRT: waiting for snapshot (gen in progress, no snap yet)")
-                    # else: snapshot not ready yet — drop one black frame, try next
+                # Start gen thread immediately — no CRT off before loading, the screen
+                # stays visible so the player can watch the boot progress.
+                if hasattr(handler, 'generation_started') and not handler.generation_started:
+                    _rlog(f"CRT: starting generation thread (loading screen visible)")
+                    handler.generation_started = True
+                    handler.start_generation()
+                    _gen_bar_start_time = time.monotonic()
+                    if isinstance(handler, setup_game.LoadingScreen):
+                        sounds.play_floppy_seek_sound()  # immediate seek on spin-up
+                # Render the BIOS-style loading screen on black (LoadingScreen only;
+                # CRTTransition just holds black for one frame then falls to the elif branch)
                 renderer.draw_color = (0, 0, 0, 255)
                 renderer.clear()
-                renderer.copy(glare_tex, dest=(0, 0, window_w, window_h))
-                #renderer.present()
+                if isinstance(handler, setup_game.LoadingScreen) and _gen_bar_start_time is not None:
+                    _bar_elapsed = time.monotonic() - _gen_bar_start_time
+                    _bar_progress = min(0.92, _bar_elapsed / 8.0)
+                    render_functions.render_gpu_loading_bar(renderer, _bar_progress, window_w, window_h, ui_console_renderer)
+                renderer.present()
                 for _ in tcod.event.get():
                     pass
                 time.sleep(frame_time)
                 continue
 
-            elif _crt_off_played and not _crt_on_played:
-                # Generation finished — flip to game handler NOW so the engine
-                # renders a real frame next iteration, which we capture and
-                # reveal via the CRT power-on animation.
-                _rlog(f"CRT: gen done — transitioning to MainGameEventHandler (capture pending)")
-                _crt_on_played = True
-                _gen_scene_tex       = None
-                _gen_scene_tex_size  = (0, 0)
-                _crt_off_played      = False
-                _crt_on_played       = False
+            elif _gen_bar_start_time is not None and not _crt_off_played:
+                # Gen (or synchronous CRTTransition) just completed.
+                # For LoadingScreen: flush tiles, show 100%, capture bar into _gen_scene_tex.
+                # For CRTTransition: _gen_scene_tex already holds the last game frame
+                #   (rolling snapshot kept it fresh); skip loading bar entirely.
+                if isinstance(handler, setup_game.LoadingScreen):
+                    import sprite_manager as _sm
+                    _sm.flush_deferred_tiles()
+
+                    # Show 100% loading screen briefly so player sees completion
+                    renderer.draw_color = (0, 0, 0, 255)
+                    renderer.clear()
+                    render_functions.render_gpu_loading_bar(renderer, 1.0, window_w, window_h, ui_console_renderer)
+                    renderer.present()
+                    time.sleep(0.45)
+
+                    # Capture the 100% loading screen into a texture for CRT off
+                    if _gen_scene_tex_size != (window_w, window_h):
+                        _gen_scene_tex = renderer.new_texture(
+                            window_w, window_h, access=tcod.sdl.render.TextureAccess.TARGET
+                        )
+                        _gen_scene_tex_size = (window_w, window_h)
+                    with renderer.set_render_target(_gen_scene_tex):
+                        renderer.draw_color = (0, 0, 0, 255)
+                        renderer.clear()
+                        render_functions.render_gpu_loading_bar(renderer, 1.0, window_w, window_h, ui_console_renderer)
+
+                # Video mode switch — register tear → noise → blank (no CRT power-off)
+                _rlog(f"CRT: playing video mode switch (INT 10h) from completed loading screen")
+                _crt_off_played = True
+                sounds.play_video_mode_switch_sound()
+                _sw_anim = VideoModeSwitchAnimation(renderer, window_w, window_h)
+                _sw_anim.play_off(_gen_scene_tex, event_pump=tcod.event.get, glare_tex=glare_tex)
+                del _sw_anim
+                _rlog(f"CRT: video mode switch blank phase done, transitioning handler")
+
+                # Release capture texture and reset state
+                _gen_scene_tex      = None
+                _gen_scene_tex_size = (0, 0)
+                _crt_off_played     = False
+                _gen_bar_start_time = None
                 _suppress_degauss_once = True
-                # Flag the main loop to capture the next rendered game frame
                 _crt_on_capture_pending = True
-                # CRT-on sound must play clean, before VHS warps anything.
-                sounds.play_crt_on_sound()
-                time.sleep(0.5)
-                # Open VHS gate BEFORE the new handler initialises so any dungeon
-                # music/ambient loops it starts are warped from the very first sample.
-                sounds.trigger_vhs_audio_effect()
                 class _CRTTransitionEvent:
                     _crt_transition = True
                 new_handler = handler.handle_events(_CRTTransitionEvent())
@@ -756,6 +801,17 @@ def main() -> None:
                 if new_handler is not handler:
                     handler = new_handler
                     overlay_dirty = True
+                    # Re-evaluate view flags so engine.tick() runs this frame and
+                    # the _crt_on_capture_pending frame captures a fully-ticked state.
+                    # Without this, main_game_view is stale-False (was LoadingScreen),
+                    # tick() is skipped, and the player appears one step off for one frame.
+                    if isinstance(handler, input_handlers.MainGameEventHandler):
+                        active_engine     = handler.engine
+                        has_game_view     = (active_engine is not None
+                                             and getattr(active_engine, 'game_map', None) is not None)
+                        main_game_view    = has_game_view
+                        fast_main_view    = has_game_view
+                        needs_live_game_frame = True
                 # Render black this frame while the new handler initialises
                 renderer.draw_color = (0, 0, 0, 255)
                 renderer.clear()
@@ -1378,22 +1434,21 @@ def main() -> None:
                     if gpu.crt_bloom_on:
                         gpu.gpu_bloom(gpu.post_crt_tex, window_w, window_h)
                 _crt_on_capture_pending = False
-                _rlog(f"CRT: playing screen-ON animation with real game frame")
-                _sw_anim = CRTSwitchAnimation(renderer, window_w, window_h)
+                _rlog(f"CRT: playing video mode resync + snap with real game frame")
+                _sw_anim = VideoModeSwitchAnimation(renderer, window_w, window_h)
                 _sw_anim.play_on(_crt_on_scene_tex, event_pump=tcod.event.get,
                                  glare_tex=glare_tex, gpu_stack=gpu,
                                  scanlines_tex=scanlines_tex, scanlines_h=scanlines_h,
                                  vignette_tex=vignette_tex)
                 del _sw_anim
-                _rlog(f"CRT: screen-ON done")
+                _rlog(f"CRT: video mode resync done")
                 _crt_on_scene_tex      = None
                 _crt_on_scene_tex_size = (0, 0)
-                # Re-trigger wobble and channel splash ("game" or "menu" overlay)
+                # Re-trigger channel splash (no wobble — INT 10h mode switch, not CRT power cycle)
                 _new_has_game = (
                     getattr(handler, 'engine', None) is not None
                     and getattr(getattr(handler, 'engine', None), 'game_map', None) is not None
                 )
-                gpu.start_wobble()
                 gpu.start_channel_overlay("game" if _new_has_game else "menu")
                 continue   # skip outer present(); play_on already presented final frame
 

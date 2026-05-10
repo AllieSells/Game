@@ -409,8 +409,10 @@ def get_available_saves():
 class LoadingScreen(input_handlers.BaseEventHandler):
     """Display a loading screen while generating the world."""
     
-    def __init__(self, parent_menu):
+    def __init__(self, parent_menu, game_seed=None, seed_string=None):
         self.parent_menu = parent_menu
+        self.game_seed = game_seed
+        self.seed_string = seed_string
         self.generation_steps = [
             "Initializing world...",
             "Generating rooms...",
@@ -580,48 +582,25 @@ class LoadingScreen(input_handlers.BaseEventHandler):
         self.generation_thread.start()
     
     def generate_world_with_steps(self):
-        """Generate the world with step-by-step progress updates."""
-        import time
-        
+        """Generate the world in a background thread."""
+        import sprite_manager as _sm
+        _sm.set_deferred_mode(True)
         try:
-            # Step 1: Initializing
             self.current_step = 0
-            
-            # Step 2: Creating terrain
-            self.current_step = 1
-            
-            # Step 3: Generate buildings (this is where most of the work happens)
-            self.current_step = 2
-            
-            # Start actual generation with any configured seed
-
-            
-            # Step 4: Doors and entrances (already done in new_game)
-            self.current_step = 3
-            
-            # Step 5: Campfires (already done)
-            self.current_step = 4
-            
-            # Step 6: Villagers (already done)
-            self.current_step = 5
-            
-            # Step 7: Finalizing
-            self.current_step = 6
-            
-            # Step 8: Complete
-            self.current_step = 7
+            self.engine = new_game(
+                game_seed=self.game_seed,
+                seed_string=self.seed_string,
+            )
+            self.current_step = len(self.generation_steps) - 1
             self.game_load = True
-            
-            # Wait a moment to show completion, then auto-transition
-            
         except Exception as e:
-            # If generation fails
             self.current_step = len(self.generation_steps)
             self.game_load = True
             self.engine = None
-            self.engine.debug_log(f"World generation failed: {e}", handler=type(self).__name__, event="world_gen_error") if self.engine else None
             import traceback
             traceback.print_exc()
+        finally:
+            _sm.set_deferred_mode(False)
 
     
     def handle_events(self, event: tcod.event.Event) -> input_handlers.BaseEventHandler:
@@ -638,14 +617,15 @@ class LoadingScreen(input_handlers.BaseEventHandler):
 
         # Once generation is complete the main loop will play the screen-on animation
         # and then call handle_events with a synthetic event to trigger the transition.
-        if self.game_load and self.engine is not None:
+        if self.game_load:
+            if self.engine is None:
+                # Generation failed — return to main menu
+                return self.parent_menu
             if getattr(event, '_crt_transition', False):
                 from input_handlers import MainGameEventHandler
 
                 sounds.start_dungeon_music()
                 return MainGameEventHandler(self.engine)
-            if self.engine is None:
-                return self.parent_menu
 
         return self
 
@@ -988,7 +968,7 @@ class MainMenu(input_handlers.BaseEventHandler):
 
         # Draw parchment background and ornate border
         MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
-        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Dungeons of Ærrok: The Divine Stone", title_fg=(182, 255, 245))
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Dungeons of \u00c6rrok: The Divine Stone", title_fg=(182, 255, 245))
 
         # Draw menu options with selection highlighting
         # Set menu_start_y here so it can be used for mouse hover calculations in ev_mousemotion
@@ -1047,7 +1027,7 @@ class MainMenu(input_handlers.BaseEventHandler):
         console.print(
             console.width // 2,
             instructions_y,
-            "[↑↓] Navigate  [Space] Select  [Esc] Quit",
+            "[\u2191\u2193] Navigate  [Space] Select  [Esc] Quit",
             fg=color.fantasy_text,
             alignment=tcod.CENTER,
         )
@@ -1142,29 +1122,19 @@ class MainMenu(input_handlers.BaseEventHandler):
                 if entered_seed is None:
                     return self
                     
-                loading_screen = LoadingScreen(self)
+                game_seed = None
+                seed_string = None
                 if entered_seed.strip():  # Only set seed if something was entered
                     # Try to parse as integer first, otherwise use as string
                     if entered_seed.strip().isdigit():
-                        loading_screen.game_seed = int(entered_seed.strip())
+                        game_seed = int(entered_seed.strip())
                     else:
-                        loading_screen.seed_string = entered_seed.strip()
-                # If no seed entered, LoadingScreen will use random generation
-                            # Stop menu ambience when leaving menu  
+                        seed_string = entered_seed.strip()
+                loading_screen = LoadingScreen(self, game_seed=game_seed, seed_string=seed_string)
+                # Stop menu ambience when leaving menu  
                 sounds.stop_menu_ambience()
                 sounds.stop_all_music()
                 sounds.stop_all_sounds()
-                if hasattr(self, 'game_seed') or hasattr(self, 'seed_string'):
-                    engine = new_game(
-                        game_seed=getattr(self, 'game_seed', None),
-                        seed_string=getattr(self, 'seed_string', None)
-                    )
-                else:
-                    engine = new_game()
-                return input_handlers.CRTTransition(
-                    input_handlers.MainGameEventHandler(engine),
-                    post_fn=sounds.start_dungeon_music
-                )
                 return loading_screen
             
             return input_handlers.TextInputHandler(

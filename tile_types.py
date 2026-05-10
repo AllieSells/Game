@@ -219,6 +219,37 @@ water = new_tile(
     light=(0xE140, (255, 255, 255), (30, 110, 135)),
 )
 
+# Dungeon water-edge floor tiles (CP18B–E).
+# These replace floor tiles that border a water pool on one cardinal side.
+dungeon_water_edge_S = new_tile(   # CP18B — water touching bottom
+    name="Floor",
+    walkable=True,
+    transparent=True,
+    dark=(0xE141, (255, 255, 255), (25, 25, 25)),
+    light=(0xE141, (255, 255, 255), (80, 80, 80)),
+)
+dungeon_water_edge_N = new_tile(   # CP18C — water touching top
+    name="Floor",
+    walkable=True,
+    transparent=True,
+    dark=(0xE142, (255, 255, 255), (25, 25, 25)),
+    light=(0xE142, (255, 255, 255), (80, 80, 80)),
+)
+dungeon_water_edge_W = new_tile(   # CP18D — water touching left
+    name="Floor",
+    walkable=True,
+    transparent=True,
+    dark=(0xE143, (255, 255, 255), (25, 25, 25)),
+    light=(0xE143, (255, 255, 255), (80, 80, 80)),
+)
+dungeon_water_edge_E = new_tile(   # CP18E — water touching right
+    name="Floor",
+    walkable=True,
+    transparent=True,
+    dark=(0xE144, (255, 255, 255), (25, 25, 25)),
+    light=(0xE144, (255, 255, 255), (80, 80, 80)),
+)
+
 
 def generate_foliage_tile():
     char = random.choice([0xE13C, 0xE13D, 0xE13E, 0xE13F])

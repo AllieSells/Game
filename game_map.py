@@ -707,6 +707,7 @@ class GameWorld:
             # Each entry is a tuple: (gamemap, player_xy, floor_number)
             self.up_stack: list[tuple] = []
             self.down_stack: list[tuple] = []  
+            self.dungeon_cache: dict = {}  # entrance_pos -> (dungeon_map, player_spawn_pos)
             self.fungi = []  # Global list of fungi in the world
             self._noise_rng = None
 
@@ -839,19 +840,24 @@ class GameWorld:
                 raise Exception("No dungeon entrance here.")
             dungeon_seed = entrances[player_pos]
             self.up_stack.append((current_map, player_pos, self.current_floor))
-            from procgen import generate_dungeon
             self.current_floor = 1
-            new_map = generate_dungeon(
-                max_rooms=self.max_rooms,
-                room_min_size=self.room_min_size,
-                room_max_size=self.room_max_size,
-                map_width=self.map_width,
-                map_height=self.map_height,
-                engine=self.engine,
-                noise_vals=self.generate_noise(dungeon_seed),
-                floor_num=1,
-            )
-            self.engine.game_map = new_map
+            if player_pos in self.dungeon_cache:
+                cached_map, cached_spawn = self.dungeon_cache[player_pos]
+                self.engine.game_map = cached_map
+                self.engine.player.place(cached_spawn[0], cached_spawn[1], cached_map)
+            else:
+                from procgen import generate_dungeon
+                new_map = generate_dungeon(
+                    max_rooms=self.max_rooms,
+                    room_min_size=self.room_min_size,
+                    room_max_size=self.room_max_size,
+                    map_width=self.map_width,
+                    map_height=self.map_height,
+                    engine=self.engine,
+                    noise_vals=self.generate_noise(dungeon_seed),
+                    floor_num=1,
+                )
+                self.engine.game_map = new_map
             anim_q = getattr(self.engine, "animation_queue", None)
             if anim_q is not None:
                 try:
@@ -903,6 +909,10 @@ class GameWorld:
 
         # Restore previous floor
         prev_map, prev_player_pos, prev_floor = self.up_stack.pop()
+
+        # If returning to overworld, cache the dungeon keyed by the entrance position
+        if getattr(prev_map, 'type', None) == 'overworld':
+            self.dungeon_cache[prev_player_pos] = (current_map, player_pos)
         self.engine.game_map = prev_map
         self.current_floor = prev_floor
         
@@ -918,4 +928,8 @@ class GameWorld:
         # Restore player position  
         px, py = prev_player_pos
         self.engine.player.place(px, py, prev_map)
+
+        # Switch to travelling sprite when returning to the overworld
+        if getattr(prev_map, 'type', None) == 'overworld':
+            self.engine.player.char = chr(0xE03B)
 

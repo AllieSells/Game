@@ -27,6 +27,43 @@ _composite_cache: dict = {}   # tuple(codepoints) -> assigned codepoint int
 _composite_next: int = COMPOSITE_START_CP
 _tileset = None               # Set by load_extras; used by compose/refresh
 
+# --- Deferred set_tile queue (used during background gen to avoid GPU calls) ---
+_deferred_mode: bool = False
+_deferred_tiles: list = []       # List of (cp, pixels_uint8) to flush on main thread
+_deferred_pixel_store: dict = {} # cp -> pixels_uint8: CPU-side store so get_tile works during deferred mode
+
+
+def set_deferred_mode(enabled: bool) -> None:
+    """Enable/disable deferred GPU tile uploads. Call set_deferred_mode(True) before
+    running world gen on a background thread, then flush_deferred_tiles() afterwards
+    on the main thread to safely apply all set_tile calls."""
+    global _deferred_mode
+    _deferred_mode = enabled
+    # Do NOT clear _deferred_tiles here — flush_deferred_tiles() owns that.
+    # When disabling, only drop the CPU-side lookup store (no longer needed).
+    if not enabled:
+        _deferred_pixel_store.clear()
+
+
+def flush_deferred_tiles() -> None:
+    """Apply all queued set_tile calls. Must be called from the main (SDL) thread."""
+    global _deferred_tiles, _deferred_pixel_store
+    if _tileset is None:
+        _deferred_tiles.clear()
+        _deferred_pixel_store.clear()
+        return
+    for cp, pixels in _deferred_tiles:
+        _tileset.set_tile(cp, pixels)
+    _deferred_tiles.clear()
+    _deferred_pixel_store.clear()
+
+
+def _get_tile(cp: int) -> np.ndarray:
+    """Get tile pixels, checking CPU-side deferred store before the GPU tileset."""
+    if _deferred_mode and cp in _deferred_pixel_store:
+        return _deferred_pixel_store[cp].copy()
+    return _tileset.get_tile(cp)
+
 
 def _offset_overlay_tile(tile_pixels: np.ndarray, x_offset: int, y_offset: int) -> np.ndarray:
     """Shift an overlay tile by the given pixel offsets, filling empty space with transparency."""
@@ -211,7 +248,7 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
             return norm_tints[idx]
 
         # First layer (entity) is special: cropped and/or preserved as top if requested.
-        first = _tileset.get_tile(layer_codepoints[0]).astype(np.float32).copy()
+        first = _get_tile(layer_codepoints[0]).astype(np.float32).copy()
         first = _apply_tint(first, _tint_for(0))
         if x_crop != 0 or y_crop != 0:
             first = _crop_overlay_tile(first, x_crop, y_crop).astype(np.float32)
@@ -222,9 +259,9 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
         else:
             # Compose all background layers (the rest) first, then draw first on top.
             if len(layer_codepoints) > 1:
-                base = _tileset.get_tile(layer_codepoints[1]).astype(np.float32).copy()
+                base = _get_tile(layer_codepoints[1]).astype(np.float32).copy()
                 for cp in layer_codepoints[2:]:
-                    overlay_pixels = _tileset.get_tile(cp)
+                    overlay_pixels = _get_tile(cp)
                     if normalized_scale != 1.0:
                         overlay_pixels = _scale_overlay_tile(overlay_pixels, normalized_scale)
                     if x_offset != 0 or y_offset != 0:
@@ -254,7 +291,7 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
                 base[..., 3] = np.maximum(base[..., 3], overlay_pixels[..., 3])
         else:
             for cp in overlay_layers:
-                overlay_pixels = _tileset.get_tile(cp)
+                overlay_pixels = _get_tile(cp)
                 overlay_pixels = _apply_tint(overlay_pixels, _tint_for(layer_codepoints.index(cp)))
                 if normalized_scale != 1.0:
                     overlay_pixels = _scale_overlay_tile(overlay_pixels, normalized_scale)
@@ -267,7 +304,11 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
 
         result = base.astype(np.uint8)
         cp = _composite_next
-        _tileset.set_tile(cp, result)
+        if _deferred_mode:
+            _deferred_pixel_store[cp] = result
+            _deferred_tiles.append((cp, result))
+        else:
+            _tileset.set_tile(cp, result)
         _composite_cache[key] = cp
         _composite_next += 1
         #print(f"[sprite_manager] Composed sprite 0x{cp:04X} from layers {[hex(c) for c in layer_codepoints]}")

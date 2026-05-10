@@ -901,6 +901,108 @@ def render_gpu_minimap_body(
     renderer.copy(tex, dest=(px0, py0, pw, ph))
 
 
+def render_gpu_loading_bar(
+    renderer,
+    progress: float,
+    window_w: int,
+    window_h: int,
+    console_renderer=None,
+) -> None:
+    """Draw a DOA OS BIOS-style world-gen loading screen matching the initial boot screen."""
+    import tcod
+    progress = max(0.0, min(1.0, progress))
+    pct = int(progress * 100)
+
+    W      = (200, 200, 200)
+    DIM    = (100, 100, 100)
+    BG     = (0,   0,   0  )
+    BAR_BG = (0,   170, 170)
+    BAR_FG = (0,   0,   0  )
+    SEP    = (160, 160, 160)
+
+    if console_renderer is not None:
+        COLS = 80
+        ROWS = 50
+        con = tcod.console.Console(COLS, ROWS, order="F")
+
+        # Fill background black
+        con.draw_rect(0, 0, COLS, ROWS, ch=ord(' '), fg=W, bg=BG)
+
+        # ── Header bar (row 0) ──────────────────────────────────────────────
+        con.draw_rect(0, 0, COLS, 1, ord(' '), fg=BAR_FG, bg=BAR_BG)
+        con.print(0, 0, " DOA BIOS v18.23.00", fg=BAR_FG, bg=BAR_BG)
+        cr = "(C) 1998 Loxen Inc. "
+        con.print(COLS - len(cr), 0, cr, fg=BAR_FG, bg=BAR_BG)
+
+        # ── Separator ────────────────────────────────────────────────────────
+        con.print(0, 1, chr(0x2550) * COLS, fg=SEP, bg=BG)
+
+        # ── System info block ────────────────────────────────────────────────
+        con.print(2, 3, "Dungeons of Aerrok: The Divine Stone", fg=W, bg=BG)
+        con.print(2, 4, "BIOS DATE 11/19/98 12:40:36  |  VER: 18.23.00", fg=DIM, bg=BG)
+        con.print(2, 5, "CPU: Intel(R) 330 @ 40 MHz  |  SPEED: 40MHz", fg=DIM, bg=BG)
+
+        # ── Separator ────────────────────────────────────────────────────────
+        con.print(0, 7, chr(0x2550) * COLS, fg=SEP, bg=BG)
+
+        # ── Floppy read heading ───────────────────────────────────────────────
+        _SPINNERS = ["|", "/", "-", "\\"]
+        _spin = _SPINNERS[int(time.monotonic() * 6) % 4]
+        con.print(2, 9, f"{_spin} Reading A:\\DUNGEON.DAT", fg=W, bg=BG)
+
+        # ── File status list ──────────────────────────────────────────────────
+        statuses = [
+            (0.05, "A:\\WORLD\\NOISE.DAT"),
+            (0.25, "A:\\WORLD\\TERRAIN.DAT"),
+            (0.55, "A:\\WORLD\\ENTITIES.DAT"),
+            (0.85, "A:\\WORLD\\FINALIZE.DAT"),
+        ]
+        for i, (threshold, name) in enumerate(statuses):
+            done = progress >= threshold
+            status_str = "OK" if done else "..."
+            fg_col = W if done else DIM
+            con.print(4, 11 + i, f"{name:<28} {status_str}", fg=fg_col, bg=BG)
+
+        # ── Progress bar ──────────────────────────────────────────────────────
+        BAR_W = 40
+        filled_n = int(BAR_W * progress)
+        bar = "[" + (chr(0x2588) * filled_n) + ("." * (BAR_W - filled_n)) + f"] {pct:3d}%"
+        con.print(4, 17, bar, fg=W, bg=BG)
+
+        # ── Done / cursor ─────────────────────────────────────────────────────
+        if progress >= 1.0:
+            con.print(4, 19, "Disk read complete. Switching video mode...", fg=W, bg=BG)
+        else:
+            blink = int(time.monotonic() * 2) % 2
+            if blink:
+                con.print(4, 19, chr(0x2588), fg=W, bg=BG)
+
+        # ── Footer bar ───────────────────────────────────────────────────────
+        con.draw_rect(0, ROWS - 1, COLS, 1, ord(' '), fg=BAR_FG, bg=BAR_BG)
+        con.print(0, ROWS - 1, "  Reading from A:\\ ...", fg=BAR_FG, bg=BAR_BG)
+
+        tex = console_renderer.render(con)
+        tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+        renderer.copy(tex, dest=(0, 0, window_w, window_h))
+    else:
+        # Fallback: plain fill_rect bar (no console renderer available)
+        bar_w = int(window_w * 0.40)
+        bar_h = max(6, int(window_h * 0.018))
+        bx = (window_w - bar_w) // 2
+        by = (window_h - bar_h) // 2
+        filled = int(bar_w * progress)
+        renderer.draw_color = (20, 20, 20, 255)
+        renderer.fill_rect((bx, by, bar_w, bar_h))
+        if filled > 0:
+            renderer.draw_color = (200, 200, 200, 255)
+            renderer.fill_rect((bx, by, filled, bar_h))
+        renderer.draw_color = (255, 255, 255, 255)
+        renderer.fill_rect((bx, by, bar_w, 1))
+        renderer.fill_rect((bx, by + bar_h - 1, bar_w, 1))
+        renderer.fill_rect((bx, by, 1, bar_h))
+        renderer.fill_rect((bx + bar_w - 1, by, 1, bar_h))
+
+
 def render_gpu_reset_bar(
     renderer,
     handler,

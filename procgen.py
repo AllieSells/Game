@@ -1432,6 +1432,32 @@ def generate_dungeon(
                 if dungeon.tiles[x, y]["walkable"]:
                     dungeon.tiles[x, y] = tile_types.water
     print("[GEN] water pools done")
+
+    # Water-edge overlay: replace floor tiles that border water with directional edge tiles.
+    _FLOOR_NAMES = {"Floor", "Mossy Floor"}
+    _WATER_EDGE = {
+        'S': tile_types.dungeon_water_edge_S,
+        'N': tile_types.dungeon_water_edge_N,
+        'W': tile_types.dungeon_water_edge_W,
+        'E': tile_types.dungeon_water_edge_E,
+    }
+    for x in range(1, dungeon.width - 1):
+        for y in range(1, dungeon.height - 1):
+            if str(dungeon.tiles[x, y]["name"]) not in _FLOOR_NAMES:
+                continue
+            water_S = str(dungeon.tiles[x,     y + 1]["name"]) == "Water"
+            water_N = str(dungeon.tiles[x,     y - 1]["name"]) == "Water"
+            water_W = str(dungeon.tiles[x - 1, y    ]["name"]) == "Water"
+            water_E = str(dungeon.tiles[x + 1, y    ]["name"]) == "Water"
+            if water_S:
+                dungeon.tiles[x, y] = _WATER_EDGE['S']
+            elif water_N:
+                dungeon.tiles[x, y] = _WATER_EDGE['N']
+            elif water_W:
+                dungeon.tiles[x, y] = _WATER_EDGE['W']
+            elif water_E:
+                dungeon.tiles[x, y] = _WATER_EDGE['E']
+
     # Foliage post processing
     if vegetation > 0:
         for x in range(dungeon.width):

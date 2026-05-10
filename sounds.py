@@ -744,6 +744,11 @@ def play_gameover_sound():
 def play_boot_sound():
     play_sound_with_pitch_variation(Sound("RP/sfx/boot.mp3"), pitch_range=(0.9, 1.1), volume=0.5)
 
+def play_floppy_seek_sound():
+    """Floppy disk seek/read — same source as boot sound but pitched lower and quieter,
+    giving the characteristic slow mechanical clunk of a drive head seeking a new cylinder."""
+    play_sound_with_pitch_variation(Sound("RP/sfx/boot.mp3"), pitch_range=(0.58, 0.72), volume=0.30)
+
 quaff_sound = Sound("RP/sfx/quaff.wav")
 
 # Helper functions for global sounds with pitch variation
@@ -753,6 +758,13 @@ def play_quaff_sound():
 def play_crt_off_sound():
     sound = Sound("RP/sfx/crtoff.mp3")
     play_sound_with_pitch_variation(sound, pitch_range=(0.75, 0.75), volume=1.0)
+
+def play_video_mode_switch_sound():
+    """Short static crackle for INT 10h video mode switch — high-pitched blip,
+    not a power-down.  Uses crtoff.mp3 pitched up so it sounds like a snap of
+    static rather than a monitor switching off."""
+    sound = Sound("RP/sfx/crtoff.mp3")
+    play_sound_with_pitch_variation(sound, pitch_range=(1.6, 1.9), volume=0.45)
 
 def play_crt_load_sound():
     sound = Sound("RP/sfx/crtload.mp3")

@@ -855,6 +855,196 @@ class CRTSwitchAnimation:
         renderer.present()
 
 
+class VideoModeSwitchAnimation:
+    """DOS-accurate INT 10h video mode switch animation.
+
+    What actually happens when a DOS game calls INT 10h AH=00h to switch mode:
+      play_off(scene_tex)  ~0.45 s
+        Phase 1 — register tear:   CRTC regs written mid-frame → horizontal
+                                   band corruption sweeping top→bottom
+        Phase 2 — framebuf garbage: card resets, screen fills with noise
+        Phase 3 — blank:            monitor loses sync, black
+
+      play_on(scene_tex)   ~0.30 s
+        Phase 1 — resync roll:  monitor hunts for new sync freq → bright
+                                bars sweep upward on black
+        Phase 2 — snap:         content appears instantly + brief AGC flash
+
+    Replaces CRTSwitchAnimation for the floppy-load → game transition.
+    """
+
+    def __init__(self, renderer, window_w: int, window_h: int):
+        self._renderer = renderer
+        self._w        = window_w
+        self._h        = window_h
+        _px = np.array([[[255, 255, 255, 255]]], dtype=np.uint8)
+        self._overlay = renderer.upload_texture(_px)
+        self._overlay.blend_mode = tcod.sdl.render.BlendMode.BLEND
+
+    # ------------------------------------------------------------------
+
+    def play_off(self, scene_tex, event_pump=None, glare_tex=None) -> None:
+        """Register tear → framebuffer garbage → blank.  ~0.45 s."""
+        import time
+        DURATION        = 0.45
+        T_GARBAGE_START = 0.18   # full-noise phase starts here
+        T_BLANK_START   = 0.34   # sync lost, black from here
+
+        t_start  = time.perf_counter()
+        w, h     = self._w, self._h
+        renderer = self._renderer
+        ov       = self._overlay
+        _rng     = random.Random(7)   # fixed seed → deterministic look
+
+        while True:
+            if event_pump:
+                for _ in event_pump():
+                    pass
+            t = (time.perf_counter() - t_start) / DURATION
+            if t >= 1.0:
+                break
+
+            renderer.draw_color = (0, 0, 0, 255)
+            renderer.clear()
+
+            if t < T_GARBAGE_START:
+                # ── Register tear ── scene visible, bands corrupt top→bottom ──
+                p = t / T_GARBAGE_START
+                scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                scene_tex.alpha_mod  = 255
+                scene_tex.color_mod  = (255, 255, 255)
+                renderer.copy(scene_tex, dest=(0, 0, w, h))
+                band_h     = max(1, h // 30)
+                n_bands    = int(p * p * (h // band_h))   # quadratic: sparse→dense
+                tear_limit = int(p * h)                    # corrupted region grows downward
+                for _ in range(n_bands):
+                    by  = _rng.randint(0, max(1, tear_limit))
+                    bw  = _rng.randint(w // 3, w)
+                    bx  = _rng.randint(0, max(1, w - bw))
+                    r   = _rng.randint(0, 100)
+                    g   = _rng.randint(0, 100)
+                    b   = _rng.randint(0, 100)
+                    renderer.draw_color = (r, g, b, 255)
+                    renderer.fill_rect((bx, by, bw, band_h))
+                    # horizontal shift: row read from wrong scanline address
+                    if _rng.random() < 0.4 * p:
+                        shift  = _rng.randint(-32, 32)
+                        src_y  = max(0, min(h - band_h, by + shift))
+                        scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                        scene_tex.alpha_mod  = 200
+                        renderer.copy(scene_tex,
+                                      source=(0, src_y, w, band_h),
+                                      dest=(0, by, w, band_h))
+
+            elif t < T_BLANK_START:
+                # ── Framebuffer garbage ── random dim scanline strips ──────────
+                p     = (t - T_GARBAGE_START) / (T_BLANK_START - T_GARBAGE_START)
+                row_h = max(1, h // 35)
+                for row in range(0, h, row_h):
+                    rh  = min(row_h, h - row)
+                    r   = _rng.randint(0, 70)
+                    g   = _rng.randint(0, 70)
+                    b   = _rng.randint(0, 70)
+                    renderer.draw_color = (r, g, b, 255)
+                    renderer.fill_rect((0, row, w, rh))
+                # fade to black as monitor loses sync
+                ov.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                ov.color_mod  = (0, 0, 0)
+                ov.alpha_mod  = int(p * 220)
+                renderer.copy(ov, dest=(0, 0, w, h))
+
+            # else: blank — already cleared to black
+
+            if glare_tex is not None:
+                renderer.copy(glare_tex, dest=(0, 0, w, h))
+            renderer.present()
+            time.sleep(1.0 / 60)
+
+        renderer.draw_color = (0, 0, 0, 255)
+        renderer.clear()
+        if glare_tex is not None:
+            renderer.copy(glare_tex, dest=(0, 0, w, h))
+        renderer.present()
+
+    # ------------------------------------------------------------------
+
+    def play_on(self, scene_tex, event_pump=None, glare_tex=None, gpu_stack=None,
+                scanlines_tex=None, scanlines_h=0, vignette_tex=None) -> None:
+        """Resync roll then instant snap to game content.  ~0.65 s."""
+        import time, math
+        DURATION = 0.65
+        T_SNAP   = 0.50   # content snaps in from here
+
+        t_start  = time.perf_counter()
+        w, h     = self._w, self._h
+        renderer = self._renderer
+        ov       = self._overlay
+
+        scene_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+        scene_tex.alpha_mod  = 255
+        scene_tex.color_mod  = (255, 255, 255)
+
+        while True:
+            if event_pump:
+                for _ in event_pump():
+                    pass
+            t = (time.perf_counter() - t_start) / DURATION
+            if t >= 1.0:
+                break
+
+            renderer.draw_color = (0, 0, 0, 255)
+            renderer.clear()
+            ov.blend_mode = tcod.sdl.render.BlendMode.BLEND
+
+            if t < T_SNAP:
+                # ── Resync roll ── two bright bars sweep upward on black ──────
+                p     = t / T_SNAP
+                bar_h = max(3, h // 16)
+                for idx in range(2):
+                    by         = int((1.0 - p) * h - idx * (h // 2)) % h
+                    brightness = max(60, int((1.0 - p * 0.4) * 255))
+                    ov.color_mod = (brightness, brightness, brightness)
+                    ov.alpha_mod = brightness
+                    renderer.copy(ov, dest=(0, by, w, bar_h))
+                    # soft trailing edge
+                    ov.alpha_mod = brightness // 4
+                    renderer.copy(ov, dest=(0, min(h - 1, by + bar_h), w, bar_h // 2))
+                if glare_tex is not None:
+                    renderer.copy(glare_tex, dest=(0, 0, w, h))
+                renderer.present()
+                time.sleep(1.0 / 60)
+                continue
+
+            else:
+                # ── Snap ── content appears instantly (no AGC flash for mode switch) ──
+                renderer.copy(scene_tex, dest=(0, 0, w, h))
+                if gpu_stack is not None:
+                    gpu_stack.apply_crt_overlays(
+                        w, h,
+                        scanlines_tex=scanlines_tex, scanlines_h=scanlines_h,
+                        vignette_tex=vignette_tex, glare_tex=glare_tex,
+                        bloom_source=gpu_stack.post_crt_tex,
+                    )
+                elif glare_tex is not None:
+                    renderer.copy(glare_tex, dest=(0, 0, w, h))
+                renderer.present()
+                time.sleep(1.0 / 60)
+                continue
+
+        # End on full scene
+        renderer.copy(scene_tex, dest=(0, 0, w, h))
+        if gpu_stack is not None:
+            gpu_stack.apply_crt_overlays(
+                w, h,
+                scanlines_tex=scanlines_tex, scanlines_h=scanlines_h,
+                vignette_tex=vignette_tex, glare_tex=glare_tex,
+                bloom_source=gpu_stack.post_crt_tex,
+            )
+        elif glare_tex is not None:
+            renderer.copy(glare_tex, dest=(0, 0, w, h))
+        renderer.present()
+
+
 # =============================================================================
 # SECTION 4 — DEGAUSS ANIMATION CLASS
 # =============================================================================
