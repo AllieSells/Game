@@ -1123,8 +1123,8 @@ def generate_first_floor(
         skin_tone="fair",
         eye_color="blue",
         clothing_style="formal",
-        head="cone hat",
-        torso="silk robe",
+        head="white cone hat",
+        torso="brown silk robe",
         legs="silk trousers",
         feet="leather shoes",
         accessories="gold necklaces"

@@ -135,36 +135,48 @@ class BaseEventHandler(tcod.event.EventDispatch[ActionOrHandler]):
         use_world_space = isinstance(self, (MainGameEventHandler, SelectIndexHandler))
 
         if ui_tile is not None:
-            self.engine.mouse_ui_x = int(ui_tile[0])
-            self.engine.mouse_ui_y = int(ui_tile[1])
+            try:
+                self.engine.mouse_ui_x = int(ui_tile[0])
+                self.engine.mouse_ui_y = int(ui_tile[1])
+            except Exception:
+                pass
+
 
         active_tile = world_tile if use_world_space and world_tile is not None else ui_tile
 
         if active_tile is not None:
-            self.engine.mouse_x = int(active_tile[0])
-            self.engine.mouse_y = int(active_tile[1])
-
-        if self.engine.mouse_ui_y == 40 and 36 <= self.engine.mouse_ui_x <= 50:
-            self.engine.hovered_inventory_button = "inventory"
-        elif self.engine.mouse_ui_y == 40 and 52 <= self.engine.mouse_ui_x <= 64:
-            self.engine.hovered_inventory_button = "equipment"
-        else:
-            self.engine.hovered_inventory_button = None
-
+            try:
+                self.engine.mouse_x = int(active_tile[0])
+                self.engine.mouse_y = int(active_tile[1])
+            except Exception:
+                pass
+        try:
+            if self.engine.mouse_ui_y == 40 and 36 <= self.engine.mouse_ui_x <= 50:
+                self.engine.hovered_inventory_button = "inventory"
+            elif self.engine.mouse_ui_y == 40 and 52 <= self.engine.mouse_ui_x <= 64:
+                self.engine.hovered_inventory_button = "equipment"
+            else:
+                self.engine.hovered_inventory_button = None
+        except Exception:
+            pass
         return None
 
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
         """Handle mouse clicks during main game - just print for now."""
-        if event.button == tcod.event.BUTTON_LEFT:
-            self.engine.mouse_held = True
-        
+        try:
+            if event.button == tcod.event.BUTTON_LEFT:
+                self.engine.mouse_held = True
+        except Exception:
+            pass
     
         return None
 
     def ev_mousebuttonup(self, event: tcod.event.MouseButtonUp):
-        if event.button == tcod.event.BUTTON_LEFT:
-            self.engine.mouse_held = False
-
+        try:
+            if event.button == tcod.event.BUTTON_LEFT:
+                self.engine.mouse_held = False
+        except Exception:
+            pass
         return None
     
     def on_render(self, console: tcod.Console) -> None:

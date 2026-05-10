@@ -930,8 +930,8 @@ tutorial_guide = Actor(
 )
 
 villager = Actor(
-    char="☺",
-    color=(255, 255, 0),
+    char=chr(0xE03D),
+    color=(255, 255, 255),
     name="Villager",
     ai_cls=Friendly,
     equipment=Equipment(),
@@ -945,8 +945,8 @@ villager = Actor(
 )
 
 quest_giver = Actor(
-    char="☺",
-    color=(255, 0, 243),
+    char=chr(0xE03D),
+    color=(255, 255, 255),
     name="Quest Giver",
     ai_cls=Friendly,
     equipment=Equipment(),

@@ -618,6 +618,21 @@ _PORTRAIT_PARTS_DIR = os.path.join(os.path.dirname(__file__), "components", "por
 # Bump this string to invalidate all cached portraits (e.g. after changing tints or layers)
 _PORTRAIT_CACHE_VERSION = "v2"
 
+_VILLAGER_SPRITE_CODEPOINTS: dict = {
+    "male": 0xE03C,
+    "female": 0xE03D,
+    "short": 0xE060,
+    "long": 0xE061,
+    "beard": 0xE062,
+    "cap": 0xE063,
+    "hood": 0xE064,
+    "tunic": 0xE065,
+    "trousers": 0xE066,
+    "robe": 0xE067,
+    "shoes": 0xE068,
+}
+
+
 # Hair-color → (R, G, B) multiply tint
 _HAIR_TINTS: dict = {
     "black":  (30,  20,  20),
@@ -707,6 +722,8 @@ def compose_portrait(actor) -> str | None:
         return None
 
     know = getattr(actor, "knowledge", {})
+    composite_sprite_layers = []
+    composite_sprite_tints = []
 
     # ── Base layer ────────────────────────────────────────────────────────────
     skin       = know.get("skin_tone", "fair")
@@ -722,7 +739,7 @@ def compose_portrait(actor) -> str | None:
     # ── Cache key ─────────────────────────────────────────────────────────────
     import hashlib, json as _json
     _cache_fields = ["skin_tone", "gender", "hair_color", "hair_style",
-                     "facial_hair", "torso", "head", "accessories"]
+                     "facial_hair", "torso", "legs", "feet", "head", "accessories"]
     cache_data  = {k: know.get(k) for k in _cache_fields}
     cache_data["_v"] = _PORTRAIT_CACHE_VERSION
     cache_hash  = hashlib.md5(_json.dumps(cache_data, sort_keys=True).encode()).hexdigest()[:12]
@@ -737,6 +754,19 @@ def compose_portrait(actor) -> str | None:
     _log = [f"base={base_key}_{gender_key}"]
     canvas = Image.open(base_path).convert("RGBA")
 
+    # Get skin tone tint from base layer, to apply to clothing layers for better integration.
+    if skin in _SKIN_TO_BASE:
+        # Sample tint from the base skin layer (assuming it's a solid color).
+        r, g, b, _ = canvas.getpixel((TILE_W // 2, TILE_H // 2))
+        skin_tint = (r, g, b)
+
+    if gender.lower() == "male":
+        composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["male"])
+        composite_sprite_tints.append(skin_tint)
+    else:
+        composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["female"])
+        composite_sprite_tints.append(skin_tint)
+        
     def _overlay(rel_path: str, tint=None) -> None:
         nonlocal canvas
         full = os.path.join(_PORTRAIT_PARTS_DIR, rel_path)
@@ -761,29 +791,96 @@ def compose_portrait(actor) -> str | None:
     torso_tint  = _extract_cloth_tint(torso_desc)
     if "robe" in torso_lower:
         _overlay("robe/robe.png", torso_tint)
+        composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["robe"])
+        composite_sprite_tints.append(torso_tint)
     elif any(w in torso_lower for w in ("tunic", "shirt", "jerkin")):
         _overlay(f"tunic/{gender_key}.png", torso_tint)
+        composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["tunic"])
+        composite_sprite_tints.append(torso_tint)
 
     # Hair
     if hair_tint and hair_color not in ("bald", "hairless"):
-        _overlay("hair/long.png", hair_tint)  # only long.png exists; extend as more are added
+        # Switch for style comp
+        match hair_style.lower():
+            case "long":
+                _overlay("hair/long.png", hair_tint)
+                composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["long"])
+                composite_sprite_tints.append(hair_tint)
+
+            case "curly":
+                _overlay("hair/curly.png", hair_tint)
+                composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["long"])
+                composite_sprite_tints.append(hair_tint)
+
+            case "short":
+                _overlay("hair/short.png", hair_tint)
+                composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["short"])
+                composite_sprite_tints.append(hair_tint)
+
+            case "straight":
+                _overlay("hair/straight.png", hair_tint)
+                composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["short"])
+                composite_sprite_tints.append(hair_tint)
+
+            case "wavy":
+                _overlay("hair/wavy.png", hair_tint)
+                composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["long"])
+                composite_sprite_tints.append(hair_tint)
+
+            case _:
+                # Pass on no match, BALD!
+                pass
 
     # Facial hair / beard
     facial_hair = know.get("facial_hair")
     if facial_hair and hair_tint:
-        beard_file = "beards/long.png" if "beard" in facial_hair else "beards/normal.png"
-        _overlay(beard_file, hair_tint)
-
+        match facial_hair.lower():
+            case "bearded":
+                _overlay("facial_hair/beard.png", hair_tint)
+                composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["beard"])
+                composite_sprite_tints.append(hair_tint)
+            case "mustached":
+                _overlay("facial_hair/mustache.png", hair_tint)
+            case "goateed":
+                _overlay("facial_hair/goatee.png", hair_tint)
+                composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["beard"])
+                composite_sprite_tints.append(hair_tint)
+            case "stubbled":
+                _overlay("facial_hair/stubble.png", hair_tint)
+            case _:
+                pass
+            
     # Head gear  (on top of hair)
     head_desc  = know.get("head") or ""
     head_lower = head_desc.lower()
     head_tint  = _extract_cloth_tint(head_desc)
     if "hood" in head_lower:
         _overlay("hood/hood.png", head_tint)
+        composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["hood"])
+        composite_sprite_tints.append(head_tint)
+
     elif "cap" in head_lower:
         _overlay("cap/cap.png", head_tint)
+        composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["cap"])
+        composite_sprite_tints.append(head_tint)
+
     elif "hat" in head_lower:
         _overlay("cone_hat/cone_hat.png", head_tint)
+
+    feet_desc = know.get("feet") or ""
+    feet_lower = feet_desc.lower()
+    feet_tint = _extract_cloth_tint(feet_desc)
+    if "shoes" in feet_lower:
+        composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["shoes"])
+        composite_sprite_tints.append(feet_tint)
+    
+    legs_desc = know.get("legs") or ""
+    legs_lower = legs_desc.lower()
+    legs_tint = _extract_cloth_tint(legs_desc)
+    if "trousers" in legs_lower or "pants" in legs_lower:
+        composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["trousers"])
+        composite_sprite_tints.append(legs_tint)
+
 
     # Accessories — necklace
     acc_desc  = know.get("accessories") or ""
@@ -794,6 +891,9 @@ def compose_portrait(actor) -> str | None:
     canvas.save(out_path, "PNG")
     print(f"[portrait] {getattr(actor, 'name', '?')} → {cache_hash}.png | layers: {', '.join(_log)}")
     actor._portrait_path = out_path
+
+    actor.char = compose_sprite(composite_sprite_layers, layer_tints=composite_sprite_tints)
+
     return out_path
 
 

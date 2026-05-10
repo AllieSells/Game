@@ -674,7 +674,7 @@ class Actor(Entity):
                     "dirty cloth trousers": 30,
                 },
                 "feet": {
-                    "worn leather boots": 70,
+                    "worn leather shoes": 70,
                     "dirty cloth shoes": 30,
                     None: 60,
                 },
@@ -688,12 +688,12 @@ class Actor(Entity):
             "white": 20,
             "black": 20,
             "brown": 20,
-            "gray": 10,
-            "blue": 15,
-            "red": 5,
-            "green": 15,
-            "yellow": 1,
-            "purple": 2,
+            "gray": 20,
+            "blue": 20,
+            "red": 20,
+            "green": 20,
+            "yellow": 20,
+            "purple": 20,
         }
         for slot, options in clothing_options.items():
             option_choices = list(options.keys())
@@ -795,7 +795,7 @@ class Actor(Entity):
         """Composite portrait_parts layers into a cached PNG and set self._portrait_path."""
         import sprite_manager
         sprite_manager.compose_portrait(self)
-
+    
 
 class Item(Entity):
     def __init__(

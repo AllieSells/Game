@@ -792,6 +792,7 @@ class GameWorld:
         from procgen import generate_dungeon, generate_village, generate_tutorial_floor
         import random
 
+        print("TEST")
         self.current_floor += 1
         self.floors_since_village += 1
 
@@ -890,17 +891,26 @@ class GameWorld:
             prev_floor = self.current_floor
             self.current_floor += 1
             print(f"[DESCEND] Generating new floor {self.current_floor} (was {prev_floor})")
-            from procgen import generate_dungeon
-            new_map = generate_dungeon(
-                max_rooms=self.max_rooms,
-                room_min_size=self.room_min_size,
-                room_max_size=self.room_max_size,
-                map_width=self.map_width,
-                map_height=self.map_height,
-                engine=self.engine,
-                noise_vals=self.generate_noise(self.current_floor),
-                floor_num=self.current_floor,
-            )
+            # Village generation
+            if 1 == 1:
+                from procgen import generate_village
+                new_map = generate_village(
+                    map_width=self.map_width,
+                    map_height=self.map_height,
+                    engine=self.engine,
+                )
+            else:
+                from procgen import generate_dungeon
+                new_map = generate_dungeon(
+                    max_rooms=self.max_rooms,
+                    room_min_size=self.room_min_size,
+                    room_max_size=self.room_max_size,
+                    map_width=self.map_width,
+                    map_height=self.map_height,
+                    engine=self.engine,
+                    noise_vals=self.generate_noise(self.current_floor),
+                    floor_num=self.current_floor,
+                )
             print(f"[DESCEND] New map generated: down={new_map.downstairs_location} up={getattr(new_map,'upstairs_location',None)}")
             self.engine.game_map = new_map
         anim_q = getattr(self.engine, "animation_queue", None)
