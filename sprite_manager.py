@@ -766,7 +766,7 @@ def compose_portrait(actor) -> str | None:
     else:
         composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["female"])
         composite_sprite_tints.append(skin_tint)
-        
+
     def _overlay(rel_path: str, tint=None) -> None:
         nonlocal canvas
         full = os.path.join(_PORTRAIT_PARTS_DIR, rel_path)
@@ -790,13 +790,19 @@ def compose_portrait(actor) -> str | None:
     torso_lower = torso_desc.lower()
     torso_tint  = _extract_cloth_tint(torso_desc)
     if "robe" in torso_lower:
-        _overlay("robe/robe.png", torso_tint)
+        _overlay(f"robe/{gender_key}.png", torso_tint)
         composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["robe"])
         composite_sprite_tints.append(torso_tint)
     elif any(w in torso_lower for w in ("tunic", "shirt", "jerkin")):
         _overlay(f"tunic/{gender_key}.png", torso_tint)
         composite_sprite_layers.append(_VILLAGER_SPRITE_CODEPOINTS["tunic"])
         composite_sprite_tints.append(torso_tint)
+
+    # Accessories — necklace
+    acc_desc  = know.get("accessories") or ""
+    acc_tint  = _extract_cloth_tint(acc_desc)
+    if "necklace" in acc_desc.lower():
+        _overlay("necklace/necklace.png", acc_tint)
 
     # Hair
     if hair_tint and hair_color not in ("bald", "hairless"):
@@ -882,11 +888,7 @@ def compose_portrait(actor) -> str | None:
         composite_sprite_tints.append(legs_tint)
 
 
-    # Accessories — necklace
-    acc_desc  = know.get("accessories") or ""
-    acc_tint  = _extract_cloth_tint(acc_desc)
-    if "necklace" in acc_desc.lower():
-        _overlay("necklace/necklace.png", acc_tint)
+
 
     canvas.save(out_path, "PNG")
     print(f"[portrait] {getattr(actor, 'name', '?')} → {cache_hash}.png | layers: {', '.join(_log)}")

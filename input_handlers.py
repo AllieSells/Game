@@ -1024,7 +1024,8 @@ class DialogueEventHandler(PopupEventHandler):
 
         if action == "trade":
             if self.npc.tradable == True:
-                return TradeEventHandler(self.engine, self.npc.inventory)
+                from inventory_ui import TradeGridUI
+                return TradeGridUI(self.engine, self.npc.inventory)
             else:
                 context = ["RefuseTrade"]
                 self.npc.dialogue_context = context

@@ -64,13 +64,13 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='MyGame',
+    name='Dungeons of Aerrok',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
-    console=False,  # Temporarily enable to see errors
+    console=True,  # Temporarily enable to see errors
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,

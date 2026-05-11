@@ -1892,3 +1892,246 @@ class ContainerGridUI(PopupEventHandler):
             elif event.y > 0: self._player_scroll = max(0, self._player_scroll - 1)
         return None
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Trade grid UI — player inventory (left) ↔ merchant inventory (right)
+# Sell (left → right): player receives 75 % of item.value in gold.
+# Buy  (right → left): player pays    150 % of item.value in gold.
+# Inherits all grid/GPU rendering from ContainerGridUI; overrides only the
+# transfer logic, titles, hint labels, and info strip.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TradeGridUI(ContainerGridUI):
+    """Two-panel trade grid using the ContainerGridUI renderer.
+
+    Left panel = player inventory (sell items).
+    Right panel = merchant's inventory (buy items).
+
+    Shift-click or drag-across-panels to buy / sell.
+    Drag within the player panel reorders normally.
+    Merchant panel items cannot be reordered by the player.
+    """
+
+    SELL_MULT: float = 0.75   # player sells at 75 % of base value
+    BUY_MULT:  float = 1.50   # player buys  at 150 % of base value
+
+    def __init__(self, engine: "Engine", container) -> None:
+        super().__init__(engine, container)
+        engine.context_hints = [
+            ("Shift+Click", "Buy / Sell"),
+            ("Drag",        "Buy / Sell"),
+            ("Esc",         "Close"),
+        ]
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _npc_name(self) -> str:
+        return getattr(self.container.parent, "name", "Merchant")
+
+    def _npc_color(self) -> tuple:
+        col = getattr(self.container.parent, "color", None)
+        if isinstance(col, (list, tuple)) and len(col) == 3:
+            return tuple(col)
+        return _TITLE_FG
+
+    # ── Override rendering ────────────────────────────────────────────────────
+
+    def _render_to_console(self, c: tcod.Console) -> None:
+        W, H = _CC_W, _CC_H
+        bf   = _BORDER_DIM
+
+        c.tiles_rgb["bg"][:, :] = _BG
+        c.tiles_rgb["fg"][:, :] = _BG
+        c.tiles_rgb["ch"][:, :] = ord(" ")
+        c.draw_frame(0, 0, W, H, fg=bf, bg=_BG)
+
+        # Titles embedded in the top frame
+        npc_name    = self._npc_name()
+        right_title = f" {npc_name} "
+        c.print(1, 0, " Inventory ", fg=_TITLE_FG, bg=_BG)
+        c.print(_CC_RIGHT_ORI, 0, right_title[:(_CC_W - _CC_RIGHT_ORI - 1)],
+                fg=self._npc_color(), bg=_BG)
+
+        # Hint row — buy / sell labels
+        c.print(2,                1, "\u2190 Sell \u00b775%",  fg=_HINT_FG, bg=_BG)
+        c.print(_CC_RIGHT_ORI + 1, 1, "Buy \u00b7150% \u2192", fg=_HINT_FG, bg=_BG)
+
+        # Vertical divider
+        c.print(_CC_DIV_X, 0, "\u252c", fg=bf, bg=_BG)
+        for y in range(1, _CC_INFO_SEP_Y):
+            c.print(_CC_DIV_X, y, "\u2502", fg=bf, bg=_BG)
+
+        # Horizontal separator at row 2
+        for x in range(1, W - 1):
+            c.print(x, 2, "\u2500", fg=bf, bg=_BG)
+        c.print(0,         2, "\u251c", fg=bf, bg=_BG)
+        c.print(_CC_DIV_X, 2, "\u253c", fg=bf, bg=_BG)
+        c.print(W - 1,     2, "\u2524", fg=bf, bg=_BG)
+
+        # Separator above info strip
+        for x in range(1, W - 1):
+            c.print(x, _CC_INFO_SEP_Y, "\u2500", fg=bf, bg=_BG)
+        c.print(0,         _CC_INFO_SEP_Y, "\u251c", fg=bf, bg=_BG)
+        c.print(_CC_DIV_X, _CC_INFO_SEP_Y, "\u2534", fg=bf, bg=_BG)
+        c.print(W - 1,     _CC_INFO_SEP_Y, "\u2524", fg=bf, bg=_BG)
+
+        # Scroll indicators
+        p_max_s = max(0, -(-len(self._get_player_groups())    // _CC_GRID_COLS) - _CC_GRID_ROWS)
+        c_max_s = max(0, -(-len(self._get_container_groups()) // _CC_GRID_COLS) - _CC_GRID_ROWS)
+        if self._player_scroll > 0:
+            c.print(_CC_DIV_X, _CC_GRID_ROW_ORI, "\u2191", fg=_BORDER_BRIGHT, bg=_BG)
+        if self._player_scroll < p_max_s:
+            c.print(_CC_DIV_X, _CC_INFO_SEP_Y - 1, "\u2193", fg=_BORDER_BRIGHT, bg=_BG)
+        _scroll_r = _CC_W - 2
+        if self._container_scroll > 0:
+            c.print(_scroll_r, _CC_GRID_ROW_ORI, "\u2191", fg=_BORDER_BRIGHT, bg=_BG)
+        if self._container_scroll < c_max_s:
+            c.print(_scroll_r, _CC_INFO_SEP_Y - 1, "\u2193", fg=_BORDER_BRIGHT, bg=_BG)
+
+        # Transparent holes for both item grids
+        for ori in (_CC_LEFT_ORI, _CC_RIGHT_ORI):
+            x1 = ori
+            x2 = ori + _CC_GRID_COLS * _CC_GRID_SCALE
+            y1 = _CC_GRID_ROW_ORI
+            y2 = _CC_GRID_ROW_ORI + _CC_GRID_ROWS * _CC_GRID_SCALE
+            c.tiles_rgb["bg"][x1:x2, y1:y2] = 0
+            c.tiles_rgb["fg"][x1:x2, y1:y2] = 0
+            c.tiles_rgb["ch"][x1:x2, y1:y2] = ord(" ")
+
+        self._draw_info_strip(c)
+
+    def _draw_info_strip(self, c: tcod.Console) -> None:
+        item:   Optional["Item"] = None
+        is_buy: bool             = False
+
+        if self._sel_player >= 0:
+            groups = self._get_player_groups()
+            if self._sel_player < len(groups):
+                item   = groups[self._sel_player]["item"]
+                is_buy = False
+        elif self._sel_container >= 0:
+            groups = self._get_container_groups()
+            if (self._sel_container < len(groups)
+                    and groups[self._sel_container] is not None):
+                item   = groups[self._sel_container]["item"]
+                is_buy = True
+
+        gold    = self.engine.player.gold
+        gold_fg = (220, 180, 50) if gold > 0 else (160, 120, 50)
+
+        if item is None:
+            c.print(2, _CC_INFO_Y,
+                    "Shift+LMB or drag to buy / sell",
+                    fg=_HINT_FG, bg=_BG)
+            c.print(2, _CC_INFO_Y + 1, f"Gold: {gold}", fg=gold_fg, bg=_BG)
+            return
+
+        name = item.name[:(_CC_W - 4)]
+        c.print(2, _CC_INFO_Y, name,
+                fg=getattr(item, "rarity_color", (220, 190, 120)), bg=_BG)
+
+        if is_buy:
+            price     = int(item.value * self.BUY_MULT)
+            can_buy   = gold >= price
+            price_col = (100, 210, 100) if can_buy else (200, 60, 40)
+            c.print(2, _CC_INFO_Y + 1, f"Buy: {price}gp", fg=price_col, bg=_BG)
+        else:
+            price = int(item.value * self.SELL_MULT)
+            c.print(2, _CC_INFO_Y + 1, f"Sell: {price}gp", fg=(160, 200, 100), bg=_BG)
+        c.print(2, _CC_INFO_Y + 2, f"Gold: {gold}", fg=gold_fg, bg=_BG)
+
+    # ── Trade-specific transfer helpers ───────────────────────────────────────
+
+    def _transfer_to_container(self, item: "Item") -> None:
+        """Sell item: remove from player inventory, credit gold at 75 % value."""
+        if len(self.container.items) >= self.container.capacity:
+            self.engine.message_log.add_message(
+                "The merchant can't take any more items.", color.impossible)
+            return
+        if self.engine.player.equipment.item_is_equipped(item):
+            self.engine.player.equipment.unequip_item(item, add_message=True)
+        self.engine.player.inventory.items.remove(item)
+        self.container.items.append(item)
+        item.parent = self.container
+        # Place in first free slot of the merchant's sparse slot list
+        placed = False
+        for i in range(len(self._container_slots)):
+            if self._container_slots[i] is None:
+                self._container_slots[i] = item
+                placed = True
+                break
+        if not placed:
+            self._container_slots.append(item)
+        sell_price = int(item.value * self.SELL_MULT)
+        self.engine.player.gold += sell_price
+        sounds.play_equip_manycoins_sound()
+        if hasattr(item, "drop_sound") and item.drop_sound is not None:
+            item.drop_sound()
+        self.engine.message_log.add_message(
+            f"You sell the {item.name} for {sell_price}gp.")
+
+    def _transfer_to_player(self, item: "Item") -> None:
+        """Buy item: deduct gold at 150 % value, add item to player inventory."""
+        buy_price = int(item.value * self.BUY_MULT)
+        if self.engine.player.gold < buy_price:
+            self.engine.message_log.add_message(
+                f"You need {buy_price}gp to buy the {item.name}.",
+                color.error)
+            return
+        if not self.engine.player.inventory.can_carry(item):
+            self.engine.message_log.add_message(
+                "You are carrying too much.", color.impossible)
+            return
+        self.container.items.remove(item)
+        for i, s in enumerate(self._container_slots):
+            if s is item:
+                self._container_slots[i] = None
+                break
+        self.engine.player.inventory.items.append(item)
+        item.parent = self.engine.player.inventory
+        self.engine.player.gold -= buy_price
+        sounds.play_equip_manycoins_sound()
+        if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
+            item.pickup_sound()
+        self.engine.message_log.add_message(
+            f"You buy the {item.name} for {buy_price}gp.")
+
+    # ── Override drag: suppress merchant-panel reorder ────────────────────────
+
+    def _complete_drag(self, tx: int, ty: int) -> None:
+        item     = self._drag_item
+        src_type = self._drag_src_type
+        src_idx  = self._drag_src_idx
+        self._drag_item     = None
+        self._drag_src_type = None
+        self._drag_src_idx  = None
+        if item is None:
+            return
+
+        left_cell  = self._hit_left_cell(tx, ty)
+        right_cell = self._hit_right_cell(tx, ty)
+
+        if left_cell is not None:
+            col, row = left_cell
+            dst_idx  = self._cell_to_idx(col, row, self._player_scroll)
+            if src_type == "player":
+                if dst_idx != src_idx:
+                    self._swap_player_items(src_idx, dst_idx)
+            elif src_type == "container":
+                self._transfer_to_player(item)  # buy
+            return
+
+        if right_cell is not None:
+            if src_type == "player":
+                self._transfer_to_container(item)  # sell
+            # Merchant's panel — don't allow player to reorder their wares
+            return
+
+        # Released outside any panel — drop player items on the ground
+        ix, iy = self._to_panel(tx, ty)
+        if not (0 <= ix < _CC_W and 0 <= iy < _CC_H):
+            if src_type == "player":
+                actions.DropItem(self.engine.player, item).perform()
+        elif hasattr(item, "drop_sound") and item.drop_sound is not None:
+            item.drop_sound()
+

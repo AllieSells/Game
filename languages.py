@@ -165,6 +165,7 @@ def generate_sentence(intent: str, language: str = "goblin", known: bool = False
 
 
 # Demo
+"""
 for lang in ["goblin"]:
     print(f"\n--- {lang.upper()} ---")
     for intent in ("observe", "threat"):
@@ -173,3 +174,4 @@ for lang in ["goblin"]:
             common = generate_sentence(intent, lang, known=True)
             print(f"  {native}")
             print(f"  ~ {common}")
+"""

@@ -519,8 +519,8 @@ class Actor(Entity):
         complexions = {
             "skin_tone": {
                 "fair": 25,
-                "brown": 15,
-                "dark": 8,
+                "brown": 25,
+                "dark": 25,
             },
             "build": {
                 " very slim": 8,

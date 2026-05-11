@@ -49,7 +49,7 @@ _render_frame = 0
 def _dlog(msg: str) -> None:
     """Generic debug log message with timestamp."""
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    _render_log_file.write(f"[{timestamp}] {msg}\n")
+    _render_log_file.write(f"[{timestamp}] [frame {_render_frame}] {msg}\n")
     _render_log_file.flush()
 
 def _rlog(msg: str) -> None:
@@ -645,7 +645,7 @@ def main() -> None:
             now = time.time()
             delta = now - last_frame
             last_frame = now
-            _dlog(f"Main loop start: delta={delta:.4f}s")
+            #_dlog(f"Main loop start: delta={delta:.4f}s")
             # Process deferred handler transitions (e.g., GameOver) after one final frame update.
             pending_engine = getattr(handler, 'engine', None)
             if pending_engine is not None:
@@ -738,7 +738,7 @@ def main() -> None:
             # Phase 3 — screen-on: played once when game_load flips True.
             #           Expands from line to full scene, then falls through normally,
             #           allowing the main loop to transition to MainGameEventHandler.
-            _rlog(f"CRT_STATE frame={_render_frame} gen={_gen_in_progress} off={_crt_off_played} on={_crt_on_played} snap={'yes' if _gen_scene_tex is not None else 'no'} handler={type(handler).__name__} gen_complete={getattr(handler,'game_load',None)}")
+            #(f"CRT_STATE frame={_render_frame} gen={_gen_in_progress} off={_crt_off_played} on={_crt_on_played} snap={'yes' if _gen_scene_tex is not None else 'no'} handler={type(handler).__name__} gen_complete={getattr(handler,'game_load',None)}")
             if _gen_in_progress:
                 # Start gen thread immediately — no CRT off before loading, the screen
                 # stays visible so the player can watch the boot progress.
@@ -862,9 +862,9 @@ def main() -> None:
             gpu.crt_force_fast_path = _crt_force_fast_path
 
             # --- Begin scene rendering to off-screen target for GPU bloom ---
-            _rlog(f"ensure_bloom_targets({window_w},{window_h}) fast={_crt_force_fast_path}")
+            #_rlog(f"ensure_bloom_targets({window_w},{window_h}) fast={_crt_force_fast_path}")
             gpu.ensure_bloom_targets(window_w, window_h)
-            _rlog("set_render_target(scene_tex)")
+            #_rlog("set_render_target(scene_tex)")
             _scene_ctx = renderer.set_render_target(gpu.scene_tex)
 
             def _apply_lightmap():
@@ -1486,7 +1486,7 @@ def main() -> None:
                 renderer.copy(ui_tex, dest=(0, 0, window_w, window_h))
 
             # --- End scene rendering: restore default target, apply global CRT post-process ---
-            _rlog("restore_render_target")
+            #_rlog("restore_render_target")
             _scene_ctx.__exit__(None, None, None)  # restore default render target
 
             # Barrel distortion + chromatic aberration: scene_tex → post_crt_tex
@@ -1634,13 +1634,13 @@ def main() -> None:
                     bloom_source=gpu.post_crt_tex,
                 )
 
-            _rlog("renderer.present")
+            #_rlog("renderer.present")
             try:
                 renderer.present()
             except Exception as e:
                 print(f"Error during renderer.present(): {e}")
                 raise
-            _rlog("present done")
+            #_rlog("present done")
 
 # ---------------------- # 
 # MAIN GAME LOOP

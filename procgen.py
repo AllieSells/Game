@@ -1119,7 +1119,7 @@ def generate_first_floor(
         age=100,
         hair_color="white",
         hair_style="long",
-        facial_hair="long",
+        facial_hair="bearded",
         skin_tone="fair",
         eye_color="blue",
         clothing_style="formal",
