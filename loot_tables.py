@@ -16,7 +16,7 @@ def generate_starter_chest_loot() -> list:
         _instantiate(entity_factories.torch),
         _instantiate(entity_factories.dagger),
         _instantiate(entity_factories.leather_cap),
-        _instantiate(entity_factories.generate_sigil_stone),
+        _instantiate(entity_factories.generate_spellbook),
         _instantiate(entity_factories.lesser_health_potion),
     ]
 
@@ -33,8 +33,8 @@ def choose_item(pool):
 
 
 _CHEST_TIER_WEIGHTS = {
-    "basic":    (("common", 70), ("uncommon", 22), ("rare", 8)),
-    "advanced": (("common", 30), ("uncommon", 50), ("rare", 20)),
+    "basic":    (("common", 70), ("uncommon", 22), ("rare", 8), ("legendary", 1)),
+    "advanced": (("common", 30), ("uncommon", 50), ("rare", 20), ("legendary", 3)),
 }
 
 _POOL_MAP = None
@@ -46,6 +46,8 @@ def _get_pool_map():
             "common":   entity_factories.COMMON_POOL,
             "uncommon": entity_factories.UNCOMMON_POOL,
             "rare":     entity_factories.RARE_POOL,
+            "legendary": entity_factories.LEGENDARY_POOL,
+            "ammo":     entity_factories.AMMO_POOL,
         }
     return _POOL_MAP
 
@@ -57,10 +59,18 @@ def generate_tiered_chest_loot(chest_tier: str = "basic") -> list:
     pool_map = _get_pool_map()
 
     items = []
-    for _ in range(random.randint(0, 4)):
+    for _ in range(random.randint(2, 6)):
         rarity = random.choices(rarity_names, weights=rarity_weights, k=1)[0]
         entry  = choose_item(pool_map[rarity])
         item   = _instantiate(entry.item_factory)
         if item:
             items.append(item)
+
+    # Add one random ammo item (not consuming a weighted loot pick)
+    for _ in range(random.randint(0, 2)):
+        ammo_entry = choose_item(pool_map["ammo"])
+        ammo_item = _instantiate(ammo_entry.item_factory)
+        if ammo_item:
+            items.append(ammo_item)
+    
     return items

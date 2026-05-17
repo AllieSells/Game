@@ -48,6 +48,7 @@ _SPAWN_TABLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "js
 class SpawnEntry(NamedTuple):
     biome: str           # "any" or a specific biome string
     min_floor: int       # first floor this entry can appear on
+    max_floor: int       # last floor this entry can appear on (-1 = no limit)
     factory: Callable    # callable that returns a fresh Actor
     weight: int          # relative spawn weight
 
@@ -73,9 +74,11 @@ class EnemySpawner:
         weight: int,
         biome: str = "any",
         min_floor: int = 0,
+        max_floor: int = -1,
     ) -> None:
         """Register an enemy factory for a particular biome/depth."""
         self._entries.append(SpawnEntry(biome=biome, min_floor=min_floor,
+                                        max_floor=max_floor,
                                         factory=factory, weight=weight))
 
     def _register_defaults(self) -> None:
@@ -87,6 +90,7 @@ class EnemySpawner:
             self.register(
                 biome=entry["biome"],
                 min_floor=entry["min_floor"],
+                max_floor=entry.get("max_floor", -1),
                 factory=lambda obj=factory_obj: copy.deepcopy(obj),
                 weight=entry["weight"],
             )
@@ -105,15 +109,18 @@ class EnemySpawner:
         """
         combined: Dict[Callable, int] = {}
 
+        def _floor_matches(entry: SpawnEntry) -> bool:
+            return entry.min_floor <= floor and (entry.max_floor == -1 or floor <= entry.max_floor)
+
         # Pass 1 – generic entries
         for entry in self._entries:
-            if entry.biome == "any" and entry.min_floor <= floor:
+            if entry.biome == "any" and _floor_matches(entry):
                 combined[entry.factory] = entry.weight
 
         # Pass 2 – biome-specific entries (merged on top)
         if biome and biome != "any":
             for entry in self._entries:
-                if entry.biome == biome and entry.min_floor <= floor:
+                if entry.biome == biome and _floor_matches(entry):
                     combined[entry.factory] = entry.weight
 
         return combined
@@ -170,10 +177,11 @@ def add_enemy(
     weight: int,
     biome: str = "any",
     min_floor: int = 0,
+    max_floor: int = -1,
 ) -> None:
     """Register an enemy with the global spawner."""
     enemy_spawner.register(factory=factory, weight=weight,
-                           biome=biome, min_floor=min_floor)
+                           biome=biome, min_floor=min_floor, max_floor=max_floor)
 
 
 # Legacy alias kept for mods that use add_enemy_to_floor(floor, factory, weight)

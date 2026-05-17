@@ -3,9 +3,8 @@ ASCII Equipment Interface
 
 A visual equipment interface that shows a body diagram with selectable slots.
 """
-
 from __future__ import annotations
-from typing import Optional, Dict, List, Tuple, TYPE_CHECKING
+from typing import Optional, Dict, List, TYPE_CHECKING
 
 import tcod
 import color
@@ -35,6 +34,16 @@ class EquipmentSlot:
     def get_equipped_item(self, equipment) -> Optional[Item]:
         """Get the item equipped in this slot."""
         if not equipment:
+            return None
+
+        # Ring slots are backed by explicit keys in equipment.equipped_items.
+        if self.name == "Ring 1":
+            if hasattr(equipment, 'equipped_items'):
+                return equipment.equipped_items.get("RING_1")
+            return None
+        if self.name == "Ring 2":
+            if hasattr(equipment, 'equipped_items'):
+                return equipment.equipped_items.get("RING_2")
             return None
             
         for eq_type in self.equipment_types:
@@ -195,6 +204,8 @@ class EquipmentUI(PopupEventHandler):
             EquipmentSlot("L.Foot", 0, 8, [EquipmentType.BOOTS], "o", "•"),
             EquipmentSlot("R.Foot", 0, 9, [EquipmentType.BOOTS], "o", "•"),
             EquipmentSlot("Back", 0, 10, [EquipmentType.BACKPACK], "o", "•"),
+            EquipmentSlot("Ring 1", 20, 9, [EquipmentType.RING], "o", "•"),
+            EquipmentSlot("Ring 2", 20, 10, [EquipmentType.RING], "o", "•"),
         ]
     
     def on_render(self, console: Console) -> None:
@@ -244,21 +255,29 @@ class EquipmentUI(PopupEventHandler):
         
         list_x = base_x + 3
         list_y = base_y + 3
-        
-        for i, slot in enumerate(self.slots):
+
+        main_slots = [slot for slot in self.slots if not slot.name.startswith("Ring")]
+        ring_slots = [slot for slot in self.slots if slot.name.startswith("Ring")]
+
+        # Draw core equipment slots in the left column.
+        for i, slot in enumerate(main_slots):
             equipped_item = slot.get_equipped_item(self.engine.player.equipment)
             is_disabled = self._is_slot_disabled(slot)
+            slot_x = list_x
+            slot_y = list_y + i
+
+            selected_index = self.slots.index(slot)
             
             # Choose colors based on selection, equipment status, and injury
             if is_disabled:
                 fg_color = color.red
                 bg_color = (45, 35, 25)
                 marker = "  "
-                if i == self.selected_slot:
+                if selected_index == self.selected_slot:
                     fg_color = color.white
                     bg_color = (80, 60, 30)
                     marker = "> "
-            elif i == self.selected_slot:
+            elif selected_index == self.selected_slot:
                 fg_color = color.white
                 bg_color = (80, 60, 30)
                 marker = "> "
@@ -297,7 +316,66 @@ class EquipmentUI(PopupEventHandler):
                 item_color = getattr(equipped_item, 'rarity_color', color.white)
                 text_parts.append((item_name, item_color))
             
-            print_colored_text_with_bg(console, list_x, list_y + i, text_parts, bg_color)
+            print_colored_text_with_bg(console, slot_x, slot_y, text_parts, bg_color)
+
+        # Draw ring slots in a dedicated right-side mini panel.
+        ring_x = list_x + 25
+        ring_y = list_y + 8
+        console.print(ring_x, ring_y - 1, "Rings:", fg=color.yellow, bg=(45, 35, 25))
+
+        for ring_row, slot in enumerate(ring_slots):
+            equipped_item = slot.get_equipped_item(self.engine.player.equipment)
+            is_disabled = self._is_slot_disabled(slot)
+
+            slot_x = ring_x
+            slot_y = ring_y + ring_row
+            selected_index = self.slots.index(slot)
+
+            if is_disabled:
+                fg_color = color.red
+                bg_color = (45, 35, 25)
+                marker = "  "
+                if selected_index == self.selected_slot:
+                    fg_color = color.white
+                    bg_color = (80, 60, 30)
+                    marker = "> "
+            elif selected_index == self.selected_slot:
+                fg_color = color.white
+                bg_color = (80, 60, 30)
+                marker = "> "
+            elif equipped_item:
+                fg_color = color.white
+                bg_color = (45, 35, 25)
+                marker = "  "
+            else:
+                fg_color = color.white
+                bg_color = (45, 35, 25)
+                marker = "  "
+
+            slot_hp = self._get_slot_hp(slot)
+            if slot_hp <= 0:
+                part_color = color.dark_red
+            elif slot_hp < 30:
+                part_color = color.red
+            elif slot_hp < 70:
+                part_color = color.yellow
+            else:
+                part_color = color.green
+
+            slot_char = slot.equipped_char if equipped_item else slot.char
+            text_parts = [
+                (f"{marker}{slot_char}{slot.name:<7}[", fg_color),
+                (f"{slot_hp:>3}%", part_color),
+                ("]", fg_color),
+            ]
+
+            if equipped_item:
+                item_name = equipped_item.name[:16]
+                text_parts.append((":", fg_color))
+                item_color = getattr(equipped_item, 'rarity_color', color.white)
+                text_parts.append((item_name, item_color))
+
+            print_colored_text_with_bg(console, slot_x, slot_y, text_parts, bg_color)
     def _draw_player_stats(self, console: Console, base_x: int, base_y: int) -> None:
         ''' Draw equipment stats like power and defense at the bottom of the equipment UI.'''
         from text_utils import print_colored_text_with_bg
@@ -410,10 +488,6 @@ class EquipmentUI(PopupEventHandler):
         
         # For unequipped items, return the first one (FIFO)
         return group['items'][0] if group['items'] else group['item']
-        
-        # Sort items: unequipped items first, item currently in this slot last
-        compatible.sort(key=lambda item: item == currently_equipped_in_slot)
-        return compatible
     
     def _is_item_equipped(self, item: Item) -> bool:
         """Check if an item is currently equipped in any slot."""
@@ -578,7 +652,7 @@ class EquipmentUI(PopupEventHandler):
                     f"Cannot use {selected_slot.name} - too injured!",
                     color.impossible
                 )
-            except:
+            except Exception:
                 pass
             return None  # Stay in equipment UI
         
@@ -606,7 +680,7 @@ class EquipmentUI(PopupEventHandler):
                     self.engine.player.equipment.equip_to_specific_hand(selected_item, "right hand")
                 else:
                     action = actions.EquipAction(self.engine.player, selected_item)
-                    action.perform()
+                    self.engine.execute_action(action, is_player_action=False)
         
         return None  # Stay in equipment UI
     
@@ -624,7 +698,7 @@ class EquipmentUI(PopupEventHandler):
                     f"Cannot access {selected_slot.name} - too injured!",
                     color.impossible
                 )
-            except:
+            except Exception:
                 pass
             return None  # Stay in equipment UI
             

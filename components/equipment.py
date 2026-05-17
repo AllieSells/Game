@@ -5,12 +5,10 @@ from typing import Optional, TYPE_CHECKING, Dict, Set
 from components.base_component import BaseComponent
 from equipment_types import EquipmentType
 import color
+import proficiency_system as profsys
 
 if TYPE_CHECKING:
     from entity import Actor, Item
-    from components.entity.body.body_parts import BodyPartType
-
-import sounds
 
 
 class Equipment(BaseComponent):
@@ -23,6 +21,22 @@ class Equipment(BaseComponent):
         self.grasped_items: Dict[str, Item] = {}  # Maps specific body part names to grasped items
 
     @property
+    def mana_regen(self) -> int:
+        # Get all unique equipped items efficiently
+        all_items = set(self.equipped_items.values()) | set(self.grasped_items.values()) | set(self.body_part_coverage.values())
+
+        bonus = 0
+        for item in all_items:
+            if item.equippable is None:
+                continue
+            
+            item_mana_regen = getattr(item.equippable, 'mana_regen', 0)
+            if item_mana_regen:
+                bonus += item_mana_regen
+
+        return bonus
+
+    @property
     def defense_bonus(self) -> int:
         # Get all unique equipped items efficiently  
         all_items = set(self.equipped_items.values()) | set(self.grasped_items.values()) | set(self.body_part_coverage.values())
@@ -33,13 +47,9 @@ class Equipment(BaseComponent):
                 continue
             
             item_defense = item.equippable.defense_bonus
-            
-            # Apply light armor skill bonus if applicable
-            modifier = 0
-            if 'light armor' in item.equippable.parent.tags:
-                modifier = self.parent.level.traits['light armor']['level'] - 1
-            
-            bonus += item_defense + modifier
+            item_tags = set(getattr(item, 'tags', []) or [])
+            armor_profile = profsys.armor_profile(self.parent, item_tags)
+            bonus += int(round(item_defense * armor_profile.defense_bonus_multiplier))
 
         return bonus
 
@@ -56,6 +66,18 @@ class Equipment(BaseComponent):
         except Exception:
             return False
 
+    def get_equipped_quiver(self) -> Optional[Item]:
+        """Return the currently equipped quiver item, if any."""
+        for item in self.equipped_items.values():
+            if not item or not getattr(item, "equippable", None):
+                continue
+            if item.equippable.equipment_type.name != "BACKPACK":
+                continue
+            tags = {tag.lower() for tag in getattr(item, "tags", [])}
+            if "quiver" in tags:
+                return item
+        return None
+
     @property
     def power_bonus(self) -> int:
         # Get all unique equipped items efficiently
@@ -67,6 +89,13 @@ class Equipment(BaseComponent):
         """Check if an item can be equipped based on body part tags."""
         if not item.equippable:
             return False, "Item is not equippable"
+        
+        eq_type = item.equippable.equipment_type
+        eq_type_name = eq_type.name
+        
+        # Rings and back items don't require body part checks
+        if eq_type_name in ("RING", "BACKPACK"):
+            return True, "Can equip"
         
         # Use the new tag-based system
         if not hasattr(self.parent, 'body_parts') or not self.parent.body_parts:
@@ -86,7 +115,6 @@ class Equipment(BaseComponent):
             # Actually, let's assume if any tag matches a part, it can be worn, 
             # but we want to ensure the entity actually HAS the anatomy.
             
-            missing_tags = []
             available_tags = set()
             for part in self.parent.body_parts.get_all_parts().values():
                 available_tags.update(part.tags)
@@ -95,6 +123,38 @@ class Equipment(BaseComponent):
                  return False, f"Anatomy incompatible (requires: {item.equippable.required_tags})"
 
         return True, "Can equip"
+
+    def _hand_has_free_slot(self, hand_tag: str) -> bool:
+        """Return True if any matching hand body part is currently unoccupied."""
+        if not hasattr(self.parent, "body_parts") or not self.parent.body_parts:
+            return False
+
+        matching_parts = [
+            part for part in self.parent.body_parts.get_all_parts().values()
+            if "hand" in getattr(part, "tags", set()) and hand_tag in getattr(part, "tags", set())
+        ]
+        if not matching_parts:
+            return False
+
+        for part in matching_parts:
+            if part.name not in self.body_part_coverage and part.name not in self.grasped_items:
+                return True
+        return False
+
+    def _preferred_hand_for_item(self, item: Item) -> Optional[str]:
+        """Choose a hand for hand-held items, preferring a free side."""
+        if not getattr(item, "equippable", None):
+            return None
+
+        required_tags = getattr(item.equippable, "required_tags", set())
+        if "hand" not in required_tags:
+            return None
+
+        if self._hand_has_free_slot("right"):
+            return "right"
+        if self._hand_has_free_slot("left"):
+            return "left"
+        return None
 
     # Return slot item is in
     def get_slot(self, item: Item) -> Optional[str]:
@@ -172,7 +232,8 @@ class Equipment(BaseComponent):
             self.unequip_item(equippable_item, add_message)
         elif can_equip:
             # Item can be equipped, equip it
-            self.equip_item(equippable_item, add_message)
+            preferred_hand = self._preferred_hand_for_item(equippable_item)
+            self.equip_item(equippable_item, add_message, preferred_hand=preferred_hand)
         else:
             # Cannot equip item
             if add_message:
@@ -181,7 +242,7 @@ class Equipment(BaseComponent):
                     # Try to get engine instance for message log
                     engine = Engine.instance
                     engine.message_log.add_message(f"Cannot equip {equippable_item.name}: {reason}", color.impossible)
-                except:
+                except Exception:
                     self.engine.debug_log(f"Cannot equip {equippable_item.name}: {reason}", handler=self.__class__.__name__, event="EquipError")
     
     def equip_item(self, item: Item, add_message: bool = True, preferred_hand: str = None) -> None:
@@ -191,6 +252,41 @@ class Equipment(BaseComponent):
             return
         
         eq_type = item.equippable.equipment_type
+        eq_type_name = eq_type.name
+        item_tags = {tag.lower() for tag in getattr(item, "tags", [])}
+        is_back_slot_item = eq_type_name == "BACKPACK"
+        is_ring = eq_type_name == "RING"
+
+        # Back-slot and ring items should not claim body coverage and displace armor.
+        if is_back_slot_item or is_ring:
+            if is_ring:
+                # Allow up to 2 rings: find first free slot
+                ring_1_key = "RING_1"
+                ring_2_key = "RING_2"
+                if ring_1_key not in self.equipped_items or not self.equipped_items[ring_1_key]:
+                    self.equipped_items[ring_1_key] = item
+                elif ring_2_key not in self.equipped_items or not self.equipped_items[ring_2_key]:
+                    self.equipped_items[ring_2_key] = item
+                else:
+                    # Both slots full, unequip the first one and equip to first slot
+                    self.unequip_item(self.equipped_items[ring_1_key], add_message=False)
+                    self.equipped_items[ring_1_key] = item
+            else:
+                # Back-slot item (quiver)
+                existing = self.equipped_items.get(eq_type_name)
+                if existing and existing != item:
+                    self.unequip_item(existing, add_message)
+                self.equipped_items[eq_type_name] = item
+            
+            if add_message:
+                self.equip_message(item.name)
+            self._play_equip_sound(item)
+            try:
+                import sprite_manager
+                sprite_manager.refresh_actor_sprite(self.parent)
+            except Exception:
+                pass
+            return
         
         # First, unequip any items that would conflict with this one
         if hasattr(self.parent, "body_parts"):
@@ -230,7 +326,6 @@ class Equipment(BaseComponent):
                     self.unequip_item(conflicting_item, add_message)
         
         # Update general equipment tracking
-        eq_type_name = eq_type.name
         self.equipped_items[eq_type_name] = item
         
         if add_message:
@@ -294,16 +389,13 @@ class Equipment(BaseComponent):
         if not item.equippable:
             return
         
-        eq_type = item.equippable.equipment_type
-        
         # Remove from all tracking systems (optimized with dict comprehensions)
         self.grasped_items = {k: v for k, v in self.grasped_items.items() if v != item}
         self.body_part_coverage = {k: v for k, v in self.body_part_coverage.items() if v != item}
         
-        # Remove from equipped items
-        eq_type_name = eq_type.name
-        if eq_type_name in self.equipped_items and self.equipped_items[eq_type_name] == item:
-            del self.equipped_items[eq_type_name]
+        # Remove from equipped items by value. This supports keyed slots like
+        # RING_1/RING_2 in addition to standard type-name keys.
+        self.equipped_items = {k: v for k, v in self.equipped_items.items() if v != item}
         
         if add_message:
             self.unequip_message(item.name)
@@ -332,6 +424,13 @@ class Equipment(BaseComponent):
                 return item.tags
         return None
 
+    def get_all_armor_tags(self) -> Set[str]:
+        tags: Set[str] = set()
+        for item in self.body_part_coverage.values():
+            if item and getattr(item, 'equippable', None):
+                tags.update(set(getattr(item, 'tags', []) or []))
+        return tags
+
     def get_defense_for_part(self, part_name: str) -> int:
         """Get defense bonus provided by equipment for a specific body part."""
         # Lazy init coverage if needed (handling load/init race conditions)
@@ -342,7 +441,9 @@ class Equipment(BaseComponent):
         if part_name in self.body_part_coverage:
             item = self.body_part_coverage[part_name]
             if item.equippable:
-                return item.equippable.defense_bonus
+                item_tags = set(getattr(item, 'tags', []) or [])
+                armor_profile = profsys.armor_profile(self.parent, item_tags)
+                return int(round(item.equippable.defense_bonus * armor_profile.defense_bonus_multiplier))
         return 0
     
     def _update_all_coverage(self) -> None:
@@ -354,8 +455,10 @@ class Equipment(BaseComponent):
         
         # helper to process an item
         def process_item(item: Item):
-            if not item.equippable: return
-            if not hasattr(self.parent, "body_parts"): return
+            if not item.equippable:
+                return
+            if not hasattr(self.parent, "body_parts"):
+                return
             
             # Skip weapons/shields as they don't provide passive coverage usually
             # (Logic matches equip_item)

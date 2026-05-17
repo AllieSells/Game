@@ -214,6 +214,74 @@ def render_debug_overlay(console: Console, fps: float, player_pos: Tuple[int, in
     console.print(render_x, render_y + 4, f"Frame Time: {frame_time_ms:.2f}ms", fg=(255, 255, 255))
     console.print(render_x, render_y + 5, f"Mouse Pos: ({engine.mouse_x}, {engine.mouse_y})", fg=(255, 255, 255))
 
+    # Composite slot usage (helps track blood-tile sprite-slot exhaustion)
+    try:
+        import sprite_manager as _sm
+        _slot_info = _sm.get_composite_slot_usage()
+        console.print(render_x, render_y + 7, f"Sprite slots: alloc={_slot_info['slots_allocated']} free={_slot_info['slots_free']} live={_slot_info['slots_live']}", fg=(200, 200, 80))
+        console.print(render_x, render_y + 8, f"Puddle pos: {_slot_info['puddle_positions']}  TilePuddle: {_slot_info['tile_puddle_positions']}", fg=(200, 200, 80))
+        console.print(render_x, render_y + 9, f"ComposeCache: {_slot_info['compose_cache_entries']}  PuddleCache: {_slot_info['puddle_sprite_cache_entries']}", fg=(200, 200, 80))
+    except Exception:
+        pass
+
+    # (Lag chart rendered separately by render_lag_profiler when F1 is active.)
+
+
+def render_lag_profiler(console: Console, engine) -> None:
+    """Render the F1 lag profiler chart independently of the debug overlay."""
+    profiler = getattr(engine, "lag_profiler", None)
+    if not isinstance(profiler, dict):
+        return
+    ema_ms = profiler.get("ema_ms", {}) or {}
+    last_ms = profiler.get("last_frame_ms", {}) or {}
+    sample_ms = last_ms if isinstance(last_ms, dict) and last_ms else ema_ms
+    total_ms = float(sample_ms.get("total", 0.0) or 0.0)
+
+    chart_x = 0
+    chart_y = 0
+    console.print(chart_x, chart_y, "Lag Chart (CPU Tick EMA)", fg=(255, 220, 120))
+
+    if total_ms <= 0.0:
+        console.print(chart_x, chart_y + 1, "Collecting profiler samples...", fg=(140, 140, 140))
+        return
+
+    frame_ms = float(getattr(engine, "frame_time_ms", 0.0) or 0.0)
+    console.print(
+        chart_x, chart_y + 1,
+        f"Real Frame: {frame_ms:5.2f}ms  CPU Tick: {total_ms:5.2f}ms",
+        fg=(180, 220, 255),
+    )
+
+    sections = [
+        ("entity_updates", "entities"),
+        ("ai_preturn",     "ai_pre"),
+        ("ai_postturn",    "ai_post"),
+        ("autopath_step",  "ap_step"),
+        ("autopath_scan",  "ap_scan"),
+        ("sprite_prune",   "prune"),
+        ("light_shafts",   "light"),
+        ("grass_waves",    "grass"),
+        ("global_anims",   "globalfx"),
+        ("cleanup",        "cleanup"),
+    ]
+    bar_width = 12
+    row = chart_y + 2
+    denom = max(0.05, total_ms)
+    for key, label in sections:
+        ms = float(sample_ms.get(key, 0.0) or 0.0)
+        pct = max(0.0, min(999.0, (ms / denom) * 100.0))
+        fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
+        bar = ("#" * fill) + ("." * (bar_width - fill))
+        ema_val = float(ema_ms.get(key, ms) or ms)
+        if pct >= 40.0:
+            fg = (255, 120, 120)
+        elif pct >= 20.0:
+            fg = (255, 180, 120)
+        else:
+            fg = (200, 200, 200)
+        console.print(chart_x, row, f"{label:<8} {ms:5.2f} {pct:4.0f}% {bar} avg:{ema_val:4.1f}", fg=fg)
+        row += 1
+
 
 
 
@@ -529,6 +597,9 @@ def render_combat_stats(
     # Show ammo only when a bow is currently equipped/readied.
     has_bow = False
     arrow_count = 0
+    quiver_arrow_count = None
+    quiver_selected_type = None
+    counted_arrow_ids = set()
 
     equipped_items = list(equipment.grasped_items.values()) + list(equipment.equipped_items.values())
 
@@ -539,8 +610,18 @@ def render_combat_stats(
         tags = {tag.lower() for tag in getattr(item, "tags", [])}
         if eq_type_name == "RANGED" or "bow" in tags:
             has_bow = True
+        if eq_type_name == "BACKPACK" and "quiver" in tags:
+            counts = getattr(item, "ammo_counts", None)
+            if isinstance(counts, dict):
+                quiver_arrow_count = sum(max(0, int(v or 0)) for v in counts.values())
+            else:
+                quiver_arrow_count = int(getattr(item, "arrow_count", 0) or 0)
+            quiver_selected_type = str(getattr(item, "selected_ammo_type", "") or "").strip()
         if eq_type_name == "PROJECTILE" or "arrow" in tags or "ammunition" in tags:
-            arrow_count += 1
+            item_id = id(item)
+            if item_id not in counted_arrow_ids:
+                counted_arrow_ids.add(item_id)
+                arrow_count += 1
 
     if inventory:
         for item in inventory.items:
@@ -549,10 +630,17 @@ def render_combat_stats(
             eq_type_name = item.equippable.equipment_type.name
             tags = {tag.lower() for tag in getattr(item, "tags", [])}
             if eq_type_name == "PROJECTILE" or "arrow" in tags or "ammunition" in tags:
-                arrow_count += 1
+                item_id = id(item)
+                if item_id not in counted_arrow_ids:
+                    counted_arrow_ids.add(item_id)
+                    arrow_count += 1
 
     if has_bow:
-        ammo_text = f"Arrows: {arrow_count}"
+        display_arrow_count = quiver_arrow_count if quiver_arrow_count is not None else arrow_count
+        if quiver_selected_type:
+            ammo_text = f"Ammo: {quiver_selected_type} ({display_arrow_count})"
+        else:
+            ammo_text = f"Arrows: {display_arrow_count}"
         ammo_x = max(1, console.width - len(ammo_text) - WEAPON_TEXT_OFFSET_FROM_RIGHT)
         console.print(x=ammo_x, y=PANEL_Y + 2, string=ammo_text, fg=color.bronze_text)
 

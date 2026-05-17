@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from email.mime import base
 from random import random as random_float
 from typing import TYPE_CHECKING
 
@@ -79,10 +78,10 @@ class Fighter(BaseComponent):
         sounds.play_death_sound()
         
         if self.engine.player is self.parent:
-            death_message = "YOU DIED IDIOT"
+            death_message = ""
             death_message_color = color.player_die
         else:
-            death_message = f"{self.parent.name} is dead! Not big surpise."
+            death_message = f"The {self.parent.name.lower()} is dead."
             death_message_color = color.enemy_die
         # If configured not to leave a corpse (ephemeral creatures), remove
         # the entity from the map and award XP without creating a corpse.
@@ -133,7 +132,6 @@ class Fighter(BaseComponent):
         self.parent.color = (255, 255, 255)
         self.parent.blocks_movement = False
         self.parent.ai = None
-        import text_utils
         self.parent.name = f"Corpse of {self.parent.name}"
         self.parent.render_order = RenderOrder.CORPSE
         self.parent.type = "Dead"
@@ -245,7 +243,7 @@ class Fighter(BaseComponent):
         if body_parts_healed and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
             try:
                 self.parent.gamemap.engine.message_log.add_message(
-                    f"Your injuries begin to mend.",
+                    "Your injuries begin to mend.",
                     color.light_green
                 )
             except Exception:
@@ -253,7 +251,38 @@ class Fighter(BaseComponent):
 
         return amount_recovered
     
+    def _guide_retaliate(self) -> None:
+        """Fire a volley of Inflict Wounds spells at the player for daring to attack the Guide."""
+        if getattr(self, '_retaliating', False):
+            return
+        self._retaliating = True
+        try:
+            guide = self.parent
+            try:
+                engine = self.engine
+                player = engine.player
+            except Exception:
+                return
+
+            engine.message_log.add_message(
+                "The Guide regards you with infinite patience... then unleashes divine retribution!",
+                color.dark_purple
+            )
+            from actions import SpellAction
+            from components.spells import FireballSpell
+            engine.execute_action(SpellAction(guide, FireballSpell(), target_xy=(player.x, player.y)), is_player_action=False)
+        finally:
+            self._retaliating = False
+
+        
+        
+
     def take_damage(self, amount: int, targeted_part=None, causes_bleeding: bool = True) -> None:
+        # The Guide is invulnerable — retaliate against the player instead
+        if getattr(self.parent, 'type', None) == 'Guide':
+            self._guide_retaliate()
+            return
+
         # Capture the entity name before it potentially dies/changes
         entity_name = self.parent.name
 
@@ -265,6 +294,24 @@ class Fighter(BaseComponent):
         
         # Reduce overall HP — body part damage is applied by actions.py before this call
         self.hp -= amount
+
+        # Any real damage wakes sleeping actors.
+        if amount > 0 and hasattr(self.parent, "effects"):
+            removed_sleep = False
+            remaining_effects = []
+            for effect in self.parent.effects:
+                effect_name = str(getattr(effect, "name", "")).strip().lower()
+                if effect_name == "sleep":
+                    removed_sleep = True
+                    continue
+                remaining_effects.append(effect)
+            self.parent.effects = remaining_effects
+            if removed_sleep and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
+                engine = self.parent.gamemap.engine
+                if self.parent is engine.player:
+                    engine.message_log.add_message("You wake up!", color.light_gray)
+                else:
+                    engine.message_log.add_message(f"{self.parent.name} wakes up!", color.light_gray)
 
         # If a vital part was destroyed by the caller (actions.py), force death
         if hasattr(self.parent, 'body_parts') and self.parent.body_parts:
@@ -307,9 +354,55 @@ class Fighter(BaseComponent):
                 )
             except Exception:
                 pass
+
+    def mitigate_incoming_damage(
+        self,
+        raw_damage: int,
+        damage_multiplier: float = 1.0,
+        targeted_part=None,
+        armor_tags: list[str] | None = None,
+    ) -> tuple[int, int]:
+        """Apply target-side mitigation and return the final damage plus armor defense."""
+        armor_defense = 0
+
+        # Get defense for specific part
+        if targeted_part:
+            base_defense = targeted_part.protection + self.base_defense
+            if self.parent.equipment:
+                armor_defense = self.parent.equipment.get_defense_for_part(targeted_part.name)
+        # Fallback to base defense
+        else:
+            base_defense = self.defense
+
+        # Aggregate mitigation multipliers from effects that apply to this attack
+        defense_multiplier = 1.0
+        if hasattr(self.parent, 'effects'):
+            for effect in self.parent.effects:
+                if hasattr(effect, 'get_defense_multiplier'):
+                    defense_multiplier *= effect.get_defense_multiplier()
+
+
+        # Combine for total defense
+        total_defense = (base_defense*defense_multiplier) + armor_defense
+
+        print(total_defense)
+
+        base_damage = raw_damage - total_defense
+        mitigation_multiplier = 1.0
+
+        if armor_tags:
+            from proficiency_system import armor_profile
+
+            mitigation_multiplier = armor_profile(self.parent, armor_tags).mitigation_multiplier
+
+        
+
+        mitigated_damage = max(0, int(base_damage * damage_multiplier * mitigation_multiplier))
+
+        return mitigated_damage, armor_defense
         
     
-    def _check_weapon_drop(self, damaged_part) -> None:
+    def _check_weapon_drop(self, damaged_part) -> None: # TODO
         """Drop weapons if grasping limbs are severely wounded."""
         if not damaged_part.can_grasp or not hasattr(self.parent, 'equipment'):
             return
@@ -356,7 +449,7 @@ class Fighter(BaseComponent):
                     f"{self.parent.name} drops {item_to_drop.name} from their {damaged_part.name}!",
                     color.blue
                 )
-            except:
+            except Exception:
                 pass
     
     def _heal_body_parts(self, amount_recovered: int) -> bool:

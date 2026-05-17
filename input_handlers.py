@@ -12,9 +12,10 @@ import traceback
 
 
 import actions
+import balance_config
+import proficiency_system as profsys
 from actions import (
     Action,
-    BumpAction,
     PickupAction,
     WaitAction,
 )
@@ -25,7 +26,7 @@ from components.effect import BurningEffect
 import exceptions
 from render_functions import MenuRenderer
 
-from text_utils import *
+from text_utils import print_wrapped_colored_text, wrap_colored_text
 import sounds
 
 
@@ -292,7 +293,7 @@ class EventHandler(BaseEventHandler):
             return action
             
         try:
-            result = action.perform()
+            result = self.engine.execute_action(action, is_player_action=False)
         except exceptions.Impossible as exc:
             self.engine.message_log.add_message(exc.args[0], color.impossible)
             return False #skip enemy turn
@@ -528,8 +529,6 @@ class TradeEventHandler(PopupEventHandler):
                 console.print(right_x + px, right_y + py, " ", bg=panel_bg)
         
         # Draw decorative divider between panels
-        divider_x = left_x + panel_width + 1
-        
         # Panel headers
         player_header = "You"
         container_header = f"{container_name}"
@@ -622,10 +621,7 @@ class TradeEventHandler(PopupEventHandler):
         console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
-        player = self.engine.player
-
         key = event.sym
-        modifier = event.mod
 
         # Get display groups for selection
         player_groups = self.engine.player.inventory.get_display_groups()
@@ -690,8 +686,6 @@ class TradeEventHandler(PopupEventHandler):
             try:
                 # Check if equipped
                 if self.engine.player.equipment.item_is_equipped(item):
-                    # Get slot item is in
-                    slot = self.engine.player.equipment.get_slot(item)
                     self.engine.player.equipment.unequip_item(item, add_message=True)
                     
 
@@ -1002,7 +996,7 @@ class DialogueEventHandler(PopupEventHandler):
         if OPT_Y is None:
             return None
 
-        mx, my = int(event.tile.x), int(event.tile.y)
+        _, my = int(event.tile.x), int(event.tile.y)
         hovered = my - OPT_Y
         if 0 <= hovered < len(options):
             opt_row = OPT_Y + hovered
@@ -1023,7 +1017,7 @@ class DialogueEventHandler(PopupEventHandler):
         action = selected_option["action"]
 
         if action == "trade":
-            if self.npc.tradable == True:
+            if self.npc.tradable:
                 from inventory_ui import TradeGridUI
                 return TradeGridUI(self.engine, self.npc.inventory)
             else:
@@ -1241,7 +1235,6 @@ class ContainerEventHandler(PopupEventHandler):
                 console.print(right_x + px, right_y + py, " ", bg=panel_bg)
         
         # Draw decorative divider between panels
-        divider_x = left_x + panel_width
         #self._draw_decorative_divider(console, divider_x, left_y, panel_height)
         
         # Panel headers
@@ -1433,9 +1426,7 @@ class ContainerEventHandler(PopupEventHandler):
         return None
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
-        player = self.engine.player
         key = event.sym
-        modifier = event.mod
 
         # Get display groups for selection
         player_groups = self.engine.player.inventory.get_display_groups()
@@ -1502,8 +1493,6 @@ class ContainerEventHandler(PopupEventHandler):
             try:
                 # Check if equipped
                 if self.engine.player.equipment.item_is_equipped(item):
-                    # Get slot item is in
-                    slot = self.engine.player.equipment.get_slot(item)
                     self.engine.player.equipment.unequip_item(item, add_message=True)
                     
 
@@ -2316,12 +2305,10 @@ class InventoryEventHandler(PopupEventHandler):
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         sounds.play_ui_move_sound()
-        player = self.engine.player
         key = event.sym
-        modifier = event.mod
 
         # Build filtered list for selection mapping
-        item_groups = player.inventory.get_display_groups()
+        item_groups = self.engine.player.inventory.get_display_groups()
         category_filter = self.categories[self.current_category][1]
         filtered_groups = []
         for group in item_groups:
@@ -2368,14 +2355,14 @@ class InventoryEventHandler(PopupEventHandler):
             action_or_handler = item.consumable.get_action(self.engine.player)
             if action_or_handler:
                 if hasattr(action_or_handler, 'perform'):
-                    action_or_handler.perform()
+                    self.engine.execute_action(action_or_handler, is_player_action=False)
                     return None
                 else:
                     return action_or_handler
             return None
         elif item.equippable:
             action = actions.EquipAction(self.engine.player, item)
-            action.perform()
+            self.engine.execute_action(action, is_player_action=False)
             return None
         else:
             return None
@@ -2394,7 +2381,7 @@ class ScrollActivateHandler(InventoryEventHandler):
             if action_or_handler:
                 # Check if it's a handler (needs input) or action (can perform immediately)
                 if hasattr(action_or_handler, 'perform'):
-                    action_or_handler.perform()
+                    self.engine.execute_action(action_or_handler, is_player_action=False)
                     return None  # Stay in inventory
                 else:
                     # It's a handler that needs input, return it
@@ -2419,7 +2406,7 @@ class InventoryActivateHandler(InventoryEventHandler):
             if action_or_handler:
                 if hasattr(action_or_handler, 'perform'):
                     try:
-                        action_or_handler.perform()
+                        self.engine.execute_action(action_or_handler, is_player_action=False)
                     except exceptions.Impossible as exc:
                         self.engine.message_log.add_message(exc.args[0], color.impossible)
                     return None
@@ -2454,7 +2441,7 @@ class QuaffActivateHandler(InventoryEventHandler):
             if action_or_handler:
                 # Check if it's a handler (needs input) or action (can perform immediately)
                 if hasattr(action_or_handler, 'perform'):
-                    action_or_handler.perform()
+                    self.engine.execute_action(action_or_handler, is_player_action=False)
                     return None  # Stay in inventory
                 else:
                     # It's a handler that needs input, return it
@@ -2482,7 +2469,7 @@ class InventoryDropHandler(InventoryEventHandler):
         
         # Execute drop action
         action = actions.DropItem(self.engine.player, item)
-        action.perform()
+        self.engine.execute_action(action, is_player_action=False)
         
         # Adjust selected index after dropping item
         # Get the new filtered list after dropping
@@ -2573,12 +2560,88 @@ class ItemContextMenu(EventHandler):
             else:
                 options.append(("Equip", "equip"))
 
+        # Quiver ammo selection belongs in the item's right-click context menu.
+        if in_player_inv and self._is_quiver_item(item):
+            for ammo_type, qty in self._get_quiver_ammo_options(item):
+                marker = "*" if ammo_type == self._get_selected_quiver_ammo(item) else " "
+                options.append((f"{marker} Use {ammo_type} ({qty})", f"ammo:{ammo_type}"))
+
+        # Arrow items get a "Load into Quiver" option when a quiver is equipped.
+        if in_player_inv and self._is_arrow_item(item):
+            quiver = self._get_player_quiver(player)
+            if quiver is not None:
+                options.append(("Load into Quiver", "load_quiver"))
+
         if in_player_inv:
             options.append(("Throw", "throw"))
             options.append(("Drop", "drop"))
         else:
             options.append(("Take", "take"))
         return options
+
+    @staticmethod
+    def _is_arrow_item(item) -> bool:
+        """Return True if item is ammo (not a quiver itself)."""
+        if item is None:
+            return False
+        item_tags = {str(tag).strip().lower() for tag in getattr(item, "tags", []) or []}
+        eq_type_name = None
+        if hasattr(item, "equippable") and item.equippable:
+            eq_type_name = item.equippable.equipment_type.name
+        if eq_type_name == "BACKPACK" or "quiver" in item_tags:
+            return False
+        return (
+            eq_type_name == "PROJECTILE"
+            or "arrow" in item_tags
+            or "ammunition" in item_tags
+            or "ammo" in item_tags
+        )
+
+    @staticmethod
+    def _get_player_quiver(player) -> Optional["Item"]:
+        equipment = getattr(player, "equipment", None)
+        if equipment and hasattr(equipment, "get_equipped_quiver"):
+            return equipment.get_equipped_quiver()
+        return None
+
+    @staticmethod
+    def _is_quiver_item(item) -> bool:
+        if item is None:
+            return False
+        tags = {str(tag).strip().lower() for tag in getattr(item, "tags", []) or []}
+        if "quiver" in tags:
+            return True
+        return int(getattr(item, "arrow_capacity", 0) or 0) > 0
+
+    @staticmethod
+    def _get_selected_quiver_ammo(quiver) -> str:
+        return str(getattr(quiver, "selected_ammo_type", "") or "").strip().lower()
+
+    @staticmethod
+    def _get_quiver_ammo_options(quiver) -> list[tuple[str, int]]:
+        counts = getattr(quiver, "ammo_counts", None)
+        if not isinstance(counts, dict):
+            legacy = int(getattr(quiver, "arrow_count", 0) or 0)
+            counts = {"arrow": legacy} if legacy > 0 else {}
+            quiver.ammo_counts = counts
+
+        norm: dict[str, int] = {}
+        for key, value in counts.items():
+            ammo_type = str(key or "").strip().lower()
+            if not ammo_type:
+                continue
+            qty = max(0, int(value or 0))
+            if qty > 0:
+                norm[ammo_type] = norm.get(ammo_type, 0) + qty
+
+        # Keep selected ammo valid.
+        selected = ItemContextMenu._get_selected_quiver_ammo(quiver)
+        if selected not in norm:
+            selected = next(iter(norm.keys()), "")
+            if selected:
+                quiver.selected_ammo_type = selected
+
+        return sorted(norm.items(), key=lambda kv: (-kv[1], kv[0]))
 
     # ------------------------------------------------------------------
     # Rendering
@@ -2678,6 +2741,52 @@ class ItemContextMenu(EventHandler):
         _, action_key = self._options[self.selected_option]
         item = self.item
 
+        if action_key.startswith("ammo:"):
+            ammo_type = action_key.split(":", 1)[1].strip().lower()
+            options = dict(self._get_quiver_ammo_options(item))
+            if ammo_type in options and options[ammo_type] > 0:
+                item.selected_ammo_type = ammo_type
+                self.engine.message_log.add_message(
+                    f"Quiver set to {ammo_type} arrows.",
+                    color.light_blue,
+                )
+            return self.parent_handler
+
+        if action_key == "load_quiver":
+            from actions import (
+                _ensure_quiver_ammo_state, _get_quiver_total_count,
+                _resolve_ammo_type, _ensure_quiver_ammo_templates,
+            )
+            import copy as _copy
+            quiver = self._get_player_quiver(self.engine.player)
+            if quiver is None:
+                self.engine.message_log.add_message("No quiver equipped.", color.impossible)
+                return self.parent_handler
+            ammo_counts, _sel = _ensure_quiver_ammo_state(quiver)
+            current = _get_quiver_total_count(quiver)
+            capacity = int(getattr(quiver, "arrow_capacity", 0) or 0)
+            if current >= capacity:
+                self.engine.message_log.add_message("Your quiver is full.", color.impossible)
+                return self.parent_handler
+            ammo_type = _resolve_ammo_type(item)
+            ammo_counts[ammo_type] = int(ammo_counts.get(ammo_type, 0) or 0) + 1
+            quiver.arrow_count = current + 1
+            ammo_templates = _ensure_quiver_ammo_templates(quiver)
+            if ammo_type not in ammo_templates:
+                try:
+                    ammo_templates[ammo_type] = _copy.deepcopy(item)
+                except Exception:
+                    pass
+            try:
+                self.engine.player.inventory.items.remove(item)
+            except ValueError:
+                pass
+            self.engine.message_log.add_message(
+                f"You load {item.name} into your quiver ({current + 1}/{capacity}).",
+                color.light_blue,
+            )
+            return self.parent_handler
+
         if action_key in ("quaff", "read", "use"):
             if item.consumable:
                 if action_key == "quaff":
@@ -2686,7 +2795,7 @@ class ItemContextMenu(EventHandler):
                 if action_or_handler:
                     if hasattr(action_or_handler, "perform"):
                         try:
-                            action_or_handler.perform()
+                            self.engine.execute_action(action_or_handler, is_player_action=False)
                         except exceptions.Impossible as exc:
                             self.engine.message_log.add_message(exc.args[0], color.impossible)
                         return self.parent_handler
@@ -2696,7 +2805,7 @@ class ItemContextMenu(EventHandler):
 
         elif action_key == "equip":
             try:
-                actions.EquipAction(self.engine.player, item).perform()
+                self.engine.execute_action(actions.EquipAction(self.engine.player, item), is_player_action=False)
             except exceptions.Impossible as exc:
                 self.engine.message_log.add_message(exc.args[0], color.impossible)
             # Move item to first free slot so unequip/equip doesn't snap back to origin
@@ -2709,7 +2818,7 @@ class ItemContextMenu(EventHandler):
 
         elif action_key == "drop":
             try:
-                actions.DropItem(self.engine.player, item).perform()
+                self.engine.execute_action(actions.DropItem(self.engine.player, item), is_player_action=False)
                 if hasattr(self.parent_handler, 'refresh_item_groups'):
                     self.parent_handler.refresh_item_groups()
             except exceptions.Impossible as exc:
@@ -3134,13 +3243,6 @@ class AttackModeHandler(AskUserEventHandler):
         # Store the preferred attack type on the player
         self.engine.player.current_attack_type = selected_mode
         self.engine.debug_log(f"Player attack mode set to: {selected_mode}", handler=type(self).__name__, event="combat")
-        # Show confirmation message
-        if selected_mode is None:
-            message = "Attack mode: Random targeting"
-        else:
-            part_name = selected_mode.replace('_', ' ').title()
-            message = f"Attack mode: Always target {part_name}"
-            
         #self.engine.message_log.add_message(message, color.green)
         
         return MainGameEventHandler(self.engine)
@@ -3392,7 +3494,7 @@ class LimbTargetingHandler(AskUserEventHandler):
         action = MeleeAction(self.attacker, dx, dy, selected_part_type)
         
         try:
-            action.perform()
+            self.engine.execute_action(action, is_player_action=False)
         except Exception as e:
             self.engine.message_log.add_message(str(e), color.impossible)
         
@@ -3411,12 +3513,13 @@ class SpellCastingHandler(PopupEventHandler):
     def _initialize_spell_registry(cls):
         """Initialize the spell registry with available spells."""
         if not cls.SPELL_REGISTRY:  # Only initialize once
-            from components.spells import DarkvisionSpell, TeleportSpell, PoisonSpraySpell
+            from components.spells import DarkvisionSpell, TeleportSpell, PoisonSpraySpell, InvisibilitySpell
             
             cls.SPELL_REGISTRY = {
                 "Darkvision": DarkvisionSpell,
                 "Teleport": TeleportSpell,
                 "Poison Spray": PoisonSpraySpell,
+                "Invisibility": InvisibilitySpell,
                 # Add new spells here: "SpellName": SpellClass,
             }
     
@@ -3620,6 +3723,9 @@ class SpellCastingHandler(PopupEventHandler):
             max_desc_lines = 2
             for i, line in enumerate(lines[:max_desc_lines]):
                 console.print(x + 2, desc_start_y + i, line, fg=color.white)
+
+        # Show associated school
+        console.print(x + 2, desc_start_y + 2, selected_spell.school.title(), fg=self._get_spell_school_color(selected_spell.school))
         
         # Show scroll indicators
         if start_index > 0:
@@ -3804,7 +3910,7 @@ class SpellCastingHandler(PopupEventHandler):
         try:
             from actions import SpellAction
             spell_action = SpellAction(player, spell, (player.x, player.y))
-            spell_action.perform()
+            self.engine.execute_action(spell_action, is_player_action=False)
             
             self.engine.message_log.add_message(
                 f"You cast {spell.name}!", 
@@ -4970,7 +5076,6 @@ class MainGameEventHandler(EventHandler):
 
             has_bow = False
             has_arrow = False
-            has_melee_weapon = False
 
             for item in held_items:
                 if not item or not hasattr(item, 'equippable') or not item.equippable:
@@ -4983,18 +5088,31 @@ class MainGameEventHandler(EventHandler):
                     has_bow = True
                 if eq_type_name == 'PROJECTILE' or 'arrow' in item_tags or 'ammunition' in item_tags:
                     has_arrow = True
-                if eq_type_name == 'WEAPON':
-                    has_melee_weapon = True
+
+            # Allow ranged attacks with arrows in inventory even if none is explicitly readied.
+            if not has_arrow:
+                inventory = getattr(self.engine.player, 'inventory', None)
+                if inventory:
+                    for item in inventory.items:
+                        if not item or not hasattr(item, 'equippable') or not item.equippable:
+                            continue
+                        eq_type_name = item.equippable.equipment_type.name
+                        item_tags = {tag.lower() for tag in getattr(item, 'tags', [])}
+                        if eq_type_name == 'PROJECTILE' or 'arrow' in item_tags or 'ammunition' in item_tags:
+                            has_arrow = True
+                            break
 
             if has_bow and has_arrow:
-                return actions.RangedAction(self.engine.player, dx, dy, target_part, tile_rel_pos=tile_rel_pos)
-            elif has_melee_weapon:
-                return actions.MeleeAction(self.engine.player, dx, dy, target_part, tile_rel_pos=tile_rel_pos)
+                return actions.RangedAction(
+                    self.engine.player,
+                    dx,
+                    dy,
+                    target_part,
+                    tile_rel_pos=tile_rel_pos,
+                    target_xy=(self.engine.mouse_x, self.engine.mouse_y),
+                )
             else:
-                self.engine.message_log.add_message(
-                    "No suitable weapon readied for directional attack.", color.impossible
-                    )
-                return None
+                return actions.MeleeAction(self.engine.player, dx, dy, target_part, tile_rel_pos=tile_rel_pos)
         if event.button == tcod.event.MouseButton.RIGHT:
 
             # --- Minimap right-click: navigate to clicked map location ---
@@ -5070,12 +5188,16 @@ class MainGameEventHandler(EventHandler):
             self.engine.player.fighter.power = 99999999999
             self.engine.player.fighter.defense = 99999999999
 
-            for entity in self.engine.game_map.entities:
+            for entity in list(self.engine.game_map.entities):
                 if entity is not self.engine.player and hasattr(entity, 'fighter') and entity.fighter and hasattr(entity.fighter, 'hp'):
                     entity.fighter.hp = 0
 
             self.engine.message_log.add_message("GOD MODE BABY!!!!!!!!", color.purple)
-        # F2 toggles debug mode
+        # F1 toggles lag profiler overlay
+        elif key == tcod.event.K_F1:
+            self.engine.show_lag_profiler = not getattr(self.engine, "show_lag_profiler", False)
+            self.engine.message_log.add_message("Lag profiler toggled.", color.green)
+        # F2 toggles debug overlay
         elif key == tcod.event.K_F2:
             self.engine.debug = not self.engine.debug
             self.engine.message_log.add_message("Debug mode toggled.", color.green)
@@ -5087,6 +5209,11 @@ class MainGameEventHandler(EventHandler):
         # F3 shows limb stats debug
         elif key == tcod.event.K_F3:
             return EntityDebugHandler(self.engine)
+        # F12 dumps full tileset atlas to RP/full_atlas.png
+        elif key == tcod.event.K_F12:
+            import sprite_manager as _sm
+            _sm.save_full_atlas()
+            self.engine.message_log.add_message("Atlas saved → RP/full_atlas.png", (200, 200, 80))
 
 
         # Dodge change direction (Ctrl + arrow key direction OR numpad direction)
@@ -5109,42 +5236,8 @@ class MainGameEventHandler(EventHandler):
         
         elif key in MOVE_KEYS:
             dx, dy = MOVE_KEYS[key]
-            
-            # Check if player has a preferred attack target and if there's an enemy to attack
-            preferred_target = getattr(player, 'current_attack_type', None)
-            target_x = player.x + dx
-            target_y = player.y + dy
-            target_actor = self.engine.game_map.get_actor_at_location(target_x, target_y)
-            
-            if preferred_target and target_actor and target_actor != player:
-                # Use targeted attack if we have a preference and there's an enemy
-                if hasattr(target_actor, 'body_parts') and target_actor.body_parts:
-                    # Convert preferred target tag to specific body part
-                    target_part = None
-                    if preferred_target:
-                        # Find all body parts with the preferred target tag
-                        import random
-                        matching_parts = []
-                        for part_type, body_part in target_actor.body_parts.body_parts.items():
-                            if preferred_target in body_part.tags:
-                                matching_parts.append(part_type)
-                        
-                        # Randomly select one matching part if any found
-                        if matching_parts:
-                            target_part = random.choice(matching_parts)
-                    
-                    if target_part:
-                        from actions import MeleeAction
-                        action = MeleeAction(player, dx, dy, target_part)
-                    else:
-                        # Fallback to normal attack if body part not found
-                        action = BumpAction(player, dx, dy)
-                else:
-                    # Enemy has no body parts, use normal attack
-                    action = BumpAction(player, dx, dy)
-            else:
-                # No preference set or no enemy, use normal movement/attack
-                action = BumpAction(player, dx, dy)
+            # Movement keys always move — never auto-attack on bump.
+            action = actions.MovementAction(player, dx, dy)
 
 
         ## KEY INPUTS
@@ -5164,21 +5257,21 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.KeySym.R:
             import time as _time
             if not event.repeat:
-                # First press — start the hold timer
+                # First press — start the hold timer.
                 self._r_press_time = _time.monotonic()
             elif self._r_press_time is not None:
                 elapsed = _time.monotonic() - self._r_press_time
                 if elapsed >= self._RESET_HOLD_DURATION:
-                    # Hold threshold reached — quick reset to a fresh game
+                    # Hold threshold reached — reset to a fresh game and re-run chargen.
                     self._r_press_time = None
                     import setup_game
                     import sounds as _sounds
+                    from chargen_ui import CharacterCreationHandler
                     _sounds.stop_all_sounds()
                     _sounds.stop_all_music()
                     new_engine = setup_game.new_game()
                     return CRTTransition(
-                        MainGameEventHandler(new_engine),
-                        post_fn=_sounds.start_dungeon_music,
+                        CharacterCreationHandler(new_engine),
                     )
         elif key == tcod.event.KeySym.TAB:
             from inventory_ui import InventoryGridUI
@@ -5188,8 +5281,8 @@ class MainGameEventHandler(EventHandler):
             pass
             #return ThrowSelectionHandler(self.engine)
         elif key == tcod.event.KeySym.F1:
-            pass
-            #return CheatMaxLevel(self.engine)
+            self.engine.show_lag_profiler = not getattr(self.engine, "show_lag_profiler", False)
+            self.engine.message_log.add_message("Lag profiler toggled.", color.green)
         elif key == tcod.event.KeySym.E:
             # Combined inventory + equipment grid
             from inventory_ui import InventoryGridUI
@@ -5216,8 +5309,7 @@ class MainGameEventHandler(EventHandler):
         # Quick cast from slots (Shift+1-9)
         elif (key in [tcod.event.KeySym.N1, tcod.event.KeySym.N2, tcod.event.KeySym.N3, 
                       tcod.event.KeySym.N4, tcod.event.KeySym.N5, tcod.event.KeySym.N6,
-                      tcod.event.KeySym.N7, tcod.event.KeySym.N8, tcod.event.KeySym.N9] and
-              modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT)):
+                      tcod.event.KeySym.N7, tcod.event.KeySym.N8, tcod.event.KeySym.N9]):
             
             # Initialize quickcast slots if not present
             if not hasattr(player, 'quickcast_slots'):
@@ -5263,7 +5355,7 @@ class MainGameEventHandler(EventHandler):
                         try:
                             from actions import SpellAction
                             spell_action = SpellAction(player, spell_obj, (player.x, player.y))
-                            spell_action.perform()
+                            self.engine.execute_action(spell_action, is_player_action=False)
                             
                             self.engine.message_log.add_message(
                                 f"Quick cast: {spell_obj.name}!", 
@@ -5297,7 +5389,7 @@ class MainGameEventHandler(EventHandler):
             return None
         
         # No valid key was pressed
-        self.engine.debug_log(f"Unbound key pressed: {key} (modifiers: {modifier})", handler=type(self).__name__, event="input")
+        #self.engine.debug_log(f"Unbound key pressed: {key} (modifiers: {modifier})", handler=type(self).__name__, event="input")
         return action
     
 
@@ -5568,21 +5660,166 @@ class DebugConsoleHandler(TextInputHandler):
             command = command.lower()
 
             if command == "help":
-                self.push_output("""
-Player Commands:
-apply_effect(EFFECT) - Ex. apply_effect(darkvision)                
-give(ITEM) - Ex. give(sigil_stone)                 
+                from components.effect import list_available_effects
+                effects_list = ", ".join(list_available_effects())
+                self.push_output(f"""
+Debug Console Commands:
+
+effect <name> [duration]      - Apply effect. Examples: effect sleep, effect darkvision 100
+Available effects: {effects_list}
+
+give(ITEM)                    - Ex. give(sigil_stone)
+spawn(ENTITY)                 - Ex. spawn giant_spider                 
+chest [basic|advanced]        - Spawn a chest with generated loot
+
+level <TRAIT>                 - Force levelup trait
+descend                       - Go to next dungeon level
                 
-"""
-                )
-            elif command == "apply_effect(darkvision)":
-                from components.effect import DarkvisionEffect
-                self.engine.player.effects.append(DarkvisionEffect(duration=100))
-                self.push_output("Darkvision applied for 100 turns")
-            elif command == "give(sigil_stone)":
+""")
+            elif command.startswith("effect "):
+                from components.effect import get_effect_by_name
+                
+                parts = command[len("effect "):].strip().split()
+                if not parts:
+                    self.push_output("Usage: effect <name> [duration]")
+                    return None
+                
+                effect_name = parts[0]
+                duration = 100  # Default duration
+                
+                # Parse optional duration parameter
+                if len(parts) > 1:
+                    try:
+                        duration = int(parts[1])
+                    except ValueError:
+                        self.push_output(f"Invalid duration '{parts[1]}'. Using default duration 100.")
+                
+                effect = get_effect_by_name(effect_name, duration=duration)
+                if effect:
+                    if not hasattr(self.engine.player, 'effects'):
+                        self.engine.player.effects = []
+                    self.engine.player.effects.append(effect)
+                    self.push_output(f"Applied {effect.name} for {duration} turns")
+                else:
+                    from components.effect import list_available_effects
+                    self.push_output(f"Unknown effect: '{effect_name}'")
+                    self.push_output(f"Available: {', '.join(list_available_effects())}")
+            elif command == "give(spellbook)":
                 import entity_factories
-                self.engine.player.inventory.items.append(entity_factories.generate_sigil_stone())
-                self.push_output("Generated sigil stone added to inventory")
+                self.engine.player.inventory.items.append(entity_factories.generate_spellbook())
+                self.push_output("Generated spellbook added to inventory")
+
+            elif command == "chest" or command.startswith("chest "):
+                import entity_factories as _ef
+                import loot_tables as _lt
+
+                parts = command.split(maxsplit=1)
+                chest_tier = parts[1].strip().lower() if len(parts) > 1 else "basic"
+                if chest_tier not in {"basic", "advanced"}:
+                    self.push_output(f"Unknown chest tier: '{chest_tier}'")
+                    self.push_output("Use: chest [basic|advanced]")
+                else:
+                    loot = _lt.generate_tiered_chest_loot(chest_tier)
+                    chest = _ef.make_chest_with_loot(loot, capacity=max(6, len(loot)))
+
+                    px, py = self.engine.player.x, self.engine.player.y
+                    import random as _rand
+
+                    offsets = [(dx, dy) for dx in range(-2, 3) for dy in range(-2, 3) if (dx, dy) != (0, 0)]
+                    _rand.shuffle(offsets)
+                    spawned = False
+                    gm = self.engine.game_map
+                    for dx, dy in offsets:
+                        tx, ty = px + dx, py + dy
+                        if gm.in_bounds(tx, ty) and gm.tiles["walkable"][tx, ty] and not any(e.x == tx and e.y == ty for e in gm.entities):
+                            chest.spawn(gm, tx, ty)
+                            self.push_output(f"Spawned {chest_tier} chest with {len(loot)} loot item(s) at ({tx}, {ty})")
+                            spawned = True
+                            break
+                    if not spawned:
+                        self.push_output("No free tile found near player to spawn chest")
+
+            elif command.startswith("descend"):
+                # Check if floor number attached
+                parts = command.split(maxsplit=1)
+                if len(parts) > 1:
+                    try:
+                        floor_number = int(parts[1])
+                        for _ in range(floor_number):
+                            self.engine.game_world.descend()
+                    except ValueError:
+                        self.push_output(f"Invalid floor number: '{parts[1]}'")
+                else:
+                    self.engine.game_world.descend()
+
+            elif command.startswith("level "):
+                # Force levelup for trait
+                trait_name = command[len("level "):].strip()
+                trait = None
+                for t in self.engine.player.level.traits:
+                    if t.lower() == trait_name:
+                        trait = t
+                        break
+                if trait:
+                    level = self.engine.player.level
+                    xp_required = level.xp_to_next(trait)
+                    level.traits[trait]["xp"] += xp_required
+                    previous_level = level.traits[trait]["level"]
+                    level.level_up(trait, play_sound=False)
+                    new_level = level.traits[trait]["level"]
+                    self.push_output(
+                        f"{trait} leveled: {previous_level} -> {new_level} (xp +{xp_required})"
+                    )
+                else:
+                    self.push_output(f"Unknown trait: '{trait_name}'")
+
+            elif command.startswith("spawn "):
+                entity_name = command[len("spawn "):].strip()
+                import entity_factories as _ef
+                template = None
+
+                scroll_name = None
+                lowered_name = entity_name.lower()
+                if lowered_name.startswith("scroll "):
+                    scroll_name = entity_name[len("scroll "):].strip()
+                elif lowered_name.endswith("_scroll"):
+                    scroll_name = entity_name[:-len("_scroll")].strip()
+
+                if scroll_name:
+                    try:
+                        template = _ef.get_scroll(scroll_name)
+                        entity_name = f"Scroll of {scroll_name.title()}"
+                    except Exception as exc:
+                        self.push_output(f"Failed to build scroll '{scroll_name}': {exc}")
+                        template = None
+
+                if template is None:
+                    template = getattr(_ef, entity_name, None)
+                if template is None:
+                    self.push_output(f"Unknown entity: '{entity_name}'")
+                    if entity_name.lower() == "help":
+                        self.push_output("Try: NAME_scroll " + ", ".join(
+                            k for k in dir(_ef)
+                            if not k.startswith("_") and hasattr(getattr(_ef, k, None), "spawn")
+
+                        ))
+                else:
+                    px, py = self.engine.player.x, self.engine.player.y
+                    # Try adjacent tiles to avoid overlap with the player
+                    import random as _rand
+                    offsets = [(dx, dy) for dx in range(-2, 3) for dy in range(-2, 3) if (dx, dy) != (0, 0)]
+                    _rand.shuffle(offsets)
+                    spawned = False
+                    gm = self.engine.game_map
+                    for dx, dy in offsets:
+                        tx, ty = px + dx, py + dy
+                        if gm.in_bounds(tx, ty) and gm.tiles["walkable"][tx, ty] and not any(e.x == tx and e.y == ty for e in gm.entities):
+                            template.spawn(gm, tx, ty)
+                            self.push_output(f"Spawned {entity_name} at ({tx}, {ty})")
+                            spawned = True
+                            break
+                    if not spawned:
+                        self.push_output(f"No free tile found near player to spawn {entity_name}")
 
             # ----------------------------------------------------------------
             # ADD YOUR COMMAND HANDLING CODE HERE
@@ -5923,23 +6160,391 @@ class HistoryViewer(EventHandler):
         return None
 
 class EntityDebugHandler(SelectIndexHandler):
-    """Debug handler with cursor movement for inspecting any entity's body parts."""
-    
+    """F3 — move cursor to inspect any entity or tile."""
+
     def __init__(self, engine: Engine):
-        super().__init__(engine)  # This sets cursor to player position
+        super().__init__(engine)
+        self._scroll_offset = 0
+
+    @staticmethod
+    def _append_balance_lines(lines: list[tuple[str, tuple[int, int, int]]]) -> None:
+        sections = [
+            (
+                "BALANCE CONFIG:",
+                [
+                    "BASE_TRAIT_LEVEL",
+                    "STARTING_MANA_BASE",
+                    "STARTING_MANA_PER_ARCANA_LEVEL",
+                    "VIGOR_HP_PER_LEVEL",
+                    "ARCANA_MANA_PER_LEVEL",
+                ],
+            ),
+            (
+                "HIT / DAMAGE:",
+                [
+                    "MELEE_BASE_HIT",
+                    "RANGED_BASE_HIT",
+                    "MIN_HIT_CHANCE",
+                    "MAX_HIT_CHANCE",
+                    "AGILITY_HIT_BONUS_PER_LEVEL",
+                    "AGILITY_HIT_BONUS_CAP",
+                    "STRENGTH_MELEE_DAMAGE_PER_LEVEL",
+                    "AGILITY_RANGED_DAMAGE_PER_LEVEL",
+                ],
+            ),
+            (
+                "MANA / SPELLS:",
+                [
+                    "MANA_REGEN_CHANCE",
+                    "MANA_REGEN_FRACTION",
+                    "SPELL_BASE_SUCCESS_CHANCE",
+                    "SPELL_SUCCESS_BONUS_PER_LEVEL",
+                    "SPELL_MIN_SUCCESS_CHANCE",
+                    "SPELL_MAX_SUCCESS_CHANCE",
+                    "SPELL_FIZZLE_MANA_REFUND_FRACTION",
+                ],
+            ),
+            (
+                "WEAPON SKILL SCALING:",
+                [
+                    "WEAPON_SKILL_BASE_ACCURACY",
+                    "WEAPON_SKILL_ACCURACY_PER_LEVEL",
+                    "WEAPON_SKILL_BASE_DAMAGE",
+                    "WEAPON_SKILL_DAMAGE_PER_LEVEL",
+                ],
+            ),
+            (
+                "ARMOR SKILL SCALING:",
+                [
+                    "ARMOR_SKILL_BASE_DEFENSE",
+                    "ARMOR_SKILL_DEFENSE_PER_LEVEL",
+                    "ARMOR_AFFINITY_MITIGATION_PER_LEVEL",
+                    "ARMOR_AFFINITY_MITIGATION_CAP",
+                    "ARMOR_DEFENSE_SKILL_PER_LEVEL",
+                ],
+            ),
+            (
+                "DODGE:",
+                [
+                    "AGILITY_DODGE_BONUS_PER_LEVEL",
+                    "ARMOR_DODGE_BONUS_PER_LEVEL",
+                    "LIGHT_ARMOR_DODGE_PENALTY",
+                    "MEDIUM_ARMOR_DODGE_PENALTY",
+                    "HEAVY_ARMOR_DODGE_PENALTY",
+                ],
+            ),
+            (
+                "MULTIPLIER CLAMPING:",
+                [
+                    "PROFICIENCY_MULTIPLIER_MIN",
+                    "PROFICIENCY_MULTIPLIER_MAX",
+                ],
+            ),
+        ]
+
+        lines.append(("", color.white))
+        for heading, names in sections:
+            lines.append((heading, color.yellow))
+            for name in names:
+                value = getattr(balance_config, name, None)
+                lines.append((f"{name}: {value}", color.light_gray))
+            lines.append(("", color.white))
+
+        lines.append((f"trait_delta(1): {balance_config.trait_delta(1)}", color.cyan))
+
+    @staticmethod
+    def _append_lag_chart_lines(engine: Engine, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
+        """Append a compact F3-style lag chart from engine profiling samples."""
+        lines.append(("", color.white))
+        lines.append(("LAG CHART (EMA):", color.yellow))
+
+        profiler = getattr(engine, "lag_profiler", None)
+        if not isinstance(profiler, dict):
+            lines.append(("Profiler unavailable", color.dark_gray))
+            return
+
+        ema_ms = profiler.get("ema_ms", {}) or {}
+        last_ms = profiler.get("last_frame_ms", {}) or {}
+        if not ema_ms:
+            lines.append(("Collecting frame samples...", color.dark_gray))
+            return
+
+        total_ms = float(ema_ms.get("total", 0.0) or 0.0)
+        lines.append((f"Frame: {total_ms:5.2f} ms ({(1000.0 / total_ms) if total_ms > 0 else 0.0:5.1f} fps)", color.cyan))
+
+        section_order = [
+            ("entity_updates", "entities"),
+            ("light_shafts", "light"),
+            ("auto_move", "autopath"),
+            ("grass_waves", "grass"),
+            ("global_anims", "globalfx"),
+            ("cleanup", "cleanup"),
+            ("tutorial", "tutorial"),
+        ]
+
+        bar_width = 14
+        for key, label in section_order:
+            ms = float(ema_ms.get(key, 0.0) or 0.0)
+            if ms <= 0.0:
+                continue
+            pct = (ms / total_ms * 100.0) if total_ms > 0.0 else 0.0
+            fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
+            bar = ("#" * fill) + ("." * (bar_width - fill))
+
+            if pct >= 40.0:
+                fg = color.red
+            elif pct >= 20.0:
+                fg = color.orange
+            else:
+                fg = color.light_gray
+
+            lines.append((f"{label:<8} {ms:5.2f} {pct:4.0f}% {bar}", fg))
+
+        if last_ms:
+            last_total = float(last_ms.get("total", 0.0) or 0.0)
+            lines.append((f"Last frame total: {last_total:5.2f} ms", color.gray))
+
+    def _build_debug_lines(
+        self,
+        cursor_x: int,
+        cursor_y: int,
+        target_entity,
+    ) -> list[tuple[str, tuple[int, int, int]]]:
+        lines: list[tuple[str, tuple[int, int, int]]] = []
+
+        if target_entity:
+            entity_name = getattr(target_entity, 'name', 'Unknown')
+            if target_entity == self.engine.player:
+                lines.append((f"PLAYER: {entity_name}", color.green))
+            else:
+                lines.append((f"ENTITY: {entity_name}", color.white))
+            lines.append((f"Position: ({cursor_x}, {cursor_y})", color.gray))
+            lines.append(("", color.white))
+
+            if hasattr(target_entity, 'body_parts') and target_entity.body_parts:
+                lines.append(("BODY PARTS:", color.yellow))
+                body_parts = target_entity.body_parts
+
+                for part_type, part in body_parts.body_parts.items():
+                    hp_text = f"{part.current_hp}/{part.max_hp}"
+                    hp_ratio = body_parts.get_part_health_ratio(part)
+
+                    if hp_ratio <= 0:
+                        hp_color = color.red
+                    elif hp_ratio <= 0.25:
+                        hp_color = color.orange
+                    elif hp_ratio <= 0.5:
+                        hp_color = color.yellow
+                    elif hp_ratio <= 0.75:
+                        hp_color = color.light_gray
+                    else:
+                        hp_color = color.green
+
+                    part_line = f"{part.name:<14} {hp_text:>6} ({hp_ratio*100:.0f}%)"
+                    status_info = []
+                    if part.is_vital:
+                        status_info.append("VITAL")
+                    if part.can_grasp:
+                        status_info.append("GRASP")
+                    if part.is_destroyed:
+                        status_info.append("DESTROYED")
+                    elif hp_ratio <= 0.25:
+                        status_info.append("DISABLED")
+
+                    if status_info:
+                        part_line = f"{part_line} [{' '.join(status_info)}]"
+                    lines.append((part_line, hp_color))
+
+                if hasattr(body_parts, 'get_movement_penalty'):
+                    movement_penalty = body_parts.get_movement_penalty()
+                    if movement_penalty > 0:
+                        lines.append(("", color.white))
+                        penalty_text = f"Movement Penalty: {movement_penalty*100:.0f}%"
+                        penalty_color = color.red if movement_penalty > 0.5 else color.yellow
+                        lines.append((penalty_text, penalty_color))
+            else:
+                lines.append(("No body parts system", color.red))
+
+            lines.append(("", color.white))
+            if hasattr(target_entity, 'fighter') and target_entity.fighter:
+                lines.append(("FIGHTER STATS:", color.yellow))
+                lines.append((f"HP: {target_entity.fighter.hp}/{target_entity.fighter.max_hp}", color.white))
+                lines.append((f"Defense: {target_entity.fighter.defense}", color.white))
+                lines.append((f"Power: {target_entity.fighter.power}", color.white))
+                mana_value = getattr(target_entity, 'mana', None)
+                mana_max = getattr(target_entity, 'mana_max', None)
+                if mana_value is not None or mana_max is not None:
+                    lines.append((f"Mana: {mana_value}/{mana_max}", color.cyan))
+
+            if hasattr(target_entity, 'ai') and target_entity.ai:
+                lines.append((f"AI: {type(target_entity.ai).__name__}", color.cyan))
+
+            self._append_derived_stat_lines(target_entity, lines)
+        else:
+            lines.append(("TILE INFORMATION:", color.cyan))
+            lines.append((f"Position: ({cursor_x}, {cursor_y})", color.gray))
+            lines.append(("", color.white))
+
+            if self.engine.game_map.in_bounds(cursor_x, cursor_y):
+                tile = self.engine.game_map.tiles[cursor_x, cursor_y]
+
+                if self.engine.game_map.visible[cursor_x, cursor_y]:
+                    lines.append(("Visibility: VISIBLE", color.green))
+                else:
+                    lines.append(("Visibility: NOT VISIBLE", color.red))
+
+                if tile['walkable']:
+                    lines.append(("Walkable: YES", color.green))
+                else:
+                    lines.append(("Walkable: NO", color.red))
+
+                if tile['transparent']:
+                    lines.append(("Transparent: YES", color.green))
+                else:
+                    lines.append(("Transparent: NO", color.red))
+
+                if self.engine.game_map.visible[cursor_x, cursor_y]:
+                    char = int(tile['light'][0])
+                    fg_color = tuple(tile['light'][1])
+                    bg_color = tuple(tile['light'][2])
+                    lines.append((f"Char: '{chr(char)}' ({char})", color.white))
+                    lines.append((f"FG Color: {fg_color}", color.white))
+                    lines.append((f"BG Color: {bg_color}", color.white))
+                lines.append(("", color.white))
+
+                items_here = [
+                    e for e in self.engine.game_map.entities
+                    if e.x == cursor_x and e.y == cursor_y and not (hasattr(e, 'fighter') or hasattr(e, 'ai'))
+                ]
+
+                if items_here:
+                    lines.append(("ITEMS HERE:", color.yellow))
+                    for item in items_here:
+                        lines.append((f"- {item.name}", color.white))
+                    lines.append(("", color.white))
+
+                if hasattr(self.engine.game_map, 'liquid_system'):
+                    coating = self.engine.game_map.liquid_system.get_coating(cursor_x, cursor_y)
+                    if coating:
+                        liquid_name = coating.liquid_type.get_display_name().title()
+                        lines.append((f"Coating: {liquid_name}", color.cyan))
+            else:
+                lines.append(("OUT OF BOUNDS", color.red))
+
+        self._append_balance_lines(lines)
+        return lines
+
+    @staticmethod
+    def _append_derived_stat_lines(entity, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
+        if not hasattr(entity, 'level') or not getattr(entity.level, 'traits', None):
+            return
+
+        lines.append(("", color.white))
+        lines.append(("DERIVED STATS:", color.yellow))
+
+        strength_delta = balance_config.trait_delta(entity.level.traits.get("strength", {}).get("level", 1))
+        agility_delta = balance_config.trait_delta(entity.level.traits.get("agility", {}).get("level", 1))
+        arcana_delta = balance_config.trait_delta(entity.level.traits.get("arcana", {}).get("level", 1))
+
+        melee_strength_mult = 1.0 + (strength_delta * balance_config.STRENGTH_MELEE_DAMAGE_PER_LEVEL)
+        ranged_agility_mult = 1.0 + (agility_delta * balance_config.AGILITY_RANGED_DAMAGE_PER_LEVEL)
+
+        equipped_weapons = actions._collect_equipped_weapons(entity)
+        weapon_profile = actions._weapon_proficiency_profile(entity, equipped_weapons)
+        weapon_tags: set[str] = set()
+        for weapon in equipped_weapons:
+            weapon_tags.update(actions._item_tags(weapon))
+
+        armor_tags: set[str] = set()
+        if getattr(entity, "equipment", None):
+            try:
+                armor_tags.update(entity.equipment.get_all_armor_tags())
+            except Exception:
+                pass
+
+        armor_profile = profsys.armor_profile(entity, armor_tags)
+        effective_dodge = actions._effective_dodge_chance(entity, list(armor_tags))
+
+        lines.append((f"Strength delta: +{strength_delta}", color.light_gray))
+        lines.append((f"Agility delta: +{agility_delta}", color.light_gray))
+        lines.append((f"Arcana delta: +{arcana_delta}", color.light_gray))
+        lines.append((f"Melee strength mult: x{melee_strength_mult:.2f}", color.white))
+        lines.append((f"Ranged agility mult: x{ranged_agility_mult:.2f}", color.white))
+        lines.append((f"Weapon hit mult: x{weapon_profile.accuracy_multiplier:.2f}", color.white))
+        lines.append((f"Weapon damage mult: x{weapon_profile.damage_multiplier:.2f}", color.white))
+        lines.append((f"Armor mitigation mult: x{armor_profile.mitigation_multiplier:.2f}", color.white))
+        lines.append((f"Armor defense mult: x{armor_profile.defense_bonus_multiplier:.2f}", color.white))
+        lines.append((f"Armor dodge delta: {armor_profile.dodge_delta:+.2f}", color.white))
+        lines.append((f"Effective dodge chance: {effective_dodge * 100:.0f}%", color.cyan))
+        if weapon_tags:
+            lines.append((f"Weapon tags: {', '.join(sorted(weapon_tags))}", color.gray))
+        if armor_tags:
+            lines.append((f"Armor tags: {', '.join(sorted(armor_tags))}", color.gray))
+
+        known_schools = {
+            str(getattr(spell, "school", "")).lower().strip()
+            for spell in (getattr(entity, "known_spells", None) or [])
+            if getattr(spell, "school", None)
+        }
+        trained_schools = {
+            school_name
+            for school_name in profsys.SPELL_SCHOOL_TO_TRAITS.keys()
+            if int(entity.level.traits.get(school_name, {}).get("level", 1) or 1) > 1
+        }
+        spell_schools = sorted(known_schools | trained_schools)
+        if not spell_schools:
+            spell_schools = ["arcana"]
+
+        fizzled_mana_loss = 1.0 - balance_config.SPELL_FIZZLE_MANA_REFUND_FRACTION
+        lines.append(("", color.white))
+        lines.append(("SPELL PROFILES:", color.yellow))
+        for school_name in spell_schools:
+            profile = profsys.spell_profile(entity, school_name)
+            lines.append((
+                f"{school_name.title()}: success {profile.success_chance * 100:.0f}% | "
+                f"fizzle loss {fizzled_mana_loss * 100:.0f}%",
+                color.cyan,
+            ))
+
+        # Trait levels and XP progression
+        lines.append(("", color.white))
+        lines.append(("TRAIT LEVELS:", color.yellow))
         
+        # Sort traits by level (descending) then by name
+        sorted_traits = sorted(
+            entity.level.traits.items(),
+            key=lambda x: (-x[1].get('level', 0), x[0])
+        )
+        
+        for trait_name, trait_data in sorted_traits:
+            level = trait_data.get('level', 0)
+            current_xp = trait_data.get('xp', 0)
+            xp_needed = entity.level.xp_to_next(trait_name)
+            
+            # Format: trait_name(level): current_xp/xp_needed
+            trait_display = f"{trait_name}({level}): {current_xp}/{xp_needed}xp"
+            
+            # Color based on progress (green if near level up, gray if low)
+            if xp_needed > 0 and current_xp >= xp_needed * 0.75:
+                trait_color = color.green  # Near level up
+            elif current_xp >= xp_needed:
+                trait_color = color.yellow  # Ready to level up
+            else:
+                trait_color = color.light_gray  # In progress
+            
+            lines.append((trait_display, trait_color))
+
+    def _clamp_scroll(self, max_offset: int) -> None:
+        self._scroll_offset = max(0, min(self._scroll_offset, max_offset))
+
     def on_index_selected(self, x: int, y: int) -> Optional[ActionOrHandler]:
-        """Return to main handler when location is selected."""
         return MainGameEventHandler(self.engine)
 
     def on_render(self, console: tcod.Console) -> None:
-        # Fallback path (not used when inspect_overlay_view is active).
-        # Render game + cursor on the same console then draw the debug panel.
         super().on_render(console)
         self.render_ui_overlay(console)
 
     def render_game_overlay(self, console: tcod.Console) -> None:
-        # Cursor tile highlight on the game (map) layer — inherited behaviour is correct.
         super().render_game_overlay(console)
 
     def render_ui_overlay(self, console: tcod.Console) -> None:
@@ -5948,11 +6553,10 @@ class EntityDebugHandler(SelectIndexHandler):
         cursor_x, cursor_y = int(cursor_x), int(cursor_y)
 
         # Map world position to UI-console tile space (game view is zoomed 2×).
-        screen_position = self.engine.world_to_screen(cursor_x, cursor_y, 40, 20)
+        screen_position = self.engine.world_to_screen(cursor_x, cursor_y, 40, 25)
         if screen_position is None:
             return
         screen_x, screen_y = screen_position
-        # UI console uses 2× tile scale to cover the game view area
         ui_x = min(console.width  - 1, screen_x * 2)
         ui_y = min(console.height - 1, screen_y * 2)
 
@@ -5979,6 +6583,12 @@ class EntityDebugHandler(SelectIndexHandler):
         else:
             debug_y = 1
 
+        # Tell main.py which sub-region to extract as the BLEND sidebar texture.
+        self._sidebar_x = debug_x
+        self._sidebar_y = debug_y
+        self._sidebar_w = window_width
+        self._sidebar_h = window_height
+
         # Draw debug window frame
         title = "DEBUG: Entity Inspector" if target_entity else "DEBUG: Tile Inspector"
         console.draw_frame(
@@ -5987,166 +6597,70 @@ class EntityDebugHandler(SelectIndexHandler):
             fg=color.yellow, bg=color.black
         )
 
-        # Show info
         info_y = debug_y + 2
+        content_x = debug_x + 2
+        content_width = window_width - 4
+        visible_lines = window_height - 8
 
-        if target_entity:
-            entity_name = getattr(target_entity, 'name', 'Unknown')
-            if target_entity == self.engine.player:
-                console.print(debug_x + 2, info_y, f"PLAYER: {entity_name}", fg=color.green)
-            else:
-                console.print(debug_x + 2, info_y, f"ENTITY: {entity_name}", fg=color.white)
-            info_y += 1
+        lines = self._build_debug_lines(cursor_x, cursor_y, target_entity)
+        max_offset = max(0, len(lines) - visible_lines)
+        self._clamp_scroll(max_offset)
 
-            console.print(debug_x + 2, info_y, f"Position: ({cursor_x}, {cursor_y})", fg=color.gray)
-            info_y += 2
-
-            if hasattr(target_entity, 'body_parts') and target_entity.body_parts:
-                console.print(debug_x + 2, info_y, "BODY PARTS:", fg=color.yellow)
-                info_y += 1
-
-                body_parts = target_entity.body_parts
-
-                for part_type, part in body_parts.body_parts.items():
-                    hp_text = f"{part.current_hp}/{part.max_hp}"
-                    hp_ratio = body_parts.get_part_health_ratio(part)
-
-                    if hp_ratio <= 0:
-                        hp_color = color.red
-                    elif hp_ratio <= 0.25:
-                        hp_color = color.orange
-                    elif hp_ratio <= 0.5:
-                        hp_color = color.yellow
-                    elif hp_ratio <= 0.75:
-                        hp_color = color.light_gray
-                    else:
-                        hp_color = color.green
-
-                    part_line = f"{part.name:<14} {hp_text:>6} ({hp_ratio*100:.0f}%)"
-                    console.print(debug_x + 2, info_y, part_line, fg=hp_color)
-
-                    status_info = []
-                    if part.is_vital:
-                        status_info.append("VITAL")
-                    if part.can_grasp:
-                        status_info.append("GRASP")
-                    if part.is_destroyed:
-                        status_info.append("DESTROYED")
-                    elif hp_ratio <= 0.25:
-                        status_info.append("DISABLED")
-
-                    if status_info:
-                        console.print(debug_x + 35, info_y, " ".join(status_info), fg=color.cyan)
-
-                    info_y += 1
-
-                    if info_y >= debug_y + window_height - 8:
-                        console.print(debug_x + 2, info_y, "...(more parts)", fg=color.gray)
-                        break
-
-                if hasattr(body_parts, 'get_movement_penalty'):
-                    movement_penalty = body_parts.get_movement_penalty()
-                    if movement_penalty > 0:
-                        info_y += 1
-                        penalty_text = f"Movement Penalty: {movement_penalty*100:.0f}%"
-                        penalty_color = color.red if movement_penalty > 0.5 else color.yellow
-                        console.print(debug_x + 2, info_y, penalty_text, fg=penalty_color)
-                        info_y += 1
-            else:
-                console.print(debug_x + 2, info_y, "No body parts system", fg=color.red)
-                info_y += 2
-
-            if hasattr(target_entity, 'fighter') and target_entity.fighter:
-                console.print(debug_x + 2, info_y, "FIGHTER STATS:", fg=color.yellow)
-                info_y += 1
-                console.print(debug_x + 2, info_y, f"HP: {target_entity.fighter.hp}/{target_entity.fighter.max_hp}", fg=color.white)
-                info_y += 1
-                console.print(debug_x + 2, info_y, f"Defense: {target_entity.fighter.defense}", fg=color.white)
-                info_y += 1
-                console.print(debug_x + 2, info_y, f"Power: {target_entity.fighter.power}", fg=color.white)
-                info_y += 1
-
-            if hasattr(target_entity, 'ai') and target_entity.ai:
-                console.print(debug_x + 2, info_y, f"AI: {type(target_entity.ai).__name__}", fg=color.cyan)
-                info_y += 1
+        if self._scroll_offset > 0:
+            console.print(content_x, info_y, f"Scroll: {self._scroll_offset}/{max_offset}", fg=color.gray)
         else:
-            console.print(debug_x + 2, info_y, "TILE INFORMATION:", fg=color.cyan)
+            console.print(content_x, info_y, f"Lines: {len(lines)}", fg=color.gray)
+        info_y += 1
+
+        visible_slice = lines[self._scroll_offset:self._scroll_offset + visible_lines - 1]
+        for text, fg in visible_slice:
+            console.print(content_x, info_y, text[:content_width], fg=fg)
             info_y += 1
-            console.print(debug_x + 2, info_y, f"Position: ({cursor_x}, {cursor_y})", fg=color.gray)
-            info_y += 2
 
-            if self.engine.game_map.in_bounds(cursor_x, cursor_y):
-                tile = self.engine.game_map.tiles[cursor_x, cursor_y]
-
-                if self.engine.game_map.visible[cursor_x, cursor_y]:
-                    console.print(debug_x + 2, info_y, "Visibility: VISIBLE", fg=color.green)
-                else:
-                    console.print(debug_x + 2, info_y, "Visibility: NOT VISIBLE", fg=color.red)
-                info_y += 1
-
-                if tile['walkable']:
-                    console.print(debug_x + 2, info_y, "Walkable: YES", fg=color.green)
-                else:
-                    console.print(debug_x + 2, info_y, "Walkable: NO", fg=color.red)
-                info_y += 1
-
-                if tile['transparent']:
-                    console.print(debug_x + 2, info_y, "Transparent: YES", fg=color.green)
-                else:
-                    console.print(debug_x + 2, info_y, "Transparent: NO", fg=color.red)
-                info_y += 1
-
-                if self.engine.game_map.visible[cursor_x, cursor_y]:
-                    char = int(tile['light'][0])
-                    fg_color = tuple(tile['light'][1])
-                    bg_color = tuple(tile['light'][2])
-                    console.print(debug_x + 2, info_y, f"Char: '{chr(char)}' ({char})", fg=color.white)
-                    info_y += 1
-                    console.print(debug_x + 2, info_y, f"FG Color: {fg_color}", fg=color.white)
-                    info_y += 1
-                    console.print(debug_x + 2, info_y, f"BG Color: {bg_color}", fg=color.white)
-                    info_y += 1
-                info_y += 1
-
-                items_here = [e for e in self.engine.game_map.entities
-                              if e.x == cursor_x and e.y == cursor_y and not (hasattr(e, 'fighter') or hasattr(e, 'ai'))]
-
-                if items_here:
-                    console.print(debug_x + 2, info_y, "ITEMS HERE:", fg=color.yellow)
-                    info_y += 1
-                    for item in items_here[:5]:
-                        console.print(debug_x + 4, info_y, f"- {item.name}", fg=color.white)
-                        info_y += 1
-                    if len(items_here) > 5:
-                        console.print(debug_x + 4, info_y, f"...and {len(items_here)-5} more", fg=color.gray)
-                        info_y += 1
-                    info_y += 1
-
-                if hasattr(self.engine.game_map, 'liquid_system'):
-                    coating = self.engine.game_map.liquid_system.get_coating(cursor_x, cursor_y)
-                    if coating:
-                        liquid_name = coating.liquid_type.get_display_name().title()
-                        console.print(debug_x + 2, info_y, f"Coating: {liquid_name}", fg=color.cyan)
-                        info_y += 1
-            else:
-                console.print(debug_x + 2, info_y, "OUT OF BOUNDS", fg=color.red)
+        if max_offset > 0:
+            footer = "More above/below" if 0 < self._scroll_offset < max_offset else (
+                "More below" if self._scroll_offset == 0 else "More above"
+            )
+            console.print(content_x + 30, debug_y + window_height - 4, footer, fg=color.gray)
 
         instructions_y = debug_y + window_height - 4
         console.print(debug_x + 2, instructions_y,     "Arrow Keys: Move cursor",    fg=color.light_gray)
-        console.print(debug_x + 2, instructions_y + 1, "Shift+Arrow: Move faster",   fg=color.light_gray)
+        console.print(debug_x + 2, instructions_y + 1, "Ctrl+Up/Down, PgUp/PgDn, Wheel", fg=color.light_gray)
         if target_entity:
             console.print(debug_x + 2, instructions_y + 2, "Mode: Entity inspection", fg=color.green)
         else:
             console.print(debug_x + 2, instructions_y + 2, "Mode: Tile inspection",   fg=color.cyan)
-        console.print(debug_x + 2, instructions_y + 3, "Enter/ESC: Exit debug",      fg=color.light_gray)
+        console.print(debug_x + 2, instructions_y + 3, "Home/End top-bottom, Enter/ESC exit", fg=color.light_gray)
+
+    def ev_mousewheel(self, event: tcod.event.MouseWheel) -> Optional[ActionOrHandler]:
+        if event.y > 0:
+            self._scroll_offset = max(0, self._scroll_offset - 3)
+        elif event.y < 0:
+            self._scroll_offset += 3
+        return self
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
-        """Handle key input for debug mode with cursor movement."""
-        key = event.sym
-
-        if key == tcod.event.KeySym.ESCAPE:
+        if event.sym == tcod.event.KeySym.ESCAPE:
             return MainGameEventHandler(self.engine)
-
+        if event.mod & (tcod.event.Modifier.LCTRL | tcod.event.Modifier.RCTRL):
+            if event.sym == tcod.event.KeySym.UP:
+                self._scroll_offset = max(0, self._scroll_offset - 3)
+                return self
+            if event.sym == tcod.event.KeySym.DOWN:
+                self._scroll_offset += 3
+                return self
+        if event.sym == tcod.event.KeySym.PAGEUP:
+            self._scroll_offset = max(0, self._scroll_offset - 8)
+            return self
+        if event.sym == tcod.event.KeySym.PAGEDOWN:
+            self._scroll_offset += 8
+            return self
+        if event.sym == tcod.event.KeySym.HOME:
+            self._scroll_offset = 0
+            return self
+        if event.sym == tcod.event.KeySym.END:
+            self._scroll_offset = 10_000
+            return self
         return super().ev_keydown(event)
 
 
@@ -6201,6 +6715,7 @@ UI:
     TAB: Switch focus
 
 DEBUG:
+    F1: Lag Profiler
     F2: Player Debug
     F3: Entity/Tile Debug
     F10: Debug Console
@@ -6231,9 +6746,7 @@ class CheatMaxLevel(EventHandler):
         """Give XP to level up all traits by one level"""
         player = self.engine.player
         
-        # Calculate XP needed to level up each trait
         for trait_name in player.level.traits:
-            current_level = player.level.traits[trait_name]['level']
             xp_needed = player.level.xp_to_next(trait_name)
             
             # Give enough XP to level up once

@@ -3,17 +3,13 @@ from typing import Optional, Dict, List, Tuple, TYPE_CHECKING
 
 import tcod
 import color
-from equipment_types import EquipmentType
 from input_handlers import AskUserEventHandler, PopupEventHandler
 from render_functions import MenuRenderer
 from tcod.console import Console
-import actions
 
 if TYPE_CHECKING:
     from engine import Engine
-    from entity import Item
 import sounds
-import components.level
 
 
 class CharacterScreen(PopupEventHandler):
@@ -93,7 +89,7 @@ class CharacterScreen(PopupEventHandler):
 
         MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
         MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Character Sheet")
-        self.render_portrait(console, preview_x = 25, preview_y = 14)
+        self.render_portrait(console, preview_x = 24, preview_y = 10)
         
         # Calculate stats position and selected category position first
         stats_x, stats_y = x + 9, y + 2
@@ -244,10 +240,10 @@ class CharacterScreen(PopupEventHandler):
         """Play UI navigation sound if available."""
         try:
             sounds.play_ui_move_sound()
-        except:
+        except Exception:
             try:
                 sounds.play_menu_move_sound()
-            except:
+            except Exception:
                 pass  # Silent fail if no sound available
     
     def _calculate_total_lines(self) -> int:
@@ -435,23 +431,30 @@ class CharacterScreen(PopupEventHandler):
 
 
     def render_portrait(self, console: Console, preview_x: int, preview_y: int) -> None:
-        preview_size = 3
+        PORT_W = 6   # inner tile width  (matches dialogue portrait)
+        PORT_H = 6   # inner tile height
         frame_x = preview_x
         frame_y = preview_y
 
-        # Draw frame 
+        # Outer frame
         console.draw_frame(
             x=frame_x, y=frame_y,
-            width=preview_size + 2, height=preview_size + 2,
+            width=PORT_W + 2, height=PORT_H + 2,
             title="YOU", clear=True,
             fg=(139, 120, 60), bg=(45, 35, 25)
-            )
-        
-        # Draw character in center of frame
-        char = self.engine.player.char
-        char_x = frame_x + 1 + preview_size // 2
-        char_y = frame_y + 1 + preview_size // 2
-        console.print(x=char_x, y=char_y, string=char, fg=self.engine.player.color)
+        )
+
+        # Dark backing so the PNG portrait sits cleanly on top
+        inner_x = frame_x + 1
+        inner_y = frame_y + 1
+        console.draw_rect(inner_x, inner_y, PORT_W, PORT_H,
+                          ch=ord(' '), fg=(0, 0, 0), bg=(20, 15, 10))
+
+        # Expose tile rect so main.py blits the portrait PNG here
+        self._portrait_dest_tiles = (inner_x, inner_y, PORT_W, PORT_H)
+        import os as _os
+        _pp = getattr(self.engine.player, '_portrait_path', None)
+        self._portrait_path = _pp if (_pp and _os.path.isfile(_pp)) else None
         
 
 

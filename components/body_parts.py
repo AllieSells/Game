@@ -162,6 +162,8 @@ class BodyParts(BaseComponent):
         """Initialize body parts based on anatomy type."""
         if anatomy_type == AnatomyType.HUMANOID:
             self._create_humanoid_anatomy()
+        elif anatomy_type == AnatomyType.QUADRUPED:
+            self._create_quadruped_anatomy()
         elif anatomy_type == AnatomyType.ARACHNID:
             self._create_arachnid_anatomy()
         elif anatomy_type == AnatomyType.SNAKE:
@@ -244,6 +246,44 @@ class BodyParts(BaseComponent):
             BodyPartType.ABDOMEN: BodyPart(
                 BodyPartType.ABDOMEN, "abdomen", .5, max_hp=int(0.5 * parent_max_hp), is_vital=True,
                 tags={"abdomen", "armor"}
+            )
+        }
+
+    def _create_quadruped_anatomy(self) -> None:
+        """Rats, wolves, horses, etc. — 4-legged animals without distinct arms."""
+        parent_max_hp = self.max_hp
+        self.body_parts = {
+            BodyPartType.HEAD: BodyPart(
+                BodyPartType.HEAD, "head", .5, max_hp=int(0.5 * parent_max_hp), is_vital=True,
+                tags={"head", "armor", "cranium"}
+            ),
+            BodyPartType.NECK: BodyPart(
+                BodyPartType.NECK, "neck", .267, max_hp=int(0.267 * parent_max_hp), is_vital=True,
+                tags={"neck", "armor", "cranium"}
+            ),
+            BodyPartType.TORSO: BodyPart(
+                BodyPartType.TORSO, "torso", 1.0, max_hp=int(1.0 * parent_max_hp), is_vital=True,
+                tags={"torso", "armor", "core"}
+            ),
+            BodyPartType.FRONT_LEFT_LEG: BodyPart(
+                BodyPartType.FRONT_LEFT_LEG, "left front leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "front_left_leg"}
+            ),
+            BodyPartType.FRONT_RIGHT_LEG: BodyPart(
+                BodyPartType.FRONT_RIGHT_LEG, "right front leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "front_right_leg"}
+            ),
+            BodyPartType.BACK_LEFT_LEG: BodyPart(
+                BodyPartType.BACK_LEFT_LEG, "left back leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "back_left_leg"}
+            ),
+            BodyPartType.BACK_RIGHT_LEG: BodyPart(
+                BodyPartType.BACK_RIGHT_LEG, "right back leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "back_right_leg"}
+            ),
+            BodyPartType.TAIL: BodyPart(
+                BodyPartType.TAIL, "tail", .2, max_hp=int(0.2 * parent_max_hp), is_limb=True,
+                tags={"tail", "armor"}
             )
         }
     
@@ -412,16 +452,10 @@ class BodyParts(BaseComponent):
             torso = self.body_parts.get(BodyPartType.TORSO)
             return torso is not None and not torso.is_destroyed
         
-        # Check if at least one leg is functional
-        legs = [part for part_type, part in self.body_parts.items() 
-                if part_type in [BodyPartType.LEFT_LEG, BodyPartType.RIGHT_LEG, 
-                               BodyPartType.LEFT_FOOT, BodyPartType.RIGHT_FOOT,
-                               BodyPartType.FRONT_LEFT_LEG, BodyPartType.FRONT_RIGHT_LEG,
-                               BodyPartType.SECOND_LEFT_LEG, BodyPartType.SECOND_RIGHT_LEG,
-                               BodyPartType.THIRD_LEFT_LEG, BodyPartType.THIRD_RIGHT_LEG,
-                               BodyPartType.BACK_LEFT_LEG, BodyPartType.BACK_RIGHT_LEG]
-                and not part.is_destroyed]
-        
+        # Check if at least one locomotion part is functional
+        legs = [part for part in self.body_parts.values()
+                if "locomotion" in part.tags and not part.is_destroyed]
+
         return len(legs) > 0
     
     def can_use_hands(self) -> bool:
@@ -439,24 +473,11 @@ class BodyParts(BaseComponent):
                 return 1.0 - (torso.current_hp / torso.max_hp)
             return 0.0
         
-        leg_parts = [
-            BodyPartType.LEFT_LEG, BodyPartType.RIGHT_LEG,
-            BodyPartType.LEFT_FOOT, BodyPartType.RIGHT_FOOT,
-            BodyPartType.FRONT_LEFT_LEG, BodyPartType.FRONT_RIGHT_LEG,
-            BodyPartType.SECOND_LEFT_LEG, BodyPartType.SECOND_RIGHT_LEG,
-            BodyPartType.THIRD_LEFT_LEG, BodyPartType.THIRD_RIGHT_LEG,
-            BodyPartType.BACK_LEFT_LEG, BodyPartType.BACK_RIGHT_LEG
-        ]
-        
-        total_legs = 0
-        functional_legs = 0
-        
-        for part_type in leg_parts:
-            part = self.get_part(part_type)
-            if part:
-                total_legs += 1
-                if not part.is_destroyed:
-                    functional_legs += 1
+        locomotion_parts = [part for part in self.body_parts.values()
+                             if "locomotion" in part.tags]
+
+        total_legs = len(locomotion_parts)
+        functional_legs = sum(1 for part in locomotion_parts if not part.is_destroyed)
         
         if total_legs == 0:
             return 0.0

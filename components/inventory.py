@@ -29,13 +29,41 @@ class Inventory(BaseComponent):
     def max_weight(self, value: float) -> None:
         self._max_weight = value
 
+    @staticmethod
+    def _item_is_arrow(item) -> bool:
+        """Return True for ammo items (not quivers)."""
+        item_tags = {str(t).strip().lower() for t in getattr(item, 'tags', []) or []}
+        eq_type_name = None
+        if getattr(item, 'equippable', None):
+            eq_type_name = item.equippable.equipment_type.name
+        if eq_type_name == 'BACKPACK' or 'quiver' in item_tags:
+            return False
+        return (
+            eq_type_name == 'PROJECTILE'
+            or 'arrow' in item_tags
+            or 'ammunition' in item_tags
+            or 'ammo' in item_tags
+        )
+
     @property
     def current_weight(self) -> float:
-        """Total weight of all carried items."""
+        """Total weight of all carried items.
+
+        Arrows/ammo are weightless when the actor has a quiver equipped —
+        the quiver absorbs that burden.
+        """
+        # Check once whether a quiver is equipped.
+        has_quiver = False
+        equipment = getattr(self.parent, 'equipment', None)
+        if equipment and hasattr(equipment, 'get_equipped_quiver'):
+            has_quiver = equipment.get_equipped_quiver() is not None
+
         total = 0.0
         for item in self.items:
             w = getattr(item, 'weight', None)
             if not isinstance(w, (int, float)):
+                w = 0.0
+            if has_quiver and self._item_is_arrow(item):
                 w = 0.0
             total += w * max(1, getattr(item, '_quantity', 1))
         return total

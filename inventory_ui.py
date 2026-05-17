@@ -33,6 +33,7 @@ import tcod.event
 import color
 import sounds
 import actions
+import tile_ids
 
 from input_handlers import PopupEventHandler, ItemContextMenu, CONFIRM_KEYS
 from equipment_types import EquipmentType
@@ -76,6 +77,7 @@ _EQ_GRID_ORI_Y: int = _INV_BLIT_Y + _GRID_ROW_ORI            # = 10
 #   row 0 : Head
 #   row 1 : R.Arm  Torso  L.Arm
 #   row 3 : R.Hand        L.Hand   Back
+#   row 4/5 : Ring 1 / Ring 2 (right side)
 #   row 6 : R.Leg         L.Leg
 #   row 8 : R.Foot        L.Foot
 _EQ_SLOT_GRID_POS: List[Tuple[int, int]] = [
@@ -90,6 +92,8 @@ _EQ_SLOT_GRID_POS: List[Tuple[int, int]] = [
     (4, 7),  # 8: L.Foot  — R8 col 4
     (6, 7),  # 9: R.Foot  — R8 col 6
     (2, 6),  # 10: Back   — R7 col 2
+    (9, 4),  # 11: Ring 1 — right side
+    (9, 5),  # 12: Ring 2 — right side
 ]
 _EQ_GRID_HIT: dict = {pos: i for i, pos in enumerate(_EQ_SLOT_GRID_POS)}
 
@@ -107,6 +111,8 @@ _EQ_SLOT_BODY_PART_NAME = [
     "LEFT_FOOT",   # 8: L.Foot
     "RIGHT_FOOT",  # 9: R.Foot
     "TORSO",       # 10: Back (shares torso body part)
+    None,          # 11: Ring 1 (no body-part damage mapping)
+    None,          # 12: Ring 2 (no body-part damage mapping)
 ]
 
 # Info strip (grid rows 3–29 = 27 rows, separator at 30, info at 31)
@@ -159,6 +165,8 @@ _EQ_SLOTS: List[Tuple[str, List[EquipmentType]]] = [
     ("L.Foot", [EquipmentType.BOOTS]),
     ("R.Foot", [EquipmentType.BOOTS]),
     ("Back",   [EquipmentType.BACKPACK]),
+    ("Ring 1", [EquipmentType.RING]),
+    ("Ring 2", [EquipmentType.RING]),
 ]
 
 
@@ -341,6 +349,12 @@ class InventoryGridUI(PopupEventHandler):
         slot_label, eq_types = _EQ_SLOTS[slot_i]
         eq = self.engine.player.equipment
 
+        # Ring slots are bound to explicit ring keys in equipped_items.
+        if slot_label == "Ring 1":
+            return eq.equipped_items.get("RING_1")
+        if slot_label == "Ring 2":
+            return eq.equipped_items.get("RING_2")
+
         hand_map = {"R.Hand": "right hand", "L.Hand": "left hand"}
 
         for et in eq_types:
@@ -374,6 +388,45 @@ class InventoryGridUI(PopupEventHandler):
                     if item and getattr(item, "equippable", None) and item.equippable.equipment_type == et:
                         return item
         return None
+
+    def _get_equipped_quiver(self) -> Optional["Item"]:
+        eq = getattr(self.engine.player, "equipment", None)
+        if not eq or not hasattr(eq, "get_equipped_quiver"):
+            return None
+        return eq.get_equipped_quiver()
+
+    def _get_quiver_ammo_state(self):
+        """Return (quiver_item, counts_dict, selected_type)."""
+        quiver = self._get_equipped_quiver()
+        if quiver is None:
+            return None, {}, None
+
+        counts = getattr(quiver, "ammo_counts", None)
+        if not isinstance(counts, dict):
+            legacy = int(getattr(quiver, "arrow_count", 0) or 0)
+            counts = {"arrow": legacy} if legacy > 0 else {}
+            quiver.ammo_counts = counts
+
+        # Normalize counts.
+        norm = {}
+        for k, v in counts.items():
+            key = str(k or "").strip().lower()
+            if not key:
+                continue
+            qty = max(0, int(v or 0))
+            if qty > 0:
+                norm[key] = norm.get(key, 0) + qty
+
+        selected = str(getattr(quiver, "selected_ammo_type", "") or "").strip().lower()
+        if not selected:
+            selected = next(iter(norm.keys()), None)
+            if selected is not None:
+                quiver.selected_ammo_type = selected
+
+        # Keep legacy total in sync.
+        quiver.arrow_count = sum(norm.values())
+        quiver.ammo_counts = norm
+        return quiver, norm, selected
 
     # ─────────────────────────────────────────────────────────────────────────
     # Rendering
@@ -637,7 +690,6 @@ class InventoryGridUI(PopupEventHandler):
         # Build damage map from player body parts (0.0 = healthy, 1.0 = destroyed)
         _bp_damage: dict = {}
         try:
-            from components.body_parts import BodyPartType as _BPT
             bp_comp = getattr(getattr(self.engine.player, 'body_parts', None), 'body_parts', None)
             if bp_comp:
                 for _bpt, _bp in bp_comp.items():
@@ -711,12 +763,14 @@ class InventoryGridUI(PopupEventHandler):
             parts.append(f"{item_w:.2g}kg")
         if getattr(item, "equippable", None):
             eq = item.equippable
-            if getattr(eq, "power_bonus",   0): parts.append(f"Pwr:{eq.power_bonus:+}")
-            if getattr(eq, "defense_bonus", 0): parts.append(f"Def:{eq.defense_bonus:+}")
+            if getattr(eq, "power_bonus", 0):
+                parts.append(f"Pwr:{eq.power_bonus:+}")
+            if getattr(eq, "defense_bonus", 0):
+                parts.append(f"Def:{eq.defense_bonus:+}")
             is_e = self.engine.player.equipment.item_is_equipped(item)
             parts.append("Equipped" if is_e else "Not Equipped")
         elif getattr(item, "consumable", None):
-            parts.append("Consumable — Enter/RClick to use")
+            parts.append("Consumable — Space/RClick to use")
         else:
             parts.append("Miscellaneous")
 
@@ -734,6 +788,8 @@ class InventoryGridUI(PopupEventHandler):
         if slot_i < 0 or slot_i >= len(_EQ_SLOT_BODY_PART_NAME):
             return '', None
         part_name = _EQ_SLOT_BODY_PART_NAME[slot_i]
+        if part_name is None:
+            return '', None
         try:
             bp_comp = getattr(getattr(self.engine.player, 'body_parts', None), 'body_parts', None)
             if not bp_comp:
@@ -933,7 +989,7 @@ class InventoryGridUI(PopupEventHandler):
                             eq.unequip_item(item, add_message=True)
                         eq.equip_item(item, add_message=True, preferred_hand=_hand_pref)
                     else:
-                        actions.EquipAction(self.engine.player, item).perform()
+                        self.engine.execute_action(actions.EquipAction(self.engine.player, item), is_player_action=False)
                 except Exception as exc:
                     self.engine.message_log.add_message(str(exc), color.impossible)
                 else:
@@ -1153,7 +1209,7 @@ class InventoryGridUI(PopupEventHandler):
                         return aoh
                 elif getattr(item, "equippable", None):
                     try:
-                        actions.EquipAction(self.engine.player, item).perform()
+                        self.engine.execute_action(actions.EquipAction(self.engine.player, item), is_player_action=False)
                     except Exception as exc:
                         self.engine.message_log.add_message(str(exc), color.impossible)
                     self._clear_from_item_slots(item)  # free slot regardless of equip/unequip
@@ -1343,12 +1399,157 @@ class ContainerGridUI(PopupEventHandler):
     # ── Data helpers ──────────────────────────────────────────────────────────
 
     def _get_player_groups(self):
-        return self.engine.player.inventory.get_display_groups()
+        """Return a sparse list mirroring inv.item_slots (positions preserved, like InventoryGridUI)."""
+        inv = self.engine.player.inventory
+        self._resync_inv_slots()
+        qty_map = {id(g['item']): g.get('quantity', 1) for g in inv.get_display_groups()}
+        return [{'item': s, 'quantity': qty_map.get(id(s), 1)} if s is not None else None
+                for s in inv.item_slots]
+
+    def _resync_inv_slots(self) -> None:
+        """Sync inv.item_slots — keeps item positions stable across transfers."""
+        inv = self.engine.player.inventory
+        if not hasattr(inv, 'item_slots') or inv.item_slots is None:
+            inv.item_slots = []
+        groups = inv.get_display_groups()
+        valid  = {id(g['item']): g for g in groups}
+        slotted: set = set()
+        for i, s in enumerate(inv.item_slots):
+            if s is None:
+                continue
+            if id(s) in valid:
+                slotted.add(id(s))
+            else:
+                stale_key = inv._get_item_display_key(s)
+                replacement = None
+                for gid, g in valid.items():
+                    if gid not in slotted and inv._get_item_display_key(g['item']) == stale_key:
+                        replacement = g['item']
+                        break
+                if replacement is not None:
+                    inv.item_slots[i] = replacement
+                    slotted.add(id(replacement))
+                else:
+                    inv.item_slots[i] = None
+        for gid, g in valid.items():
+            rep = g['item']
+            if id(rep) in slotted:
+                continue
+            placed = False
+            for i in range(len(inv.item_slots)):
+                if inv.item_slots[i] is None:
+                    inv.item_slots[i] = rep
+                    slotted.add(id(rep))
+                    placed = True
+                    break
+            if not placed:
+                inv.item_slots.append(rep)
+                slotted.add(id(rep))
+        # Trim trailing Nones so scroll indicator stays compact
+        while inv.item_slots and inv.item_slots[-1] is None:
+            inv.item_slots.pop()
+
+    def _clear_from_inv_slots(self, item: "Item") -> None:
+        """Null out this item's slot in inv.item_slots."""
+        inv = self.engine.player.inventory
+        if not hasattr(inv, 'item_slots'):
+            return
+        for i, s in enumerate(inv.item_slots):
+            if s is item:
+                inv.item_slots[i] = None
+                return
+
+    @staticmethod
+    def _get_container_display_key(item: "Item") -> str:
+        """Match inventory stacking rules for container display groups."""
+        if hasattr(item, 'equippable') and item.equippable:
+            if hasattr(item.equippable, 'equipment_type'):
+                try:
+                    from equipment_types import EquipmentType
+                    if item.equippable.equipment_type == EquipmentType.PROJECTILE:
+                        return item.name
+                except ImportError:
+                    pass
+            return f"{item.name}_{id(item)}"
+
+        if hasattr(item, 'burn_duration') and item.burn_duration is not None:
+            return f"{item.name}_burn_{item.burn_duration}"
+
+        if hasattr(item, 'liquid_amount') and item.liquid_amount is not None:
+            return f"{item.name}_liquid_{item.liquid_amount}"
+
+        return item.name
+
+    def _resync_container_slots(self) -> None:
+        """Sync container slots while collapsing stackable duplicates for display."""
+        if not hasattr(self.container, '_ui_slots') or self.container._ui_slots is None:
+            self.container._ui_slots = []
+
+        grouped = {}
+        for item in self.container.items:
+            key = self._get_container_display_key(item)
+            if key not in grouped:
+                grouped[key] = {'item': item, 'quantity': 1}
+            else:
+                grouped[key]['quantity'] += 1
+
+        valid = {id(group['item']): group for group in grouped.values()}
+        slotted: set = set()
+
+        for i, slot_item in enumerate(self._container_slots):
+            if slot_item is None:
+                continue
+            if id(slot_item) in valid:
+                slotted.add(id(slot_item))
+                continue
+
+            stale_key = self._get_container_display_key(slot_item)
+            replacement = None
+            for gid, group in valid.items():
+                if gid in slotted:
+                    continue
+                if self._get_container_display_key(group['item']) == stale_key:
+                    replacement = group['item']
+                    break
+
+            if replacement is not None:
+                self._container_slots[i] = replacement
+                slotted.add(id(replacement))
+            else:
+                self._container_slots[i] = None
+
+        for gid, group in valid.items():
+            representative = group['item']
+            if gid in slotted:
+                continue
+            placed = False
+            for i in range(len(self._container_slots)):
+                if self._container_slots[i] is None:
+                    self._container_slots[i] = representative
+                    slotted.add(gid)
+                    placed = True
+                    break
+            if not placed:
+                self._container_slots.append(representative)
+                slotted.add(gid)
+
+        while self._container_slots and self._container_slots[-1] is None:
+            self._container_slots.pop()
 
     def _get_container_groups(self):
         """Return a sparse list mirroring _container_slots.
         Entries are {"item": item} for filled slots, None for empty slots."""
-        return [{"item": s} if s is not None else None
+        self._resync_container_slots()
+        grouped = {}
+        for item in self.container.items:
+            key = self._get_container_display_key(item)
+            if key not in grouped:
+                grouped[key] = {'item': item, 'quantity': 1}
+            else:
+                grouped[key]['quantity'] += 1
+
+        quantity_by_id = {id(group['item']): group['quantity'] for group in grouped.values()}
+        return [{"item": s, "quantity": quantity_by_id.get(id(s), 1)} if s is not None else None
                 for s in self._container_slots]
 
     # ── Rendering ─────────────────────────────────────────────────────────────
@@ -1393,7 +1594,7 @@ class ContainerGridUI(PopupEventHandler):
         for row in range(_CC_GRID_ROWS):
             for col in range(_CC_GRID_COLS):
                 idx = self._cell_to_idx(col, row, self._player_scroll)
-                if idx >= len(groups):
+                if idx >= len(groups) or groups[idx] is None:
                     continue
                 item = groups[idx]['item']
                 px   = col * _CC_GRID_SCALE
@@ -1415,16 +1616,18 @@ class ContainerGridUI(PopupEventHandler):
         gc.tiles_rgb['bg'][:, :] = 0
         gc.tiles_rgb['fg'][:, :] = 0
         gc.tiles_rgb['ch'][:, :] = ord(' ')
+        groups = self._get_container_groups()
         for row in range(_CC_GRID_ROWS):
             for col in range(_CC_GRID_COLS):
                 idx = self._cell_to_idx(col, row, self._container_scroll)
-                if idx >= len(self._container_slots):
+                if idx >= len(groups) or groups[idx] is None:
                     continue
-                item = self._container_slots[idx]
-                if item is None:
-                    continue
+                item = groups[idx]['item']
                 px  = col * _CC_GRID_SCALE
                 py  = row * _CC_GRID_SCALE
+                qty = groups[idx].get('quantity', 1)
+                if qty > 1:
+                    gc.print(px, py, f"x{qty}", fg=(255, 230, 120), bg=(0, 0, 0))
                 enc = getattr(item, 'enchantment_level', 0)
                 if enc and enc > 0:
                     import roman as _roman
@@ -1559,7 +1762,7 @@ class ContainerGridUI(PopupEventHandler):
         item: Optional["Item"] = None
         if self._sel_player >= 0:
             groups = self._get_player_groups()
-            if self._sel_player < len(groups):
+            if self._sel_player < len(groups) and groups[self._sel_player] is not None:
                 item = groups[self._sel_player]["item"]
         elif self._sel_container >= 0:
             groups = self._get_container_groups()
@@ -1579,8 +1782,10 @@ class ContainerGridUI(PopupEventHandler):
         parts: list[str] = []
         if getattr(item, "equippable", None):
             eq = item.equippable
-            if getattr(eq, "power_bonus",   0): parts.append(f"Pwr:{eq.power_bonus:+}")
-            if getattr(eq, "defense_bonus", 0): parts.append(f"Def:{eq.defense_bonus:+}")
+            if getattr(eq, "power_bonus", 0):
+                parts.append(f"Pwr:{eq.power_bonus:+}")
+            if getattr(eq, "defense_bonus", 0):
+                parts.append(f"Def:{eq.defense_bonus:+}")
             is_e = self.engine.player.equipment.item_is_equipped(item)
             parts.append("Equipped" if is_e else "Not Equipped")
         elif getattr(item, "consumable", None):
@@ -1603,7 +1808,7 @@ class ContainerGridUI(PopupEventHandler):
             col, row = cell
             idx    = self._cell_to_idx(col, row, self._player_scroll)
             groups = self._get_player_groups()
-            if idx < len(groups):
+            if idx < len(groups) and groups[idx] is not None:
                 if idx != self._sel_player:
                     self._sel_player    = idx
                     self._sel_container = -1
@@ -1649,7 +1854,7 @@ class ContainerGridUI(PopupEventHandler):
             col, row = cell
             idx    = self._cell_to_idx(col, row, self._player_scroll)
             groups = self._get_player_groups()
-            if idx < len(groups):
+            if idx < len(groups) and groups[idx] is not None:
                 item = groups[idx]["item"]
                 if event.button == tcod.event.BUTTON_RIGHT:
                     return ItemContextMenu(self, item, tx, ty)
@@ -1665,8 +1870,10 @@ class ContainerGridUI(PopupEventHandler):
                         self._drag_src_idx  = idx
                         self._drag_tile     = (tx, ty)
                         if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
-                            try: item.pickup_sound()
-                            except Exception: pass
+                            try:
+                                item.pickup_sound()
+                            except Exception:
+                                pass
             return None
 
         # Right (container) panel
@@ -1691,8 +1898,10 @@ class ContainerGridUI(PopupEventHandler):
                         self._drag_src_idx  = idx
                         self._drag_tile     = (tx, ty)
                         if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
-                            try: item.pickup_sound()
-                            except Exception: pass
+                            try:
+                                item.pickup_sound()
+                            except Exception:
+                                pass
             return None
 
         return None
@@ -1748,8 +1957,10 @@ class ContainerGridUI(PopupEventHandler):
             return
         # Inside panel but between grids — play sound, item stays where it was
         if hasattr(item, "drop_sound") and item.drop_sound is not None:
-            try: item.drop_sound()
-            except Exception: pass
+            try:
+                item.drop_sound()
+            except Exception:
+                pass
 
     # ── Transfer helpers ──────────────────────────────────────────────────────
 
@@ -1766,6 +1977,7 @@ class ContainerGridUI(PopupEventHandler):
             self.engine.player.inventory.items.remove(item)
         except ValueError:
             return
+        self._clear_from_inv_slots(item)
         self.container.items.append(item)
         # Place in first free slot of _container_slots
         placed = False
@@ -1776,22 +1988,25 @@ class ContainerGridUI(PopupEventHandler):
                 break
         if not placed:
             self._container_slots.append(item)
-        try: item.parent = self.container
-        except Exception: pass
+        try:
+            item.parent = self.container
+        except Exception:
+            pass
         c_name = getattr(self.container.parent, "name", "container")
         self.engine.message_log.add_message(
             f"You place the {item.name} in the {c_name}.")
         if hasattr(item, "drop_sound") and item.drop_sound is not None:
-            try: item.drop_sound()
-            except Exception: pass
+            try:
+                item.drop_sound()
+            except Exception:
+                pass
 
     def _transfer_to_player(self, item: "Item") -> None:
-        if not self.engine.player.inventory.can_carry(item):
-            self.engine.message_log.add_message("You are carrying too much.", color.impossible)
-            return
         if "coin" in item.name.lower():
-            try: self.container.items.remove(item)
-            except ValueError: return
+            try:
+                self.container.items.remove(item)
+            except ValueError:
+                return
             # Clear from slot list
             for i, s in enumerate(self._container_slots):
                 if s is item:
@@ -1800,9 +2015,29 @@ class ContainerGridUI(PopupEventHandler):
             self.engine.player.gold += getattr(item, "value", 0)
             self.engine.message_log.add_message("You pick up some coins.")
             if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
-                try: item.pickup_sound()
-                except Exception: pass
+                try:
+                    item.pickup_sound()
+                except Exception:
+                    pass
             return
+        
+        # Check if item is an arrow/ammo — try to add to quiver first
+        def is_arrow_item(item) -> bool:
+            if not item:
+                return False
+            item_tags = {tag.lower() for tag in getattr(item, "tags", [])}
+            eq_type_name = None
+            if hasattr(item, "equippable") and item.equippable:
+                eq_type_name = item.equippable.equipment_type.name
+            if eq_type_name == "BACKPACK" or "quiver" in item_tags:
+                return False
+            return (
+                eq_type_name == "PROJECTILE"
+                or "arrow" in item_tags
+                or "ammunition" in item_tags
+                or "ammo" in item_tags
+            )
+        
         try:
             self.container.items.remove(item)
         except ValueError:
@@ -1812,13 +2047,64 @@ class ContainerGridUI(PopupEventHandler):
             if s is item:
                 self._container_slots[i] = None
                 break
+        
+        # Special handling for arrows: try quiver first
+        if is_arrow_item(item):
+            equipment = self.engine.player.equipment
+            quiver_item = None
+            if hasattr(equipment, "get_equipped_quiver"):
+                quiver_item = equipment.get_equipped_quiver()
+
+            if quiver_item is not None:
+                from actions import _ensure_quiver_ammo_state, _get_quiver_total_count, _resolve_ammo_type, _ensure_quiver_ammo_templates
+                import copy as _copy
+                ammo_counts, selected_type = _ensure_quiver_ammo_state(quiver_item)
+                current = _get_quiver_total_count(quiver_item)
+                capacity = int(getattr(quiver_item, "arrow_capacity", 0) or 0)
+                if current < capacity:
+                    ammo_type = _resolve_ammo_type(item)
+                    ammo_counts[ammo_type] = int(ammo_counts.get(ammo_type, 0) or 0) + 1
+                    quiver_item.arrow_count = current + 1
+                    # Store template so firing uses the correct item variant.
+                    ammo_templates = _ensure_quiver_ammo_templates(quiver_item)
+                    if ammo_type not in ammo_templates:
+                        try:
+                            ammo_templates[ammo_type] = _copy.deepcopy(item)
+                        except Exception:
+                            pass
+                    self.engine.message_log.add_message(
+                        f"You add {item.name} to your quiver ({current + 1}/{capacity})."
+                    )
+                    if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
+                        try:
+                            item.pickup_sound()
+                        except Exception:
+                            pass
+                    return
+        
+        if not self.engine.player.inventory.can_carry(item):
+            self.engine.message_log.add_message("You are carrying too much.", color.impossible)
+            # Put item back in container
+            self.container.items.append(item)
+            for i in range(len(self._container_slots)):
+                if self._container_slots[i] is None:
+                    self._container_slots[i] = item
+                    break
+            else:
+                self._container_slots.append(item)
+            return
+        
         self.engine.player.inventory.items.append(item)
-        try: item.parent = self.engine.player.inventory
-        except Exception: pass
+        try:
+            item.parent = self.engine.player.inventory
+        except Exception:
+            pass
         self.engine.message_log.add_message(f"You take the {item.name}.")
         if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
-            try: item.pickup_sound()
-            except Exception: pass
+            try:
+                item.pickup_sound()
+            except Exception:
+                pass
         is_corpse = getattr(self.container.parent, "type", None) == "Dead"
         if is_corpse and not self.container.items:
             import random as _random
@@ -1826,16 +2112,14 @@ class ContainerGridUI(PopupEventHandler):
                 [chr(0xE010), chr(0xE011), chr(0xE012)])
 
     def _swap_player_items(self, src_idx: int, dst_idx: int) -> None:
-        groups = self._get_player_groups()
-        if src_idx >= len(groups) or dst_idx >= len(groups):
+        """Swap two slot positions in inv.item_slots."""
+        inv = self.engine.player.inventory
+        if not hasattr(inv, 'item_slots'):
             return
-        items = self.engine.player.inventory.items
-        try:
-            si = items.index(groups[src_idx]["item"])
-            di = items.index(groups[dst_idx]["item"])
-            items[si], items[di] = items[di], items[si]
-        except ValueError:
-            pass
+        slots = inv.item_slots
+        while len(slots) <= max(src_idx, dst_idx):
+            slots.append(None)
+        slots[src_idx], slots[dst_idx] = slots[dst_idx], slots[src_idx]
 
     def _swap_container_items(self, src_idx: int, dst_idx: int) -> None:
         slots = self._container_slots
@@ -1872,7 +2156,7 @@ class ContainerGridUI(PopupEventHandler):
             if shift:
                 if self._sel_player >= 0:
                     groups = self._get_player_groups()
-                    if self._sel_player < len(groups):
+                    if self._sel_player < len(groups) and groups[self._sel_player] is not None:
                         self._transfer_to_container(groups[self._sel_player]["item"])
                 elif self._sel_container >= 0:
                     groups = self._get_container_groups()
@@ -1885,11 +2169,15 @@ class ContainerGridUI(PopupEventHandler):
 
     def ev_mousewheel(self, event: tcod.event.MouseWheel) -> Optional[object]:
         if self._hover_panel == "container":
-            if event.y < 0:   self._container_scroll += 1
-            elif event.y > 0: self._container_scroll = max(0, self._container_scroll - 1)
+            if event.y < 0:
+                self._container_scroll += 1
+            elif event.y > 0:
+                self._container_scroll = max(0, self._container_scroll - 1)
         else:
-            if event.y < 0:   self._player_scroll += 1
-            elif event.y > 0: self._player_scroll = max(0, self._player_scroll - 1)
+            if event.y < 0:
+                self._player_scroll += 1
+            elif event.y > 0:
+                self._player_scroll = max(0, self._player_scroll - 1)
         return None
 
 
@@ -2006,7 +2294,7 @@ class TradeGridUI(ContainerGridUI):
 
         if self._sel_player >= 0:
             groups = self._get_player_groups()
-            if self._sel_player < len(groups):
+            if self._sel_player < len(groups) and groups[self._sel_player] is not None:
                 item   = groups[self._sel_player]["item"]
                 is_buy = False
         elif self._sel_container >= 0:
@@ -2051,6 +2339,7 @@ class TradeGridUI(ContainerGridUI):
         if self.engine.player.equipment.item_is_equipped(item):
             self.engine.player.equipment.unequip_item(item, add_message=True)
         self.engine.player.inventory.items.remove(item)
+        self._clear_from_inv_slots(item)
         self.container.items.append(item)
         item.parent = self.container
         # Place in first free slot of the merchant's sparse slot list
@@ -2078,6 +2367,61 @@ class TradeGridUI(ContainerGridUI):
                 f"You need {buy_price}gp to buy the {item.name}.",
                 color.error)
             return
+        
+        # Check if item is an arrow/ammo — try to add to quiver first
+        def is_arrow_item(item) -> bool:
+            if not item:
+                return False
+            item_tags = {tag.lower() for tag in getattr(item, "tags", [])}
+            eq_type_name = None
+            if hasattr(item, "equippable") and item.equippable:
+                eq_type_name = item.equippable.equipment_type.name
+            if eq_type_name == "BACKPACK" or "quiver" in item_tags:
+                return False
+            return (
+                eq_type_name == "PROJECTILE"
+                or "arrow" in item_tags
+                or "ammunition" in item_tags
+                or "ammo" in item_tags
+            )
+        
+        # Special handling for arrows: try quiver first
+        if is_arrow_item(item):
+            equipment = self.engine.player.equipment
+            quiver_item = None
+            if hasattr(equipment, "get_equipped_quiver"):
+                quiver_item = equipment.get_equipped_quiver()
+
+            if quiver_item is not None:
+                from actions import _ensure_quiver_ammo_state, _get_quiver_total_count, _resolve_ammo_type, _ensure_quiver_ammo_templates
+                import copy as _copy
+                ammo_counts, selected_type = _ensure_quiver_ammo_state(quiver_item)
+                current = _get_quiver_total_count(quiver_item)
+                capacity = int(getattr(quiver_item, "arrow_capacity", 0) or 0)
+                if current < capacity:
+                    self.container.items.remove(item)
+                    for i, s in enumerate(self._container_slots):
+                        if s is item:
+                            self._container_slots[i] = None
+                            break
+                    ammo_type = _resolve_ammo_type(item)
+                    ammo_counts[ammo_type] = int(ammo_counts.get(ammo_type, 0) or 0) + 1
+                    quiver_item.arrow_count = current + 1
+                    ammo_templates = _ensure_quiver_ammo_templates(quiver_item)
+                    if ammo_type not in ammo_templates:
+                        try:
+                            ammo_templates[ammo_type] = _copy.deepcopy(item)
+                        except Exception:
+                            pass
+                    self.engine.player.gold -= buy_price
+                    sounds.play_equip_manycoins_sound()
+                    if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
+                        item.pickup_sound()
+                    self.engine.message_log.add_message(
+                        f"You buy {item.name} and add it to your quiver ({current + 1}/{capacity}) for {buy_price}gp."
+                    )
+                    return
+        
         if not self.engine.player.inventory.can_carry(item):
             self.engine.message_log.add_message(
                 "You are carrying too much.", color.impossible)
@@ -2134,4 +2478,818 @@ class TradeGridUI(ContainerGridUI):
                 actions.DropItem(self.engine.player, item).perform()
         elif hasattr(item, "drop_sound") and item.drop_sound is not None:
             item.drop_sound()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cooking UI — campfire crafting: 3 ingredient input slots + 1 output slot
+# ─────────────────────────────────────────────────────────────────────────────
+# Recipe table: list of recipe dicts.
+#
+# Each recipe dict has:
+#   "required" — list of frozensets; every item MUST be matched (in any order).
+#   "optional" — list of frozensets; each matched item makes the recipe richer
+#                but is not required. The total filled count must be between
+#                len(required) and len(required)+len(optional) inclusive.
+#   "output"   — entity_factories attribute name or callable; receives the
+#                list of matched ingredient items (required first, then
+#                optional matches in input order).
+#
+# Tag matching: an item satisfies a slot if its tags are a SUPERSET of the slot
+# frozenset (the slot specifies the MINIMUM required tags).  Items not matched
+# by any required/optional slot are rejected (recipe does not fire).
+
+_COOKING_RECIPES: list = [
+    # 3 mushrooms → mushroom stew
+    {
+        "required": [
+            frozenset({"mushroom", "ingredient"}),
+            frozenset({"mushroom", "ingredient"}),
+        ],
+        "optional": [
+            frozenset({"mushroom", "ingredient"}),
+            frozenset({"meat", "ingredient"}),
+        ],
+        "output": "create_stew",
+    },
+    {
+        "required": [
+            frozenset({"meat", "ingredient"}),
+            frozenset({"meat", "ingredient"}),
+        ],
+        "optional": [
+            frozenset({"mushroom", "ingredient"}),
+            frozenset({"meat", "ingredient"}),
+        ],
+        "output": "create_hash",
+    },
+    {
+        "required": [
+            frozenset({"lesser", "health"}),
+            frozenset({"lesser", "health"}),
+        ],
+        "output": "health_potion",
+    }
+]
+
+# Layout constants (reuse ContainerGridUI values where identical)
+_CK_W            = _CC_W             # 34  — chrome console width
+_CK_H            = _CC_H             # 36  — chrome console height
+_CK_BLIT_X       = _CC_BLIT_X        # 23  — blit position in 80×50
+_CK_BLIT_Y       = _CC_BLIT_Y        # 7
+_CK_GRID_SCALE   = _CC_GRID_SCALE    # 3   — GPU upscale factor
+_CK_LEFT_COLS    = _CC_GRID_COLS     # 5   — player-inventory grid columns
+_CK_LEFT_ROWS    = _CC_GRID_ROWS     # 9   — player-inventory grid rows
+_CK_LEFT_ORI     = _CC_LEFT_ORI      # 1   — panel col where player grid starts
+_CK_DIV_X        = _CC_DIV_X         # 16  — vertical divider panel col
+# Triangle grid: 3 cols × 6 rows — slot positions (col, row)
+# (0,0)=ingr0   (2,0)=ingr1
+#  gap row 1
+#      (1,2)=ingr2
+#  rows 3-4 = smoke/flame indicator (non-interactive)
+#      (1,5)=output
+_CK_SLOT_COLS    = 3
+_CK_SLOT_ROWS    = 6
+# Right-panel area = cols 17-32 (16 wide); 3 cols × 3 scale = 9; centre → start at 20
+_CK_SLOT_ORI     = 20               # cooking grid start col in panel space
+_CK_SLOT_MAP     = {(0,0):0, (2,0):1, (1,2):2, (1,5):3}  # (col,row)→slot idx
+_CK_GRID_ROW_ORI = _CC_GRID_ROW_ORI  # 3   — first grid row in panel space
+_CK_INFO_SEP_Y   = _CC_INFO_SEP_Y    # 30
+_CK_INFO_Y       = _CC_INFO_Y        # 31
+
+
+class CookingUI(PopupEventHandler):
+    """Campfire cooking interface.
+
+    Left panel  : player inventory (5 × 9, GPU-scaled 3×).
+    Right panel : 3 ingredient input slots + 1 output slot (1 × 4, GPU-scaled 3×).
+
+    Drag or Shift+Click to add/remove ingredients.
+    Press Enter to cook; click the output slot to collect the result.
+    Escape returns all ingredients and closes.
+    """
+
+    _N_INPUTS: int = 3
+
+    def __init__(self, engine: "Engine") -> None:
+        super().__init__(engine)
+        engine.context_hints = [
+            ("Drag / Shift+Click", "Add Ingredient"),
+            ("Enter",              "Cook"),
+            ("Esc",                "Close"),
+        ]
+
+        # Chrome console (borders, titles, chrome labels)
+        self._inv_console = tcod.console.Console(_CK_W, _CK_H, order="F")
+
+        # Player inventory — GPU-scaled 3× (main.py renders via _grid_dest_tiles)
+        self._grid_console = tcod.console.Console(_CK_LEFT_COLS, _CK_LEFT_ROWS, order="F")
+        self._player_qty_console = tcod.console.Console(
+            _CK_LEFT_COLS * _CK_GRID_SCALE,
+            _CK_LEFT_ROWS * _CK_GRID_SCALE,
+            order="F",
+        )
+
+        # Cooking slots — 3 col × 6 rows triangle layout (spaced)
+        # GPU-scaled 3× (main.py renders via _container_grid_dest_tiles)
+        self._container_grid_console = tcod.console.Console(_CK_SLOT_COLS, _CK_SLOT_ROWS, order="F")
+        self._container_qty_console  = tcod.console.Console(
+            _CK_SLOT_COLS * _CK_GRID_SCALE,
+            _CK_SLOT_ROWS * _CK_GRID_SCALE,
+            order="F",
+        )
+
+        # Drag ghost — 1×1, GPU-scaled 3× ADD-blended (transparent bg)
+        self._drag_console = tcod.console.Console(1, 1, order="F")
+
+        # Cooking state
+        self._cooking_slots: List[Optional["Item"]] = [None] * self._N_INPUTS
+        self._output_item:   Optional["Item"]        = None
+
+        # Selection / hover
+        self._player_scroll: int      = 0
+        self._sel_player:    int      = -1
+        self._sel_slot:      int      = -1   # -1=none, 0-2=input, 3=output
+        self._hover_panel:   Optional[str] = None  # "player" | "cooking"
+
+        # Drag state
+        self._drag_item:     Optional["Item"] = None
+        self._drag_src_type: Optional[str]    = None  # "player" | "slot"
+        self._drag_src_idx:  Optional[int]    = None
+        self._drag_tile:     Tuple[int, int]  = (0, 0)
+        self._drag_pixel:    Tuple[int, int]  = (0, 0)
+
+        self._set_popup_bounds(_CK_BLIT_X, _CK_BLIT_Y, _CK_W, _CK_H)
+
+    # ── Recipe matching ───────────────────────────────────────────────────────
+
+    def _match_recipe(self) -> Optional["Item"]:
+        """Return the output item if the filled slots satisfy a recipe.
+
+        Matching rules:
+        - filled count must be between len(required) and
+          len(required)+len(optional) inclusive.
+        - Every permutation of the filled items is tried.  The first
+          len(required) positions in the permutation must satisfy the required
+          slots; each remaining item must satisfy at least one unused optional
+          slot (greedy left-to-right).
+        - The first matching recipe wins.
+        """
+        from itertools import permutations as _perms
+        filled = [item for item in self._cooking_slots if item is not None]
+        if not filled:
+            return None
+
+        def _tags(item) -> set:
+            return set(getattr(item, "tags", []))
+
+        def _try_recipe(recipe: dict) -> Optional[list]:
+            req:  list = recipe.get("required", [])
+            opt:  list = recipe.get("optional", [])
+            n_req = len(req)
+            n_opt = len(opt)
+            if not (n_req <= len(filled) <= n_req + n_opt):
+                return None
+            n_extra = len(filled) - n_req  # how many optional slots to fill
+            for perm in _perms(filled):
+                # Check required slots
+                if not all(req[i].issubset(_tags(perm[i])) for i in range(n_req)):
+                    continue
+                # Greedily match extra items against optional slots
+                opt_remaining = list(opt)
+                matched_opts: list = []
+                ok = True
+                for item in perm[n_req:]:
+                    for j, opt_slot in enumerate(opt_remaining):
+                        if opt_slot.issubset(_tags(item)):
+                            matched_opts.append(item)
+                            opt_remaining.pop(j)
+                            break
+                    else:
+                        ok = False
+                        break
+                if ok and len(matched_opts) == n_extra:
+                    return list(perm[:n_req]) + matched_opts
+            return None
+
+        import entity_factories as _ef
+        import copy as _copy
+        for recipe in _COOKING_RECIPES:
+            matched = _try_recipe(recipe)
+            if matched is None:
+                continue
+            factory_name = recipe.get("output", "")
+            template = getattr(_ef, factory_name, None)
+            if template is None:
+                return None
+            return template(matched) if callable(template) else _copy.deepcopy(template)
+        return None
+
+    def _update_output(self) -> None:
+        """Recompute preview output whenever ingredients change."""
+        ingredient_ids = tuple(id(s) for s in self._cooking_slots)
+        if getattr(self, "_last_ingredient_ids", None) != ingredient_ids:
+            self._last_ingredient_ids = ingredient_ids
+            self._output_item = self._match_recipe()
+
+    # ── Coordinate helpers ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _to_panel(tx: int, ty: int) -> Tuple[int, int]:
+        return tx - _CK_BLIT_X, ty - _CK_BLIT_Y
+
+    def _hit_left_cell(self, tx: int, ty: int) -> Optional[Tuple[int, int]]:
+        ix, iy = self._to_panel(tx, ty)
+        col = (ix - _CK_LEFT_ORI) // _CK_GRID_SCALE
+        row = (iy - _CK_GRID_ROW_ORI) // _CK_GRID_SCALE
+        if 0 <= col < _CK_LEFT_COLS and 0 <= row < _CK_LEFT_ROWS:
+            return col, row
+        return None
+
+    def _hit_cooking_slot(self, tx: int, ty: int) -> Optional[int]:
+        """Return slot index 0–3 (3 = output slot), or None if no hit."""
+        ix, iy = self._to_panel(tx, ty)
+        col = (ix - _CK_SLOT_ORI) // _CK_GRID_SCALE
+        row = (iy - _CK_GRID_ROW_ORI) // _CK_GRID_SCALE
+        if not (0 <= col < _CK_SLOT_COLS and 0 <= row < _CK_SLOT_ROWS):
+            return None
+        return _CK_SLOT_MAP.get((col, row))  # None for non-slot cells
+
+    def _cell_to_idx(self, col: int, row: int) -> int:
+        return (self._player_scroll + row) * _CK_LEFT_COLS + col
+
+    # ── GPU grid destination tiles (read by main.py) ──────────────────────────
+
+    @property
+    def _grid_dest_tiles(self) -> Tuple[int, int, int, int]:
+        return (
+            _CK_BLIT_X + _CK_LEFT_ORI,
+            _CK_BLIT_Y + _CK_GRID_ROW_ORI,
+            _CK_LEFT_COLS * _CK_GRID_SCALE,
+            _CK_LEFT_ROWS * _CK_GRID_SCALE,
+        )
+
+    @property
+    def _container_grid_dest_tiles(self) -> Tuple[int, int, int, int]:
+        return (
+            _CK_BLIT_X + _CK_SLOT_ORI,
+            _CK_BLIT_Y + _CK_GRID_ROW_ORI,
+            _CK_SLOT_COLS * _CK_GRID_SCALE,
+            _CK_SLOT_ROWS * _CK_GRID_SCALE,
+        )
+
+    @property
+    def _drag_dest_tiles(self) -> Tuple[int, int, int, int]:
+        tx, ty = self._drag_tile
+        dx = _clamp(tx - _CK_GRID_SCALE // 2, 0, 80 - _CK_GRID_SCALE)
+        dy = _clamp(ty - _CK_GRID_SCALE // 2, 0, 50 - _CK_GRID_SCALE)
+        return (dx, dy, _CK_GRID_SCALE, _CK_GRID_SCALE)
+
+    @property
+    def _drag_dest_pixels(self) -> Tuple[int, int, int, int]:
+        px, py = self._drag_pixel
+        size = _CK_GRID_SCALE * 16
+        return (px - size // 2, py - size // 2, size, size)
+
+    # ── Data helpers ──────────────────────────────────────────────────────────
+
+    def _get_player_groups(self):
+        return self.engine.player.inventory.get_display_groups()
+
+    # ── Rendering ──────────────────────────────────────────────────────────────
+
+    def on_render(self, console: tcod.Console) -> None:
+        super().on_render(console)
+        self._update_output()
+
+        # Player grid
+        self._grid_console.clear()
+        self._fill_player_grid()
+
+        self._player_qty_console.clear()
+        self._fill_player_qty_console()
+
+        # Cooking slots (input + output)
+        self._container_grid_console.clear()
+        self._fill_cooking_grid()
+        self._container_qty_console.clear()
+        self._fill_cooking_qty()
+
+        # Drag ghost
+        if self._drag_item is not None:
+            self._drag_console.clear()
+            self._fill_drag_console()
+
+        # Chrome
+        c = self._inv_console
+        c.clear()
+        self._render_to_console(c)
+        c.blit(console, _CK_BLIT_X, _CK_BLIT_Y)
+
+    def _fill_drag_console(self) -> None:
+        if self._drag_item is None:
+            return
+        self._drag_console.print(
+            0, 0,
+            getattr(self._drag_item, "char", "?"),
+            fg=getattr(self._drag_item, "color", (200, 180, 100)),
+            bg=(0, 0, 0),
+        )
+
+    def _fill_player_grid(self) -> None:
+        gc     = self._grid_console
+        groups = self._get_player_groups()
+        total  = len(groups)
+        max_s  = max(0, -(-total // _CK_LEFT_COLS) - _CK_LEFT_ROWS)
+        self._player_scroll = _clamp(self._player_scroll, 0, max_s)
+
+        for row in range(_CK_LEFT_ROWS):
+            for col in range(_CK_LEFT_COLS):
+                idx       = self._cell_to_idx(col, row)
+                grp       = groups[idx] if idx < total else None
+                is_filled = grp is not None
+                is_sel    = (idx == self._sel_player)
+                is_drag_s = (self._drag_src_type == "player" and self._drag_src_idx == idx)
+
+                is_equipped = (
+                    is_filled
+                    and self.engine.player.equipment.item_is_equipped(grp["item"])
+                )
+
+                cell_bg = (
+                    _CELL_DRAG if is_drag_s
+                    else _CELL_SEL  if is_sel
+                    else tuple(max(0, v * 70 // 100) for v in _CELL_FILLED) if (is_filled and is_equipped)
+                    else _CELL_FILLED if is_filled
+                    else _CELL_EMPTY
+                )
+
+                if is_filled:
+                    item     = grp["item"]
+                    item_ch  = getattr(item, "char", "?")
+                    item_col = getattr(item, "color", (200, 180, 100))
+                    rar_col  = getattr(item, "rarity_color", cell_bg)
+                    tinted   = tuple(min(255, int(b * 75 // 100 + r * 25 // 100))
+                                     for b, r in zip(cell_bg, rar_col))
+                    if is_drag_s:
+                        item_col = tuple(max(0, v - 80) for v in item_col)
+                    gc.print(col, row, item_ch, fg=item_col, bg=tinted)
+                else:
+                    gc.print(col, row, "\u00b7", fg=_SLOT_EMPTY_V, bg=cell_bg)
+
+    def _fill_player_qty_console(self) -> None:
+        gc = self._player_qty_console
+        gc.tiles_rgb["bg"][:, :] = 0
+        gc.tiles_rgb["fg"][:, :] = 0
+        gc.tiles_rgb["ch"][:, :] = ord(" ")
+        groups = self._get_player_groups()
+        for row in range(_CK_LEFT_ROWS):
+            for col in range(_CK_LEFT_COLS):
+                idx = self._cell_to_idx(col, row)
+                if idx >= len(groups):
+                    continue
+                grp = groups[idx]
+                if grp is None:
+                    continue
+                px  = col * _CK_GRID_SCALE
+                py  = row * _CK_GRID_SCALE
+                qty = grp.get("quantity", 1)
+                if qty > 1:
+                    gc.print(px, py, f"x{qty}", fg=(255, 230, 120), bg=(0, 0, 0))
+                enc = getattr(grp["item"], "enchantment_level", 0)
+                if enc:
+                    import roman as _roman
+                    gc.print(px, py + _CK_GRID_SCALE - 1,
+                             f"+{_roman.toRoman(enc)}".rjust(_CK_GRID_SCALE),
+                             fg=(120, 200, 255), bg=(0, 0, 0))
+
+    def _fill_cooking_grid(self) -> None:
+        gc = self._container_grid_console
+        all_slots = list(self._cooking_slots) + [self._output_item]  # 4 entries
+
+        # Reverse map: slot_idx → (col, row)
+        _pos = {v: k for k, v in _CK_SLOT_MAP.items()}
+
+        # First fill every cell with panel background (non-interactive cells blend in)
+        for r in range(_CK_SLOT_ROWS):
+            for c_col in range(_CK_SLOT_COLS):
+                gc.print(c_col, r, " ", fg=_BG, bg=_BG)
+
+        # Render each active slot
+        for slot_idx, item in enumerate(all_slots):
+            col, row  = _pos[slot_idx]
+            is_output = (slot_idx == self._N_INPUTS)
+            is_sel    = (slot_idx == self._sel_slot)
+            is_drag_s = (self._drag_src_type == "slot" and self._drag_src_idx == slot_idx)
+
+            if is_output:
+                cell_bg = (
+                    _CELL_SEL       if (is_sel and item is not None)
+                    else (50, 70, 30)   if item is not None
+                    else (20, 30, 12)
+                )
+            else:
+                cell_bg = (
+                    _CELL_DRAG  if is_drag_s
+                    else _CELL_SEL    if is_sel
+                    else _CELL_FILLED if item is not None
+                    else _CELL_EMPTY
+                )
+
+            if item is not None:
+                item_ch  = getattr(item, "char", "?")
+                item_col = getattr(item, "color", (200, 180, 100))
+                rar_col  = getattr(item, "rarity_color", cell_bg)
+                tinted   = tuple(min(255, int(b * 75 // 100 + r2 * 25 // 100))
+                                 for b, r2 in zip(cell_bg, rar_col))
+                if is_drag_s:
+                    item_col = tuple(max(0, v - 80) for v in item_col)
+                gc.print(col, row, item_ch, fg=item_col, bg=tinted)
+            else:
+                empty_fg = (40, 60, 25) if is_output else _SLOT_EMPTY_V
+                gc.print(col, row, "\u00b7", fg=empty_fg, bg=cell_bg)
+
+
+        gc.print(1, 3, tile_ids.HEAT_FLAME, fg=(255, 105, 0), bg=_BG)
+
+    def _fill_cooking_qty(self) -> None:
+        """ADD-blend overlay for cooking slots — no extra decoration needed;
+        the heat sprite is drawn directly in the grid console."""
+        pass
+
+    def _render_to_console(self, c: tcod.Console) -> None:
+        W, H = _CK_W, _CK_H
+        bf   = _BORDER_DIM
+
+        c.tiles_rgb["bg"][:, :] = _BG
+        c.tiles_rgb["fg"][:, :] = _BG
+        c.tiles_rgb["ch"][:, :] = ord(" ")
+        c.draw_frame(0, 0, W, H, fg=bf, bg=_BG)
+
+        # Titles
+        c.print(1, 0, " Inventory ",     fg=_TITLE_FG,         bg=_BG)
+        c.print(_CK_DIV_X + 1, 0, " Campfire ", fg=(255, 160, 60), bg=_BG)
+
+        # Hint row
+        c.print(2,             1, "\u2190 Your Items", fg=_HINT_FG, bg=_BG)
+        c.print(_CK_DIV_X + 1, 1, "Cooking \u2192",   fg=_HINT_FG, bg=_BG)
+
+        # Vertical divider
+        c.print(_CK_DIV_X, 0, "\u252c", fg=bf, bg=_BG)
+        for y in range(1, _CK_INFO_SEP_Y):
+            c.print(_CK_DIV_X, y, "\u2502", fg=bf, bg=_BG)
+
+        # Horizontal separator at row 2
+        for x in range(1, W - 1):
+            c.print(x, 2, "\u2500", fg=bf, bg=_BG)
+        c.print(0,         2, "\u251c", fg=bf, bg=_BG)
+        c.print(_CK_DIV_X, 2, "\u253c", fg=bf, bg=_BG)
+        c.print(W - 1,     2, "\u2524", fg=bf, bg=_BG)
+
+        # Separator above info strip
+        for x in range(1, W - 1):
+            c.print(x, _CK_INFO_SEP_Y, "\u2500", fg=bf, bg=_BG)
+        c.print(0,         _CK_INFO_SEP_Y, "\u251c", fg=bf, bg=_BG)
+        c.print(_CK_DIV_X, _CK_INFO_SEP_Y, "\u2534", fg=bf, bg=_BG)
+        c.print(W - 1,     _CK_INFO_SEP_Y, "\u2524", fg=bf, bg=_BG)
+
+        # Player scroll indicators
+        groups = self._get_player_groups()
+        p_max_s = max(0, -(-len(groups) // _CK_LEFT_COLS) - _CK_LEFT_ROWS)
+        if self._player_scroll > 0:
+            c.print(_CK_DIV_X, _CK_GRID_ROW_ORI, "\u2191", fg=_BORDER_BRIGHT, bg=_BG)
+        if self._player_scroll < p_max_s:
+            c.print(_CK_DIV_X, _CK_INFO_SEP_Y - 1, "\u2193", fg=_BORDER_BRIGHT, bg=_BG)
+
+        # Transparent hole — player grid
+        x1 = _CK_LEFT_ORI
+        x2 = _CK_LEFT_ORI + _CK_LEFT_COLS * _CK_GRID_SCALE
+        y1 = _CK_GRID_ROW_ORI
+        y2 = _CK_GRID_ROW_ORI + _CK_LEFT_ROWS * _CK_GRID_SCALE
+        c.tiles_rgb["bg"][x1:x2, y1:y2] = 0
+        c.tiles_rgb["fg"][x1:x2, y1:y2] = 0
+        c.tiles_rgb["ch"][x1:x2, y1:y2] = ord(" ")
+
+        # Transparent hole — cooking triangle grid (3 cols × 6 rows)
+        sx1 = _CK_SLOT_ORI
+        sx2 = _CK_SLOT_ORI + _CK_SLOT_COLS * _CK_GRID_SCALE
+        sy1 = _CK_GRID_ROW_ORI
+        sy2 = _CK_GRID_ROW_ORI + _CK_SLOT_ROWS * _CK_GRID_SCALE
+        c.tiles_rgb["bg"][sx1:sx2, sy1:sy2] = 0
+        c.tiles_rgb["fg"][sx1:sx2, sy1:sy2] = 0
+        c.tiles_rgb["ch"][sx1:sx2, sy1:sy2] = ord(" ")
+
+        self._draw_info_strip(c)
+
+    def _draw_info_strip(self, c: tcod.Console) -> None:
+        item: Optional["Item"] = None
+        if self._sel_player >= 0:
+            groups = self._get_player_groups()
+            if self._sel_player < len(groups) and groups[self._sel_player] is not None:
+                item = groups[self._sel_player]["item"]
+        elif 0 <= self._sel_slot < self._N_INPUTS:
+            item = self._cooking_slots[self._sel_slot]
+        elif self._sel_slot == self._N_INPUTS:
+            item = self._output_item
+
+        if item is None:
+            c.print(2, _CK_INFO_Y,
+                    "Drag items into cooking slots, then cook.",
+                    fg=_HINT_FG, bg=_BG)
+            return
+
+        c.print(2, _CK_INFO_Y,
+                item.name[:(_CK_W - 4)],
+                fg=getattr(item, "rarity_color", (220, 190, 120)), bg=_BG)
+
+        parts: list = []
+        if getattr(item, "consumable", None):
+            parts.append("Consumable")
+        elif getattr(item, "equippable", None):
+            parts.append("Equipment")
+        else:
+            parts.append("Misc")
+        weight = getattr(item, "weight", None)
+        if weight is not None:
+            parts.append(f"{weight:.1f}kg")
+        c.print(2, _CK_INFO_Y + 1,
+                "  ".join(parts)[:(_CK_W - 4)],
+                fg=_INFO_STAT, bg=_BG)
+
+    # ── Event handling ────────────────────────────────────────────────────────
+
+    def ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:
+        super().ev_mousemotion(event)
+        tx, ty           = int(event.tile.x), int(event.tile.y)
+        self._drag_tile  = (tx, ty)
+        self._drag_pixel = (int(event.pixel.x), int(event.pixel.y))
+
+        # Hit-test player panel
+        cell = self._hit_left_cell(tx, ty)
+        if cell is not None:
+            col, row = cell
+            idx    = self._cell_to_idx(col, row)
+            groups = self._get_player_groups()
+            if idx < len(groups) and groups[idx] is not None:
+                if idx != self._sel_player:
+                    self._sel_player = idx
+                    self._sel_slot   = -1
+                    sounds.play_ui_move_sound()
+                self._hover_panel = "player"
+            else:
+                self._sel_player  = -1
+                self._hover_panel = "player"
+            return
+
+        # Hit-test cooking slots
+        slot_idx = self._hit_cooking_slot(tx, ty)
+        if slot_idx is not None:
+            if slot_idx != self._sel_slot:
+                self._sel_slot   = slot_idx
+                self._sel_player = -1
+                sounds.play_ui_move_sound()
+            self._hover_panel = "cooking"
+            return
+
+        self._sel_player  = -1
+        self._sel_slot    = -1
+        self._hover_panel = None
+
+    def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[object]:
+        tx, ty = int(event.tile.x), int(event.tile.y)
+        ix, iy = self._to_panel(tx, ty)
+        if not (0 <= ix < _CK_W and 0 <= iy < _CK_H):
+            return self.on_exit()
+
+        ks    = tcod.event.get_keyboard_state()
+        shift = bool(ks[225] or ks[229])
+
+        # ── Left (player) panel ───────────────────────────────────────────
+        cell = self._hit_left_cell(tx, ty)
+        if cell is not None:
+            col, row = cell
+            idx    = self._cell_to_idx(col, row)
+            groups = self._get_player_groups()
+            if idx < len(groups) and groups[idx] is not None and event.button == tcod.event.BUTTON_LEFT:
+                item = groups[idx]["item"]
+                self._sel_player = idx
+                self._sel_slot   = -1
+                if shift:
+                    self._add_ingredient(item)
+                else:
+                    self.engine.mouse_held = True
+                    self._drag_item     = item
+                    self._drag_src_type = "player"
+                    self._drag_src_idx  = idx
+                    self._drag_tile     = (tx, ty)
+                    if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
+                        try:
+                            item.pickup_sound()
+                        except Exception:
+                            pass
+            return None
+
+        # ── Right (cooking) panel ─────────────────────────────────────────
+        slot_idx = self._hit_cooking_slot(tx, ty)
+        if slot_idx is not None and event.button == tcod.event.BUTTON_LEFT:
+            if slot_idx == self._N_INPUTS:
+                # Output slot — take the cooked result
+                self._take_output()
+            else:
+                item = self._cooking_slots[slot_idx]
+                if item is not None:
+                    self._sel_slot   = slot_idx
+                    self._sel_player = -1
+                    if shift:
+                        self._return_ingredient(slot_idx)
+                    else:
+                        self.engine.mouse_held = True
+                        self._drag_item     = item
+                        self._drag_src_type = "slot"
+                        self._drag_src_idx  = slot_idx
+                        self._drag_tile     = (tx, ty)
+                        if hasattr(item, "drop_sound") and item.drop_sound is not None:
+                            try:
+                                item.drop_sound()
+                            except Exception:
+                                pass
+            return None
+
+        return None
+
+    def ev_mousebuttonup(self, event: tcod.event.MouseButtonUp) -> Optional[object]:
+        if event.button != tcod.event.BUTTON_LEFT or self._drag_item is None:
+            return None
+        tx, ty = int(event.tile.x), int(event.tile.y)
+        self._complete_drag(tx, ty)
+        return None
+
+    def _complete_drag(self, tx: int, ty: int) -> None:
+        item     = self._drag_item
+        src_type = self._drag_src_type
+        src_idx  = self._drag_src_idx
+        self._drag_item     = None
+        self._drag_src_type = None
+        self._drag_src_idx  = None
+        if item is None:
+            return
+
+        # Dropped on a cooking input slot
+        slot_idx = self._hit_cooking_slot(tx, ty)
+        if slot_idx is not None and slot_idx < self._N_INPUTS:
+            if src_type == "player":
+                existing = self._cooking_slots[slot_idx]
+                if existing is not None:
+                    # Swap: return the existing ingredient first
+                    self.engine.player.inventory.items.append(existing)
+                    existing.parent = self.engine.player.inventory
+                    if hasattr(existing, "pickup_sound") and existing.pickup_sound is not None:
+                        try:
+                            existing.pickup_sound()
+                        except Exception:
+                            pass
+                self.engine.player.inventory.items.remove(item)
+                self._cooking_slots[slot_idx] = item
+                item.parent = None
+                self._output_item = None   # invalidate cached result
+                if hasattr(item, "drop_sound") and item.drop_sound is not None:
+                    try:
+                        item.drop_sound()
+                    except Exception:
+                        pass
+            elif src_type == "slot" and src_idx != slot_idx:
+                # Reorder two input slots
+                self._cooking_slots[src_idx], self._cooking_slots[slot_idx] = (
+                    self._cooking_slots[slot_idx],
+                    self._cooking_slots[src_idx],
+                )
+                self._output_item = None
+            return
+
+        # Dropped back on the player panel
+        cell = self._hit_left_cell(tx, ty)
+        if cell is not None:
+            if src_type == "slot" and src_idx is not None and src_idx < self._N_INPUTS:
+                self._return_ingredient(src_idx)
+            return
+
+        # Dropped outside the panel entirely
+        ix, iy = self._to_panel(tx, ty)
+        if not (0 <= ix < _CK_W and 0 <= iy < _CK_H):
+            if src_type == "slot" and src_idx is not None and src_idx < self._N_INPUTS:
+                self._return_ingredient(src_idx)
+            elif src_type == "player":
+                try:
+                    actions.DropItem(self.engine.player, item).perform()
+                except Exception:
+                    pass
+
+    # ── Ingredient / cooking actions ──────────────────────────────────────────
+
+    def _add_ingredient(self, item: "Item") -> None:
+        """Move item from player inventory into the first empty input slot."""
+        if self.engine.player.equipment.item_is_equipped(item):
+            self.engine.message_log.add_message("Unequip the item first.", color.impossible)
+            return
+        for i in range(self._N_INPUTS):
+            if self._cooking_slots[i] is None:
+                self.engine.player.inventory.items.remove(item)
+                self._cooking_slots[i] = item
+                item.parent      = None
+                self._output_item = None
+                if hasattr(item, "drop_sound") and item.drop_sound is not None:
+                    try:
+                        item.drop_sound()
+                    except Exception:
+                        pass
+                else:
+                    sounds.play_ui_move_sound()
+                return
+        self.engine.message_log.add_message("All ingredient slots are full.", color.impossible)
+
+    def _return_ingredient(self, slot_idx: int) -> None:
+        """Return the ingredient at slot_idx back to player inventory."""
+        item = self._cooking_slots[slot_idx]
+        if item is None:
+            return
+        self.engine.player.inventory.items.append(item)
+        item.parent = self.engine.player.inventory
+        self._cooking_slots[slot_idx] = None
+        self._output_item = None
+        if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
+            try:
+                item.pickup_sound()
+            except Exception:
+                pass
+        else:
+            sounds.play_ui_move_sound()
+
+    def _cook(self) -> None:
+        """Attempt to cook the current ingredients."""
+        result = self._match_recipe()
+        if result is None:
+            self.engine.message_log.add_message(
+                "You don't know a recipe for these ingredients.", color.impossible)
+            return
+        self._output_item = result
+        self.engine.message_log.add_message(
+            f"You cook: {result.name}!", color.light_green)
+        try:
+            sounds.play_ui_move_sound()
+        except Exception:
+            pass
+
+    def _take_output(self) -> None:
+        """Collect the cooked output into the player's inventory."""
+        if self._output_item is None:
+            return
+        if not self.engine.player.inventory.can_carry(self._output_item):
+            self.engine.message_log.add_message("You are carrying too much.", color.impossible)
+            return
+        out = self._output_item
+        self.engine.player.inventory.items.append(out)
+        out.parent = self.engine.player.inventory
+        name = out.name
+        self._output_item = None
+        # Consume the used ingredients
+        for i in range(self._N_INPUTS):
+            self._cooking_slots[i] = None
+        self.engine.message_log.add_message(f"You take the {name}.", color.light_green)
+        if hasattr(out, "pickup_sound") and out.pickup_sound is not None:
+            try:
+                out.pickup_sound()
+            except Exception:
+                sounds.play_ui_move_sound()
+        else:
+            sounds.play_ui_move_sound()
+
+    # ── Keyboard ──────────────────────────────────────────────────────────────
+
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[object]:
+        key = event.sym
+        if key in (tcod.event.K_ESCAPE, tcod.event.K_TAB):
+            return self.on_exit()
+        if key == tcod.event.K_PAGEDOWN:
+            self._player_scroll += 1
+        elif key == tcod.event.K_PAGEUP:
+            self._player_scroll = max(0, self._player_scroll - 1)
+        if key in CONFIRM_KEYS:
+            self._cook()
+        return None
+
+    def ev_mousewheel(self, event: tcod.event.MouseWheel) -> Optional[object]:
+        if event.y < 0:
+            self._player_scroll += 1
+        elif event.y > 0:
+            self._player_scroll = max(0, self._player_scroll - 1)
+        return None
+
+    def on_exit(self) -> object:
+        """Return all ingredients to inventory before closing."""
+        for i in range(self._N_INPUTS):
+            if self._cooking_slots[i] is not None:
+                self.engine.player.inventory.items.append(self._cooking_slots[i])
+                self._cooking_slots[i].parent = self.engine.player.inventory
+                self._cooking_slots[i] = None
+        self._output_item = None
+        return super().on_exit()
 

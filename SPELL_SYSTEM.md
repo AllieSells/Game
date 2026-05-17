@@ -13,7 +13,7 @@ class FireballSpell(Spell):
         super().__init__(
             name="Fireball",
             description="Launch a fiery projectile at your enemies.",
-            damage=15,
+            damage=5,
             duration=0,
             mana_cost=15,
             components=['V', 'S'],

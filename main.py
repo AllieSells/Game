@@ -489,7 +489,7 @@ def main() -> None:
     debug_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
     # Dedicated renderer for the 40×25 inventory grid (never shares state with game renderer)
     inv_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
-    debug_console = tcod.console.Console(40, 9, order="F")
+    debug_console = tcod.console.Console(40, 24, order="F")
     # 1×1 dim texture stretched over full screen for overlay fade (GPU-only, no CPU pixel work)
     dim_pixels = np.array([[[20, 20, 30, 100]]], dtype=np.uint8)
     dim_tex = renderer.upload_texture(dim_pixels)
@@ -725,6 +725,13 @@ def main() -> None:
             _render_frame += 1
 
             current_time = time.time()
+            # Real displayed frame cadence (includes GPU present + sleep cap).
+            frame_dt = max(1e-6, current_time - last_time)
+            real_frame_fps = 1.0 / frame_dt
+            real_frame_ms = frame_dt * 1000.0
+            if active_engine is not None:
+                active_engine.frame_fps = real_frame_fps
+                active_engine.frame_time_ms = real_frame_ms
             window_w, window_h = context.sdl_window.size
 
             # ------------------------------------------------------------------
@@ -918,14 +925,60 @@ def main() -> None:
                     debug_console.clear()
                     render_functions.render_debug_overlay(
                         debug_console,
-                        active_engine.tick_rate,
+                        getattr(active_engine, "frame_fps", active_engine.tick_rate),
                         (active_engine.player.x, active_engine.player.y),
                         type(handler).__name__,
                         len(active_engine.game_map.entities),
                         active_engine,
                     )
                     dbg_tex = debug_console_renderer.render(debug_console)
-                    renderer.copy(dbg_tex, dest=(0, 0, int(40 * base_tile_w), int(9 * base_tile_h)))
+                    renderer.copy(
+                        dbg_tex,
+                        dest=(
+                            0,
+                            0,
+                            int(debug_console.width * base_tile_w),
+                            int(debug_console.height * base_tile_h),
+                        ),
+                    )
+                if getattr(active_engine, "show_lag_profiler", False):
+                    cached_overlay_handler = None
+                    overlay_dirty = True
+                    ui_console.clear()
+                    active_engine.render_ui(ui_console, skip_debug=True)
+                    hud_tex = ui_console_renderer.render(ui_console)
+                    renderer.copy(hud_tex,
+                                  source=(0, int(hud_source_y), int(_ui_tex_w), int(hud_source_h)),
+                                  dest=(0, int(window_h - hud_dest_h), window_w, int(hud_dest_h)))
+                    _tw, _th = tileset.tile_width, tileset.tile_height
+                    _mm_x = render_functions.get_minimap_origin_x(active_engine)
+                    _mm_y, _mm_w, _mm_h = render_functions._MM_Y, render_functions._MM_W, render_functions._MM_H
+                    _mm_mode = getattr(active_engine, 'show_minimap', 0)
+                    _mm_on_overworld = getattr(getattr(active_engine, 'game_map', None), 'type', '') == 'overworld'
+                    if _mm_mode == 2 and not _mm_on_overworld:
+                        renderer.copy(hud_tex,
+                                      source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_th)),
+                                      dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
+                                            int(_mm_w * base_tile_w), int(base_tile_h)))
+                    elif _mm_mode != 3 and not _mm_on_overworld:
+                        renderer.copy(hud_tex,
+                                      source=(int(_mm_x * _tw), int(_mm_y * _th), int(_mm_w * _tw), int(_mm_h * _th)),
+                                      dest=(int(_mm_x * base_tile_w), int(_mm_y * base_tile_h),
+                                            int(_mm_w * base_tile_w), int(_mm_h * base_tile_h)))
+                        render_functions.render_gpu_minimap_body(renderer, active_engine, base_tile_w, base_tile_h)
+                    render_functions.render_gpu_reset_bar(renderer, handler, window_w, window_h, ui_console_renderer, hud_dest_h)
+                    debug_console.clear()
+                    render_functions.render_lag_profiler(debug_console, active_engine)
+                    dbg_tex = debug_console_renderer.render(debug_console)
+                    renderer.copy(
+                        dbg_tex,
+                        dest=(
+                            0,
+                            0,
+                            int(debug_console.width * base_tile_w),
+                            int(debug_console.height * base_tile_h),
+                        ),
+                    )
                 else:
                     cached_overlay_handler = None
                     overlay_dirty = True
@@ -1034,7 +1087,7 @@ def main() -> None:
                         tuple(getattr(active_engine, 'mouse_location',
                                       active_engine.mouse_location)),
                         getattr(handler, 'current_tab', 0),
-                        getattr(handler, 'scroll_offset', 0),
+                        getattr(handler, 'scroll_offset', getattr(handler, '_scroll_offset', 0)),
                         getattr(handler, 'detail_index', 0),
                     )
                     if inspect_ui_cursor_cache != cur_cursor or inspect_ui_tex is None:

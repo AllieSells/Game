@@ -22,6 +22,7 @@ import random
 import numpy as np
 from components.effect import BurningEffect, PoisonEffect
 import sounds
+import sprite_manager
 
 if TYPE_CHECKING:
     from game_map import GameMap
@@ -72,12 +73,12 @@ class LiquidType(Enum):
         colors = {
             LiquidType.NONE: color.white,
             LiquidType.WATER: color.blue,
-            LiquidType.BLOOD: color.red,
+            LiquidType.BLOOD: color.dark_red,
             LiquidType.OIL: color.yellow,
             LiquidType.SLIME: color.green,
             LiquidType.HEALTHPOTION: color.light_red,
             LiquidType.POISON: color.light_green,
-            LiquidType.FIRE: color.sprite_sheet
+            LiquidType.FIRE: (255, 85, 23)
         }
         return colors.get(self, color.white)
     
@@ -190,11 +191,19 @@ class LiquidSystem:
 
         
     
+    # Tile names considered "water" — blood/other coatings are suppressed on these.
+    _WATER_TILE_NAMES = frozenset({"Water", "Ocean", "River", "Shore"})
+
     def add_liquid(self, x: int, y: int, liquid_type: LiquidType, depth: int = 1) -> None:
         """Add liquid coating to a tile."""
         if not self.game_map.in_bounds(x, y):
             return
-        
+
+        # Don't place blood (or any coating) on top of water tiles.
+        tile_name = str(self.game_map.tiles['name'][x, y])
+        if tile_name in self._WATER_TILE_NAMES:
+            return
+
         # Only coat walkable tiles
         if not self.game_map.tiles['walkable'][x, y]:
             return
@@ -233,6 +242,13 @@ class LiquidSystem:
         if coating.depth <= 0:
             self._restore_original_tile(x, y)
             del self.coatings[pos]
+            # Refresh all 8 neighbours so diagonal pulls update too.
+            for nx, ny in (
+                (x,     y - 1), (x,     y + 1), (x - 1, y    ), (x + 1, y    ),
+                (x - 1, y - 1), (x + 1, y - 1), (x - 1, y + 1), (x + 1, y + 1),
+            ):
+                if (nx, ny) in self.coatings:
+                    self._update_tile_graphics(nx, ny, self.coatings[(nx, ny)], _refresh_neighbors=False)
             return True
         else:
             self._update_tile_graphics(x, y, coating)
@@ -249,43 +265,63 @@ class LiquidSystem:
             if coating.original_tile is not None:
                 self.game_map.tiles[x, y] = coating.original_tile
     
-    def _update_tile_graphics(self, x: int, y: int, coating: LiquidCoating) -> None:
-        """Update the tile's graphics to show the liquid coating."""
+    def _update_tile_graphics(self, x: int, y: int, coating: LiquidCoating, _refresh_neighbors: bool = True) -> None:
+        """Update the tile's graphics to show the liquid coating via procedural sprite compositing."""
         if coating.original_tile is None:
             return
-        
-        # Get original character and foreground colors (preserve these)
-        orig_char = coating.original_tile["dark"]["ch"]
-        orig_fg_dark = tuple(coating.original_tile["dark"]["fg"])
-        orig_fg_light = tuple(coating.original_tile["light"]["fg"])
-        
-        # Get original background colors for blending
-        orig_bg_dark = tuple(coating.original_tile["dark"]["bg"])
-        orig_bg_light = tuple(coating.original_tile["light"]["bg"])
-        
-        # Blend background colors with liquid (only modify background)
-        liquid_bg_dark = coating.get_bg_color(orig_bg_dark)
-        liquid_bg_light = coating.get_bg_color(orig_bg_light)
-        liquid_fg_dark = coating.get_bg_color(orig_fg_dark)
-        liquid_fg_light = coating.get_bg_color(orig_fg_light)
-        
-        # Update tile graphics
+
+        orig_char = int(coating.original_tile["dark"]["ch"])
+
+        # All 8-neighbour connectivity drives blob shape and diagonal pulls.
+        has_top    = (x,     y - 1) in self.coatings
+        has_bottom = (x,     y + 1) in self.coatings
+        has_left   = (x - 1, y    ) in self.coatings
+        has_right  = (x + 1, y    ) in self.coatings
+        has_tl     = (x - 1, y - 1) in self.coatings
+        has_tr     = (x + 1, y - 1) in self.coatings
+        has_bl     = (x - 1, y + 1) in self.coatings
+        has_br     = (x + 1, y + 1) in self.coatings
+
+        tint = coating.liquid_type.get_display_color()
+
+        puddle_char = sprite_manager.get_puddle_sprite(
+            x, y,
+            has_top, has_bottom, has_left, has_right,
+            has_tl, has_tr, has_bl, has_br,
+            tint, coating.depth,
+        )
+
+        # Use compose_puddle_tile so the tile+puddle composite reuses its
+        # per-position slot instead of allocating a new one every evaporation tick.
+        composite_char = sprite_manager.compose_puddle_tile(x, y, orig_char, ord(puddle_char))
+        composite_cp = ord(composite_char)
+
         current_tile = self.game_map.tiles[x, y]
-        
-        # Create new tile preserving original character and foreground, only changing background
+        orig_bg_dark  = tuple(coating.original_tile["dark"]["bg"])
+        orig_bg_light = tuple(coating.original_tile["light"]["bg"])
+        white = (255, 255, 255)
+
         new_tile = (
             current_tile["light_level"],
             current_tile["name"],
             current_tile["walkable"],
             current_tile["transparent"],
-            np.array((orig_char, liquid_fg_dark, liquid_bg_dark), dtype=current_tile["dark"].dtype),
-            np.array((orig_char, liquid_fg_light, liquid_bg_light), dtype=current_tile["light"].dtype),
+            np.array((composite_cp, white, orig_bg_dark),  dtype=current_tile["dark"].dtype),
+            np.array((composite_cp, white, orig_bg_light), dtype=current_tile["light"].dtype),
             current_tile["interactable"],
             current_tile["type"],
-            current_tile["direction"]
+            current_tile["direction"],
         )
-        
         self.game_map.tiles[x, y] = new_tile
+
+        # Refresh all 8 neighbours so diagonal pulls stay consistent.
+        if _refresh_neighbors:
+            for nx, ny in (
+                (x,     y - 1), (x,     y + 1), (x - 1, y    ), (x + 1, y    ),
+                (x - 1, y - 1), (x + 1, y - 1), (x - 1, y + 1), (x + 1, y + 1),
+            ):
+                if (nx, ny) in self.coatings:
+                    self._update_tile_graphics(nx, ny, self.coatings[(nx, ny)], _refresh_neighbors=False)
     
     def get_coating(self, x: int, y: int) -> Optional[LiquidCoating]:
         """Get liquid coating at position."""
@@ -497,11 +533,31 @@ class LiquidSystem:
         for pos in to_remove:
             x, y = pos
             self._restore_original_tile(x, y)
+            sprite_manager.release_puddle_slots(x, y)
             del self.coatings[pos]
-    
+            for nx, ny in (
+                (x,     y - 1), (x,     y + 1), (x - 1, y    ), (x + 1, y    ),
+                (x - 1, y - 1), (x + 1, y - 1), (x - 1, y + 1), (x + 1, y + 1),
+            ):
+                if (nx, ny) in self.coatings:
+                    self._update_tile_graphics(nx, ny, self.coatings[(nx, ny)], _refresh_neighbors=False)
+
     def cleanup(self) -> None:
         """Clean up all liquid coatings and restore original tiles."""
         for pos in list(self.coatings.keys()):
             x, y = pos
             self._restore_original_tile(x, y)
+            sprite_manager.release_puddle_slots(x, y)
         self.coatings.clear()
+
+    def refresh_all_graphics(self) -> None:
+        """Regenerate all liquid tile graphics (e.g. after a puddle algorithm change).
+
+        Clears the puddle sprite content-cache so every coating gets fresh
+        pixels on the next _update_tile_graphics call, while reusing the same
+        tileset slots (no new slots consumed).
+        """
+        sprite_manager.invalidate_all_puddle_sprites()
+        for pos, coating in list(self.coatings.items()):
+            x, y = pos
+            self._update_tile_graphics(x, y, coating, _refresh_neighbors=False)

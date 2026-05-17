@@ -139,6 +139,23 @@ class JaggedLineSpellParticle:
         self.frames -= 1
 
 
+class ProjectileTrailParticle:
+    """Projectile trail rendered entirely in GPU passes.
+
+    Used for thrown items and bow shots; stores only physics/path timing state.
+    """
+
+    def __init__(self, path: list[tuple], color: tuple):
+        self.path = [(int(px), int(py)) for px, py in (path or [])]
+        self.color = color
+        self.frames = max(8, min(18, len(self.path) + 6))
+        self.total_frames = self.frames
+        self.render_priority = 2
+
+    def tick(self, console=None, game_map=None) -> None:
+        self.frames -= 1
+
+
 class IlluminatedParticle:
     """Persistent light-ray corona for a light orb (rendered by GPUStack._illuminated_render).
 
@@ -170,6 +187,37 @@ class IlluminatedParticle:
             for e in getattr(self.entity, 'effects', [])
         )
         if not still_lit:
+            self.frames = 0
+        else:
+            self.frames -= 1
+
+
+class SleepingParticle:
+    """Persistent sleep aura for an entity that is currently asleep.
+
+    The particle follows the entity and renders a small drifting blue 'Z'
+    cluster above the actor's tile until the Sleep effect ends.
+    """
+
+    _breath_speed = 0.85  # faster, lighter pulse than illumination
+
+    def __init__(self, entity, color: tuple = (160, 180, 255)):
+        self.entity = entity
+        self.fx = float(entity.x)
+        self.fy = float(entity.y)
+        self.frames = 9000
+        self.total_frames = self.frames
+        self.render_priority = 2
+        self.color = color
+
+    def tick(self, console, game_map) -> None:
+        self.fx = float(self.entity.x)
+        self.fy = float(self.entity.y)
+        still_asleep = any(
+            getattr(e, 'name', '') == 'Sleep'
+            for e in getattr(self.entity, 'effects', [])
+        )
+        if not still_asleep:
             self.frames = 0
         else:
             self.frames -= 1
@@ -270,7 +318,7 @@ class BurningParticle:
             for part in self.entity.body_parts.body_parts.values()
         )
         if not has_fire_coating:
-            print("EXPIRE")
+            #print("EXPIRE")
             self.frames -= 1
             return
 
@@ -316,7 +364,8 @@ class SlashParticle:
     """Physics state for a brief melee slash effect."""
 
     def __init__(self, position: tuple, enchanted: bool = False, color: tuple = (255, 255, 255), angle: tuple = (0, 0), type: str = "blade"):
-        import math as _math, random as _random
+        import math as _math
+        import random as _random
         x, y = position
         self.fx = float(x)
         self.fy = float(y)
@@ -412,6 +461,61 @@ class EmberParticle:
         self.fx += self.vx
         self.vx += random.uniform(-0.006, 0.006)
         self.vx = max(-0.35, min(0.35, self.vx))
+        self.frames -= 1
+
+
+class FireballExplosionParticle:
+    """Expanding fire explosion for the Fireball spell.
+
+    Rendered by GPUStack._fireball_explosion_render (bloom pass) as a
+    bright central flash that blooms into an expanding ring of fire embers.
+    """
+
+    def __init__(self, position: tuple, radius: float = 2.5):
+        x, y = position
+        self.fx = float(x)
+        self.fy = float(y)
+        self.radius = float(radius)     # blast radius in world tiles
+        self.frames = 24
+        self.total_frames = self.frames
+        self.render_priority = 2
+
+    def tick(self, console=None, game_map=None) -> None:
+        if self.frames <= 0:
+            return
+        self.frames -= 1
+
+
+class PoisonSprayParticle:
+    """Toxic acid splatter for the Poison Spray spell.
+
+    Rendered by GPUStack._poison_spray_render (bloom pass) as a burst of
+    acid-green droplets radiating outward from the target tile.
+    Droplet directions are baked at spawn so the pattern is stable each frame.
+    """
+
+    _TWO_PI = 2.0 * math.pi
+
+    def __init__(self, position: tuple):
+        x, y = position
+        self.fx = float(x)
+        self.fy = float(y)
+        N = 20
+        self.directions = [
+            (
+                math.cos(self._TWO_PI * i / N + random.uniform(-0.25, 0.25)),
+                math.sin(self._TWO_PI * i / N + random.uniform(-0.25, 0.25)),
+                random.uniform(0.55, 1.0),   # per-droplet speed factor
+            )
+            for i in range(N)
+        ]
+        self.frames = 18
+        self.total_frames = self.frames
+        self.render_priority = 2
+
+    def tick(self, console=None, game_map=None) -> None:
+        if self.frames <= 0:
+            return
         self.frames -= 1
 
 
@@ -524,7 +628,8 @@ class CRTSwitchAnimation:
         0.76-0.90  Phosphor dot      — hot spot lingers at screen centre      (~0.20 s)
         0.90-1.00  Dot pops          — quadratic fade to black                (~0.14 s)
         """
-        import time, math
+        import math
+        import time
 
         # ---- Tunable parameters ----
         DURATION         = 1.4    # total length in seconds
@@ -573,7 +678,7 @@ class CRTSwitchAnimation:
             renderer.copy(ov, dest=(lx, ly, line_w, LINE_H))
 
         _off_frame = 0
-        print(f"[CRT play_off] loop start")
+        print("[CRT play_off] loop start")
         while True:
             if event_pump:
                 for _ in event_pump():
@@ -633,7 +738,8 @@ class CRTSwitchAnimation:
                 dot_x = (w - dot_w) // 2
                 dot_y = line_cy - dot_h // 2
                 # Outer halo — diffuse glow around the bright core
-                halo_w = dot_w + DOT_HALO_PAD_W;  halo_h = dot_h + DOT_HALO_PAD_H
+                halo_w = dot_w + DOT_HALO_PAD_W
+                halo_h = dot_h + DOT_HALO_PAD_H
                 ov.color_mod = (255, 248, 200)
                 ov.alpha_mod = max(0, int((1.0 - p * 0.60) * DOT_HALO_ALPHA))
                 renderer.copy(ov, dest=((w - halo_w) // 2, dot_y - 5, halo_w, halo_h))
@@ -686,7 +792,8 @@ class CRTSwitchAnimation:
         0.67-0.87  Expansion        — image unrolls with spring overshoot       (~0.36 s)
         0.87-1.00  Settle           — AGC normalises, final bloom fades         (~0.23 s)
         """
-        import time, math
+        import math
+        import time
         import sounds
 
         # ---- Tunable parameters ----
@@ -805,7 +912,8 @@ class CRTSwitchAnimation:
                 ov.alpha_mod = max(0, int(p * BLOOM_OUTER_ALPHA))
                 renderer.copy(ov, dest=((w - halo_w) // 2, line_cy - halo_h // 2, halo_w, halo_h))
                 # Mid bloom
-                mid_w = dot_w + int(p * BLOOM_MID_PAD_W);  mid_h = dot_h + int(p * BLOOM_MID_PAD_H)
+                mid_w = dot_w + int(p * BLOOM_MID_PAD_W)
+                mid_h = dot_h + int(p * BLOOM_MID_PAD_H)
                 ov.alpha_mod = max(0, int(p * BLOOM_MID_ALPHA))
                 renderer.copy(ov, dest=((w - mid_w) // 2, line_cy - mid_h // 2, mid_w, mid_h))
                 # Core dot — full brightness
@@ -1014,7 +1122,7 @@ class VideoModeSwitchAnimation:
     def play_on(self, scene_tex, event_pump=None, glare_tex=None, gpu_stack=None,
                 scanlines_tex=None, scanlines_h=0, vignette_tex=None) -> None:
         """Resync roll then instant snap to game content.  ~0.65 s."""
-        import time, math
+        import time
         DURATION = 0.65
         T_SNAP   = 0.50   # content snaps in from here
 
@@ -1640,6 +1748,7 @@ class GPUStack:
         # Register the built-in particle passes
         self.gpu_anim_registry.append(self._gpu_ember_render)   
         self.gpu_anim_registry.append(self._jagged_line_spell_render)      # bloom
+        self.gpu_anim_registry.append(self._projectile_trail_render)        # bloom
         self.gpu_anim_registry.append(self._burn_render)      # bloom
         self.gpu_anim_registry.append(self._dodge_render)      # under entities, no bloom
         self.gpu_anim_registry.append(self._gpu_crtbleed_render)      # bloom
@@ -1650,6 +1759,9 @@ class GPUStack:
         self.gpu_anim_registry.append(self._heal_render)  # bloom ? (exact color)
         self.gpu_anim_registry.append(self._damage_number_render)     # bloom
         self.gpu_anim_registry.append(self._space_distort_spell_render)    # bloom
+        self.gpu_anim_registry.append(self._fireball_explosion_render)     # bloom
+        self.gpu_anim_registry.append(self._poison_spray_render)           # bloom
+        self.gpu_anim_registry.append(self._sleep_render)                 # bloom
         self.gpu_anim_registry.append(self._illuminated_render)            # bloom
 
     # ------------------------------------------------------------------
@@ -2177,6 +2289,101 @@ class GPUStack:
 
         return drew
 
+    def _projectile_trail_render(self, active_engine) -> bool:
+        """Draw a smooth arced projectile stroke (slash-like, no orb trail)."""
+        projectiles = [
+            a for a in active_engine.animation_queue
+            if isinstance(a, ProjectileTrailParticle) and a.frames > 0 and a.path
+        ]
+        if not projectiles:
+            return False
+
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height
+        )
+        game_map = active_engine.game_map
+        renderer = self.renderer
+        drew = False
+
+        with renderer.set_render_target(self._gal_src):
+            for proj in projectiles:
+                if len(proj.path) == 1:
+                    idx = 0
+                else:
+                    age = 1.0 - (proj.frames / float(max(1, proj.total_frames)))
+                    age = max(0.0, min(1.0, age))
+                    # Slight ease-out so the launch reads punchier.
+                    eased = 1.0 - ((1.0 - age) ** 2)
+                    idx = int(round(eased * (len(proj.path) - 1)))
+
+                start_tx, start_ty = proj.path[0]
+                head_tx, head_ty = proj.path[idx]
+                end_tx, end_ty = proj.path[-1]
+
+                # Build a smooth quadratic arc from launch -> current head, with the
+                # control point offset perpendicular to overall travel.
+                vec_x = end_tx - start_tx
+                vec_y = end_ty - start_ty
+                vec_mag = math.sqrt((vec_x * vec_x) + (vec_y * vec_y))
+                if vec_mag <= 1e-6:
+                    vec_x, vec_y = 1.0, 0.0
+                    vec_mag = 1.0
+                norm_x, norm_y = (vec_x / vec_mag), (vec_y / vec_mag)
+                perp_x, perp_y = -norm_y, norm_x
+
+                # Keep arc subtle and consistent with slash style.
+                arc_sign = -1.0 if ((start_tx + start_ty + end_tx + end_ty) % 2 == 0) else 1.0
+                arc_amp_tiles = max(0.15, min(0.55, vec_mag * 0.06))
+
+                ctrl_tx = (start_tx + head_tx) * 0.5 + (perp_x * arc_amp_tiles * arc_sign)
+                ctrl_ty = (start_ty + head_ty) * 0.5 + (perp_y * arc_amp_tiles * arc_sign)
+
+                # Distance-scaled sample count for a smooth line.
+                span = math.sqrt(((head_tx - start_tx) ** 2) + ((head_ty - start_ty) ** 2))
+                segments = max(10, min(34, int(span * 8) + 10))
+
+                r, g, b = proj.color
+                for i in range(segments):
+                    t = i / max(1, segments - 1)
+
+                    # Quadratic Bezier: B(t) = (1-t)^2 P0 + 2(1-t)t P1 + t^2 P2
+                    omt = 1.0 - t
+                    bx = (omt * omt * start_tx) + (2.0 * omt * t * ctrl_tx) + (t * t * head_tx)
+                    by = (omt * omt * start_ty) + (2.0 * omt * t * ctrl_ty) + (t * t * head_ty)
+
+                    tx = int(round(bx))
+                    ty = int(round(by))
+                    if not game_map.in_bounds(tx, ty) or not game_map.visible[tx, ty]:
+                        continue
+
+                    sx = bx - origin_x
+                    sy = by - origin_y
+                    if not (0 <= sx < self.game_view_width and 0 <= sy < self.game_view_height):
+                        continue
+
+                    px = int(sx * tile_px_w + tile_px_w * 0.5)
+                    py = int(sy * tile_px_h + tile_px_h * 0.5)
+                    if not (2 <= px < self._gal_w - 2 and 2 <= py < self._gal_h - 2):
+                        continue
+
+                    # Slash-like envelope: bright in the middle, tapered tips, with
+                    # a slight bias toward the moving front.
+                    env = math.sin(t * math.pi)
+                    front_bias = 0.75 + (0.25 * t)
+                    alpha = int(220 * env * front_bias)
+                    if alpha <= 8:
+                        continue
+
+                    core = 1.8 + (0.8 * env)
+                    renderer.draw_color = (r, g, b, alpha)
+                    renderer.fill_rect((float(px - core), float(py - core), float(core * 2.0), float(core * 2.0)))
+
+                    drew = True
+
+        return drew
+
 
     def _illuminated_render(self, active_engine) -> bool:
         """Draws a smooth breathing corona for each IlluminatedParticle (bloom pass).
@@ -2270,6 +2477,73 @@ class GPUStack:
                     renderer.draw_color = (r, g, min(255, b + 20), min(255, glow_alpha))
                     renderer.fill_rect((cx - glow_r, cy - glow_r, glow_r * 2.0, glow_r * 2.0))
 
+                drew = True
+
+        return drew
+
+
+    def _sleep_render(self, active_engine) -> bool:
+        """Draw a soft drifting blue Z-aura for each SleepingParticle (bloom pass)."""
+        sleeps = [a for a in active_engine.animation_queue
+                  if isinstance(a, SleepingParticle) and a.frames > 0]
+        if not sleeps:
+            return False
+
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        game_map = active_engine.game_map
+        renderer = self.renderer
+        drew = False
+
+        with renderer.set_render_target(self._gal_src):
+            for sleep in sleeps:
+                world_xi = int(round(sleep.fx))
+                world_yi = int(round(sleep.fy))
+                if not game_map.in_bounds(world_xi, world_yi):
+                    continue
+                if not game_map.visible[world_xi, world_yi]:
+                    continue
+
+                scr_x = sleep.fx - origin_x
+                scr_y = sleep.fy - origin_y
+                if not (0.0 <= scr_x < self.game_view_width and
+                        0.0 <= scr_y < self.game_view_height):
+                    continue
+
+                cx = scr_x * tile_px_w + tile_px_w * 0.5
+                cy = scr_y * tile_px_h + tile_px_h * 0.18
+                if not (2 <= cx < self._gal_w - 2 and 2 <= cy < self._gal_h - 2):
+                    continue
+
+                import time as _time
+                t_now = _time.monotonic()
+                envelope = 0.65 + 0.20 * math.sin(t_now * SleepingParticle._breath_speed * 2.0 * math.pi)
+                age = 1.0 - (sleep.frames / float(sleep.total_frames))
+                alpha = int(190 * envelope * max(0.15, 1.0 - age * 0.55))
+                if alpha < 8:
+                    continue
+
+                r, g, b = sleep.color
+                # Build a small Z-shape from rectangles, with a faint drifting trail.
+                top_w = max(3, int(tile_px_w * 0.16))
+                top_h = max(2, int(tile_px_h * 0.05))
+                mid_w = max(2, int(tile_px_w * 0.10))
+                mid_h = max(2, int(tile_px_h * 0.05))
+                bot_w = max(3, int(tile_px_w * 0.16))
+                bot_h = max(2, int(tile_px_h * 0.05))
+                drift = math.sin(t_now * 1.7 + (id(sleep) % 11)) * max(1.0, tile_px_h * 0.03)
+
+                renderer.draw_color = (r, g, b, alpha)
+                renderer.fill_rect((cx - top_w * 0.5, cy - tile_px_h * 0.18 + drift, top_w, top_h))
+                renderer.fill_rect((cx + tile_px_w * 0.06, cy + drift * 0.5, mid_w, mid_h))
+                renderer.fill_rect((cx - bot_w * 0.5, cy + tile_px_h * 0.16 + drift, bot_w, bot_h))
+
+                # Faint mist puff under the Z to make it feel sleepy rather than magical.
+                renderer.draw_color = (220, 230, 255, max(8, alpha // 3))
+                puff = max(2, int(tile_px_w * 0.08))
+                renderer.fill_rect((cx - puff * 0.5, cy + tile_px_h * 0.28 + drift * 0.3, puff, puff))
                 drew = True
 
         return drew
@@ -2664,10 +2938,34 @@ class GPUStack:
                         continue
 
                     renderer.draw_color = (r, g, b, fade)
-                    print(slash.type)
                     if slash.type == "miss":
                         renderer.draw_color = (int(r/2), int(g//3), int(b//4), int(fade//3))
                         renderer.fill_rect((sx - 25, sy - 25, 3.0, 3.0))
+                    elif slash.type == "unarmed":
+                        # Impact cross: two overlapping arcs at the hit point.
+                        # Arc 1 (i < half): attack direction, wide bow → looks like a
+                        #   hook/punch concave curve.
+                        # Arc 2 (i >= half): perpendicular, tighter → cross mark.
+                        half = SEGMENTS // 2
+                        if i < half:
+                            t2  = i / max(half - 1, 1)
+                            s2  = t2 * 2.0 - 1.0
+                            hl2 = tile_px_w * 0.28
+                            aa2 = tile_px_h * 0.44
+                            bow = math.sin(t2 * math.pi)
+                            sx2 = px + norm_dx * hl2 * s2 + perp_dx * aa2 * bow
+                            sy2 = py + norm_dy * hl2 * s2 + perp_dy * aa2 * bow
+                        else:
+                            t2  = (i - half) / max(SEGMENTS - half - 1, 1)
+                            s2  = t2 * 2.0 - 1.0
+                            hl2 = tile_px_w * 0.18
+                            aa2 = tile_px_h * 0.20
+                            bow = math.sin(t2 * math.pi)
+                            sx2 = px + perp_dx * hl2 * s2 - norm_dx * aa2 * bow
+                            sy2 = py + perp_dy * hl2 * s2 - norm_dy * aa2 * bow
+                        dot_r = max(1.5, 3.5 * env)
+                        renderer.draw_color = (r, g, b, fade)
+                        renderer.fill_rect((sx2 - dot_r, sy2 - dot_r, dot_r * 2, dot_r * 2))
                     else:
                         renderer.fill_rect((sx - 1.5, sy - 1.5, 3.0, 3.0))
 
@@ -2861,6 +3159,238 @@ class GPUStack:
                 drew = True
         return drew
 
+    def _fireball_explosion_render(self, active_engine) -> bool:
+        """Expanding fire blast for FireballExplosionParticle (bloom pass).
+
+        Draws:
+          1. Bright white-hot central flash (first 30 % of life).
+          2. Expanding ring of orange-red fire dots (ease-out, grows to particle radius).
+          3. Scattered inner ember dots inside the blast area.
+          4. 8 radial heat-ray streaks from the centre.
+        """
+        particles = [a for a in active_engine.animation_queue
+                     if isinstance(a, FireballExplosionParticle) and a.frames > 0]
+        if not particles:
+            return False
+
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        game_map = active_engine.game_map
+        renderer = self.renderer
+        drew     = False
+
+        TWO_PI   = 2.0 * math.pi
+        N_RING   = 32           # sample points for the fire ring
+        N_RAYS   = 8            # radial heat streaks
+        N_EMBERS = 18           # scattered inner ember dots
+        aspect   = tile_px_h / tile_px_w
+
+        with renderer.set_render_target(self._gal_src):
+            for p in particles:
+                world_xi = int(round(p.fx))
+                world_yi = int(round(p.fy))
+                if not game_map.in_bounds(world_xi, world_yi):
+                    continue
+                if not game_map.visible[world_xi, world_yi]:
+                    continue
+
+                scr_x = p.fx - origin_x
+                scr_y = p.fy - origin_y
+                if not (0.0 <= scr_x < self.game_view_width and
+                        0.0 <= scr_y < self.game_view_height):
+                    continue
+
+                cx  = scr_x * tile_px_w + tile_px_w * 0.5
+                cy  = scr_y * tile_px_h + tile_px_h * 0.5
+                age = 1.0 - (p.frames / float(p.total_frames))
+                max_r = p.radius * tile_px_w
+
+                # ── 1. Central white-hot flash (first 30 % of life) ──────────
+                if age < 0.30:
+                    t_flash  = age / 0.30
+                    f_alpha  = int(230 * math.sin(t_flash * math.pi))
+                    sz_flash = max(2, int(tile_px_w * (0.55 - t_flash * 0.35)))
+                    px_c     = int(cx)
+                    py_c     = int(cy)
+                    if f_alpha > 8 and 2 <= px_c < self._gal_w - 2 and 2 <= py_c < self._gal_h - 2:
+                        renderer.draw_color = (255, 255, int(200 * (1.0 - t_flash)), f_alpha)
+                        renderer.fill_rect((float(px_c - sz_flash), float(py_c - sz_flash),
+                                            float(sz_flash * 2), float(sz_flash * 2)))
+                        halo_sz = sz_flash + max(1, int(tile_px_w * 0.18))
+                        ha = int(f_alpha * 0.4)
+                        if ha > 6:
+                            renderer.draw_color = (255, 180, 0, ha)
+                            renderer.fill_rect((float(px_c - halo_sz), float(py_c - halo_sz),
+                                                float(halo_sz * 2), float(halo_sz * 2)))
+
+                # ── 2. Expanding fire ring ────────────────────────────────────
+                # ease-out quad: ring expands quickly then slows at the edge
+                r_norm     = 1.0 - (1.0 - age) ** 2
+                radius     = max_r * r_norm
+                ring_alpha = int(200 * math.sin(age * math.pi))
+                dot_sz     = max(1, int(tile_px_w * 0.10))
+                r_noise    = tile_px_w * 0.18
+
+                if ring_alpha > 8:
+                    rg_ring = max(0, int(180 - age * 180))
+                    for i in range(N_RING):
+                        theta = TWO_PI * i / N_RING
+                        cos_t = math.cos(theta)
+                        sin_t = math.sin(theta)
+                        r_jit = radius + random.gauss(0.0, r_noise * math.sin(age * math.pi))
+                        pxd   = int(cx + r_jit * cos_t)
+                        pyd   = int(cy + r_jit * sin_t * aspect)
+                        if not (dot_sz <= pxd < self._gal_w - dot_sz and
+                                dot_sz <= pyd < self._gal_h - dot_sz):
+                            continue
+                        renderer.draw_color = (255, rg_ring, 0, ring_alpha)
+                        renderer.fill_rect((float(pxd - dot_sz), float(pyd - dot_sz),
+                                            float(dot_sz * 2), float(dot_sz * 2)))
+
+                # ── 3. Scattered inner ember dots ─────────────────────────────
+                if age > 0.05 and ring_alpha > 10:
+                    e_alpha = int(ring_alpha * 0.7)
+                    esz     = max(1, dot_sz - 1)
+                    for i in range(N_EMBERS):
+                        theta = TWO_PI * (i / N_EMBERS) + random.uniform(-0.3, 0.3)
+                        r_e   = radius * random.uniform(0.1, 0.85)
+                        epx   = int(cx + r_e * math.cos(theta))
+                        epy   = int(cy + r_e * math.sin(theta) * aspect)
+                        if not (esz <= epx < self._gal_w - esz and
+                                esz <= epy < self._gal_h - esz):
+                            continue
+                        t_heat = 1.0 - (r_e / max(radius, 1.0))
+                        eg_e   = int(200 * t_heat)
+                        eb_e   = int(150 * t_heat)
+                        renderer.draw_color = (255, eg_e, eb_e, e_alpha)
+                        renderer.fill_rect((float(epx - esz), float(epy - esz),
+                                            float(esz * 2), float(esz * 2)))
+
+                # ── 4. Radial heat rays ───────────────────────────────────────
+                if age < 0.65 and ring_alpha > 12:
+                    ray_len   = radius * 0.80
+                    ray_alpha = int(ring_alpha * 0.65)
+                    N_STEPS   = 8
+                    rg_ray    = max(0, int(160 - age * 160))
+                    for ri in range(N_RAYS):
+                        ray_angle = TWO_PI * ri / N_RAYS + random.uniform(-0.15, 0.15)
+                        rc = math.cos(ray_angle)
+                        rs = math.sin(ray_angle)
+                        for si in range(1, N_STEPS + 1):
+                            t_r  = si / N_STEPS
+                            dr   = ray_len * t_r
+                            rpx  = int(cx + dr * rc)
+                            rpy  = int(cy + dr * rs * aspect)
+                            if not (1 <= rpx < self._gal_w - 1 and 1 <= rpy < self._gal_h - 1):
+                                continue
+                            step_a = int(ray_alpha * (1.0 - t_r * 0.6))
+                            if step_a > 6:
+                                renderer.draw_color = (255, rg_ray, 0, step_a)
+                                renderer.fill_rect((float(rpx - 1), float(rpy - 1), 2.0, 2.0))
+
+                drew = True
+        return drew
+
+    def _poison_spray_render(self, active_engine) -> bool:
+        """Acid-green splatter for PoisonSprayParticle (bloom pass).
+
+        Draws:
+          1. Bright central glob flash (first 25 % of life).
+          2. Radiating acid droplets flying outward with ease-out cubic slowdown.
+          3. A halfway trail dot per droplet for a flung-liquid look.
+        """
+        particles = [a for a in active_engine.animation_queue
+                     if isinstance(a, PoisonSprayParticle) and a.frames > 0]
+        if not particles:
+            return False
+
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        game_map = active_engine.game_map
+        renderer = self.renderer
+        drew     = False
+
+        aspect   = tile_px_h / tile_px_w
+        max_dist = tile_px_w * 1.4     # droplets travel up to ~1.4 tiles from center
+
+        with renderer.set_render_target(self._gal_src):
+            for p in particles:
+                world_xi = int(round(p.fx))
+                world_yi = int(round(p.fy))
+                if not game_map.in_bounds(world_xi, world_yi):
+                    continue
+                if not game_map.visible[world_xi, world_yi]:
+                    continue
+
+                scr_x = p.fx - origin_x
+                scr_y = p.fy - origin_y
+                if not (0.0 <= scr_x < self.game_view_width and
+                        0.0 <= scr_y < self.game_view_height):
+                    continue
+
+                cx  = scr_x * tile_px_w + tile_px_w * 0.5
+                cy  = scr_y * tile_px_h + tile_px_h * 0.5
+                age = 1.0 - (p.frames / float(p.total_frames))
+
+                # ── 1. Central glob flash (first 25 % of life) ───────────────
+                if age < 0.25:
+                    t_f     = age / 0.25
+                    f_alpha = int(210 * math.sin(t_f * math.pi))
+                    sz      = max(2, int(tile_px_w * (0.30 - t_f * 0.12)))
+                    px_c    = int(cx)
+                    py_c    = int(cy)
+                    if f_alpha > 8 and 2 <= px_c < self._gal_w - 2 and 2 <= py_c < self._gal_h - 2:
+                        renderer.draw_color = (60, 255, 80, f_alpha)
+                        renderer.fill_rect((float(px_c - sz), float(py_c - sz),
+                                            float(sz * 2), float(sz * 2)))
+                        ring_sz = sz + max(1, int(tile_px_w * 0.14))
+                        ring_a  = int(f_alpha * 0.45)
+                        if ring_a > 5:
+                            renderer.draw_color = (30, 200, 50, ring_a)
+                            renderer.fill_rect((float(px_c - ring_sz), float(py_c - ring_sz),
+                                                float(ring_sz * 2), float(ring_sz * 2)))
+
+                # ── 2. Radiating acid droplets ────────────────────────────────
+                # ease-out cubic: droplets shoot out fast then decelerate
+                travel_t   = min(1.0, age / 0.65)
+                dist_frac  = 1.0 - (1.0 - travel_t) ** 3
+                dist_px    = max_dist * dist_frac
+                drop_alpha = int(200 * max(0.0, 1.0 - max(0.0, age - 0.60) / 0.40))
+                dot_sz     = max(1, int(tile_px_w * 0.08))
+
+                if drop_alpha > 8:
+                    for cos_d, sin_d, speed in p.directions:
+                        final_dist = dist_px * speed
+                        dpx = int(cx + cos_d * final_dist)
+                        dpy = int(cy + sin_d * final_dist * aspect)
+                        if not (dot_sz <= dpx < self._gal_w - dot_sz and
+                                dot_sz <= dpy < self._gal_h - dot_sz):
+                            continue
+                        renderer.draw_color = (30, 220, 60, drop_alpha)
+                        renderer.fill_rect((float(dpx - dot_sz), float(dpy - dot_sz),
+                                            float(dot_sz * 2), float(dot_sz * 2)))
+
+                        # Trail dot halfway between center and droplet
+                        if dist_frac > 0.15:
+                            trail_px = int(cx + cos_d * final_dist * 0.5)
+                            trail_py = int(cy + sin_d * final_dist * aspect * 0.5)
+                            trail_a  = drop_alpha // 3
+                            tsz      = max(1, dot_sz - 1)
+                            if (trail_a > 5 and
+                                    tsz <= trail_px < self._gal_w - tsz and
+                                    tsz <= trail_py < self._gal_h - tsz):
+                                renderer.draw_color = (20, 170, 40, trail_a)
+                                renderer.fill_rect((float(trail_px - tsz),
+                                                    float(trail_py - tsz),
+                                                    float(tsz * 2), float(tsz * 2)))
+
+                drew = True
+        return drew
+
     # ------------------------------------------------------------------
     # 5e — Animation pass runner
     # ------------------------------------------------------------------
@@ -2906,9 +3436,12 @@ class GPUStack:
                         renderer.clear()
                         for tap_dx, tap_dy in [(0, 0), (-offset, -offset), (offset, -offset),
                                                (-offset, offset), (offset, offset)]:
-                            dx0 = max(0,  tap_dx);  dy0 = max(0,  tap_dy)
-                            sx0 = max(0, -tap_dx);  sy0 = max(0, -tap_dy)
-                            cw  = bw - abs(tap_dx); ch  = bh - abs(tap_dy)
+                            dx0 = max(0, tap_dx)
+                            dy0 = max(0, tap_dy)
+                            sx0 = max(0, -tap_dx)
+                            sy0 = max(0, -tap_dy)
+                            cw = bw - abs(tap_dx)
+                            ch = bh - abs(tap_dy)
                             if cw > 0 and ch > 0:
                                 renderer.copy(src, source=(sx0, sy0, cw, ch),
                                               dest=(dx0, dy0, cw, ch))
@@ -3226,9 +3759,12 @@ class GPUStack:
                 renderer.clear()
                 for tap_dx, tap_dy in [(0, 0), (-offset, -offset), (offset, -offset),
                                        (-offset, offset), (offset, offset)]:
-                    dst_x   = max(0, tap_dx);   dst_y   = max(0, tap_dy)
-                    src_x   = max(0, -tap_dx);  src_y   = max(0, -tap_dy)
-                    copy_w  = bw - abs(tap_dx); copy_h  = bh - abs(tap_dy)
+                    dst_x = max(0, tap_dx)
+                    dst_y = max(0, tap_dy)
+                    src_x = max(0, -tap_dx)
+                    src_y = max(0, -tap_dy)
+                    copy_w = bw - abs(tap_dx)
+                    copy_h = bh - abs(tap_dy)
                     if copy_w > 0 and copy_h > 0:
                         renderer.copy(src,
                                       source=(src_x, src_y, copy_w, copy_h),

@@ -1,19 +1,18 @@
-from components import equipment
-from components.ai import DarkHostileEnemy, Friendly, HostileEnemy, BaseAI, StatueAI, FollowerAI
+from components.ai import DarkHostileEnemy, Friendly, HostileEnemy, BaseAI, StatueAI, FollowerAI, AnimalAI, HostileCasterAI, PhasingAI, RetreatingPhasingAI
 from components import equippable
-from components.effect import Effect
 from components.equipment import Equipment
 from components.fighter import Fighter
 from components.inventory import Inventory
 from components import consumable
+from components.spells import InflictWoundsSpell
 from components.level import Level
 from components.container import Container
+from components import effect
 from components.body_parts import BodyParts, AnatomyType
 from entity import Actor, Item
 from render_order import RenderOrder
-import components.names as names
 import sounds
-from text_utils import *
+from text_utils import blue, cyan, green, purple, red, white, yellow
 import copy
 import liquid_system
 import color
@@ -34,6 +33,78 @@ def hue_shift(rgb_color):
 
     return int(r * 255), int(g * 255), int(b * 255)
 
+
+
+def create_hash(ingredients: list) -> Item:
+    hunger_restore = 60
+    if ingredients:
+        for ing in ingredients:
+            if "mushroom" in ing.tags:
+                hunger_restore += 5
+            elif "meat" in ing.tags:
+                hunger_restore += 20
+    import sprite_manager
+    return Item(
+        char=sprite_manager.compose_sprite([0xE0C6, 0xE0C9], layer_tints=[(255, 255, 255), (255, 255, 255)]),
+        color=(255, 255, 255),
+        name= (ingredients[0].name + " Hash") if ingredients else "Plain Hash",
+        description=f"A hash bowl made from {', '.join(ing.name for ing in ingredients)}.",
+        value=10,
+        weight=0.5,
+        consumable=consumable.FoodConsumable(saturation_restore=100, hunger_restore=hunger_restore),
+        pickup_sound=sounds.play_equip_glass_sound,
+        drop_sound=sounds.play_equip_glass_sound,
+        equip_sound=sounds.play_equip_glass_sound,
+        unequip_sound=sounds.play_unequip_glass_sound,
+        tags = ["hash", "food", "consumable", "meal"]
+    )
+
+
+def create_stew(ingredients: list) -> Item:
+    soup_color = (139, 69, 19)  # Default brown
+    if ingredients:
+        soup_color = (
+            sum(ing.color[0] for ing in ingredients) // len(ingredients),
+            sum(ing.color[1] for ing in ingredients) // len(ingredients),
+            sum(ing.color[2] for ing in ingredients) // len(ingredients),
+        )
+
+        spr = None
+
+        # Check for meat in ingredients (change sprite)
+        if any("meat" in ing.tags for ing in ingredients):
+            spr = 0xE0C8
+            # Get first ingredient
+            dispname = ingredients[0].name + " Roast"
+        
+        else:
+            dispname = ingredients[0].name + " Stew"
+
+        # Iterate tags to determine saturation of stew
+        hunger_restore = 60
+        for ing in ingredients:
+            if "mushroom" in ing.tags:
+                hunger_restore += 5
+            elif "meat" in ing.tags:
+                hunger_restore += 20
+
+
+    import sprite_manager
+    # Check if meat in any ingredient
+    return Item(
+        char=sprite_manager.compose_sprite([0xE0C6, 0xE0C7, spr], layer_tints=[(255, 255, 255), soup_color, (255, 255, 255)]),
+        color=(255, 255, 255),
+        name=dispname if ingredients else "Plain Stew",
+        description=f"A hearty stew made from {', '.join(ing.name for ing in ingredients)}.",
+        value=5,
+        weight=0.5,
+        consumable=consumable.FoodConsumable(saturation_restore=100, hunger_restore=hunger_restore),
+        pickup_sound=sounds.play_equip_glass_sound,
+        drop_sound=sounds.play_equip_glass_sound,
+        equip_sound=sounds.play_equip_glass_sound,
+        unequip_sound=sounds.play_unequip_glass_sound,
+        tags = ["stew", "food", "consumable", "meal"]
+    )
 
 poison_potion = Item(
     char="o",
@@ -66,7 +137,7 @@ lesser_health_potion = Item(
     pickup_sound=sounds.pick_up_glass_sound,
     drop_sound=sounds.drop_glass_sound,
     rarity_color=color.common,
-    tags = ["potion", "healing", "glass", "container", "fragile"],
+    tags = ["potion", "health", "glass", "container", "fragile", "lesser"],
     liquid_type=liquid_system.LiquidType.HEALTHPOTION,
     liquid_amount=8,
     weight=0.5
@@ -76,14 +147,14 @@ health_potion = Item(
     color=(242, 135, 135),
     value=15,
     name="Health Potion",
-    consumable=consumable.HealingConsumables(amount=15),
+    consumable=consumable.HealingConsumables(amount=20),
     description="A medium vial filled with a light red liquid.",
     equip_sound=sounds.play_equip_glass_sound,
     unequip_sound=sounds.play_unequip_glass_sound,
     pickup_sound=sounds.pick_up_glass_sound,
     drop_sound=sounds.drop_glass_sound,
     rarity_color=color.uncommon,
-    tags = ["potion", "healing", "glass", "container", "fragile"],
+    tags = ["potion", "health", "glass", "container", "fragile"],
     liquid_type=liquid_system.LiquidType.HEALTHPOTION,
     liquid_amount=15,
     weight=0.75
@@ -102,71 +173,6 @@ dungeon_key = Item(
     weight=0.1
 )
 
-darkvision_scroll = Item(
-    char="~",
-    color=color.dark_purple,
-    value=10,
-    name="Darkvision Scroll",
-    consumable=consumable.DarkvisionConsumable(duration=150),
-    description="A tattered scroll that seems to absorb light.",
-    equip_sound=sounds.play_equip_paper_sound,
-    unequip_sound=sounds.play_unequip_paper_sound,
-    pickup_sound=sounds.pick_up_paper_sound,
-    drop_sound=sounds.drop_paper_sound,
-    rarity_color=color.common,
-    tags = ["scroll", "effect", "darkvision", "paper"],
-    weight=0.1
-)
-
-lightning_scroll = Item(
-    char="~",
-    color=(255,255,0),
-    value=10,
-    name="Lightning Scroll",
-    consumable=consumable.LightningDamageConsumable(damage=20, maximum_range=5),
-    description="A scroll inscribed with complex electromagical formulae and crackling runes that channel the raw power of storm and lightning through precise arcane geometry.",
-    equip_sound=sounds.play_equip_paper_sound,
-    unequip_sound=sounds.play_unequip_paper_sound,
-    pickup_sound=sounds.pick_up_paper_sound,
-    drop_sound=sounds.drop_paper_sound,
-    rarity_color=color.common,
-    tags = ["scroll", "damage", "lightning", "paper"],
-    weight=0.1,
-    identification_level=0,  # Requires magic level 2 to understand the formulae
-    identification_skill="arcana",  # Uses the 'arcana' skill
-)
-
-confusion_scroll = Item(
-    char="~",
-    color=(207, 63, 255),
-    value = 10,
-    name="Confusion Scroll",
-    consumable=consumable.ConfusionConsumable(number_of_turns=10),
-    description="A worn scroll that seems to distort the mind.",
-    equip_sound=sounds.play_equip_paper_sound,
-    unequip_sound=sounds.play_unequip_paper_sound,
-    pickup_sound=sounds.pick_up_paper_sound,
-    drop_sound=sounds.drop_paper_sound,
-    rarity_color=color.common,
-    tags = ["scroll", "effect", "confusion", "paper"],
-    weight=0.1
-)
-
-fireball_scroll = Item(
-    char="~",
-    color=(255,0,0),
-    value = 10,
-    name="Fireball Scroll",
-    consumable=consumable.FireballDamageConsumable(damage=12, radius=3),
-    description="A singed scroll radiating intense heat.",
-    equip_sound=sounds.play_equip_paper_sound,
-    unequip_sound=sounds.play_unequip_paper_sound,
-    pickup_sound=sounds.pick_up_paper_sound,
-    drop_sound=sounds.drop_paper_sound,
-    rarity_color=color.common,
-    tags = ["scroll", "damage", "fireball", "paper"],
-    weight =0.1
-)
 
 campfire = Item(
     char=chr(0xE003),
@@ -227,6 +233,27 @@ dagger = Item(
     equip_sprite_cp=0xE0A0
 )
 
+mythril_dagger = Item(
+    char=chr(0xE0A9),
+    color=(color.sprite_sheet),
+    name="Mythril Dagger",
+    value = 25,
+    equippable=equippable.MythrilDagger(),
+    description="A dagger forged from mythril.",
+    pickup_sound=sounds.pick_up_blade_sound,
+    drop_sound=sounds.drop_blade_sound,
+    equip_sound=sounds.play_equip_blade_sound,
+    unequip_sound=sounds.play_unequip_blade_sound,
+    verb_base="stab",
+    verb_present="stabs",
+    verb_past="stabbed",
+    verb_participial="stabbing",
+    rarity_color=color.rare,
+    tags = ["mythril dagger", "dagger", "weapon", "blade", "metal", "light weapon"],
+    weight=1.0,
+    equip_sprite_cp=0xE0A8
+)
+
 shortsword = Item(
     char=chr(0xE0A5),
     equip_sprite_cp=0xE0A4,
@@ -244,12 +271,14 @@ shortsword = Item(
     verb_past="slashed",
     verb_participial="slashing",
     rarity_color=color.common,
-    tags = ["shortsword", "weapon", "blade", "metal", "light weapon"],
+    tags = ["shortsword", "sword", "weapon", "blade", "metal"],
     weight=2.0
 )
 
 longsword = Item(
-    char="|", color=(192, 192, 192), name="Longsword",
+    char=chr(0xE0A7),
+    equip_sprite_cp=0xE0A6, 
+    name="Longsword",
     equippable=equippable.Longsword(),
     description="A long, double-handed sword.",
     value = 20,
@@ -262,15 +291,16 @@ longsword = Item(
     verb_past="slashed",
     verb_participial="slashing",
     rarity_color=color.uncommon,
-    tags = ["longsword", "weapon", "blade", "metal", "heavy weapon"],
+    tags = ["longsword", "sword", "weapon", "blade", "metal", "heavy weapon"],
     weight=4.0
 )
 
 
 
 bow = Item(
-    char="}",
-    color=(160, 82, 45),
+    char=chr(0xE0AB),
+    equip_sprite_cp=0xE0AA,
+    color=color.sprite_sheet,
     name="Bow",
     equippable=equippable.Bow(),
     description="A simple wooden bow.",
@@ -289,9 +319,9 @@ bow = Item(
 )
 
 arrow = Item(
-    char="|",
-    color=(160, 82, 45),
-    name="Arrow",
+    char=chr(0xE0AC),
+    color=color.sprite_sheet,
+    name="Stone Arrow",
     value = 1,
     equippable=equippable.Arrow(),
     description="A simple wooden arrow, held in the offhand or quiver.",
@@ -304,13 +334,34 @@ arrow = Item(
     verb_past="shot",
     verb_participial="shooting",
     rarity_color=color.common,
-    tags = ["arrow", "ammunition", "ranged", "wood"],
+    tags = ["arrow", "ammunition", "ammo", "ranged", "wood"],
+    weight=0.05
+)
+
+steel_arrow = Item(
+    char=chr(0xE0AD),
+    color=color.sprite_sheet,
+    name="Steel Arrow",
+    value = 3,
+    equippable=equippable.SteelArrow(),
+    description="A steel arrow, sharper than a wooden one.",
+    pickup_sound=sounds.play_plate_sound,
+    drop_sound=sounds.play_plate_sound,
+    equip_sound=sounds.play_plate_sound,
+    unequip_sound=sounds.play_plate_sound,
+    verb_base="shoot",
+    verb_present="shoots",
+    verb_past="shot",
+    verb_participial="shooting",
+    rarity_color=color.uncommon,
+    tags = ["steel arrow", "arrow", "ammunition", "ammo", "ranged", "metal"],
     weight=0.1
 )
 
+
 leather_cap = Item(
     char=chr(0xE070),
-    color=(139, 69, 19),
+    color=color.sprite_sheet,
     name="Leather Cap",
     equippable=equippable.LeatherCap(),
     value = 5,
@@ -327,7 +378,7 @@ leather_cap = Item(
 
 leather_armor = Item(
     char=chr(0xE071),
-    color=(139, 69, 19),
+    color=color.sprite_sheet,
     name="Leather Armor",
     equippable=equippable.LeatherArmor(),
     description="A simple chestpiece offering basic protection.",
@@ -344,7 +395,7 @@ leather_armor = Item(
 
 leather_leggings = Item(
     char=chr(0xE072),
-    color=(139, 69, 19),
+    color=color.sprite_sheet,
     name="Leather Leggings",
     value = 10,
     equippable=equippable.LeatherLeggings(),
@@ -361,7 +412,7 @@ leather_leggings = Item(
 
 leather_boot = Item(
     char=chr(0xE073),
-    color=(139, 69, 19),
+    color=color.sprite_sheet,
     name="Leather Boots",
     equippable=equippable.LeatherBoot(),
     description="A simple pair of boots offering basic foot protection.",
@@ -427,6 +478,93 @@ chain_mail_leggings = Item(
     equip_sprite_cp=0xE086
 )
 
+plate_helmet = Item(
+    char=chr(0xE077),
+    color=(color.sprite_sheet),
+    equippable=equippable.PlateHelmet(),
+    name="Plate Helmet",
+    description="A solid helmet forged from pieces of metal.",
+    value = 50,
+    equip_sound=sounds.play_plate_sound,
+    unequip_sound = sounds.play_plate_sound,
+    pickup_sound=sounds.play_plate_sound,
+    drop_sound=sounds.play_plate_sound,
+    rarity_color=color.rare,
+    tags = ["plate", "armor", "headgear", "heavy armor"],
+    weight=5.0,
+    equip_sprite_cp=0xE087
+)
+
+plate_armor = Item(
+    char=chr(0xE078),
+    color=(color.sprite_sheet),
+    equippable=equippable.PlateArmor(),
+    name="Plate Armor",
+    description="Solid armor forged from pieces of metal.",
+    value = 100,
+    equip_sound=sounds.play_plate_sound,
+    unequip_sound=sounds.play_plate_sound,
+    pickup_sound=sounds.play_plate_sound,
+    drop_sound=sounds.play_plate_sound,
+    rarity_color=color.rare,
+    tags = ["plate", "armor", "body armor", "heavy armor"],
+    weight=20.0,
+    equip_sprite_cp=0xE088
+)
+
+apprentice_robe = Item(
+    char=chr(0xE079),
+    color=(color.sprite_sheet),
+    equippable=equippable.ApprenticeRobe(),
+    name="Apprentice Robe",
+    description="A robe worn by mage apprentices.",
+    value = 20,
+    equip_sound=sounds.play_equip_leather_sound,
+    unequip_sound=sounds.play_unequip_leather_sound,
+    pickup_sound=sounds.play_equip_leather_sound,
+    drop_sound=sounds.play_unequip_leather_sound,
+    rarity_color=color.uncommon,
+    tags = ["robe", "armor", "body armor", "light armor"],
+    weight=3.0,
+    equip_sprite_cp=0xE089
+)
+
+scholar_robe = Item(
+    char=chr(0xE07A),
+    color=(color.sprite_sheet),
+    equippable=equippable.ScholarRobe(),
+    name="Scholar Robe",
+    description="A robe worn by learned mages.",
+    value = 40,
+    equip_sound=sounds.play_equip_leather_sound,
+    unequip_sound=sounds.play_unequip_leather_sound,
+    pickup_sound=sounds.play_equip_leather_sound,
+    drop_sound=sounds.play_unequip_leather_sound,
+    rarity_color=color.rare,
+    tags = ["robe", "armor", "body armor", "light armor"],
+    weight=4.0,
+    equip_sprite_cp=0xE08A
+)
+
+master_robe = Item(
+    char=chr(0xE07B),
+    color=(color.sprite_sheet),
+    equippable=equippable.MasterRobe(),
+    name="Master Robe",
+    description="A robe worn by master mages.",
+    value = 80,
+    equip_sound=sounds.play_equip_leather_sound,
+    unequip_sound=sounds.play_unequip_leather_sound,
+    pickup_sound=sounds.play_equip_leather_sound,
+    drop_sound=sounds.play_unequip_leather_sound,
+    rarity_color=color.legendary,
+    tags = ["robe", "armor", "body armor", "light armor"],
+    weight=5.0,
+    equip_sprite_cp=0xE08B
+)
+
+
+
 dev_tool = Item(
     char="&", 
     color=(173, 0, 255),
@@ -440,6 +578,21 @@ backpack = Item(
     name="Backpack",
     equippable=equippable.Backpack(),
 )
+
+quiver = Item(
+    char=chr(0xE0AE),
+    color=(color.sprite_sheet),
+    name="Quiver",
+    equippable=equippable.Quiver(),
+    description="A back-worn quiver that stores arrows for bow attacks.",
+    value=12,
+    tags=["quiver", "ammunition"],
+    weight=1.0,
+)
+quiver.arrow_count = 20
+quiver.arrow_capacity = 60
+quiver.ammo_counts = {"arrow": 20}
+quiver.selected_ammo_type = "arrow"
 
 coin = Item(
     char="$",
@@ -459,66 +612,245 @@ fungus = Item(
 )
 
 
-sigil_stone = Item(
-    char=chr(0xE01F),
-    color=(255, 0, 255),
-    name="Sigil Stone",
-    value = 50,
-    description="A mysterious stone etched with intricate arcane symbols that pulse with otherworldly energy. Ancient runes spiral across its surface, their meaning lost to time but still radiating magical power.",
-    rarity_color=color.rare,
-    tags = ["sigil", "stone", "arcane", "magic"],
-    consumable=consumable.SigilStoneConsumable(None),
-    pickup_sound=sounds.play_stone_sound,
-    drop_sound=sounds.play_stone_sound,
-    equip_sound=sounds.play_stone_sound,
-    unequip_sound=sounds.play_stone_sound,
-    identification_level=3,  # Requires lore level 3 to fully understand
-    identification_skill="arcana",  # Uses the 'arcana' skill
-)
 
+test_ring = Item(
+    char=chr(0xE0AF),
+    color=(255, 0, 255),
+    name="Test Ring",
+    equippable=equippable.Ring(),
+    description="You feel like you shouldn't see this item",
+    value=999,
+    pickup_sound=sounds.pick_up_coin_sound,
+    drop_sound=sounds.pick_up_coin_sound,
+    equip_sound=sounds.pick_up_coin_sound,
+    unequip_sound=sounds.pick_up_coin_sound,
+)
 
 
 
 # =====================================================
 # FUNCTIONS
 # =====================================================
-import roman
 
-
-
-def generate_sigil_stone() -> Item:
-    # Use current random state - no individual seeding needed
-    unlocks_and_descriptions = {
-        'Teleport' : "Distort space around you",
-        "Darkvision": "Sight persists in darkness",
-        'Poison Spray': "Summon corrosive elements at your will",
-        'Fireball': 'Unleash flames upon your foes',
-        'Healing Word': 'Soothing light mends wounds',
-        'Inflict Wounds': 'Invoke necrotic forces upon your foes',
-        'Light': 'Illuminate the darkness around you',
+def get_scroll(spell_name: str) -> Item:
+    import sprite_manager
+    key = str(spell_name or "").strip().lower()
+    scroll_specs = {
+        "fireball": ((255, 69, 0), lambda: consumable.FireballConsumable(damage=15, radius=2)),
+        "lightning": ((255, 255, 0), lambda: consumable.LightningConsumable(damage=20, maximum_range=5)),
+        "darkvision": ((128, 0, 128), lambda: consumable.DarkvisionConsumable(duration=10)),
+        "confusion": ((0, 255, 255), lambda: consumable.ConfusionConsumable(duration=5)),
     }
-    
-    # Get a random key-value pair from the dictionary
-    unlock_name, description = random.choice(list(unlocks_and_descriptions.items()))
+    if key not in scroll_specs:
+        raise ValueError(f"Unknown scroll spell: {spell_name!r}")
 
-    item_color = (random.randint(100, 255), random.randint(0, 255), random.randint(100, 255))
-    return Item(
-        char=chr(0xE01F),
-        color=item_color,
-        value = 50,
-        name="Sigil Stone",
-        description=description,
-        rarity_color=color.rare,
-        weight=0.1,
-        tags = ["sigil", "stone", "arcane", "magic"],
-        consumable=consumable.SigilStoneConsumable(unlock_name=unlock_name),
-        pickup_sound=sounds.play_stone_sound,
-        drop_sound=sounds.play_stone_sound,
-        equip_sound=sounds.play_stone_sound,
-        unequip_sound=sounds.play_stone_sound,
-        identification_level=3,  # Requires lore level 3 to fully understand
-        identification_skill="arcana",  # Uses the 'arcana' skill
+    tint, consumable_factory = scroll_specs[key]
+    scroll = Item(
+        char = sprite_manager.compose_sprite([0xE0B4, 0xE0B5], layer_tints=[None, tint]),
+        color=(color.sprite_sheet),
+        name = f"Scroll of {key.title()}",
+        description = "A tattered fabric inscribed with arcane symbols.",
+        value = 20,
+        consumable=consumable_factory(),
+        pickup_sound=sounds.pick_up_paper_sound,
+        drop_sound=sounds.drop_paper_sound,
+        equip_sound=sounds.play_equip_paper_sound,
+        unequip_sound=sounds.play_unequip_paper_sound,
+        rarity_color=color.uncommon,
+        tags = ["scroll", "consumable", "paper", key],
     )
+    pass_scroll = copy.deepcopy(scroll)
+    return pass_scroll
+
+
+darkvision_scroll = get_scroll("darkvision")
+confusion_scroll = get_scroll("confusion")
+fireball_scroll = get_scroll("fireball")
+lightning_scroll = get_scroll("lightning")
+
+
+
+def get_ring(
+    effect_type: type[effect.Effect] | None = None,
+    cooldown: int | None = None,
+    duration: int | None = None,
+) -> Item:
+    """Create a ring that periodically applies an effect while equipped.
+
+    Args:
+        effect_type: Effect class to bind to the ring. Random when None.
+        cooldown: Optional turns between applications. If None, a sensible
+            default is selected per effect.
+        duration: Optional effect duration. If None, a default is used.
+    """
+    possible_effects = [effect.InvisibilityEffect, effect.DarkvisionEffect, effect.LightEffect]
+    effect_cls = effect_type or random.choice(possible_effects)
+
+    default_durations = {
+        effect.InvisibilityEffect: 6,
+        effect.DarkvisionEffect: 20,
+    }
+    default_cooldowns = {
+        effect.InvisibilityEffect: 18,  # Keeps stealth strong but not permanent.
+        effect.DarkvisionEffect: 0,
+    }
+
+    effect_duration = default_durations.get(effect_cls, 10) if duration is None else int(duration)
+    effect_cooldown = default_cooldowns.get(effect_cls, 0) if cooldown is None else max(0, int(cooldown))
+
+    return Item(
+        char=chr(0xE0AF),
+        color=(color.sprite_sheet),
+        name=f"Ring of {effect_cls.__name__.replace('Effect', '')}",
+        equippable=equippable.Ring(
+            effect=effect_cls,
+            effect_cooldown=effect_cooldown,
+            effect_duration=effect_duration,
+        ),
+        description=(
+            f"A ring that periodically grants {effect_cls.__name__.replace('Effect', '')}. "
+            f"Cooldown: {effect_cooldown} turns."
+        ),
+        value=120,
+        pickup_sound=sounds.pick_up_coin_sound,
+        drop_sound=sounds.pick_up_coin_sound,
+        equip_sound=sounds.pick_up_coin_sound,
+        unequip_sound=sounds.pick_up_coin_sound,
+        rarity_color=color.rare,
+        tags=["ring", "jewelry", "magic"],
+        weight=0.1,
+    )
+
+
+# Deterministic ring refs for profession starting kits.
+ring_of_darkvision = get_ring(effect_type=effect.DarkvisionEffect, cooldown=0, duration=20)
+
+
+
+def spawn_phase_spider() -> Actor:
+    """Factory function to spawn a Phase Spider with initial phasing effect.
+    
+    Creates a deep copy of the base phase_spider template and applies the
+    invisibility effect to simulate phasing. This keeps the phasing behavior
+    modular and reusable.
+    
+    Returns:
+        A Phase Spider actor with active phasing effect ready for combat.
+    """
+    spider = copy.deepcopy(phase_spider)
+    spider.ai = PhasingAI(spider)
+    
+    # Import here to avoid circular imports
+    from components.ai import apply_phasing_effect
+    
+    # Apply initial phasing effect (long duration to stay hidden while approaching)
+    apply_phasing_effect(spider, duration=999)
+    
+    return spider
+
+
+def spawn_retreating_phase_spider(retreat_distance: int = 4) -> Actor:
+    """Factory function to spawn a Phase Spider with retreat tactics.
+    
+    Variant that attacks then retreats and re-phases. Easy to customize.
+    
+    Args:
+        retreat_distance: How far the spider moves away after attacking (default 4)
+        
+    Returns:
+        A Phase Spider actor with RetreatingPhasingAI and initial phasing effect.
+    """
+    spider = copy.deepcopy(phase_spider)
+    spider.ai = RetreatingPhasingAI(spider)  # Swap to retreating AI
+    spider.ai.retreat_distance = retreat_distance  # Customize retreat behavior
+    
+    # Import here to avoid circular imports
+    from components.ai import apply_phasing_effect
+    
+    # Apply initial phasing effect
+    apply_phasing_effect(spider, duration=999)
+    
+    return spider
+
+
+def get_bread(type: str) -> Item:
+    if type == "Moldy":
+        sprite = chr(0xE0CB)
+        hunger_restore = 20
+        saturation_restore = 5
+    else:
+        hunger_restore = 30
+        saturation_restore = 10
+        sprite = chr(0xE0CC)
+
+    bread = Item(
+        char=sprite,
+        color=(255, 255, 255),
+        name=f"{type} Bread",
+        description=f"A piece of {type} bread.",
+        value=5,
+        weight=0.5,
+        consumable=consumable.FoodConsumable(saturation_restore=saturation_restore, hunger_restore=hunger_restore),
+        pickup_sound=sounds.play_vegetation_sound,
+        drop_sound=sounds.play_vegetation_sound,
+        equip_sound=sounds.play_vegetation_sound,
+        unequip_sound=sounds.play_vegetation_sound,
+        tags = ["bread", "ingredient", "food"]
+    )
+    return bread
+
+def get_meat(type: str, hp: int) -> Item:
+    """Generates meat corresponding to slain creature"""
+    meat_amount = max(1, hp // 5)
+    if "spider" in type.lower():
+        sprite = chr(0xE0CA)
+    else:
+        sprite = chr(0xE0C5)
+    meat = Item(
+        char=sprite,
+        color=(255, 255, 255),
+        name=f"{type} Meat",
+        description=f"Cut from a {type}.",
+        value=meat_amount,
+        weight=meat_amount * 0.1,
+        pickup_sound=sounds.play_meat_sound,
+        drop_sound=sounds.play_meat_sound,
+        equip_sound=sounds.play_meat_sound,
+        unequip_sound=sounds.play_meat_sound,
+        tags = ["meat", "ingredient"]
+    )
+    return meat
+
+def generate_spellbook() -> Item:
+    spell_entries = consumable.get_spellbook_entries()
+    if not spell_entries:
+        raise ValueError("No spell entries available for spellbook generation.")
+
+    spell_entry = random.choice(spell_entries)
+    spell_name = spell_entry["name"]
+    spell_name = "Sleep" # Debug setter
+    desc = spell_entry["description"] or "An ancient tome of arcane knowledge."
+    item_color = spell_entry["color"]
+    import sprite_manager as _sm
+    _item = Item(
+        char = _sm.compose_sprite([0xE0B6, 0xE0B7], layer_tints=[None, item_color]),
+        color=(color.sprite_sheet),
+        name="Spell Tome",
+        description=desc,
+        value=30,
+        consumable=consumable.SpellbookConsumable(unlock_name=spell_name),
+        pickup_sound=sounds.pick_up_paper_sound,
+        drop_sound=sounds.drop_paper_sound,
+        equip_sound=sounds.play_equip_paper_sound,
+        unequip_sound=sounds.play_unequip_paper_sound,
+        rarity_color=color.rare,
+        tags = ["spellbook", "consumable", "paper", spell_name],
+    )
+    pass_book = copy.deepcopy(_item)
+    return pass_book
+
+
+
 
 def get_random_potion() -> Item:
     # Use current random state
@@ -527,8 +859,8 @@ def get_random_potion() -> Item:
 
 def get_random_scroll() -> Item:
     # Use current random state
-    scroll_types = [darkvision_scroll, confusion_scroll, fireball_scroll, lightning_scroll]
-    return random.choice(scroll_types)
+    scroll_types = ["darkvision", "confusion", "fireball", "lightning"]
+    return get_scroll(random.choice(scroll_types))
 
 def get_random_fungus() -> Item:
     # Use current random state
@@ -577,6 +909,14 @@ def get_random_fungus() -> Item:
         color=color,
         name=name,
         description=description,
+        value=1,
+        weight=0.1,
+        tags = ["mushroom", "ingredient"],
+        consumable=consumable.FoodConsumable(saturation_restore=5),
+        pickup_sound=sounds.play_vegetation_sound,
+        drop_sound=sounds.play_vegetation_sound,
+        equip_sound=sounds.play_vegetation_sound,
+        unequip_sound=sounds.play_vegetation_sound,
     )
 
 def get_random_coins(min_amount: int, max_amount: int) -> Item:
@@ -630,7 +970,6 @@ def get_random_coins(min_amount: int, max_amount: int) -> Item:
 # chest_entity factory that will 'spawn' and then attach a Container to it when
 # placed on the map via code elsewhere.
 def make_chest_with_loot(items: list, capacity: int = 10) -> Actor:
-    c = chest.spawn  # This is the Actor.spawn method; we want a template clone
     # Instead we'll build a fresh Actor instance based on the chest template
     new_chest = Actor(
         char=chest.char,
@@ -678,12 +1017,12 @@ player = Actor(
     inventory=Inventory(capacity=26),
     level=copy.deepcopy(basic_entity_levelling),
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=30),
+    speed=100,  # Base speed
     # Temporary demo effect so the status-effects panel shows during testing
     effects = [],
     lucidity = 100,
     max_lucidity = 100,
     hunger = 100.0,
-    speed=100,  # Normal/base speed
     dodge_chance=0.15,  # 15% chance to dodge attacks
     preferred_dodge_direction="north",  # Tendency to dodge towards the north (for flavor)
 )
@@ -695,17 +1034,29 @@ giant_spider = Actor(
     description="A large arachnid",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
-    fighter=Fighter(hp=8, base_defense=0, base_power=3),
+    fighter=Fighter(hp=10, base_defense=0, base_power=3),
     inventory=Inventory(capacity=0),
     level=copy.deepcopy(basic_entity_levelling),
     speed=120,  # Faster than player to make them more threatening
-    body_parts=BodyParts(AnatomyType.ARACHNID, max_hp=8),
+    body_parts=BodyParts(AnatomyType.ARACHNID, max_hp=10),
     verb_base="bite",
     verb_present="bites",
     verb_past="bit",
     verb_participial="biting",
     dodge_chance=0.10,  # 10% chance to dodge attacks
+    equipment_table={
+        "meat": {
+            get_meat("Spider", 10): 100,
+        },
+        "potion": {
+            poison_potion: 20,
+            None: 80
+        }
+    
+    }
 )
+
+
 
 kobold = Actor(
     char= chr(0xE033),
@@ -714,10 +1065,10 @@ kobold = Actor(
     description="A small reptillian humanoid, commonly found in caves.",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
-    fighter=Fighter(hp=6, base_defense=0, base_power=3),
+    fighter=Fighter(hp=6, base_defense=0, base_power=5),
     inventory=Inventory(capacity=0),
     level=copy.deepcopy(basic_entity_levelling),
-    speed=110,
+    speed=150,
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=6),
     verb_base="scratch",
     verb_present="scratches",
@@ -747,7 +1098,7 @@ goblin = Actor(
     name = "Goblin",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
-    fighter=Fighter(hp=10, base_defense=0, base_power=4),
+    fighter=Fighter(hp=10, base_defense=0, base_power=6),
     inventory=Inventory(capacity=0),
     level=copy.deepcopy(basic_entity_levelling),
     speed=110,  # Fast enough to sometimes act before player
@@ -788,6 +1139,10 @@ goblin = Actor(
         'foot_armor': {
             leather_boot: 25,
             None: 75
+        },
+        'bag': {
+            get_bread("Moldy"): 50,
+            None: 50
         }
     }
 )
@@ -821,11 +1176,11 @@ troll = Actor(
     name="Troll",
     ai_cls=HostileEnemy,
     equipment=Equipment(),
-    fighter=Fighter(hp=16, base_defense=1, base_power=6),
+    fighter=Fighter(hp=24, base_defense=1, base_power=8),
     inventory=Inventory(capacity=0),
     level=copy.deepcopy(basic_entity_levelling),
     speed=80,
-    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=16),
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=24),
     verb_base="smash",
     verb_present="smashes",
     verb_past="smashed",
@@ -838,6 +1193,94 @@ troll = Actor(
         }
     }
 )
+
+dummy = Actor(
+    char=chr(0xE036),
+    color= (203, 123, 160),
+    name="ERR",
+    description="You feel like you shouldn't be seeing this...",
+    ai_cls=BaseAI,
+    equipment=Equipment(),
+    fighter=Fighter(hp=9999999, base_defense=0, base_power=0, can_bleed=False, leave_corpse=False),
+    inventory=Inventory(capacity=0),
+    level=None,
+    sentient=False,
+)
+
+ogre = Actor(
+    char=chr(0xE03F),
+    color=(color.sprite_sheet),
+    name="Ogre",
+    description="A brutish humanoid",
+    ai_cls=HostileEnemy,
+    equipment=Equipment(),
+    fighter=Fighter(hp=30, base_defense=2, base_power=12),
+    inventory=Inventory(capacity=0),
+    level=copy.deepcopy(basic_entity_levelling),
+    speed=60,
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=30),
+    verb_base="smash",
+    verb_present="smashes",
+    verb_past="smashed",
+    verb_participial="smashing",
+    dodge_chance=0.05,
+    equipment_table={
+        "weapon": {
+            dagger: 10,
+            None: 90
+        },
+        "potion": {
+            get_random_potion(): 10,
+            None: 90
+        }
+    }
+)
+
+phase_spider = Actor(
+    char=chr(0xE043),
+    color=(color.sprite_sheet),
+    name="Phase Spider",
+    description="A large, extra-dimensional arachnid that phases in and out of reality, striking from invisibility.",
+    ai_cls=RetreatingPhasingAI,
+    equipment=Equipment(),
+    fighter=Fighter(hp=15, base_defense=2, base_power=6),
+    inventory=Inventory(capacity=0),
+    level=copy.deepcopy(basic_entity_levelling),
+    speed=120,
+    body_parts=BodyParts(AnatomyType.ARACHNID, max_hp=15),
+    verb_base="bite",
+    verb_present="bites",
+    verb_past="bit",
+    verb_participial="biting",
+    dodge_chance=0.10,
+    equipment_table=None
+)
+
+lunatic_mage = Actor(
+    char=chr(0xE040),
+    color=(color.sprite_sheet),
+    name="Lunatic Mage",
+    description="A mage driven mad by the influence of the sigil stone.",
+    ai_cls=HostileCasterAI,
+    equipment=Equipment(),
+    fighter=Fighter(hp=15, base_defense=0, base_power=4),
+    inventory=Inventory(capacity=5),
+    level=copy.deepcopy(basic_entity_levelling),
+    speed=100,
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=15),
+    verb_base="strike",
+    verb_present="strikes",
+    verb_past="struck",
+    verb_participial="striking",
+    dodge_chance=0.10,
+    equipment_table=None,
+    known_spells=[InflictWoundsSpell()],
+    mana=20,
+    mana_max=20,
+)
+lunatic_mage.level.traits["arcana"]["level"] = 3
+lunatic_mage.level.traits["necromancy"]["level"] = 3
+lunatic_mage.level.resync_derived_stats()
 
 animated_armor = Actor(
     char=chr(0xE039),
@@ -858,6 +1301,33 @@ animated_armor = Actor(
     dodge_chance=0.10,
     equipment_table= None,
 )
+
+rat = Actor(
+    char=chr(0xE03E),
+    color=(color.sprite_sheet),
+    name="Rat",
+    description="A wretched vermin.",
+    ai_cls=AnimalAI,
+    equipment=Equipment(),
+    fighter=Fighter(hp=3, base_defense=0, base_power=1),
+    inventory=Inventory(capacity=5),
+    level=copy.deepcopy(basic_entity_levelling),
+    speed=90,
+    body_parts=BodyParts(AnatomyType.QUADRUPED, max_hp=3),
+    verb_base="bite",
+    verb_present="bites",
+    verb_past="bit",
+    verb_participial="biting",
+    dodge_chance=0.05,
+    equipment_table={
+        "meat": {
+            get_meat("Rat", 3): 100
+        }
+    },
+    harvestable=True,
+)
+
+
         
 
 statue = Actor(
@@ -992,7 +1462,6 @@ class LootEntry:
 
 COMMON_POOL = [
     LootEntry(torch,                10),
-    LootEntry(arrow,                 8),
     LootEntry(dagger,                8),
     LootEntry(shortsword,            6),
     LootEntry(bow,                   5),
@@ -1001,8 +1470,8 @@ COMMON_POOL = [
     LootEntry(leather_leggings,      8),
     LootEntry(leather_boot,          8),
     LootEntry(lesser_health_potion,  10),
-    LootEntry(confusion_scroll,      6),
-    LootEntry(darkvision_scroll,     6),
+    LootEntry(lambda: get_scroll("confusion"),      6),
+    LootEntry(lambda: get_scroll("darkvision"),     6),
 ]
 
 UNCOMMON_POOL = [
@@ -1011,10 +1480,26 @@ UNCOMMON_POOL = [
     LootEntry(chain_mail_helmet,      8),
     LootEntry(chain_mail_armor,       8),
     LootEntry(chain_mail_leggings,    8),
-    LootEntry(lightning_scroll,       6),
-    LootEntry(fireball_scroll,        5),
+    LootEntry(lambda: get_scroll("lightning"),       6),
+    LootEntry(lambda: get_scroll("fireball"),        5),
+    LootEntry(apprentice_robe,         8),
 ]
 
 RARE_POOL = [
-    LootEntry(generate_sigil_stone,  10),
+    LootEntry(generate_spellbook,      20),
+    LootEntry(mythril_dagger,          10),
+    LootEntry(plate_helmet,            10),
+    LootEntry(plate_armor,             10),
+    LootEntry(scholar_robe,            10),
+    LootEntry(lambda: get_ring(),      20),
 ]
+
+LEGENDARY_POOL = [
+    LootEntry(master_robe,             10),
+]
+
+AMMO_POOL = [
+    LootEntry(arrow,                  20),
+    LootEntry(steel_arrow,            10),
+]
+

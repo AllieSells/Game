@@ -6,9 +6,8 @@ import numpy as np
 from scipy import signal
 from scipy.signal import butter, lfilter, lfilter_zi
 import threading
-from typing import Optional, Tuple, List, Dict
+from typing import Tuple, List, Dict
 import time
-import queue
 import os
 import sys
 
@@ -347,7 +346,7 @@ class AudioMixer:
                 global_volume_multiplier = max(0.0, min(1.0, global_volume / 100.0))
             
             final_volume = volume * global_volume_multiplier
-        except Exception as e:
+        except Exception:
             # Fallback if settings can't be loaded
             final_volume = volume
 
@@ -407,7 +406,7 @@ class AudioMixer:
                 global_volume_multiplier = max(0.0, min(1.0, global_volume / 100.0))
             
             final_volume = max(0.0, min(1.0, volume)) * global_volume_multiplier
-        except:
+        except Exception:
             # Fallback if settings can't be loaded
             final_volume = max(0.0, min(1.0, volume))
             
@@ -733,7 +732,7 @@ def play_sound_with_pitch_variation(sound: Sound, pitch_range=(0.85, 1.15), volu
         try:
             sound.set_volume(volume)
             sound.play(fade_ms=fade_ms)
-        except:
+        except Exception:
             sound.play()
 
 
@@ -815,16 +814,20 @@ def play_lightning_sound():
     play_sound_with_pitch_variation(lightning_sound, pitch_range=(0.5, 1.5), volume=0.5, fade_ms=6000)
 
 def play_confusion_sound():
-    play_sound_with_pitch_variation(confusion_sound, pitch_range=(0.5, 1.5), volume=0.5, fade_ms=1000)
-
-def play_pickup_coin_sound():
-    play_sound_with_pitch_variation(pickup_coin_sound, pitch_range=(0.9, 1.1))
+    play_sound_with_pitch_variation(confusion_sound, pitch_range=(0.75, 1.25), volume=0.5, fade_ms=1000)
 
 def play_level_up_sound():
     play_sound_with_pitch_variation(level_up_sound, pitch_range=(0.95, 1.05))
 
 def play_torch_burns_out_sound():
     play_sound_with_pitch_variation(torch_burns_out_sound, pitch_range=(0.9, 1.1))
+
+def play_fizzle_sound():
+    fizzle_sounds = [
+        Sound("RP/sfx/spells/fizzle.mp3")
+    ]
+    sound = random.choice(fizzle_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.75)
 
 # Humanoid death sound
 def play_death_sound():
@@ -980,6 +983,14 @@ def play_chain_sound():
     sound = random.choice(chain_sounds)
     play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=0.25)
 
+def play_plate_sound():
+    plate_sounds = [
+        Sound("RP/sfx/equip/plate/plate1.mp3"),
+        Sound("RP/sfx/equip/plate/plate2.mp3"),
+    ]
+    sound = random.choice(plate_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.5), volume=0.25)
+
 
 def play_miss_sound():
     miss_sounds = [
@@ -1094,6 +1105,36 @@ def pick_up_wood_sound():
 
 def drop_wood_sound():
     play_sound_with_pitch_variation(Sound("RP/sfx/equip/wood/drop1.mp3"), pitch_range=(0.8, 1.1), volume=.25)
+
+def play_bite_sound():
+    bite_sounds = [
+        Sound("RP/sfx/eat/bite1.wav"),
+        Sound("RP/sfx/eat/bite2.wav"),
+        Sound("RP/sfx/eat/bite3.wav"),
+    ]
+    sound = random.choice(bite_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.5)
+
+def play_meat_sound():
+    meat_sounds = [
+        Sound("RP/sfx/equip/meat/meat1.mp3"),
+        Sound("RP/sfx/equip/meat/meat2.mp3"),
+        Sound("RP/sfx/equip/meat/meat3.mp3"),
+        Sound("RP/sfx/equip/meat/meat4.mp3"),
+        Sound("RP/sfx/equip/meat/meat5.mp3"),
+        Sound("RP/sfx/equip/meat/meat6.mp3"),
+    ]
+    sound = random.choice(meat_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.0), volume=0.5)
+
+def play_vegetation_sound():
+    vegetation_sounds = [
+        Sound("RP/sfx/vegetation/1.mp3"),
+        Sound("RP/sfx/vegetation/2.mp3"),
+        Sound("RP/sfx/vegetation/3.mp3"),
+    ]
+    sound = random.choice(vegetation_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.5)
 
 # Blade sounds
 def pick_up_blade_sound():

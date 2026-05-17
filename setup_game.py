@@ -144,8 +144,6 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
     """Return a brand new game session as an Engine instance."""
     map_width = 80    # dungeon map width
     map_height = 40   # dungeon map height
-    overworld_width  = 100
-    overworld_height = 100
 
     room_max_size = 10
     room_min_size = 6
@@ -154,8 +152,11 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
     # Set global seed once for the entire generation
     _set_global_seed(game_seed=game_seed, seed_string=seed_string)
 
+    import sprite_manager as _sm
+    _sm.reset_sprite_cache()
+
     player = copy.deepcopy(entity_factories.player)
-    player.char = chr(0xE03B)
+    player.char = None
     player.level.current_xp = 0
 
     engine = Engine(player=player)
@@ -234,6 +235,10 @@ def tutorial_game(game_seed = None, seed_string = None) -> Engine:
     # Set global seed once for the entire generation
     _set_global_seed(game_seed=game_seed, seed_string=seed_string)
 
+    import sprite_manager as _sm
+    _sm.reset_sprite_cache()
+    entity_factories.refresh_scroll_prototype_sprites()
+
     player = copy.deepcopy(entity_factories.player)
     player.level.current_xp = 0
 
@@ -286,6 +291,10 @@ def new_debug_game(game_seed: Optional[int] = None, seed_string: Optional[str] =
     
     # Set global seed once at the start
     _set_global_seed(game_seed=game_seed, seed_string=seed_string)
+
+    import sprite_manager as _sm
+    _sm.reset_sprite_cache()
+    entity_factories.refresh_scroll_prototype_sprites()
     
     player = copy.deepcopy(entity_factories.player)
     
@@ -296,8 +305,6 @@ def new_debug_game(game_seed: Optional[int] = None, seed_string: Optional[str] =
     
     # Import overworld chunk generator
     from procgen import generate_overworld_chunk
-    import numpy as np
-    
     # Generate overworld chunk for debug (this creates the GameMap with player placed)
     game_map = generate_overworld_chunk(map_width, map_height, engine)
     
@@ -398,7 +405,146 @@ def load_game(filename: str) -> Engine:
                     pass
     except Exception:
         pass
+
+    import sprite_manager
+    sprite_manager.reset_sprite_cache()
+    entity_factories.refresh_scroll_prototype_sprites()
+    _rehydrate_loaded_sprite_state(engine)
     return engine
+
+
+def _iter_engine_maps(engine: Engine):
+    """Yield every GameMap reachable from the loaded engine."""
+    seen = set()
+
+    def _yield_map(game_map):
+        if game_map is None:
+            return
+        obj_id = id(game_map)
+        if obj_id in seen:
+            return
+        seen.add(obj_id)
+        yield game_map
+
+    yield from _yield_map(getattr(engine, "game_map", None))
+
+    game_world = getattr(engine, "game_world", None)
+    if game_world is None:
+        return
+
+    for stack_name in ("up_stack", "down_stack"):
+        for entry in list(getattr(game_world, stack_name, []) or []):
+            if isinstance(entry, tuple) and entry:
+                yield from _yield_map(entry[0])
+
+    for cached in (getattr(game_world, "dungeon_cache", {}) or {}).values():
+        if isinstance(cached, tuple) and cached:
+            yield from _yield_map(cached[0])
+
+
+def _entity_needs_portrait_rebuild(entity) -> bool:
+    """Return True if this entity has portrait-driven appearance fields."""
+    know = getattr(entity, "knowledge", None)
+    if not isinstance(know, dict):
+        return False
+    portrait_keys = {
+        "gender",
+        "skin_tone",
+        "hair_color",
+        "hair_style",
+        "facial_hair",
+        "head",
+        "body",
+        "legs",
+        "feet",
+    }
+    return any(key in know for key in portrait_keys)
+
+
+def _rehydrate_loaded_sprite_state(engine: Engine) -> None:
+    """Rebuild runtime sprite composites after loading a save.
+
+    Save files serialize codepoints in map/entity fields, but sprite_manager's
+    runtime tileset cache is process-local and is not serialized with saves.
+    Rebuild known dynamic composites (portraits/equipment/liquids/dungeon water)
+    so codepoints in loaded maps point to valid tileset entries.
+    """
+    try:
+        import sprite_manager as _sm
+    except Exception:
+        return
+
+    rebuilt_entities = set()
+
+    for game_map in _iter_engine_maps(engine):
+        try:
+            liquid_system = getattr(game_map, "liquid_system", None)
+            if liquid_system is not None:
+                # Defensive relink: old saves may deserialize with stale backrefs.
+                liquid_system.game_map = game_map
+        except Exception:
+            pass
+
+        for entity in list(getattr(game_map, "entities", []) or []):
+            ent_id = id(entity)
+            if ent_id in rebuilt_entities:
+                continue
+            rebuilt_entities.add(ent_id)
+
+            try:
+                if _entity_needs_portrait_rebuild(entity):
+                    _sm.compose_portrait(entity)
+            except Exception:
+                pass
+
+            if hasattr(entity, "base_char"):
+                try:
+                    if hasattr(entity, "equipment"):
+                        _sm.refresh_actor_sprite(entity)
+                    else:
+                        entity.char = entity.base_char
+                except Exception:
+                    try:
+                        entity.char = entity.base_char
+                    except Exception:
+                        pass
+
+            try:
+                entity_factories.refresh_scroll_item_sprite(entity)
+            except Exception:
+                pass
+
+        # Regenerate liquid composites from serialized coating data.
+        try:
+            liquid_system = getattr(game_map, "liquid_system", None)
+            if liquid_system is not None:
+                liquid_system.refresh_all_graphics()
+        except Exception:
+            pass
+
+        # Rebuild cached dungeon-water composites for this process/tileset.
+        try:
+            if getattr(game_map, "type", None) == "dungeon":
+                _sm.build_dungeon_water_anim(game_map)
+                game_map.dungeon_water_current = {}
+        except Exception:
+            pass
+
+    # Final defensive refresh for the player object.
+    player = getattr(engine, "player", None)
+    if player is not None:
+        try:
+            if _entity_needs_portrait_rebuild(player):
+                _sm.compose_portrait(player)
+        except Exception:
+            pass
+        try:
+            if hasattr(player, "equipment"):
+                _sm.refresh_actor_sprite(player)
+            elif hasattr(player, "base_char"):
+                player.char = player.base_char
+        except Exception:
+            pass
 
 
 def get_available_saves():
@@ -616,7 +762,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             )
             self.current_step = len(self.generation_steps) - 1
             self.game_load = True
-        except Exception as e:
+        except Exception:
             self.current_step = len(self.generation_steps)
             self.game_load = True
             self.engine = None
@@ -644,10 +790,8 @@ class LoadingScreen(input_handlers.BaseEventHandler):
                 # Generation failed — return to main menu
                 return self.parent_menu
             if getattr(event, '_crt_transition', False):
-                from input_handlers import MainGameEventHandler
-
-                sounds.start_dungeon_music()
-                return MainGameEventHandler(self.engine)
+                from chargen_ui import CharacterCreationHandler
+                return CharacterCreationHandler(self.engine)
 
         return self
 
@@ -660,6 +804,15 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
         self.parent_menu = parent_menu
         self.save_files = get_available_saves()
         self.selected_option = 0
+        self.hovered_option = -1
+
+        # Cached layout for mouse interaction (updated each render).
+        self._window_x = 0
+        self._window_y = 0
+        self._window_width = 0
+        self._window_height = 0
+        self._menu_start_y = 0
+        self._visible_saves = 0
         
         # If no saves found, show message
         if not self.save_files:
@@ -673,11 +826,14 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
         if not self.save_files:
             self.no_saves = True
             self.selected_option = 0
+            self.hovered_option = -1
         else:
             self.no_saves = False
             # Keep selection valid
             if self.selected_option >= len(self.save_files):
                 self.selected_option = max(0, len(self.save_files) - 1)
+            if self.hovered_option >= len(self.save_files):
+                self.hovered_option = -1
     
     def delete_save(self, save_index):
         """Delete a save file by index."""
@@ -703,6 +859,12 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
         window_height = min(20, len(self.save_files) + 8) if not self.no_saves else 12
         x = (console.width - window_width) // 2
         y = (console.height - window_height) // 2
+
+        # Cache current layout for mouse hit-testing.
+        self._window_x = x
+        self._window_y = y
+        self._window_width = window_width
+        self._window_height = window_height
         
         # Draw parchment background and border
         MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
@@ -730,6 +892,8 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
             # Show save file list
             menu_start_y = y + 3
             visible_saves = min(10, len(self.save_files))  # Show max 10 saves
+            self._menu_start_y = menu_start_y
+            self._visible_saves = visible_saves
             
             for i in range(visible_saves):
                 save_index = i
@@ -738,11 +902,12 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
                     
                 display_name, filename, mtime = self.save_files[save_index]
                 is_selected = save_index == self.selected_option
+                is_hovered = save_index == self.hovered_option and not is_selected
                 
-                bg_color = (80, 60, 30) if is_selected else (45, 35, 25)
-                fg_color = color.gold_accent if is_selected else color.fantasy_text
-                marker = "> " if is_selected else "  "
-                marker2 = " <" if is_selected else "  "
+                bg_color = (80, 60, 30) if is_selected else (60, 45, 22) if is_hovered else (45, 35, 25)
+                fg_color = color.gold_accent if is_selected else color.white if is_hovered else color.fantasy_text
+                marker = "> " if is_selected else "~ " if is_hovered else "  "
+                marker2 = " <" if is_selected else " ~" if is_hovered else "  "
                 
                 option_y = menu_start_y + i
                 
@@ -774,11 +939,115 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
             console.print(
                 x + (window_width // 2),
                 instructions_y,
-                "[↑↓] Navigate  [Space] Load  [Del] Delete  [Esc] Back",
+                "[LMB] Load  [RMB] Context  [↑↓] Navigate  [Del] Delete  [Esc] Back",
                 fg=color.light_gray,
                 bg=color.parchment_bg,
                 alignment=tcod.CENTER,
             )
+
+    def _load_selected_save(self) -> Optional[input_handlers.BaseEventHandler]:
+        """Load the currently selected save file."""
+        if not (0 <= self.selected_option < len(self.save_files)):
+            return None
+
+        display_name, filename, _mtime = self.save_files[self.selected_option]
+
+        try:
+            engine = load_game(filename)  # Just pass filename, load_game handles the path
+
+            # Stop menu ambience when leaving menu
+            sounds.stop_menu_ambience()
+            sounds.stop_all_music()
+
+            return input_handlers.CRTTransition(
+                input_handlers.MainGameEventHandler(engine),
+                post_fn=sounds.start_dungeon_music
+            )
+        except FileNotFoundError:
+            return input_handlers.PopupMessage(self, f"Save file '{display_name}' not found.")
+        except Exception as exc:
+            traceback.print_exc()
+            return input_handlers.PopupMessage(self, f"Failed to load save:\n{exc}")
+
+    def _open_delete_confirmation(self, save_index: int) -> Optional[input_handlers.BaseEventHandler]:
+        """Open delete confirmation dialog for a selected save index."""
+        if not (0 <= save_index < len(self.save_files)):
+            return None
+
+        display_name, _filename, _mtime = self.save_files[save_index]
+
+        def confirm_delete(confirmed):
+            if confirmed:
+                self.delete_save(save_index)
+                self.refresh_saves()
+                return self
+            return self
+
+        return ConfirmationDialog(
+            parent_handler=self,
+            message=f"Delete save '{display_name}'?\n\nThis cannot be undone!",
+            callback=confirm_delete
+        )
+
+    def _row_to_save_index(self, mouse_y: int) -> int:
+        """Convert a mouse y-position to a visible save row index, or -1."""
+        if self.no_saves:
+            return -1
+        if mouse_y < self._menu_start_y or mouse_y >= self._menu_start_y + self._visible_saves:
+            return -1
+        idx = mouse_y - self._menu_start_y
+        return idx if 0 <= idx < len(self.save_files) else -1
+
+    def _mouse_over_list(self, mouse_x: int, mouse_y: int) -> bool:
+        """Return True if mouse is inside the save list clickable region."""
+        if self.no_saves:
+            return False
+        left = self._window_x + 1
+        right = self._window_x + self._window_width - 2
+        top = self._menu_start_y
+        bottom = self._menu_start_y + self._visible_saves - 1
+        return left <= mouse_x <= right and top <= mouse_y <= bottom
+
+    def ev_mousemotion(self, event: tcod.event.MouseMotion) -> Optional[input_handlers.BaseEventHandler]:
+        """Allow mouse hover to change save selection."""
+        if self.no_saves:
+            self.hovered_option = -1
+            return None
+
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        if self._mouse_over_list(mouse_x, mouse_y):
+            hovered = self._row_to_save_index(mouse_y)
+            if hovered != self.hovered_option:
+                sounds.play_ui_move_sound()
+            self.hovered_option = hovered
+            if hovered >= 0:
+                self.selected_option = hovered
+        else:
+            self.hovered_option = -1
+
+        return None
+
+    def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[input_handlers.BaseEventHandler]:
+        """Mouse actions: left-click loads, right-click opens context menu."""
+        if self.no_saves:
+            if event.button == tcod.event.MouseButton.LEFT:
+                return self.parent_menu
+            return None
+
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        if not self._mouse_over_list(mouse_x, mouse_y):
+            return None
+
+        clicked_index = self._row_to_save_index(mouse_y)
+        if clicked_index < 0:
+            return None
+
+        self.selected_option = clicked_index
+        if event.button == tcod.event.MouseButton.LEFT:
+            return self._load_selected_save()
+        if event.button == tcod.event.MouseButton.RIGHT:
+            return SaveFileContextMenu(self, clicked_index, mouse_x, mouse_y)
+        return None
     
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[input_handlers.BaseEventHandler]:
         """Handle key input for save selection."""
@@ -798,50 +1067,139 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
             self.selected_option = (self.selected_option + 1) % len(self.save_files)
             return None
         elif event.sym in (tcod.event.KeySym.RETURN, tcod.event.KeySym.KP_ENTER, tcod.event.KeySym.SPACE):
-            # Load selected save
-            if 0 <= self.selected_option < len(self.save_files):
-                display_name, filename, mtime = self.save_files[self.selected_option]
-                
-                try:
-                    engine = load_game(filename)  # Just pass filename, load_game handles the path
-                    
-                    # Stop menu ambience when leaving menu  
-                    sounds.stop_menu_ambience()
-                    sounds.stop_all_music()
-
-
-                    return input_handlers.CRTTransition(
-                        input_handlers.MainGameEventHandler(engine),
-                        post_fn=sounds.start_dungeon_music
-                    )
-                except FileNotFoundError:
-                    return input_handlers.PopupMessage(self, f"Save file '{display_name}' not found.")
-                except Exception as exc:
-                    traceback.print_exc()
-                    return input_handlers.PopupMessage(self, f"Failed to load save:\n{exc}")
+            return self._load_selected_save()
         elif event.sym == tcod.event.KeySym.DELETE:
-            # Delete selected save with confirmation
-            if 0 <= self.selected_option < len(self.save_files):
-                display_name, filename, mtime = self.save_files[self.selected_option]
-                save_to_delete = self.selected_option  # Capture the index before any changes
-                
-                # Create confirmation callback
-                def confirm_delete(confirmed):
-                    if confirmed:
-                        success, message = self.delete_save(save_to_delete)
-                        self.refresh_saves()  # Refresh the list after deletion
-                        # Show success message briefly and return to menu
-                        return self  # Return directly to save menu after deletion
-                    else:
-                        # User cancelled, return to save menu
-                        return self
-                
-                return ConfirmationDialog(
-                    parent_handler=self,
-                    message=f"Delete save '{display_name}'?\n\nThis cannot be undone!",
-                    callback=confirm_delete
-                )
+            return self._open_delete_confirmation(self.selected_option)
         
+        return None
+
+
+class SaveFileContextMenu(input_handlers.BaseEventHandler):
+    """Right-click context menu for save rows (load/delete/cancel)."""
+
+    def __init__(self, parent_menu: SaveGameMenu, save_index: int, mouse_x: int, mouse_y: int):
+        super().__init__()
+        self.parent_menu = parent_menu
+        self.save_index = save_index
+        self.options = [
+            ("Load Save", "load"),
+            ("Delete Save", "delete"),
+            ("Cancel", "cancel"),
+        ]
+        self.selected_option = 0
+        self.hovered_option = -1
+
+        # Position menu near cursor, clamped in on_render.
+        self.anchor_x = mouse_x
+        self.anchor_y = mouse_y
+        self.menu_x = 0
+        self.menu_y = 0
+        self.menu_w = 18
+        self.menu_h = len(self.options) + 3
+
+    def _run_selected(self) -> Optional[input_handlers.BaseEventHandler]:
+        if not (0 <= self.selected_option < len(self.options)):
+            return self.parent_menu
+
+        _label, action = self.options[self.selected_option]
+        if action == "cancel":
+            return self.parent_menu
+
+        self.parent_menu.selected_option = self.save_index
+        if action == "load":
+            return self.parent_menu._load_selected_save()
+        if action == "delete":
+            return self.parent_menu._open_delete_confirmation(self.save_index)
+        return self.parent_menu
+
+    def on_render(self, console: tcod.console.Console) -> None:
+        if hasattr(self.parent_menu, 'on_render'):
+            self.parent_menu.on_render(console)
+
+        max_label_len = max(len(label) for label, _ in self.options)
+        self.menu_w = max(18, max_label_len + 6)
+        self.menu_h = len(self.options) + 3
+
+        self.menu_x = max(0, min(self.anchor_x, console.width - self.menu_w))
+        self.menu_y = max(0, min(self.anchor_y, console.height - self.menu_h))
+
+        MenuRenderer.draw_parchment_background(console, self.menu_x, self.menu_y, self.menu_w, self.menu_h)
+        MenuRenderer.draw_ornate_border(console, self.menu_x, self.menu_y, self.menu_w, self.menu_h, "Save")
+
+        for i, (label, action) in enumerate(self.options):
+            row_y = self.menu_y + 1 + i
+            is_selected = i == self.selected_option
+            is_hovered = i == self.hovered_option and not is_selected
+            bg_color = (80, 60, 30) if is_selected else (60, 45, 22) if is_hovered else (45, 35, 25)
+            if action == "delete" and (is_selected or is_hovered):
+                fg_color = color.red
+            else:
+                fg_color = color.gold_accent if is_selected else color.white if is_hovered else color.fantasy_text
+            marker = "> " if is_selected else "~ " if is_hovered else "  "
+
+            for dx in range(self.menu_w - 2):
+                console.print(self.menu_x + 1 + dx, row_y, " ", bg=bg_color)
+            console.print(
+                self.menu_x + 2,
+                row_y,
+                f"{marker}{label}",
+                fg=fg_color,
+                bg=bg_color,
+            )
+
+    def ev_mousemotion(self, event: tcod.event.MouseMotion) -> Optional[input_handlers.BaseEventHandler]:
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        within = (
+            self.menu_x + 1 <= mouse_x <= self.menu_x + self.menu_w - 2
+            and self.menu_y + 1 <= mouse_y <= self.menu_y + len(self.options)
+        )
+        if not within:
+            self.hovered_option = -1
+            return None
+
+        hovered = mouse_y - (self.menu_y + 1)
+        if 0 <= hovered < len(self.options):
+            if hovered != self.hovered_option:
+                sounds.play_ui_move_sound()
+            self.hovered_option = hovered
+            self.selected_option = hovered
+        return None
+
+    def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[input_handlers.BaseEventHandler]:
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        within = (
+            self.menu_x + 1 <= mouse_x <= self.menu_x + self.menu_w - 2
+            and self.menu_y + 1 <= mouse_y <= self.menu_y + len(self.options)
+        )
+
+        if event.button == tcod.event.MouseButton.LEFT:
+            if within:
+                self.selected_option = mouse_y - (self.menu_y + 1)
+                return self._run_selected()
+            return self.parent_menu
+
+        if event.button == tcod.event.MouseButton.RIGHT:
+            # Right click outside closes; inside confirms hovered action.
+            if within:
+                self.selected_option = mouse_y - (self.menu_y + 1)
+                return self._run_selected()
+            return self.parent_menu
+
+        return None
+
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[input_handlers.BaseEventHandler]:
+        if event.sym in (tcod.event.K_ESCAPE, tcod.event.KeySym.BACKSPACE):
+            return self.parent_menu
+        if event.sym == tcod.event.KeySym.UP:
+            sounds.play_ui_move_sound()
+            self.selected_option = (self.selected_option - 1) % len(self.options)
+            return None
+        if event.sym == tcod.event.KeySym.DOWN:
+            sounds.play_ui_move_sound()
+            self.selected_option = (self.selected_option + 1) % len(self.options)
+            return None
+        if event.sym in (tcod.event.KeySym.RETURN, tcod.event.KeySym.KP_ENTER, tcod.event.KeySym.SPACE):
+            return self._run_selected()
         return None
 
 
@@ -855,6 +1213,13 @@ class ConfirmationDialog(input_handlers.BaseEventHandler):
         self.callback = callback
         self.selected_option = 1  # Default to "No" for safety
         self.options = ["Yes", "No"]
+        self.hovered_option = -1
+        self._dialog_x = 0
+        self._dialog_y = 0
+        self._dialog_w = 0
+        self._dialog_h = 0
+        self._options_y = 0
+        self._option_cells: list[tuple[int, int, int]] = []
     
     def on_render(self, console: tcod.console.Console) -> None:
         """Render the confirmation dialog."""
@@ -869,6 +1234,10 @@ class ConfirmationDialog(input_handlers.BaseEventHandler):
         
         x = (console.width - dialog_width) // 2
         y = (console.height - dialog_height) // 2
+        self._dialog_x = x
+        self._dialog_y = y
+        self._dialog_w = dialog_width
+        self._dialog_h = dialog_height
         
         # Apply faded background effect (dims everything except dialog area)
         # self.render_faded(console, x, y, dialog_width, dialog_height)
@@ -890,8 +1259,10 @@ class ConfirmationDialog(input_handlers.BaseEventHandler):
         
         # Draw Yes/No options
         options_y = y + dialog_height - 3
+        self._options_y = options_y
         total_width = sum(len(opt) for opt in self.options) + 6  # 3 spaces between options
         start_x = x + (dialog_width - total_width) // 2
+        self._option_cells = []
         
         for i, option in enumerate(self.options):
             is_selected = i == self.selected_option
@@ -899,13 +1270,54 @@ class ConfirmationDialog(input_handlers.BaseEventHandler):
             bg_color = (80, 60, 30) if is_selected else (45, 35, 25)
             
             text = f"[{option}]" if is_selected else f" {option} "
+            option_x = start_x + i * (len(text) + 3)
             console.print(
-                start_x + i * (len(text) + 3),
+                option_x,
                 options_y,
                 text,
                 fg=fg_color,
                 bg=bg_color,
             )
+            self._option_cells.append((i, option_x, len(text)))
+
+    def ev_mousemotion(self, event: tcod.event.MouseMotion) -> Optional[input_handlers.BaseEventHandler]:
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        if mouse_y != self._options_y:
+            self.hovered_option = -1
+            return None
+
+        hit = -1
+        for idx, option_x, option_w in self._option_cells:
+            if option_x <= mouse_x < option_x + option_w:
+                hit = idx
+                break
+
+        if hit != self.hovered_option and hit >= 0:
+            sounds.play_ui_move_sound()
+        self.hovered_option = hit
+        if hit >= 0:
+            self.selected_option = hit
+        return None
+
+    def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[input_handlers.BaseEventHandler]:
+        if event.button != tcod.event.MouseButton.LEFT:
+            return None
+
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        if mouse_y == self._options_y:
+            for idx, option_x, option_w in self._option_cells:
+                if option_x <= mouse_x < option_x + option_w:
+                    self.selected_option = idx
+                    return self.callback(self.selected_option == 0)
+
+        # Click outside dialog cancels (same as Esc/No).
+        if not (
+            self._dialog_x <= mouse_x < self._dialog_x + self._dialog_w
+            and self._dialog_y <= mouse_y < self._dialog_y + self._dialog_h
+        ):
+            return self.callback(False)
+
+        return None
     
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[input_handlers.BaseEventHandler]:
         """Handle confirmation dialog input."""
@@ -1056,7 +1468,6 @@ class MainMenu(input_handlers.BaseEventHandler):
         """Allow mouse hover to change selection."""
         # Calculate menu window dimensions and position
         window_width = 40
-        window_height = 16        
         mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
         
         if (self.menu_start_x - window_width // 2 <= mouse_x <= self.menu_start_x + window_width // 2 and
@@ -1089,7 +1500,7 @@ class MainMenu(input_handlers.BaseEventHandler):
             self.selected_option = (self.selected_option + 1) % len(self.menu_options)
             return None
         
-        elif self.engine.mouse_held == True:
+        elif self.engine.mouse_held:
             return self._handle_selection()
         elif event.sym in (tcod.event.KeySym.RETURN, tcod.event.KeySym.KP_ENTER, tcod.event.KeySym.SPACE):
             return self._handle_selection()

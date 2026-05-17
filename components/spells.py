@@ -8,12 +8,12 @@ import sounds
 import animations
 import tcod
 from input_handlers import (
-    ActionOrHandler,
     AreaRangedAttackHandler, 
     SingleRangedAttackHandler,
 )
 import gpu_stack
 import random
+from roman import toRoman
 
 class Spell():
     def __init__(self, name, duration, description, damage, mana_cost, components, spell_tags, school, arcana_level = 1, cast_xp = 5, radius = 0):
@@ -28,23 +28,40 @@ class Spell():
         self.arcana_level = arcana_level
         self.cast_xp = cast_xp
         self.radius = radius
+        self.spell_level = 1  # tracks how many times spell has been upgraded
 
     def calculate_arcana_modifiers(self, caster):
         """Calculate arcana level equipment modifiers."""
-        arcana_level = caster.level.traits['arcana']['level']
         for item in caster.equipment:
             with open("logs/log.txt", "a") as log_file:
                 log_file.write(f"DEBUG: Checking item '{item.name}' for arcana modifiers.\n")
             
 
     def give_xp(self, consumer):
-        consumer.level.add_xp({self.school: self.cast_xp})
-        consumer.level.add_xp({'arcana': (5+(consumer.level.traits['arcana']['level'] * 1.5))})
+        consumer.level.add_xp({self.school: self.cast_xp * consumer.level.traits["arcana"]["level"] * 2})
+        consumer.level.add_xp({'arcana': self.cast_xp + (10+(consumer.level.traits["arcana"]["level"] * 2))})
         with open("logs/log.txt", "a") as log_file:
-            log_file.write(f'DEBUG: Gave {self.cast_xp} XP to {self.school} and {(5+(consumer.level.traits["arcana"]["level"] * 1.5))} XP to arcana for casting {self.name}.\n')
+            log_file.write(f'DEBUG: Gave {self.cast_xp * consumer.level.traits["arcana"]["level"]} XP to {self.school} and {(10+(consumer.level.traits["arcana"]["level"] * 2))} XP to arcana for casting {self.name}.\n')
     
     def get_description(self, caster=None):
         return ""
+
+    def _cast_potency_multiplier(self, action: actions.SpellAction) -> float:
+        return 1.0
+
+    def _scaled_amount(self, action: actions.SpellAction, amount: int) -> int:
+        return max(0, int(round(int(amount) * self._cast_potency_multiplier(action))))
+
+    def _spend_mana_and_award_xp(self, caster) -> None:
+        caster.mana -= self.mana_cost
+        self.give_xp(caster)
+
+    def _apply_effect(self, target, effect_instance, action: actions.SpellAction) -> None:
+        engine = getattr(action, "engine", None)
+        if engine is not None and hasattr(engine, "add_or_refresh_effect"):
+            engine.add_or_refresh_effect(target, effect_instance)
+            return
+        target.add_effect(effect_instance)
 
 
     def activate(self, action: actions.SpellAction) -> None:
@@ -55,25 +72,92 @@ class Spell():
         return None
 
     def level_up_spell(self, level: int, entity=None) -> None:
-        if level == 2:
-            # Store the old name to update quickcast slots
-            old_name = self.name
-            
+        try:
+            target_level = max(1, int(level or 1))
+        except Exception:
+            return
+
+        if target_level <= self.spell_level:
+            return
+
+        old_name = self.name
+        base_name = old_name.rsplit(" ", 1)[0] if self.spell_level > 1 else old_name
+
+        # Apply one upgrade step per level to keep scaling consistent for III+ sync.
+        for _ in range(self.spell_level, target_level):
             self.damage = int(self.damage * 1.5)
             self.mana_cost += 1
-            self.name += " II"
             self.radius = min(self.radius, 5)
             self.duration *= 1.5
-            
-            # Update quickcast slots if entity is provided
-            if entity and hasattr(entity, 'quickcast_slots'):
-                for i, slot_spell in enumerate(entity.quickcast_slots):
-                    if slot_spell == old_name:
-                        entity.quickcast_slots[i] = self.name
-                        with open("logs/log.txt", "a") as log_file:
-                            log_file.write(f"DEBUG: Updated quickcast slot {i+1}: '{old_name}' -> '{self.name}'\n")
 
+        self.spell_level = target_level
+        self.name = f"{base_name} {toRoman(self.spell_level)}" if self.spell_level > 1 else base_name
 
+        # Update quickcast slots if entity is provided
+        if entity and hasattr(entity, 'quickcast_slots'):
+            for i, slot_spell in enumerate(entity.quickcast_slots):
+                if slot_spell == old_name:
+                    entity.quickcast_slots[i] = self.name
+                    with open("logs/log.txt", "a") as log_file:
+                        log_file.write(f"DEBUG: Updated quickcast slot {i+1}: '{old_name}' -> '{self.name}'\n")
+
+class IronskinSpell(Spell):
+    def __init__(self):
+        duration = 20
+        super().__init__(
+            name="Ironskin",
+            description=f"Grants x1.5 defense for {duration} turns.",
+            damage=0,
+            duration=duration,
+            mana_cost=10,
+            components=['S', 'V'],
+            spell_tags=["ironskin"],
+            school='abjuration',
+            arcana_level = 2,
+            cast_xp = 5
+        )
+    def get_description(self, caster=None):
+        return f"Grants x1.5 defense for {self.duration} turns."
+    
+    def activate(self, action: actions.SpellAction) -> None:
+        consumer = action.entity
+
+        self._spend_mana_and_award_xp(consumer)
+        self._apply_effect(consumer, effect.IronskinEffect(duration=self.duration), action)
+        sounds.play_confusion_sound()  # temp
+        action.engine.message_log.add_message(
+            "Your skin hardens like iron!", color.light_gray
+        )
+
+class InvisibilitySpell(Spell):
+    def __init__(self):
+        duration = 20
+        super().__init__(
+            name="Invisibility",
+            description=f"Grants invisibility for {duration} turns.",
+            damage=0,
+            duration=duration,
+            mana_cost=10,
+            components=['S', 'V'],
+            spell_tags=["invisibility"],
+            school="illusion",
+            arcana_level = 2,
+            cast_xp=5
+        )
+
+    def get_description(self, caster=None):
+        return f"Grants invisibility for {self.duration} turns."
+    
+    def activate(self, action: actions.SpellAction) -> None:
+        consumer = action.entity
+
+        self._spend_mana_and_award_xp(consumer)
+        invisibility = effect.InvisibilityEffect(duration=self.duration)
+        sounds.play_confusion_sound() # temp
+        action.engine.message_log.add_message(
+            "You fade from view!", color.light_gray
+        )
+        self._apply_effect(consumer, invisibility, action)
 
 class DarkvisionSpell(Spell):
     def __init__(self):
@@ -96,16 +180,13 @@ class DarkvisionSpell(Spell):
 
     def activate(self, action: actions.SpellAction) -> None:
         consumer = action.entity
-        
-        # Consume mana for successful darkvision cast
-        consumer.mana -= self.mana_cost
-        self.give_xp(consumer)
+        self._spend_mana_and_award_xp(consumer)
         darkvision = effect.DarkvisionEffect(duration=self.duration)
         sounds.play_darkvision_sound()
         action.engine.message_log.add_message(
-            f"Your vision sharpens as darkness recedes!", color.dark_purple
+            "Your vision sharpens as darkness recedes!", color.dark_purple
         )
-        consumer.add_effect(darkvision)
+        self._apply_effect(consumer, darkvision, action)
 
 class TeleportSpell(Spell):
     def __init__(self):
@@ -124,7 +205,7 @@ class TeleportSpell(Spell):
         )
     
     def get_description(self, caster=None):
-        return f"Instantly move to a visible location within range."
+        return "Instantly move to a visible location within range."
 
     def get_targeting_handler(self, engine, caster):
         """Return a targeting handler for selecting teleport destination."""
@@ -144,21 +225,21 @@ class TeleportSpell(Spell):
         # Check if target location is valid
         if not action.engine.game_map.in_bounds(target_x, target_y):
             action.engine.message_log.add_message(
-                f"You can't teleport there - it's out of bounds!", color.impossible
+                "You can't teleport there - it's out of bounds!", color.impossible
             )
             return
         
         # Check if location is visible
         if not action.engine.game_map.visible[target_x, target_y]:
             action.engine.message_log.add_message(
-                f"You can't teleport to a location you can't see!", color.impossible
+                "You can't teleport to a location you can't see!", color.impossible
             )
             return
         
         # Check if location is walkable
         if not action.engine.game_map.tiles[target_x, target_y]['walkable']:
             action.engine.message_log.add_message(
-                f"You can't teleport into a solid object!", color.impossible
+                "You can't teleport into a solid object!", color.impossible
             )
             return
         
@@ -181,7 +262,7 @@ class TeleportSpell(Spell):
         
         sounds.play_teleport_sound()
         action.engine.message_log.add_message(
-            f"Space distorts around you!", color.ascend
+            "Space distorts around you!", color.ascend
         )
         try:
             import sys
@@ -225,43 +306,100 @@ class PoisonSpraySpell(Spell):
         consumer = action.entity
         target_x, target_y = action.target_xy
         target = action.engine.game_map.get_blocking_entity_at_location(target_x, target_y)
+        scaled_damage = self._scaled_amount(action, self.damage)
 
         if not target or not target.fighter:
             consumer.mana -= self.mana_cost
             self.give_xp(consumer)
             action.engine.animation_queue.append(animations.SplashAnimation((target_x, target_y), color.green))
+            action.engine.animation_queue.append(gpu_stack.PoisonSprayParticle((target_x, target_y)))
             action.engine.game_map.liquid_system.create_splash(target_x, target_y, LiquidType.POISON, radius=self.radius, max_depth=2)
             action.engine.message_log.add_message(
-                f"The poison sizzles as it hits the ground.", color.green
+                "The poison sizzles as it hits the ground.", color.green
             )
             sounds.play_poison_burn_sound()
             return
         if target and target.fighter:
-            target.fighter.take_damage(self.damage, causes_bleeding=False)
+            target.fighter.take_damage(scaled_damage, causes_bleeding=False)
             consumer.mana -= self.mana_cost
             self.give_xp(consumer)
             # Create poison splash around the target
             action.engine.game_map.liquid_system.create_splash(target_x, target_y, LiquidType.POISON, radius=self.radius, max_depth=2)
             action.engine.animation_queue.append(animations.SplashAnimation((target_x, target_y), color.green))
+            action.engine.animation_queue.append(gpu_stack.PoisonSprayParticle((target_x, target_y)))
             action.engine.message_log.add_message(
                 f"The poison hits the {target.name}!", color.green
             )
             sounds.play_poison_burn_sound()
             return
 
+class SleepSpell(Spell):
+    def __init__(self):
+        duration = 10
+        super().__init__(
+            name="Sleep",
+            description=f"Put a single target to sleep for {duration} turns.",
+            damage=0,
+            duration=duration,
+            mana_cost=5,
+            components=['V', 'S'],
+            spell_tags=["sleep", "ranged"],
+            school="enchantment",
+            arcana_level = 2,
+            cast_xp = 5
+        )
+
+    def get_description(self, caster=None):
+        return f"Put a single target to sleep for {self.duration} turns."
+
+    def get_targeting_handler(self, engine, caster):
+        """Return a targeting handler for selecting sleep spell target."""
+        def sleep_callback(target_xy):
+            """Callback function for sleep spell targeting."""
+            return actions.SpellAction(caster, self, target_xy)
+        
+        return SingleRangedAttackHandler(
+            engine,
+            callback=sleep_callback
+        )
+
+    def activate(self, action: actions.SpellAction) -> None:
+        consumer = action.entity
+        target_x, target_y = action.target_xy
+        target = action.engine.game_map.get_blocking_entity_at_location(target_x, target_y)
+
+        if not target or not target.fighter:
+            consumer.mana -= self.mana_cost
+            self.give_xp(consumer)
+            action.engine.message_log.add_message(
+                "Your spell has no effect.", color.light_gray
+            )
+            return
+        
+        if target and target.fighter:
+            sleep_effect = effect.SleepEffect(duration=self.duration)
+            self._apply_effect(target, sleep_effect, action)
+            consumer.mana -= self.mana_cost
+            self.give_xp(consumer)
+            action.engine.message_log.add_message(
+                f"The {target.name} falls asleep!", color.light_gray
+            )
+            sounds.play_heal_spell_sound()
+            return
+        
 class FireballSpell(Spell):
     def __init__(self):
         super().__init__(
             name="Fireball",
             description="Launch a fiery explosion that damages all in the area.",
-            damage=15,
+            damage=5,
             duration=0,
-            mana_cost=10,
+            mana_cost=15,
             components=['V', 'S', 'M'],
             spell_tags=["fire", "area"],
             school="evocation",
             arcana_level = 3,
-            cast_xp = 10,
+            cast_xp = 15,
             radius = 2
         )
 
@@ -283,21 +421,23 @@ class FireballSpell(Spell):
     def activate(self, action: actions.SpellAction) -> None:
         target_xy = action.target_xy
         consumer = action.entity
+        scaled_damage = self._scaled_amount(action, self.damage)
 
         if not action.engine.game_map.visible[target_xy]:
             raise Impossible("You cannot target an area you cannot see!")
         
-        targets_hit = False
         for actor in action.engine.game_map.actors:
             if actor.distance(*target_xy) <= self.radius:
-                actor.fighter.take_damage(self.damage, causes_bleeding=False)
-                targets_hit = True
+                actor.fighter.take_damage(scaled_damage, causes_bleeding=False)
         consumer.mana -= self.mana_cost
         self.give_xp(consumer)
         action.engine.animation_queue.append(animations.ExplosionAnimation(target_xy))
+        action.engine.animation_queue.append(
+            gpu_stack.FireballExplosionParticle(target_xy, radius=self.radius + 0.5)
+        )
         action.engine.game_map.liquid_system.create_splash(target_xy[0], target_xy[1], LiquidType.FIRE, radius=self.radius, max_depth=2)
         action.engine.message_log.add_message(
-            f"The area is engulfed in flames!", color.orange
+            "The area is engulfed in flames!", color.orange
         )
         sounds.play_explosion_sound()
 
@@ -401,16 +541,17 @@ class HealingWordSpell(Spell):
                 return
             else:
                 heal_level = target.level.traits['evocation']['level'] 
+                scaled_base_heal = self._scaled_amount(action, self.damage)
                 
                 consumer.mana -= self.mana_cost
                 self.give_xp(consumer)
                 for _ in range(random.randint(3, 5)):
-                    action.engine.animation_queue.append(gpu_stack.HealthParticle(target, (target_x+random.uniform(-0.5, 0.5), target_y+random.uniform(-0.5, 0.5))))
+                    action.engine.animation_queue.append(gpu_stack.HealthParticle((target_x+random.uniform(-0.5, 0.5), target_y+random.uniform(-0.5, 0.5)), target))
                 
                 action.engine.message_log.add_message(
-                    f"The {target.name} is bathed in a soothing light! (4+{heal_level} HP)", color.light_green
+                    f"The {target.name} is bathed in a soothing light! ({scaled_base_heal}+{heal_level} HP)", color.light_green
                 )
-                target.fighter.heal(heal_level + self.damage) 
+                target.fighter.heal(heal_level + scaled_base_heal) 
                 sounds.play_heal_spell_sound()
 class InflictWoundsSpell(Spell):
     def __init__(self):
@@ -445,6 +586,7 @@ class InflictWoundsSpell(Spell):
         consumer = action.entity
         target_x, target_y = action.target_xy
         target = action.engine.game_map.get_blocking_entity_at_location(target_x, target_y)
+        scaled_damage = self._scaled_amount(action, self.damage)
 
         if not target or not target.fighter:
             consumer.mana -= self.mana_cost
@@ -453,7 +595,7 @@ class InflictWoundsSpell(Spell):
             action.engine.animation_queue.append(gpu_stack.JaggedLineSpellParticle(path, color.dark_purple))
             sounds.play_dark_spell_sound()
             action.engine.message_log.add_message(
-                f"Your dark energy lashes out but finds no target.", color.dark_red
+                "Your dark energy lashes out but finds no target.", color.dark_red
             )
             return
         
@@ -461,7 +603,7 @@ class InflictWoundsSpell(Spell):
             action.engine.message_log.add_message(
                 f"The {target.name} is struck by dark energy!", color.dark_purple
             )
-            target.fighter.take_damage(self.damage, causes_bleeding=False)
+            target.fighter.take_damage(scaled_damage, causes_bleeding=False)
             consumer.mana -= self.mana_cost
             self.give_xp(consumer)
             # Create path from caster to target for animation

@@ -25,10 +25,11 @@ import color
 if TYPE_CHECKING:
     from entity import Actor
     from game_map import GameMap, GameWorld
+    from actions import Action
 
 import time
 from animations import FireFlicker, BonefireFlicker, FlameAnimation
-from gpu_stack import SmokeCloudParticle, EmberParticle, DripParticle, LightShaftParticles, BurningParticle
+from gpu_stack import SmokeCloudParticle, EmberParticle, DripParticle, LightShaftParticles, BurningParticle, SleepingParticle
 import sprite_manager
 import tcod.noise
 
@@ -91,6 +92,7 @@ class Engine:
         # Auto-movement (pathfind-to-click)
         self.auto_move_path = []  # List of (x, y) tuples remaining in the queued path
         self._last_auto_move_time = 0.0
+        self._auto_move_step_interval = 0.05
         self._pending_handler = None  # Handler change queued by auto-move (e.g. GameOver)
         self._pending_handler_ready = False  # Delay until one final sprite-update frame completes before switching handler
 
@@ -106,6 +108,73 @@ class Engine:
         # libtcod demo's fov_torchx.  Used to derive per-source wobble (dx, dy)
         # and intensity delta (di) for torch/fire flicker.
         self._torch_t: float = 0.0
+
+        # F1 lag profiler overlay toggle (independent of F2 debug mode).
+        self.show_lag_profiler = False
+
+        # Lightweight frame profiler (used by F1 lag chart).
+        self.lag_profiler = {
+            "ema_ms": {},
+            "last_frame_ms": {},
+            "external_frame_ms": {},
+            "frame_count": 0,
+        }
+
+    def profile_external_ms(self, section: str, elapsed_ms: float) -> None:
+        """Queue a profiling sample (milliseconds) from non-tick systems.
+
+        Samples are merged into the next tick frame report so F2 shows them in
+        the same chart as core engine timings.
+        """
+        try:
+            profiler = getattr(self, "lag_profiler", None)
+            if not isinstance(profiler, dict):
+                return
+
+            ms = max(0.0, float(elapsed_ms))
+            ext = profiler.setdefault("external_frame_ms", {})
+            ext[section] = float(ext.get(section, 0.0) or 0.0) + ms
+        except Exception:
+            pass
+
+    def _profile_section(self, section: str, elapsed_seconds: float) -> None:
+        """Record one timing sample for a named section as an EMA in milliseconds."""
+        try:
+            profiler = getattr(self, "lag_profiler", None)
+            if not isinstance(profiler, dict):
+                return
+
+            elapsed_ms = max(0.0, float(elapsed_seconds) * 1000.0)
+            ema_map = profiler.setdefault("ema_ms", {})
+            alpha = 0.2  # EMA smoothing factor.
+            previous = float(ema_map.get(section, elapsed_ms))
+            ema_map[section] = previous + (elapsed_ms - previous) * alpha
+        except Exception:
+            pass
+
+    def _finalize_frame_profile(self, frame_samples_ms: dict[str, float]) -> None:
+        """Commit frame samples and update smoothed profiler values."""
+        try:
+            profiler = getattr(self, "lag_profiler", None)
+            if not isinstance(profiler, dict):
+                return
+
+            ext = profiler.get("external_frame_ms", {}) or {}
+            if isinstance(ext, dict) and ext:
+                for section, ms in ext.items():
+                    frame_samples_ms[section] = float(frame_samples_ms.get(section, 0.0) or 0.0) + float(ms or 0.0)
+                # Keep total coherent with merged sections.
+                frame_samples_ms["total"] = float(frame_samples_ms.get("total", 0.0) or 0.0) + sum(
+                    float(v or 0.0) for v in ext.values()
+                )
+                profiler["external_frame_ms"] = {}
+
+            profiler["last_frame_ms"] = dict(frame_samples_ms)
+            profiler["frame_count"] = int(profiler.get("frame_count", 0)) + 1
+            for section, ms in frame_samples_ms.items():
+                self._profile_section(section, ms / 1000.0)
+        except Exception:
+            pass
 
     def get_camera_origin(self, view_width: int, view_height: int) -> tuple[int, int]:
         """Return the top-left world tile of the current viewport."""
@@ -191,8 +260,16 @@ class Engine:
                     existing.duration = None
                 else:
                     existing.duration = max(existing.duration, effect.duration)
+                try:
+                    existing.on_apply(target)
+                except Exception:
+                    pass
                 return existing
         effects.append(effect)
+        try:
+            effect.on_apply(target)
+        except Exception:
+            pass
         return effect
 
     def tutorial_ticking(self, console: Console):
@@ -200,36 +277,45 @@ class Engine:
             if getattr(entity, "type", None) == "Guide":
                 guide = entity
                 break
-
-        if "start" not in self.tutorial_checkpoints:
-            self.tutorial_checkpoints.append("start")
-            guide.ai.say(custom="Welcome adventurer. Use WASD or right click to move. Try it out a bit!")
-        else:
-            if "moved" not in self.tutorial_checkpoints:
-                if self.turn_count > 5:
-                    self.tutorial_checkpoints.append("moved")
-                    guide.ai.say(custom="Excellent. Now, move to that chest northward, and right click on it to get some basic equipment.")
+        try:
+            if "start" not in self.tutorial_checkpoints:
+                self.tutorial_checkpoints.append("start")
+                guide.ai.say(custom="Welcome adventurer. Use WASD or right click to move. Try it out a bit!")
             else:
-                if "looted" not in self.tutorial_checkpoints:
-                    if len(self.player.inventory.items) > 0:
-                        self.tutorial_checkpoints.append("looted")
-                        guide.ai.say(custom="Well done. Equip items using the (TAB) inventory. Try defeating that training dummy by moving into it, or left clicking it.")
+                if "moved" not in self.tutorial_checkpoints:
+                    if self.turn_count > 5:
+                        self.tutorial_checkpoints.append("moved")
+                        guide.ai.say(custom="Excellent. Now, move to that chest northward, and right click on it to get some basic equipment.")
                 else:
-                    if "defeat" not in self.tutorial_checkpoints:
-                        dummy = next((e for e in self.game_map.entities if getattr(e, "name", None) == "Training Dummy"), None)
-                        if not dummy or (dummy.fighter and dummy.fighter.hp <= 0):
-                            self.tutorial_checkpoints.append("defeat")
-                            guide.ai.say(custom="That was a real challenge. You will gain levels as you hone your skills (F). Open your inventory (TAB) and use the sigil stone from the chest.")
+                    if "looted" not in self.tutorial_checkpoints:
+                        if len(self.player.inventory.items) > 0:
+                            self.tutorial_checkpoints.append("looted")
+                            guide.ai.say(custom="Well done. Equip items using the (TAB) inventory. Try defeating that training dummy by moving into it, or left clicking it.")
                     else:
-                        if "stoneused" not in self.tutorial_checkpoints:
-                            # check if player has level 2 arcana
-                            if self.player.level and self.player.level.traits['arcana']['level'] >= 2:
-                                self.tutorial_checkpoints.append("stoneused")
-                                guide.ai.say(custom="Well done. Access the controls menu (M) if you need a refresher. Ascend (>) the stairs to the west, and best of luck traveller.")
+                        if "defeat" not in self.tutorial_checkpoints:
+                            dummy = next((e for e in self.game_map.entities if getattr(e, "name", None) == "Training Dummy"), None)
+                            if not dummy or (dummy.fighter and dummy.fighter.hp <= 0):
+                                self.tutorial_checkpoints.append("defeat")
+                                guide.ai.say(custom="That was a real challenge. You will gain levels as you hone your skills (F). Open your inventory (TAB) and use the sigil stone from the chest.")
+                        else:
+                            if "stoneused" not in self.tutorial_checkpoints:
+                                # check if player has level 2 arcana
+                                if self.player.level and self.player.level.traits['arcana']['level'] >= 2:
+                                    self.tutorial_checkpoints.append("stoneused")
+                                    guide.ai.say(custom="Well done. Access the controls menu (M) if you need a refresher. Ascend (>) the stairs to the west, and best of luck traveller.")
+        except Exception as e:
+            print(f"ERROR: Exception in tutorial ticking: {e}")
 
 
     
     def tick(self, console: Console):
+        _frame_start = time.perf_counter()
+        _frame_samples_ms: dict[str, float] = {}
+
+        def _mark(section_name: str, section_start: float) -> None:
+            _frame_samples_ms[section_name] = _frame_samples_ms.get(section_name, 0.0) + (
+                (time.perf_counter() - section_start) * 1000.0
+            )
 
 
         # Calculate tick rate per second
@@ -239,7 +325,7 @@ class Engine:
         if _last is None:
             # first tick: initialize storage
             self._last_tick_time = now
-            self._tick_intervals = deque(maxlen=60)  # smooth over last N frames
+            self._tick_intervals = deque(maxlen=120)  # smooth over last N frames
             self.tick_rate = 0.0
         else:
             dt = now - _last
@@ -254,23 +340,29 @@ class Engine:
                 self.tick_rate = getattr(self, "tick_rate", 0.0)
 
         # Always clean up expired animations regardless of map type.
+        _section_start = time.perf_counter()
         expired = [anim for anim in list(self.animation_queue) if getattr(anim, "frames", 1) <= 0]
         for anim in expired:
             try:
                 self.animation_queue.remove(anim)
             except ValueError:
                 pass
+        _mark("cleanup", _section_start)
 
         # Always advance auto-move regardless of map type.
+        _section_start = time.perf_counter()
         auto_path = getattr(self, 'auto_move_path', None)
         if auto_path and getattr(self, 'turn_manager', None):
             self.cursor_hint = "walk"
             now_am = time.monotonic()
-            if now_am - self._last_auto_move_time >= 0.05:
+            auto_step_interval = float(getattr(self, "_auto_move_step_interval", 0.05) or 0.05)
+            if now_am - self._last_auto_move_time >= auto_step_interval:
+                _am_scan_start = time.perf_counter()
                 enemy_visible = any(
                     actor is not self.player and self.game_map.visible[actor.x, actor.y] and isinstance(actor.ai, components.ai.HostileEnemy)
                     for actor in self.game_map.actors
                 )
+                _mark("autopath_scan", _am_scan_start)
                 if enemy_visible:
                     self.auto_move_path = []
                     self.cursor_hint = None
@@ -281,29 +373,40 @@ class Engine:
                     dy = next_pos[1] - self.player.y
                     from actions import MovementAction
                     try:
-                        self.turn_manager.process_pre_player_turn()
-                        MovementAction(self.player, dx, dy).perform()
+                        _am_step_start = time.perf_counter()
+                        # execute_action with is_player_action=True already runs
+                        # pre/post turn processing. Calling turn_manager methods
+                        # separately here double-processes a turn and is very costly.
+                        result = self.execute_action(
+                            MovementAction(self.player, dx, dy),
+                            is_player_action=True,
+                        )
+                        _mark("autopath_step", _am_step_start)
                         self._last_auto_move_time = now_am
                         if not auto_path:
                             self.cursor_hint = None
-                        result = self.turn_manager.process_player_turn_end()
                         if result is not None:
                             self.auto_move_path = []
                             self.cursor_hint = None
                             self._pending_handler = result
                     except exceptions.Impossible as exc:
+                        _mark("autopath_step", _am_step_start)
                         self.auto_move_path = []
                         self.cursor_hint = None
                         self.message_log.add_message(exc.args[0], color.impossible)
+        _mark("auto_move", _section_start)
 
         # Handle tutorial-specific ticking for tutorial maps
+        _section_start = time.perf_counter()
         if hasattr(self, 'game_map') and getattr(self.game_map, 'biome', None) == "tutorial":
             self.tutorial_ticking(console)
+        _mark("tutorial", _section_start)
         
 
 
         # Generate grass waves that sweep across the visible area
         # Disabled on the overworld — it uses a Dwarf Fortress-style tile map.
+        _section_start = time.perf_counter()
         try:
             if getattr(self.game_map, 'type', '') != 'overworld':
                 self.grass_wave_timer += 1
@@ -320,11 +423,13 @@ class Engine:
                 
         except Exception:
             traceback.print_exc()
+        _mark("grass_waves", _section_start)
 
 
         # Body part coating system moved to turn_manager.py
 
         # Keep a single persistent GlobalWaterAnimation instead of per-tile spawns
+        _section_start = time.perf_counter()
         if not any(type(a).__name__ == 'GlobalWaterAnimation' for a in self.animation_queue):
             from animations import GlobalWaterAnimation
             self.animation_queue.appendleft(GlobalWaterAnimation())
@@ -340,10 +445,12 @@ class Engine:
         if not any(type(a).__name__ == 'GlobalDungeonWaterAnimation' for a in self.animation_queue):
             from animations import GlobalDungeonWaterAnimation
             self.animation_queue.appendleft(GlobalDungeonWaterAnimation())
+        _mark("global_anims", _section_start)
 
         # Spawn directional light shaft particles for visible Window tiles.
         # Check north (y-1) and south (y+1) independently: if that side is open
         # (transparent), spawn a shaft going in that direction.
+        _section_start = time.perf_counter()
         if self.animations_enabled and hasattr(self, 'game_map'):
             existing_shafts = {
                 (int(a.fx), int(a.fy), a.shaft_direction)
@@ -365,8 +472,10 @@ class Engine:
                         and self.game_map.tiles[ix, iy + 1]["transparent"]
                         and (ix, iy, 1) not in existing_shafts):
                     self.animation_queue.append(LightShaftParticles((ix, iy), shaft_direction=1))
+            _mark("light_shafts", _section_start)
 
         
+        _section_start = time.perf_counter()
         try:
             for entity in list(self.game_map.entities):
                 # Update corpse sprite based on whether it still has loot
@@ -524,12 +633,34 @@ class Engine:
                                 self.animation_queue.append(_IllumP(entity))
                     except Exception:
                         pass
+
+                if self.animations_enabled:
+                    try:
+                        is_sleeping = any(
+                            getattr(e, 'name', '') == 'Sleep'
+                            for e in getattr(entity, 'effects', [])
+                        )
+                        if is_sleeping:
+                            already = any(
+                                type(a).__name__ == 'SleepingParticle'
+                                and a.entity is entity
+                                and a.frames > 0
+                                for a in self.animation_queue
+                            )
+                            if not already:
+                                self.animation_queue.append(SleepingParticle(entity))
+                    except Exception:
+                        pass
         
             # Update ambient sounds based on player proximity
             sounds.update_all_ambient_sounds(self.player, self.game_map.entities, self.game_map)
         except Exception:
             traceback.print_exc()
             pass
+        _mark("entity_updates", _section_start)
+
+        _frame_samples_ms["total"] = (time.perf_counter() - _frame_start) * 1000.0
+        self._finalize_frame_profile(_frame_samples_ms)
 
     def process_animations(self):
         if not self.animation_queue:
@@ -539,6 +670,64 @@ class Engine:
             animation.tick()
             if animation.frames <= 0:
                 self.animation_queue.remove(animation)
+
+    def is_actor_asleep(self, actor) -> bool:
+        """Return True when the actor currently has a sleep effect."""
+        try:
+            from components.effect import has_effect_name
+            return has_effect_name(actor, "Sleep")
+        except Exception:
+            return False
+
+    def execute_action(self, action: Action, is_player_action: bool = False) -> Optional[object]:
+        """
+        **CENTRALIZED ACTION EXECUTION HUB**
+        
+        ALL actions should pass through this method to ensure:
+        - Proper turn order and initiative processing
+        - Status effects and environmental effects are applied
+        - Consistent action logging and game state management
+        
+        Args:
+            action: The action to execute
+            is_player_action: Whether this is a player action (affects pre/post-turn processing)
+        
+        Returns:
+            A handler if a state change is needed, None otherwise
+        """
+        actor = getattr(action, "entity", None)
+        if actor is not None and self.is_actor_asleep(actor):
+            from actions import WaitAction
+            if isinstance(action, WaitAction):
+                pass
+            else:
+                if actor is self.player:
+                    self.message_log.add_message("You are asleep and cannot act.", color.impossible)
+                elif getattr(actor, "name", None):
+                    self.message_log.add_message(f"{actor.name} is asleep and cannot act.", color.impossible)
+                return None
+
+        # Pre-action processing (only for player actions)
+        if is_player_action and self.turn_manager:
+            handler_change = self.turn_manager.process_pre_player_turn()
+            if handler_change:
+                return handler_change
+        
+        # Execute the actual action
+        try:
+            result = action.perform()
+        except exceptions.Impossible as exc:
+            print(f"ERROR: Impossible action attempted: {exc.args[0]}")
+            return None
+        
+        # Post-action processing (for player actions)
+        if is_player_action and self.turn_manager:
+            handler_change = self.turn_manager.process_player_turn_end()
+            if handler_change:
+                return handler_change
+        
+        # Return handler if action resulted in one, otherwise None
+        return result if isinstance(result, object) and hasattr(result, '__class__') and 'BaseEventHandler' in str(result.__class__.__mro__) else None
 
     def save_as(self, filename: str) -> None:
         # save this engine instance as a compressed file
@@ -972,7 +1161,7 @@ class Engine:
             )
             if self.debug:
                 if not skip_debug:
-                    render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities), self)
+                    render_functions.render_debug_overlay(console, getattr(self, "frame_fps", self.tick_rate), (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities), self)
             return
 
         tile = self.mouse_x, self.mouse_y
@@ -1000,6 +1189,9 @@ class Engine:
                     # Check if interactable container
                     if hasattr(ent, "container") and ent.container:
                         interactable = True
+                    # Check if campfire / bonfire — opens cooking UI
+                    elif getattr(ent, "name", None) in ("Campfire", "Bonfire"):
+                        interactable = True
                     # Check if enemy, has hp, and NOT player
                     elif hasattr(ent, "fighter") and ent.fighter and ent.fighter.hp > 0 and ent.fighter != self.player.fighter:
                         fightable = True
@@ -1020,7 +1212,7 @@ class Engine:
         )
 
         if self.debug and not skip_debug:
-            render_functions.render_debug_overlay(console, self.tick_rate, (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities), self)
+            render_functions.render_debug_overlay(console, getattr(self, "frame_fps", self.tick_rate), (self.player.x, self.player.y), self.__class__.__name__, len(self.game_map.entities), self)
 
     def render(self, console: Console) -> None:
         self.render_game(console)

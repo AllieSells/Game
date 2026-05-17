@@ -21,9 +21,106 @@ else:
 
 
 import sounds
-import animations
 import sprite_manager
 import gpu_stack
+from balance_config import (
+    AGILITY_HIT_BONUS_CAP,
+    AGILITY_HIT_BONUS_PER_LEVEL,
+    AGILITY_RANGED_DAMAGE_PER_LEVEL,
+    ARROW_HIT_RECOVERY_CHANCE,
+    ARROW_OBSTACLE_BREAK_CHANCE,
+    BOW_DEFAULT_MAX_RANGE,
+    MAX_HIT_CHANCE,
+    MELEE_BASE_HIT,
+    MIN_HIT_CHANCE,
+    RANGED_BASE_HIT,
+    SPELL_FIZZLE_MANA_REFUND_FRACTION,
+    STRENGTH_MELEE_DAMAGE_PER_LEVEL,
+    trait_delta,
+)
+import proficiency_system as profsys
+
+
+def _resolve_ammo_type(item) -> str:
+    """Return a stable ammo type key for a projectile item."""
+    if item is None:
+        return "arrow"
+
+    explicit = str(getattr(item, "ammo_type", "") or "").strip().lower()
+    if explicit:
+        return explicit
+
+    tags = {str(tag).strip().lower() for tag in getattr(item, "tags", []) or []}
+    for tag in tags:
+        if tag.startswith("ammo_type:"):
+            return tag.split(":", 1)[1] or "arrow"
+        if tag.startswith("arrow_type:"):
+            return tag.split(":", 1)[1] or "arrow"
+
+    name = str(getattr(item, "name", "") or "").strip().lower()
+    if " " in name:
+        return name.split(" ", 1)[0]
+    return "arrow"
+
+
+def _ensure_quiver_ammo_state(quiver_item) -> tuple[dict, str]:
+    """Ensure quiver has multi-ammo state, preserving legacy arrow_count data."""
+    counts = getattr(quiver_item, "ammo_counts", None)
+    if not isinstance(counts, dict):
+        legacy_count = int(getattr(quiver_item, "arrow_count", 0) or 0)
+        counts = {"arrow": legacy_count} if legacy_count > 0 else {}
+        quiver_item.ammo_counts = counts
+
+    selected = str(getattr(quiver_item, "selected_ammo_type", "") or "").strip().lower()
+    if not selected:
+        selected = next((k for k, v in counts.items() if int(v or 0) > 0), "arrow")
+        quiver_item.selected_ammo_type = selected
+
+    total = sum(max(0, int(v or 0)) for v in counts.values())
+    quiver_item.arrow_count = total  # Keep legacy field in sync for compatibility.
+
+    return counts, selected
+
+
+def _ensure_quiver_ammo_templates(quiver_item) -> dict:
+    """Ensure quiver tracks projectile templates per ammo type."""
+    templates = getattr(quiver_item, "ammo_templates", None)
+    if not isinstance(templates, dict):
+        templates = {}
+        quiver_item.ammo_templates = templates
+    return templates
+
+
+def _get_factory_projectile_template(ammo_type: str):
+    """Try to resolve an ammo template from entity_factories by ammo type."""
+    ammo_type = str(ammo_type or "").strip().lower()
+    if not ammo_type:
+        return None
+
+    try:
+        import entity_factories as ef
+    except Exception:
+        return None
+
+    candidates = [
+        f"{ammo_type}_arrow",
+        f"{ammo_type}_bolt",
+        f"{ammo_type}_projectile",
+    ]
+    for attr in candidates:
+        item = getattr(ef, attr, None)
+        if item is not None:
+            return item
+    return None
+
+
+def _get_quiver_total_count(quiver_item) -> int:
+    if quiver_item is None:
+        return 0
+    counts = getattr(quiver_item, "ammo_counts", None)
+    if isinstance(counts, dict):
+        return sum(max(0, int(v or 0)) for v in counts.values())
+    return int(getattr(quiver_item, "arrow_count", 0) or 0)
 # Body part targeting modifiers (damage_modifier, hit_difficulty_modifier)
 # hit_difficulty_modifier: Positive = easier to hit, negative = harder to hit
 
@@ -40,9 +137,9 @@ BODY_PART_MODIFIERS = {
     "TAIL":  (0.8,  0),
 }
 
-# Base hit chances (0.0–1.0)
-BASE_HIT        = 0.90  # Melee
-BASE_HIT_RANGED = 0.75  # Ranged
+# Base hit chances (0.0–1.0), centralized in balance_config.
+BASE_HIT = MELEE_BASE_HIT
+BASE_HIT_RANGED = RANGED_BASE_HIT
 
 # Weighted likelihood of hitting each zone (higher = hit more often)
 BODY_PART_WEIGHTS = {
@@ -142,6 +239,113 @@ def _resolve_hit_part(target, target_part):
 
     return hit_part, target_part, damage_modifier
 
+
+def _get_trait_level(actor: Actor, trait_name: str) -> int:
+    try:
+        return int(actor.level.traits.get(trait_name, {}).get("level", 1) or 1)
+    except Exception:
+        return 1
+
+
+def _get_agility_hit_modifier(attacker: Actor, defender: Actor) -> float:
+    atk_agi = _get_trait_level(attacker, "agility")
+    def_agi = _get_trait_level(defender, "agility")
+    delta = atk_agi - def_agi
+    return max(-AGILITY_HIT_BONUS_CAP, min(AGILITY_HIT_BONUS_CAP, delta * AGILITY_HIT_BONUS_PER_LEVEL))
+
+
+def _collect_equipped_weapons(attacker: Actor) -> list:
+    weapons = []
+    eq = getattr(attacker, "equipment", None)
+    if not eq:
+        return weapons
+
+    weapon_type_names = {"WEAPON", "RANGED"}
+
+    for item in eq.body_part_coverage.values():
+        if (
+            item
+            and getattr(item, "equippable", None)
+            and getattr(item.equippable, "equipment_type", None)
+            and item.equippable.equipment_type.name in weapon_type_names
+        ):
+            weapons.append(item)
+
+    if not weapons:
+        for eq_type, item in eq.equipped_items.items():
+            if item and eq_type in weapon_type_names:
+                weapons.append(item)
+
+    return weapons
+
+
+def _item_tags(item: Item) -> set[str]:
+    tags = set(getattr(item, "tags", []) or [])
+
+    # Legacy save compatibility: older shortsword definitions used the
+    # "light weapon" tag, which maps partially to dagger XP.
+    # Normalize sword-like items so melee profile/XP route to sword traits.
+    item_name = str(getattr(item, "name", "") or "").lower()
+    if "sword" in item_name:
+        tags.add("sword")
+        tags.discard("light weapon")
+
+    eq = getattr(item, "equippable", None)
+    if eq is not None:
+        tags.update(set(getattr(eq, "required_tags", set()) or set()))
+    return tags
+
+
+def _weapon_proficiency_profile(attacker: Actor, equipped_weapons: list) -> profsys.ProficiencyResult:
+    tags: set[str] = set()
+    for weapon in equipped_weapons:
+        tags.update(_item_tags(weapon))
+    return profsys.weapon_profile(attacker, tags)
+
+
+def _weapon_xp_traits_from_items(equipped_weapons: list) -> set[str]:
+    tags: set[str] = set()
+    for weapon in equipped_weapons:
+        tags.update(_item_tags(weapon))
+    return profsys.weapon_traits_for_tags(tags)
+
+
+def _armor_xp_traits_from_tags(armor_tags: list) -> set[str]:
+    return profsys.armor_traits_for_tags(armor_tags)
+
+
+def _armor_affinity_multiplier(defender: Actor, armor_tags: list) -> float:
+    return profsys.armor_profile(defender, armor_tags).mitigation_multiplier
+
+
+def _effective_dodge_chance(defender: Actor, local_armor_tags: list | None = None) -> float:
+    base_dodge = float(getattr(defender, "dodge_chance", 0.0) or 0.0)
+    agility_bonus = profsys.agility_dodge_bonus(defender)
+
+    armor_tags = set(local_armor_tags or [])
+    if getattr(defender, "equipment", None):
+        try:
+            armor_tags.update(defender.equipment.get_all_armor_tags())
+        except Exception:
+            pass
+
+    armor_profile = profsys.armor_profile(defender, armor_tags)
+    return max(0.0, min(0.95, base_dodge + agility_bonus + armor_profile.dodge_delta))
+
+
+def _break_invisibility(actor: Actor) -> None:
+    """Remove active invisibility effects from an actor."""
+    effects = list(getattr(actor, "effects", []) or [])
+    if not effects:
+        return
+
+    remaining = [
+        e for e in effects
+        if str(getattr(e, "name", "")).strip().lower() not in {"invisible", "invisibility"}
+    ]
+    if len(remaining) != len(effects):
+        actor.effects = remaining
+
 class Action:
     def __init__(self, entity: Actor) -> None:
         super().__init__()
@@ -192,9 +396,15 @@ class InteractAction(Action):
                     # Send to input handler to display contents
                     if not is_corpse:
                         sounds.play_chest_open_sound()
-                    from input_handlers import ContainerEventHandler
                     from inventory_ui import ContainerGridUI
                     return ContainerGridUI(self.engine, container)
+
+        # Check for a campfire or bonfire item at the target location → cooking UI
+        for ent in self.engine.game_map.entities:
+            if (getattr(ent, "name", None) in ("Campfire", "Bonfire")
+                    and ent.x == target_x and ent.y == target_y):
+                from inventory_ui import CookingUI
+                return CookingUI(self.engine)
         tile = self.engine.game_map.tiles["interactable"][target_x, target_y]    
         if tile:
             import tile_types
@@ -248,62 +458,242 @@ class PickupAction(Action):
     def __init__(self, entity: Actor):
         super().__init__(entity)
 
+    @staticmethod
+    def _is_arrow_item(item) -> bool:
+        if not item:
+            return False
+        item_tags = {tag.lower() for tag in getattr(item, "tags", [])}
+        eq_type_name = None
+        if hasattr(item, "equippable") and item.equippable:
+            eq_type_name = item.equippable.equipment_type.name
+        if eq_type_name == "BACKPACK" or "quiver" in item_tags:
+            return False
+        return (
+            eq_type_name == "PROJECTILE"
+            or "arrow" in item_tags
+            or "ammunition" in item_tags
+            or "ammo" in item_tags
+        )
+
+    def _get_equipped_quiver(self):
+        equipment = getattr(self.entity, "equipment", None)
+        if not equipment:
+            return None
+        if hasattr(equipment, "get_equipped_quiver"):
+            return equipment.get_equipped_quiver()
+        return None
+
+    def _collect_ammo_from_tile_items(self, tile_items: list) -> int:
+        """Collect ammo-tagged items from tile, preferring quiver storage.
+
+        Returns number of ammo items collected/absorbed.
+        """
+        inventory = self.entity.inventory
+        quiver_item = self._get_equipped_quiver()
+        ammo_items = [item for item in tile_items if self._is_arrow_item(item)]
+        if not ammo_items:
+            return 0
+
+        absorbed_count = 0
+        absorbed_by_type = {}
+        moved_to_inventory = 0
+        first_ammo_item = ammo_items[0]
+
+        if quiver_item is not None:
+            ammo_counts, selected_type = _ensure_quiver_ammo_state(quiver_item)
+            ammo_templates = _ensure_quiver_ammo_templates(quiver_item)
+            current = _get_quiver_total_count(quiver_item)
+            capacity = int(getattr(quiver_item, "arrow_capacity", 0) or 0)
+            remaining = []
+
+            for item in ammo_items:
+                if capacity > current:
+                    ammo_type = _resolve_ammo_type(item)
+                    try:
+                        self.engine.game_map.entities.remove(item)
+                    except Exception:
+                        pass
+                    ammo_counts[ammo_type] = int(ammo_counts.get(ammo_type, 0) or 0) + 1
+                    # Keep a representative item template so firing preserves ammo variant.
+                    if ammo_type not in ammo_templates:
+                        try:
+                            ammo_templates[ammo_type] = copy.deepcopy(item)
+                        except Exception:
+                            pass
+                    absorbed_count += 1
+                    absorbed_by_type[ammo_type] = absorbed_by_type.get(ammo_type, 0) + 1
+                    current += 1
+                else:
+                    remaining.append(item)
+
+            if selected_type not in ammo_counts or int(ammo_counts.get(selected_type, 0) or 0) <= 0:
+                quiver_item.selected_ammo_type = next(
+                    (k for k, v in ammo_counts.items() if int(v or 0) > 0),
+                    selected_type,
+                )
+            quiver_item.arrow_count = current
+            ammo_items = remaining
+
+        for item in ammo_items:
+            if not inventory.can_carry(item):
+                break
+            self.engine.game_map.entities.remove(item)
+            item.parent = self.entity.inventory
+            inventory.items.append(item)
+            moved_to_inventory += 1
+
+        moved_total = absorbed_count + moved_to_inventory
+        if moved_total <= 0:
+            return 0
+
+        if first_ammo_item and hasattr(first_ammo_item, "pickup_sound") and first_ammo_item.pickup_sound is not None:
+            try:
+                first_ammo_item.pickup_sound()
+            except Exception as e:
+                self.engine.debug_log(
+                    f"Error calling pickup sound: {e}",
+                    handler=type(self).__name__,
+                    event="perform",
+                )
+
+        if quiver_item is not None and absorbed_count > 0:
+            current = _get_quiver_total_count(quiver_item)
+            capacity = int(getattr(quiver_item, "arrow_capacity", 0) or 0)
+            selected_type = str(getattr(quiver_item, "selected_ammo_type", "arrow") or "arrow")
+            if moved_to_inventory > 0:
+                self.engine.message_log.add_message(
+                    f"You stash {absorbed_count} ammo in your quiver ({current}/{capacity}, using {selected_type}) and collect {moved_to_inventory} ammo item(s)."
+                )
+            else:
+                self.engine.message_log.add_message(
+                    f"You stash {absorbed_count} ammo in your quiver ({current}/{capacity}, using {selected_type})."
+                )
+        else:
+            self.engine.message_log.add_message(f"You collect {moved_total} ammo item(s).")
+
+        return moved_total
+
+    def _collect_ammo_at_current_position(self) -> int:
+        actor_location_x = self.entity.x
+        actor_location_y = self.entity.y
+        tile_items = [
+            item
+            for item in self.engine.game_map.items
+            if actor_location_x == item.x and actor_location_y == item.y
+        ]
+        return self._collect_ammo_from_tile_items(tile_items)
+
     def perform(self) -> None:
         actor_location_x = self.entity.x
         actor_location_y = self.entity.y
         inventory = self.entity.inventory
 
-        for item in self.engine.game_map.items:
-            if actor_location_x == item.x and actor_location_y == item.y:
-                if not inventory.can_carry(item):
-                    raise exceptions.Impossible("You are carrying too much to pick that up.")
-            
-                # Bonfires cannot be picked up
-                if item.name == "Bonfire":
-                    raise exceptions.Impossible("The bonfire is too hot to handle!")
+        tile_items = [
+            item
+            for item in self.engine.game_map.items
+            if actor_location_x == item.x and actor_location_y == item.y
+        ]
 
-                if "coin" in item.name.lower():
-                    self.engine.player.gold += item.value
-                    self.engine.game_map.entities.remove(item)
-                    self.engine.message_log.add_message("You pick up some coins.", color.yellow)
-                    
-                    # Coin pick up sound 
-                    if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
-                        try:
-                            item.pickup_sound()
-                        except Exception as e:
-                            self.engine.debug_log(f"Error calling coin pickup sound: {e}", handler=type(self).__name__, event="perform")
-                    return
-                else:
-                    self.engine.game_map.entities.remove(item)
-                    item.parent = self.entity.inventory
-                    inventory.items.append(item)
-                # Special-case picking up a campfire: convert to a Torch with a flavor message
-                try:
-                    from entity_factories import torch 
-                except Exception:
-                    _torch_template = None
+        if not tile_items:
+            raise exceptions.Impossible("There is nothing here to pick up.")
 
-                if item.name == "Campfire" and torch is not None:
-                    inventory.items.pop()
-                    new_torch = copy.deepcopy(torch)
-                    new_torch.parent = self.entity.inventory
-                    inventory.items.append(new_torch)
-                    sounds.play_torch_pull_sound()
-                    self.engine.message_log.add_message("You pull a burning log from the fire")
-                    return
-                # Play pickup sound if it exists
+        moved_ammo = self._collect_ammo_from_tile_items(tile_items)
+        if moved_ammo > 0:
+            tile_items = [
+                item
+                for item in self.engine.game_map.items
+                if actor_location_x == item.x and actor_location_y == item.y
+            ]
+            if not tile_items:
+                return
+
+        for item in tile_items:
+            if not inventory.can_carry(item):
+                raise exceptions.Impossible("You are carrying too much to pick that up.")
+
+            if item.name == "Bonfire":
+                raise exceptions.Impossible("The bonfire is too hot to handle!")
+
+            if "coin" in item.name.lower():
+                self.engine.player.gold += item.value
+                self.engine.game_map.entities.remove(item)
+                self.engine.message_log.add_message("You pick up some coins.", color.yellow)
                 if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
                     try:
                         item.pickup_sound()
                     except Exception as e:
-                        self.engine.debug_log(f"Error calling pickup sound: {e}", handler=type(self).__name__, event="perform")
-
-                self.engine.message_log.add_message(f"You picked up the {item.name}!")
-                
-                # Grant trait XP for picking up items (strength training)
+                        self.engine.debug_log(
+                            f"Error calling coin pickup sound: {e}",
+                            handler=type(self).__name__,
+                            event="perform",
+                        )
                 return
+
+            self.engine.game_map.entities.remove(item)
+            item.parent = self.entity.inventory
+            inventory.items.append(item)
+
+            try:
+                from entity_factories import torch
+            except Exception:
+                torch = None
+
+            if item.name == "Campfire" and torch is not None:
+                inventory.items.pop()
+                new_torch = copy.deepcopy(torch)
+                new_torch.parent = self.entity.inventory
+                inventory.items.append(new_torch)
+                sounds.play_torch_pull_sound()
+                self.engine.message_log.add_message("You pull a burning log from the fire")
+                return
+
+            if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
+                try:
+                    item.pickup_sound()
+                except Exception as e:
+                    self.engine.debug_log(
+                        f"Error calling pickup sound: {e}",
+                        handler=type(self).__name__,
+                        event="perform",
+                    )
+
+            self.engine.message_log.add_message(f"You picked up the {item.name}!")
+            return
+
         raise exceptions.Impossible("There is nothing here to pick up.")
+
+class CastSpellAction(Action):
+    def __init__(self, entity: Actor, target: Optional[Actor] = None):
+        super().__init__(entity)
+        self.target = target
+
+    def perform(self) -> None:
+        known_spells = list(getattr(self.entity, "known_spells", []) or [])
+        if not known_spells:
+            return WaitAction(self.entity).perform()
+
+        current_mana = int(getattr(self.entity, "mana", 0) or 0)
+        castable_spells = [
+            spell for spell in known_spells
+            if current_mana >= int(getattr(spell, "mana_cost", 0) or 0)
+        ]
+        if not castable_spells:
+            return WaitAction(self.entity).perform()
+
+        # Prefer direct-damage spells for hostile casters.
+        damage_spells = [
+            spell for spell in castable_spells
+            if int(getattr(spell, "damage", 0) or 0) > 0
+        ]
+        chosen_spell = random.choice(damage_spells or castable_spells)
+
+        if self.target is not None:
+            target_xy = (self.target.x, self.target.y)
+        else:
+            target_xy = (self.entity.x, self.entity.y)
+
+        return SpellAction(self.entity, chosen_spell, target_xy).perform()
+
 
 class SpellAction(Action):
     def __init__(self, entity: Actor, spell: Spell, target_xy: Optional[Tuple[int, int]] = None):
@@ -320,7 +710,21 @@ class SpellAction(Action):
         return self.engine.game_map.get_actor_at_location(*self.target_xy)
     
     def perform(self) -> None:
-        # Activate the spell (mana cost should be handled by caller)
+        _break_invisibility(self.entity)
+        cast_profile = profsys.spell_profile(self.entity, getattr(self.spell, "school", ""))
+        if random.random() > cast_profile.success_chance:
+            mana_cost = int(getattr(self.spell, "mana_cost", 0) or 0)
+            mana_spent = int(round(mana_cost * (1.0 - SPELL_FIZZLE_MANA_REFUND_FRACTION)))
+            if mana_spent > 0 and hasattr(self.entity, "mana"):
+                self.entity.mana = max(0, int(self.entity.mana) - mana_spent)
+            sounds.play_fizzle_sound()
+            self.engine.message_log.add_message(
+                f"{self.entity.name.capitalize()} loses concentration and the spell fizzles!",
+                color.dark_gray,
+            )
+            return
+
+        # Activate the spell after proficiency checks.
         self.spell.activate(self)
 
 class ItemAction(Action):
@@ -371,7 +775,6 @@ class OpenAction(Action):
                     # Send to input handler to display contents
                     if not is_corpse:
                         sounds.play_chest_open_sound()
-                    from input_handlers import ContainerEventHandler
                     from inventory_ui import ContainerGridUI
                     return ContainerGridUI(self.engine, container)
         raise exceptions.Impossible("Nothing nearby to open.")
@@ -407,7 +810,9 @@ class TakeStairsAction(Action):
                 self.engine.show_minimap = getattr(self.engine, '_dungeon_minimap_state', 2)
                 gw.descend()
                 sounds.stairs_sound.play()
-                import sprite_manager as _sm; _sm.refresh_actor_sprite(self.entity)
+                import sprite_manager as _sm
+
+                _sm.refresh_actor_sprite(self.entity)
                 self.engine.message_log.add_message("You descend into the dungeon.", color.descend)
                 return
             raise exceptions.Impossible("There is no dungeon entrance here.")
@@ -489,10 +894,79 @@ class ActionWithDirection(Action):
 class RangedAction(ActionWithDirection):
     """Directional ranged attack that can target a specific body part."""
 
-    def __init__(self, entity: Actor, dx: int, dy: int, target_part: Optional['BodyPartType'] = None, tile_rel_pos: Optional[Tuple[float, float]] = None):
+    def __init__(
+        self,
+        entity: Actor,
+        dx: int,
+        dy: int,
+        target_part: Optional['BodyPartType'] = None,
+        tile_rel_pos: Optional[Tuple[float, float]] = None,
+        target_xy: Optional[Tuple[int, int]] = None,
+    ):
         super().__init__(entity, dx, dy)
         self.target_part = target_part
         self.tile_rel_pos = tile_rel_pos  # normalised (x, y) within target tile, 0.0–1.0
+        self.target_xy = target_xy
+
+    @staticmethod
+    def _is_projectile_ammo_item(item) -> bool:
+        if not item or not hasattr(item, "equippable") or not item.equippable:
+            return False
+        eq_type_name = item.equippable.equipment_type.name
+        item_tags = {tag.lower() for tag in getattr(item, "tags", [])}
+        if eq_type_name == "BACKPACK" or "quiver" in item_tags:
+            return False
+        return eq_type_name == "PROJECTILE" or "arrow" in item_tags or "ammunition" in item_tags or "ammo" in item_tags
+
+    def _get_quiver_projectile_template(self, quiver_item, preferred_type: str):
+        """Get a representative projectile item for visuals/damage from inventory/equipment."""
+        templates = _ensure_quiver_ammo_templates(quiver_item)
+        preferred_type = str(preferred_type or "").strip().lower()
+
+        tpl = templates.get(preferred_type)
+        if tpl is not None:
+            return tpl
+
+        factory_tpl = _get_factory_projectile_template(preferred_type)
+        if factory_tpl is not None:
+            try:
+                templates[preferred_type] = copy.deepcopy(factory_tpl)
+                return templates[preferred_type]
+            except Exception:
+                return factory_tpl
+
+        for key, value in templates.items():
+            if int(getattr(quiver_item, "ammo_counts", {}).get(key, 0) or 0) > 0 and value is not None:
+                return value
+
+        candidates = []
+        equipment = getattr(self.entity, "equipment", None)
+        inventory = getattr(self.entity, "inventory", None)
+
+        if equipment:
+            candidates.extend([item for item in equipment.grasped_items.values() if item])
+            candidates.extend([item for item in equipment.equipped_items.values() if item])
+        if inventory:
+            candidates.extend(list(inventory.items))
+
+        fallback = None
+        for item in candidates:
+            if not self._is_projectile_ammo_item(item):
+                continue
+            ammo_type = _resolve_ammo_type(item)
+            if ammo_type == preferred_type:
+                return item
+            if fallback is None:
+                fallback = item
+
+        if fallback is not None:
+            return fallback
+
+        try:
+            import entity_factories as ef
+            return ef.arrow
+        except Exception:
+            return None
 
     def _get_ready_ranged_items(self):
         """Return currently readied bow and projectile items, if any."""
@@ -515,15 +989,33 @@ class RangedAction(ActionWithDirection):
             if bow_item is None and (eq_type_name == "RANGED" or "bow" in item_tags):
                 bow_item = item
 
-            if projectile_item is None and (
-                eq_type_name == "PROJECTILE" or "arrow" in item_tags or "ammunition" in item_tags
-            ):
+            if projectile_item is None and self._is_projectile_ammo_item(item):
                 projectile_item = item
 
             if bow_item and projectile_item:
                 break
 
+        # If a bow is readied but no projectile is equipped, allow firing from inventory ammo.
+        if bow_item is not None and projectile_item is None:
+            inventory = getattr(self.entity, "inventory", None)
+            if inventory:
+                for item in inventory.items:
+                    if not item or not hasattr(item, "equippable") or not item.equippable:
+                        continue
+
+                    if self._is_projectile_ammo_item(item):
+                        projectile_item = item
+                        break
+
         return bow_item, projectile_item
+
+    def _get_equipped_quiver(self):
+        equipment = getattr(self.entity, "equipment", None)
+        if not equipment:
+            return None
+        if hasattr(equipment, "get_equipped_quiver"):
+            return equipment.get_equipped_quiver()
+        return None
 
     def _find_target_in_line(self, max_range: int = 8) -> tuple[Optional[Actor], Optional[tuple[int, int]], str]:
         """Find the first actor hit by a shot in this direction or what stops the projectile.
@@ -534,12 +1026,25 @@ class RangedAction(ActionWithDirection):
             - collision_pos: Position where projectile stopped (x, y) - last walkable tile before obstacle
             - collision_type: 'actor', 'obstacle', 'out_of_bounds', or 'max_range'
         """
-        x, y = self.entity.x, self.entity.y
-        last_walkable_x, last_walkable_y = x, y
+        import tcod.los
 
-        for step in range(max_range):
-            x += self.dx
-            y += self.dy
+        start = (self.entity.x, self.entity.y)
+        if self.target_xy is not None:
+            end = self.target_xy
+        else:
+            end = (self.entity.x + (self.dx * max_range), self.entity.y + (self.dy * max_range))
+
+        line_points = list(tcod.los.bresenham(start, end).tolist())
+        if len(line_points) <= 1:
+            return None, start, 'max_range'
+
+        # Skip the origin tile and clamp travel distance to range.
+        travel_points = line_points[1:max_range + 1]
+
+        x, y = start
+        last_walkable_x, last_walkable_y = start
+
+        for x, y in travel_points:
 
             # Check bounds first
             if not self.engine.game_map.in_bounds(x, y):
@@ -548,6 +1053,8 @@ class RangedAction(ActionWithDirection):
             # Check for actor at this position
             target = self.engine.game_map.get_actor_at_location(x, y)
             if target and target is not self.entity:
+                if getattr(target, 'type', None) == 'Guide':
+                    continue  # Projectile passes through the Guide
                 return target, (x, y), 'actor'
 
             # Check if the tile is walkable - if not, projectile stops at last walkable position
@@ -560,17 +1067,53 @@ class RangedAction(ActionWithDirection):
         # Reached max range without hitting anything
         return None, (x, y), 'max_range'
 
-    def _consume_projectile(self, projectile_item) -> None:
+    def _consume_projectile(self, projectile_item, *, using_quiver: bool = False, quiver_item=None, shot_ammo_type: Optional[str] = None) -> None:
+        if using_quiver and quiver_item is not None:
+            ammo_counts, selected_type = _ensure_quiver_ammo_state(quiver_item)
+            current = _get_quiver_total_count(quiver_item)
+            if current <= 0:
+                if self.entity is self.engine.player:
+                    self.engine.message_log.add_message("Your quiver is empty.", color.yellow)
+                return
+
+            explicit_type = str(shot_ammo_type or "").strip().lower()
+            use_type = explicit_type if explicit_type and int(ammo_counts.get(explicit_type, 0) or 0) > 0 else None
+            if use_type is None:
+                use_type = selected_type if int(ammo_counts.get(selected_type, 0) or 0) > 0 else None
+            if use_type is None:
+                use_type = next((k for k, v in ammo_counts.items() if int(v or 0) > 0), None)
+            if use_type is None:
+                if self.entity is self.engine.player:
+                    self.engine.message_log.add_message("Your quiver is empty.", color.yellow)
+                return
+
+            ammo_counts[use_type] = max(0, int(ammo_counts.get(use_type, 0) or 0) - 1)
+            quiver_item.selected_ammo_type = use_type
+            quiver_item.arrow_count = _get_quiver_total_count(quiver_item)
+
+            if self.entity is self.engine.player and quiver_item.arrow_count == 0:
+                self.engine.message_log.add_message("You are out of arrows.", color.yellow)
+            return
+
         equipment = getattr(self.entity, "equipment", None)
         inventory = getattr(self.entity, "inventory", None)
 
         original_hand_slot = None
+        original_coverage_slot = None
         original_equipped_slot = None
+        projectile_was_equipped = False
 
         if equipment:
             for hand_name, held_item in equipment.grasped_items.items():
                 if held_item == projectile_item:
                     original_hand_slot = hand_name
+                    projectile_was_equipped = True
+                    break
+
+            for part_name, covered_item in equipment.body_part_coverage.items():
+                if covered_item == projectile_item:
+                    original_coverage_slot = part_name
+                    projectile_was_equipped = True
                     break
 
             if (
@@ -581,14 +1124,33 @@ class RangedAction(ActionWithDirection):
                 eq_slot_name = projectile_item.equippable.equipment_type.name
                 if equipment.equipped_items.get(eq_slot_name) == projectile_item:
                     original_equipped_slot = eq_slot_name
+                    projectile_was_equipped = True
 
-        if equipment:
+        if equipment and projectile_was_equipped:
             equipment.unequip_item(projectile_item, add_message=False)
 
         if inventory:
             inventory.delete(projectile_item)
 
-        if not equipment or not inventory:
+        if not inventory:
+            return
+
+        # If this shot consumed ammo directly from inventory (not from equipped/readied
+        # projectile slot), do not auto-equip a replacement arrow into a hand.
+        if not projectile_was_equipped:
+            if self.entity is self.engine.player:
+                has_more_arrows = False
+                for item in inventory.items:
+                    if not item or not hasattr(item, "equippable") or not item.equippable:
+                        continue
+                    if self._is_projectile_ammo_item(item):
+                        has_more_arrows = True
+                        break
+                if not has_more_arrows:
+                    self.engine.message_log.add_message("You are out of arrows.", color.yellow)
+            return
+
+        if not equipment:
             return
 
         replacement_arrow = None
@@ -598,15 +1160,7 @@ class RangedAction(ActionWithDirection):
             if not hasattr(item, "equippable") or not item.equippable:
                 continue
 
-            eq_type_name = item.equippable.equipment_type.name
-            item_tags = {tag.lower() for tag in getattr(item, "tags", [])}
-            is_arrow = (
-                eq_type_name == "PROJECTILE"
-                or "arrow" in item_tags
-                or "ammunition" in item_tags
-            )
-
-            if is_arrow and not equipment.item_is_equipped(item):
+            if self._is_projectile_ammo_item(item) and not equipment.item_is_equipped(item):
                 replacement_arrow = item
                 break
 
@@ -615,10 +1169,20 @@ class RangedAction(ActionWithDirection):
                 self.engine.message_log.add_message("You are out of arrows.", color.yellow)
             return
 
+        replacement_eq_type = None
+        if getattr(replacement_arrow, "equippable", None):
+            replacement_eq_type = replacement_arrow.equippable.equipment_type.name
+
         if original_hand_slot:
             equipment.grasped_items[original_hand_slot] = replacement_arrow
+            if replacement_eq_type:
+                equipment.equipped_items[replacement_eq_type] = replacement_arrow
+            if original_coverage_slot:
+                equipment.body_part_coverage[original_coverage_slot] = replacement_arrow
         elif original_equipped_slot:
             equipment.equipped_items[original_equipped_slot] = replacement_arrow
+            if original_coverage_slot:
+                equipment.body_part_coverage[original_coverage_slot] = replacement_arrow
         else:
             equipment.equip_item(replacement_arrow, add_message=False)
 
@@ -626,9 +1190,25 @@ class RangedAction(ActionWithDirection):
             self.engine.message_log.add_message("You ready another arrow.", color.light_gray)
 
     def perform(self) -> None:
+        _break_invisibility(self.entity)
         bow_item, projectile_item = self._get_ready_ranged_items()
+        quiver_item = self._get_equipped_quiver()
+        using_quiver = False
+        shot_ammo_type = None
+
+        if bow_item and quiver_item and _get_quiver_total_count(quiver_item) > 0:
+            ammo_counts, selected_type = _ensure_quiver_ammo_state(quiver_item)
+            if int(ammo_counts.get(selected_type, 0) or 0) > 0:
+                shot_ammo_type = selected_type
+            else:
+                shot_ammo_type = next((k for k, v in ammo_counts.items() if int(v or 0) > 0), None)
+            projectile_item = self._get_quiver_projectile_template(quiver_item, shot_ammo_type)
+            using_quiver = projectile_item is not None
+
         if not bow_item or not projectile_item:
-            raise exceptions.Impossible("You need a bow and an arrow readied to fire.")
+            if bow_item and quiver_item and _get_quiver_total_count(quiver_item) <= 0:
+                raise exceptions.Impossible("Your quiver is empty.")
+            raise exceptions.Impossible("You need a bow and arrows to fire.")
 
         import tcod.los
         from animations import ThrowAnimation
@@ -638,12 +1218,21 @@ class RangedAction(ActionWithDirection):
         projectile_color = projectile_item.color
 
         # Always consume projectile when firing (regardless of hit/miss)
-        self._consume_projectile(projectile_item)
+        self._consume_projectile(
+            projectile_item,
+            using_quiver=using_quiver,
+            quiver_item=quiver_item,
+            shot_ammo_type=shot_ammo_type,
+        )
 
         # Play shooting sound
         sounds.play_throw_sound()  # Use throw sound for bow firing
 
-        target, collision_pos, collision_type = self._find_target_in_line(max_range=8)
+        bow_range = BOW_DEFAULT_MAX_RANGE
+        if getattr(bow_item, "equippable", None):
+            bow_range = int(getattr(bow_item.equippable, "max_range", BOW_DEFAULT_MAX_RANGE) or BOW_DEFAULT_MAX_RANGE)
+
+        target, collision_pos, collision_type = self._find_target_in_line(max_range=bow_range)
 
         # Use bow verb if available
         shot_verb = "shoots"
@@ -655,13 +1244,13 @@ class RangedAction(ActionWithDirection):
         # Handle different collision types
         if collision_type == 'actor' and target:
             # Hit an actor - proceed with normal combat
-            self._handle_actor_hit(target, shot_verb)
+            self._handle_actor_hit(target, shot_verb, bow_item, projectile_item)
             # Add projectile animation
             path = list(tcod.los.bresenham((self.entity.x, self.entity.y), collision_pos).tolist())
             self.engine.animation_queue.append(ThrowAnimation(path, projectile_char, projectile_color))
         elif collision_type == 'obstacle':
             # Hit an obstacle - 50/50 chance to break or fall
-            break_chance = random.random() < 0.5
+            break_chance = random.random() < ARROW_OBSTACLE_BREAK_CHANCE
             
             # Add projectile animation to collision point
             obstacle_x = collision_pos[0] + self.dx
@@ -674,7 +1263,7 @@ class RangedAction(ActionWithDirection):
                 self.engine.message_log.add_message("Your arrow hits an obstacle and breaks!", color.gray)
             else:
                 self.engine.message_log.add_message("Your arrow hits an obstacle and falls to the ground.", color.gray)
-                self._drop_projectile_at(collision_pos, None)
+                self._drop_projectile_at(collision_pos, projectile_item)
         elif collision_type == 'out_of_bounds':
             # Add projectile animation to edge of map
             path = list(tcod.los.bresenham((self.entity.x, self.entity.y), collision_pos).tolist())
@@ -685,7 +1274,7 @@ class RangedAction(ActionWithDirection):
             path = list(tcod.los.bresenham((self.entity.x, self.entity.y), collision_pos).tolist())
             self.engine.animation_queue.append(ThrowAnimation(path, projectile_char, projectile_color))
             self.engine.message_log.add_message("Your arrow lands in the distance.", color.gray)
-            self._drop_projectile_at(collision_pos, None)
+            self._drop_projectile_at(collision_pos, projectile_item)
         else:
             # No target found in range
             self.engine.message_log.add_message("Your arrow flies through empty air.", color.gray)
@@ -693,10 +1282,11 @@ class RangedAction(ActionWithDirection):
     def _drop_projectile_at(self, pos: tuple[int, int], original_projectile) -> None:
         """Drop a copy of the projectile at the specified position."""
         try:
-            from entity_factories import arrow  # Assuming there's a basic arrow template
-            
-            # Create a new arrow at the collision position
-            new_arrow = copy.deepcopy(arrow)
+            if original_projectile is not None:
+                new_arrow = copy.deepcopy(original_projectile)
+            else:
+                from entity_factories import arrow  # Fallback template
+                new_arrow = copy.deepcopy(arrow)
             new_arrow.x, new_arrow.y = pos
             
             # Add to game map
@@ -706,7 +1296,7 @@ class RangedAction(ActionWithDirection):
             self.engine.debug_log(f"Error creating dropped arrow: {e}", handler=type(self).__name__, event="_drop_projectile_at")
             # Silently fail if we can't create the arrow
     
-    def _handle_actor_hit(self, target: Actor, shot_verb: str) -> None:
+    def _handle_actor_hit(self, target: Actor, shot_verb: str, bow_item, projectile_item) -> None:
         """Handle hitting an actor with the projectile."""
         # Manipulation check
         for part in self.entity.body_parts.get_all_parts().values():
@@ -728,33 +1318,49 @@ class RangedAction(ActionWithDirection):
                         self.target_part = aimed.part_type
 
         hit_part, self.target_part, damage_modifier = _resolve_hit_part(target, self.target_part)
+        bow_tags = set(getattr(bow_item, "tags", []) or [])
+        arrow_tags = set(getattr(projectile_item, "tags", []) or [])
+        bow_profile = profsys.weapon_profile(self.entity, bow_tags)
+        arrow_profile = profsys.weapon_profile(self.entity, arrow_tags)
 
         # Calculate defense and damage
-        armor_defense = 0
-        if hit_part:
-            base_defense = hit_part.protection + target.fighter.base_defense
-            if target.equipment:
-                armor_defense = target.equipment.get_defense_for_part(hit_part.name)
-        else:
-            base_defense = target.fighter.defense
+        projectile_power = 0
+        if getattr(projectile_item, "equippable", None):
+            projectile_power = int(getattr(projectile_item.equippable, "power_bonus", 0) or 0)
 
-        total_defense = base_defense + armor_defense
-        base_damage = self.entity.fighter.power - total_defense
-        final_damage = max(0, int(base_damage * damage_modifier))
+        armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name) if hit_part and target.equipment else []
+        agility_bonus = trait_delta(_get_trait_level(self.entity, "agility"))
+        ranged_multiplier = 1.0 + (agility_bonus * AGILITY_RANGED_DAMAGE_PER_LEVEL)
+        damage_multiplier = damage_modifier * ranged_multiplier * arrow_profile.damage_multiplier
+        final_damage, armor_defense = target.fighter.mitigate_incoming_damage(
+            projectile_power,
+            damage_multiplier=damage_multiplier,
+            targeted_part=hit_part,
+            armor_tags=armor_tags,
+        )
 
-        # Hit chance: BASE_HIT_RANGED (75 %), optionally scaled by mouse precision
+        # Hit chance is determined by the bow's base accuracy, optionally scaled by mouse precision.
+        bow_base_hit = BASE_HIT_RANGED
+        if getattr(bow_item, "equippable", None):
+            bow_hit_override = getattr(bow_item.equippable, "base_hit_chance", None)
+            if bow_hit_override is not None:
+                bow_base_hit = float(bow_hit_override)
+
         if self.tile_rel_pos:
             dist_from_center = ((self.tile_rel_pos[0] - 0.5) ** 2 + (self.tile_rel_pos[1] - 0.5) ** 2) ** 0.5
             accuracy_bonus = max(0.0, 1.0 - (dist_from_center / 0.5))
-            hit_chance = BASE_HIT_RANGED * (0.8 + 0.4 * accuracy_bonus)
-            hit_chance = min(hit_chance, 0.95)
+            hit_chance = bow_base_hit * (0.8 + 0.4 * accuracy_bonus)
         else:
-            hit_chance = max(0.75, BASE_HIT_RANGED)
+            hit_chance = bow_base_hit
+        hit_chance += _get_agility_hit_modifier(self.entity, target)
+        hit_chance *= bow_profile.accuracy_multiplier
+        hit_chance = max(MIN_HIT_CHANCE, min(MAX_HIT_CHANCE, hit_chance))
         hit_success = random.random() < hit_chance
 
         # Dodge calculation
         dodge_success = False
-        if hit_success and random.random() < target.dodge_chance:
+        effective_dodge = _effective_dodge_chance(target, armor_tags)
+        if hit_success and random.random() < effective_dodge:
             if target.dodge_cooldown == 0:
                 hit_success = False
                 dodge_success = True
@@ -825,7 +1431,7 @@ class RangedAction(ActionWithDirection):
                     f"{attack_desc}, but misses!", color.dark_gray
                 )
             # Arrow always drops when missing/dodged - drop at target location
-            self._drop_projectile_at((target.x, target.y), None)
+            self._drop_projectile_at((target.x, target.y), projectile_item)
         elif final_damage > 0:
             if hit_part:
                 part_damage = hit_part.take_damage(final_damage)
@@ -847,22 +1453,9 @@ class RangedAction(ActionWithDirection):
                 target.fighter.take_damage(final_damage)
             #item_for_attack = self._get_ready_ranged_items()[0]  # Get the bow used for the attack
 
-            # 50/50 chance to add arrow to target's inventory when hit
-            if hasattr(target, 'inventory') and target.inventory and random.random() < 0.5:
-                try:
-                    import copy
-                    from entity_factories import arrow  # Get arrow template
-                    
-                    # Create a copy of the arrow
-                    recovered_arrow = copy.deepcopy(arrow)
-                    
-                    # Add to target's inventory if there's space
-                    if len(target.inventory.items) < target.inventory.capacity and target.inventory.can_carry(recovered_arrow):
-                        recovered_arrow.parent = target.inventory
-                        target.inventory.items.append(recovered_arrow)
-                except Exception:
-                    # Silently fail if arrow recovery doesn't work
-                    pass
+            # Most landed arrows can be recovered from the battlefield.
+            if random.random() < ARROW_HIT_RECOVERY_CHANCE:
+                self._drop_projectile_at((target.x, target.y), projectile_item)
 
             if target is self.engine.player:
                 existing_bleed = next(
@@ -879,23 +1472,29 @@ class RangedAction(ActionWithDirection):
                 f"{attack_desc}, but does no damage.", attack_color
             )
             # Arrow bounced off armor/blocked - drops to ground
-            self._drop_projectile_at((target.x, target.y), None)
+            self._drop_projectile_at((target.x, target.y), projectile_item)
 
         # Grant trait XP for ranged combat
         if final_damage > 0:
+            attacker_level = getattr(self.entity, "level", None)
+            target_level = getattr(target, "level", None)
+
             # Award XP to attacker for bow usage
-            self.entity.level.add_xp({'agility': int(final_damage)})
+            if attacker_level is not None:
+                attacker_level.add_xp({'agility': int(final_damage*2)})
             
             # Award XP to target for taking damage and armor defense
-            target.level.add_xp({'vigor': int(final_damage)})
+            if target_level is not None:
+                target_level.add_xp({'vigor': int(final_damage)})
             
             # Award armor XP if target has armor that blocked damage
             armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name) if hit_part and hasattr(target, "equipment") and target.equipment else []
-            if armor_defense > 0 and armor_tags:
-                target.level.add_xp({'armor': int(armor_defense/2)})
-                if "light armor" in armor_tags:
-                    target.level.add_xp({'light armor': int(armor_defense)})
-                    self.engine.debug_log(f"Gained light armor XP from ranged: {int(armor_defense)}", handler=type(self).__name__, event="perform")
+            if armor_defense > 0 and armor_tags and target_level is not None:
+                target_level.add_xp({'armor': int(armor_defense/2)})
+                for trait in _armor_xp_traits_from_tags(armor_tags):
+                    if trait == "armor":
+                        continue
+                    target_level.add_xp({trait: int(armor_defense)})
 
 class DodgeAction(ActionWithDirection):
     """Dodge in a direction to attempt to avoid attacks, moving to an adjacent tile if successful."""
@@ -929,10 +1528,185 @@ class MeleeAction(ActionWithDirection):
         super().__init__(entity, dx, dy)
         self.target_part = target_part
         self.tile_rel_pos = tile_rel_pos  # normalised (x, y) within target tile, 0.0–1.0
+
+    def _apply_precision_targeting(self, target: Actor) -> None:
+        """Attempt to map tile-relative cursor position to a specific body part."""
+        if not self.tile_rel_pos or self.target_part:
+            return
+
+        body_parts_comp = getattr(target, 'body_parts', None)
+        if not body_parts_comp:
+            return
+
+        aimed = get_part_from_tile_position(body_parts_comp, *self.tile_rel_pos)
+        if not aimed:
+            return
+
+        dist_from_center = ((self.tile_rel_pos[0] - 0.5) ** 2 + (self.tile_rel_pos[1] - 0.5) ** 2) ** 0.5
+        accuracy_bonus = max(0.0, 1.0 - (dist_from_center / 0.5))
+        if accuracy_bonus > 0.6:
+            self.target_part = aimed.part_type
+
+    def _resolve_melee_weapon(self, equipped_weapons: list) -> tuple[Optional[Item], str]:
+        """Pick best melee weapon and derive a present-tense attack verb."""
+        weapon = next((w for w in equipped_weapons if getattr(w, 'enchantments', None)), None)
+        if weapon is None and equipped_weapons:
+            weapon = equipped_weapons[0]
+
+        weapon_verb = None
+        if weapon:
+            if getattr(weapon, 'verb_present', None):
+                weapon_verb = weapon.verb_present
+            elif getattr(weapon, 'verb_base', None):
+                weapon_verb = weapon.verb_base + "s"
+
+        if not weapon_verb:
+            if getattr(self.entity, 'verb_present', None):
+                weapon_verb = self.entity.verb_present
+            elif getattr(self.entity, 'verb_base', None):
+                weapon_verb = self.entity.verb_base + "s"
+
+        return weapon, (weapon_verb or "attacks")
+
+    def _compute_damage_profile(self, target: Actor, hit_part, damage_modifier: float, equipped_weapons: list) -> tuple[int, int, list, profsys.ProficiencyResult]:
+        armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name) if hit_part and target.equipment else []
+
+        strength_multiplier = 1.0 + (trait_delta(_get_trait_level(self.entity, "strength")) * STRENGTH_MELEE_DAMAGE_PER_LEVEL)
+        weapon_profile = _weapon_proficiency_profile(self.entity, equipped_weapons)
+        damage_multiplier = damage_modifier * strength_multiplier * weapon_profile.damage_multiplier
+        final_damage, armor_defense = target.fighter.mitigate_incoming_damage(
+            self.entity.fighter.power,
+            damage_multiplier=damage_multiplier,
+            targeted_part=hit_part,
+            armor_tags=armor_tags,
+        )
+        return final_damage, armor_defense, armor_tags, weapon_profile
+
+    def _compute_hit_success(self, target: Actor, weapon_profile: profsys.ProficiencyResult) -> bool:
+        if self.tile_rel_pos:
+            dist_from_center = ((self.tile_rel_pos[0] - 0.5) ** 2 + (self.tile_rel_pos[1] - 0.5) ** 2) ** 0.5
+            accuracy_bonus = max(0.0, 1.0 - (dist_from_center / 0.5))
+            hit_chance = BASE_HIT * (0.8 + 0.4 * accuracy_bonus)
+        else:
+            hit_chance = BASE_HIT
+
+        hit_chance += _get_agility_hit_modifier(self.entity, target)
+        hit_chance *= weapon_profile.accuracy_multiplier
+        hit_chance = max(MIN_HIT_CHANCE, min(MAX_HIT_CHANCE, hit_chance))
+        return random.random() < hit_chance
+
+    def _attempt_dodge(self, target: Actor, armor_tags: list) -> tuple[bool, tuple[int, int], tuple[int, int]]:
+        """Try to dodge to an adjacent tile. Returns (did_dodge, old_pos, dodge_dir)."""
+        old_pos = (target.x, target.y)
+        effective_dodge = _effective_dodge_chance(target, armor_tags)
+
+        if target.dodge_cooldown > 0 or random.random() >= effective_dodge:
+            return False, old_pos, (0, 0)
+
+        adjacent_positions = [
+            (target.x + 1, target.y), (target.x - 1, target.y),
+            (target.x, target.y + 1), (target.x, target.y - 1),
+        ]
+        if target.preferred_dodge_direction:
+            preferred_order = {
+                "north": [(target.x, target.y - 1), (target.x + 1, target.y), (target.x - 1, target.y), (target.x, target.y + 1)],
+                "south": [(target.x, target.y + 1), (target.x + 1, target.y), (target.x - 1, target.y), (target.x, target.y - 1)],
+                "east":  [(target.x + 1, target.y), (target.x, target.y - 1), (target.x, target.y + 1), (target.x - 1, target.y)],
+                "west":  [(target.x - 1, target.y), (target.x, target.y - 1), (target.x, target.y + 1), (target.x + 1, target.y)],
+            }
+            adjacent_positions = preferred_order.get(target.preferred_dodge_direction.lower(), adjacent_positions)
+
+        gm = self.engine.game_map
+        for new_x, new_y in adjacent_positions:
+            if (gm.in_bounds(new_x, new_y)
+                    and gm.tiles["walkable"][new_x, new_y]
+                    and not gm.get_blocking_entity_at_location(new_x, new_y)):
+                dodge_dir = (new_x - target.x, new_y - target.y)
+                DodgeAction(target, dodge_dir[0], dodge_dir[1]).perform()
+                return True, old_pos, dodge_dir
+
+        return False, old_pos, (0, 0)
+
+    def _apply_hit_outcome(
+        self,
+        *,
+        target: Actor,
+        hit_part,
+        final_damage: int,
+        attack_desc: str,
+        attack_color,
+        weapon,
+        weapon_verb: str,
+        slash_angle: tuple[int, int],
+    ) -> int:
+        """Apply damage/effects and return body-part damage dealt (for XP)."""
+        part_damage = 0
+
+        if weapon and getattr(weapon, 'enchantments', None):
+            for enchantment in weapon.enchantments:
+                enchantment.on_hit(self.engine, target, hit_part)
+                self.engine.animation_queue.append(
+                    gpu_stack.SlashParticle((target.x, target.y), enchanted=True, color=enchantment.get_color(), angle=slash_angle, type=weapon_verb)
+                )
+
+        if hit_part:
+            part_damage = hit_part.take_damage(final_damage)
+            if hit_part.is_destroyed:
+                self.engine.message_log.add_message(
+                    f"{attack_desc} and destroys it for {part_damage} damage!", color.red
+                )
+            else:
+                self.engine.message_log.add_message(
+                    f"{attack_desc} for {part_damage} damage.", attack_color
+                )
+            target.fighter.take_damage(part_damage, targeted_part=self.target_part)
+        else:
+            self.engine.message_log.add_message(
+                f"{attack_desc} for {final_damage} hit points.", attack_color
+            )
+            target.fighter.take_damage(final_damage)
+            part_damage = final_damage
+
+        if target is self.engine.player:
+            existing_bleed = next(
+                (a for a in self.engine.animation_queue if isinstance(a, gpu_stack.CRTBleedAnim)),
+                None,
+            )
+            if existing_bleed is not None:
+                existing_bleed.frames = existing_bleed.total_frames
+            else:
+                self.engine.animation_queue.append(gpu_stack.CRTBleedAnim())
+
+        return part_damage
+
+    def _award_melee_xp(self, target: Actor, equipped_weapons: list, part_damage: int, armor_defense: int, hit_part) -> None:
+        if part_damage <= 0:
+            return
+
+        attacker_xp: dict = {}
+        for trait in _weapon_xp_traits_from_items(equipped_weapons):
+            attacker_xp[trait] = attacker_xp.get(trait, 0) + part_damage
+
+        if attacker_xp:
+            attacker_level = getattr(self.entity, "level", None)
+            if attacker_level is not None:
+                attacker_level.add_xp(attacker_xp)
+
+        defender_xp = {'vigor': part_damage * 2}
+        if armor_defense > 0 and hit_part and target.equipment:
+            armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name) or []
+            for trait in _armor_xp_traits_from_tags(armor_tags):
+                if trait == "armor":
+                    continue
+                defender_xp[trait] = defender_xp.get(trait, 0) + int(armor_defense * 1.5)
+
+        target_level = getattr(target, "level", None)
+        if target_level is not None:
+            target_level.add_xp(defender_xp)
     
     def perform(self) -> None:
+        _break_invisibility(self.entity)
         target = self.target_actor
-        part_damage = 0
 
         # Direction: actual attacker→target vector when target exists, else tile dx/dy
         if target:
@@ -954,117 +1728,27 @@ class MeleeAction(ActionWithDirection):
                 elif part.damage_level_float > 0.5 and random.random() < 0.5:
                     self.entity.fighter._drop_grasped_items(part)
 
-        # Apply mouse precision targeting when the caller supplies a tile-relative cursor position
-        if self.tile_rel_pos and not self.target_part:
-            body_parts_comp = getattr(target, 'body_parts', None)
-            if body_parts_comp:
-                aimed = get_part_from_tile_position(body_parts_comp, *self.tile_rel_pos)
-                if aimed:
-                    dist_from_center = ((self.tile_rel_pos[0] - 0.5) ** 2 + (self.tile_rel_pos[1] - 0.5) ** 2) ** 0.5
-                    accuracy_bonus = max(0.0, 1.0 - (dist_from_center / 0.5))
-                    if accuracy_bonus > 0.6:
-                        self.target_part = aimed.part_type
+        self._apply_precision_targeting(target)
 
-        # Resolve which body part is hit and its modifiers
         hit_part, self.target_part, damage_modifier = _resolve_hit_part(target, self.target_part)
+        equipped_weapons: list = _collect_equipped_weapons(self.entity)
+        final_damage, armor_defense, armor_tags, weapon_profile = self._compute_damage_profile(
+            target,
+            hit_part,
+            damage_modifier,
+            equipped_weapons,
+        )
 
-        # Calculate localized defense
-        armor_defense = 0
-        if hit_part:
-            base_defense = hit_part.protection + target.fighter.base_defense
-            if target.equipment:
-                armor_defense = target.equipment.get_defense_for_part(hit_part.name)
-        else:
-            base_defense = target.fighter.defense
-
-        total_defense = base_defense + armor_defense
-        base_damage = self.entity.fighter.power - total_defense
-        final_damage = max(0, int(base_damage * damage_modifier))
-
-        # Hit chance: BASE_HIT (90 %), optionally scaled by mouse‑precision accuracy bonus
-        if self.tile_rel_pos:
-            dist_from_center = ((self.tile_rel_pos[0] - 0.5) ** 2 + (self.tile_rel_pos[1] - 0.5) ** 2) ** 0.5
-            accuracy_bonus = max(0.0, 1.0 - (dist_from_center / 0.5))
-            hit_chance = BASE_HIT * (0.8 + 0.4 * accuracy_bonus)
-            hit_chance = min(hit_chance, 0.95)
-        else:
-            hit_chance = max(0.75, BASE_HIT)
-        hit_success = random.random() < hit_chance
-
-        # Dodge check
+        hit_success = self._compute_hit_success(target, weapon_profile)
         dodge_success = False
-        if hit_success and random.random() < target.dodge_chance:
-            hit_success = False
-            dodge_success = True
-
-        # Dodge – move target to an adjacent free tile
-        old_dodge_x, old_dodge_y = target.x, target.y
+        dodge_origin = (target.x, target.y)
         dodge_dir = (0, 0)
-        if dodge_success:
-            adjacent_positions = [
-                (target.x + 1, target.y), (target.x - 1, target.y),
-                (target.x, target.y + 1), (target.x, target.y - 1),
-            ]
-            if target.preferred_dodge_direction:
-                preferred_order = {
-                    "north": [(target.x, target.y - 1), (target.x + 1, target.y), (target.x - 1, target.y), (target.x, target.y + 1)],
-                    "south": [(target.x, target.y + 1), (target.x + 1, target.y), (target.x - 1, target.y), (target.x, target.y - 1)],
-                    "east":  [(target.x + 1, target.y), (target.x, target.y - 1), (target.x, target.y + 1), (target.x - 1, target.y)],
-                    "west":  [(target.x - 1, target.y), (target.x, target.y - 1), (target.x, target.y + 1), (target.x + 1, target.y)],
-                }
-                adjacent_positions = preferred_order.get(target.preferred_dodge_direction.lower(), adjacent_positions)
-            gm = self.engine.game_map
-            for new_x, new_y in adjacent_positions:
-                if (gm.in_bounds(new_x, new_y)
-                        and gm.tiles["walkable"][new_x, new_y]
-                        and not gm.get_blocking_entity_at_location(new_x, new_y)):
-                    DodgeAction(target, new_x - target.x, new_y - target.y).perform()
-                    self.engine.animation_queue.append(
-                        gpu_stack.DodgeParticle((old_dodge_x, old_dodge_y),
-                                                character=target.char,
-                                                direction=dodge_dir))
-                    self.engine.message_log.add_message(f"{target.name} dodges to the side!", color.teal)
-                    break
+        if hit_success:
+            dodge_success, dodge_origin, dodge_dir = self._attempt_dodge(target, armor_tags)
+            if dodge_success:
+                hit_success = False
 
-        # --- Weapon / verb resolution ---
-        weapon_verb = None
-        weapon = None
-        equipped_weapons: list = []
-
-        if self.entity.equipment:
-            eq = self.entity.equipment
-            # Collect all weapons from body_part_coverage (primary system)
-            for item in eq.body_part_coverage.values():
-                if item and getattr(item, 'equippable', None) and item.equippable.equipment_type.name == 'WEAPON':
-                    equipped_weapons.append(item)
-
-            # Prefer enchanted; otherwise first found
-            weapon = next((w for w in equipped_weapons if getattr(w, 'enchantments', None)), None)
-            if weapon is None and equipped_weapons:
-                weapon = equipped_weapons[0]
-
-            # Legacy fallback
-            if weapon is None:
-                for eq_type, item in eq.equipped_items.items():
-                    if item and eq_type == 'WEAPON':
-                        weapon = item
-                        break
-
-            # Extract verb from the chosen weapon
-            if weapon:
-                if getattr(weapon, 'verb_present', None):
-                    weapon_verb = weapon.verb_present
-                elif getattr(weapon, 'verb_base', None):
-                    weapon_verb = weapon.verb_base + "s"
-
-        # Fall back to entity verb
-        if not weapon_verb:
-            if getattr(self.entity, 'verb_present', None):
-                weapon_verb = self.entity.verb_present
-            elif getattr(self.entity, 'verb_base', None):
-                weapon_verb = self.entity.verb_base + "s"
-        if not weapon_verb:
-            weapon_verb = "attacks"
+        weapon, weapon_verb = self._resolve_melee_weapon(equipped_weapons)
 
         # Build attack description
         if hit_part:
@@ -1088,9 +1772,11 @@ class MeleeAction(ActionWithDirection):
 
         # Animation
         if hit_success:
-            self.engine.animation_queue.append(gpu_stack.SlashParticle((target.x, target.y), enchanted=False, angle=slash_angle, type=weapon_verb))
+            slash_type = weapon_verb if weapon else "unarmed"
+            self.engine.animation_queue.append(gpu_stack.SlashParticle((target.x, target.y), enchanted=False, angle=slash_angle, type=slash_type))
 
         attack_color = color.player_atk if self.entity is self.engine.player else color.enemy_atk
+        part_damage = 0
 
         # --- Outcome messages and damage ---
         if not hit_success:
@@ -1098,74 +1784,29 @@ class MeleeAction(ActionWithDirection):
                    else f"{attack_desc}, but misses!")
             if dodge_success:
                 self.engine.animation_queue.append(
-                    gpu_stack.DodgeParticle((old_dodge_x, old_dodge_y),
+                    gpu_stack.DodgeParticle(dodge_origin,
                                             character=target.char,
                                             direction=dodge_dir))
             self.engine.animation_queue.append(gpu_stack.SlashParticle((target.x, target.y), enchanted=False, angle=slash_angle, type="miss"))
             self.engine.message_log.add_message(msg, color.teal if dodge_success else color.dark_gray)
 
         elif final_damage > 0:
-            # Enchantment on-hit effects
-            if weapon and getattr(weapon, 'enchantments', None):
-                for enchantment in weapon.enchantments:
-                    enchantment.on_hit(self.engine, target, hit_part)
-                    self.engine.animation_queue.append(
-                        gpu_stack.SlashParticle((target.x, target.y), enchanted=True, color=enchantment.get_color(), angle=slash_angle, type=weapon_verb)
-                    )
-
-            if hit_part:
-                part_damage = hit_part.take_damage(final_damage)
-                if hit_part.is_destroyed:
-                    self.engine.message_log.add_message(
-                        f"{attack_desc} and destroys it for {part_damage} damage!", color.red
-                    )
-                else:
-                    self.engine.message_log.add_message(
-                        f"{attack_desc} for {part_damage} damage.", attack_color
-                    )
-                target.fighter.take_damage(part_damage, targeted_part=self.target_part)
-            else:
-                self.engine.message_log.add_message(
-                    f"{attack_desc} for {final_damage} hit points.", attack_color
-                )
-                target.fighter.take_damage(final_damage)
-
-            if target is self.engine.player:
-                existing_bleed = next(
-                    (a for a in self.engine.animation_queue
-                     if isinstance(a, gpu_stack.CRTBleedAnim)), None
-                )
-                if existing_bleed is not None:
-                    existing_bleed.frames = existing_bleed.total_frames
-                else:
-                    self.engine.animation_queue.append(gpu_stack.CRTBleedAnim())
+            part_damage = self._apply_hit_outcome(
+                target=target,
+                hit_part=hit_part,
+                final_damage=final_damage,
+                attack_desc=attack_desc,
+                attack_color=attack_color,
+                weapon=weapon,
+                weapon_verb=weapon_verb,
+                slash_angle=slash_angle,
+            )
         else:
             self.engine.message_log.add_message(
                 f"{attack_desc}, but does no damage.", attack_color
             )
 
-        # --- XP (batched into single calls) ---
-        if part_damage > 0:
-            # Attacker weapon XP
-            attacker_xp: dict = {}
-            for w in equipped_weapons:
-                w_tags = getattr(w, 'tags', ())
-                if "blade" in w_tags:
-                    attacker_xp['blades'] = attacker_xp.get('blades', 0) + part_damage
-                if "dagger" in w_tags:
-                    attacker_xp['daggers'] = attacker_xp.get('daggers', 0) + part_damage
-            if attacker_xp:
-                self.entity.level.add_xp(attacker_xp)
-
-            # Defender XP
-            defender_xp = {'vigor': part_damage * 2}
-            if armor_defense > 0 and hit_part:
-                armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name) if target.equipment else []
-                if armor_tags is not None:
-                    if "light armor" in armor_tags:
-                        defender_xp['light armor'] = int(armor_defense * 1.5)
-            if target.level is not None:
-                target.level.add_xp(defender_xp)
+        self._award_melee_xp(target, equipped_weapons, part_damage, armor_defense, hit_part)
 
 class MovementAction(ActionWithDirection):
 
@@ -1369,6 +2010,7 @@ class ThrowItem(ItemAction):
                 self.engine.message_log.add_message(f"You throw the {self.item.name} and hit {target.name} for {damage} damage!", color.orange)
 
     def perform(self) -> None:
+        _break_invisibility(self.entity)
         # Remove item from inventory
         if self.entity.equipment.item_is_equipped(self.item):
             self.entity.equipment.toggle_equip(self.item)

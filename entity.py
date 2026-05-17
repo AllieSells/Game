@@ -4,6 +4,8 @@ import math
 import random
 from typing import Optional, Tuple, Type, TypeVar, TYPE_CHECKING, Union
 
+import color
+import enchants
 import liquid_system
 from render_order import RenderOrder
 
@@ -18,17 +20,11 @@ if TYPE_CHECKING:
     from components.inventory import Inventory
     from components.level import Level
     from components.effect import Effect
-    from components.body_parts import BodyParts, AnatomyType
+    from components.body_parts import BodyParts
     from game_map import GameMap
-    from liquid_system import LiquidType
-import enchants
 
 
 T = TypeVar("T", bound="Entity")
-
-# Import names
-from components import names
-import color
 
 class Entity:
 
@@ -110,7 +106,7 @@ class Entity:
                 # Try to equip if possible
                 equipped = False
                 if item_copy.equippable:
-                    result = self.equipment.equip_item(item_copy, add_message=False)
+                    self.equipment.equip_item(item_copy, add_message=False)
                     equipped = self.equipment.is_item_equipped(item_copy)
                 else:
                     pass
@@ -124,6 +120,15 @@ class Entity:
 
         self.x += dx
         self.y += dy
+
+        # Auto-pickup ammo-tagged items whenever the player moves, regardless of
+        # which action path performed the movement.
+        if getattr(self, "is_player", False):
+            try:
+                from actions import PickupAction
+                PickupAction(self)._collect_ammo_at_current_position()
+            except Exception:
+                pass
 
 class Actor(Entity):
     def __init__(
@@ -174,6 +179,8 @@ class Actor(Entity):
         known_spells: Optional[list] = None,  # List of spell objects this actor can use
         mana: int = 0,
         mana_max: int = 0,
+        harvestable: bool = False,
+        passive_healing: float = 0.025,  
     ):
         super().__init__(
             x=x,
@@ -263,6 +270,7 @@ class Actor(Entity):
         self.dodge_cooldown = 0
         self.dodge_cooldown_max = 5  # Cooldown in turns
         self._portrait_path: Optional[str] = None  # set by generate_portrait()
+        self.passive_healing = passive_healing
 
     
     def add_effect(self, effect: Effect) -> None:
@@ -392,7 +400,7 @@ class Actor(Entity):
             elif self.job == 'Sigil Carver':
                 self.tradable = True
                 
-                item = copy.deepcopy(entity_factories.generate_sigil_stone())
+                item = copy.deepcopy(entity_factories.generate_spellbook())
                 if hasattr(item, 'roll_for_enchantment'):
                     item.roll_for_enchantment()
             # Only add valid items to inventory
@@ -725,13 +733,13 @@ class Actor(Entity):
             if self.knowledge["facial_hair"]:
                 self.knowledge["description"] += f" is bald, with a {self.knowledge['facial_hair']} face."
             else:
-                self.knowledge["description"] += f" is bald."
+                self.knowledge["description"] += " is bald."
         else:
             self.knowledge["description"] += f" has {self.knowledge['hair_style']} {self.knowledge['hair_color']} hair"
             if self.knowledge["facial_hair"]:
                 self.knowledge["description"] += f" and a {self.knowledge['facial_hair']} face."
             else:
-                self.knowledge["description"] += f"."
+                self.knowledge["description"] += "."
 
         # Eyes
         self.knowledge["description"] += f" {self.knowledge['pronouns']['possessive_adjective'].capitalize()} eyes are {self.knowledge['eye_color']}."
@@ -819,7 +827,7 @@ class Item(Entity):
             verb_present: Optional[str] = None,
             verb_past: Optional[str] = None,
             verb_participial: Optional[str] = None,
-            rarity_color: color = color.white,
+            rarity_color: color = color.common,
             tags: Optional[list] = None,
             liquid_type: Optional[liquid_system.LiquidType] = None,
             liquid_amount: Optional[int] = None,

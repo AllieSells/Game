@@ -5,19 +5,69 @@ from typing import List, Tuple, Optional, TYPE_CHECKING
 
 import numpy as np
 import tcod
-from tcod import libtcodpy
 
 from actions import Action, MeleeAction, BumpAction, MovementAction, WaitAction
 
 import color
 import sounds
+from components.effect import has_effect_name, is_invisible, InvisibilityEffect
 
-import tile_functions
 from languages import generate_sentence
 
 
 if TYPE_CHECKING:
     from entity import Actor
+
+
+# ========================================
+# PHASING / INVISIBILITY HELPERS
+# ========================================
+
+def apply_phasing_effect(actor: "Actor", duration: int = None) -> bool:
+    """Apply invisibility effect to simulate phasing.
+    
+    Args:
+        actor: The actor to apply phasing to
+        duration: How long the phasing lasts (None = permanent until broken)
+        
+    Returns:
+        True if effect was applied, False if already phasing
+    """
+    if has_phasing_effect(actor):
+        return False  # Already phasing
+    
+    effects = getattr(actor, "effects", None) or []
+    phasing = InvisibilityEffect(duration=duration)
+    phasing.parent = actor
+    effects.append(phasing)
+    actor.effects = effects
+    return True
+
+
+def has_phasing_effect(actor: "Actor") -> bool:
+    """Check if actor is currently phasing (has invisibility effect).
+    
+    Returns:
+        True if actor has the invisibility/phasing effect
+    """
+    return is_invisible(actor)
+
+
+def remove_phasing_effect(actor: "Actor") -> bool:
+    """Remove phasing effect from actor.
+    
+    Returns:
+        True if an effect was removed, False if no phasing effect existed
+    """
+    effects = getattr(actor, "effects", None) or []
+    remaining = [
+        e for e in effects
+        if str(getattr(e, "name", "")).strip().lower() not in {"invisible", "invisibility"}
+    ]
+    if len(remaining) != len(effects):
+        actor.effects = remaining
+        return True
+    return False
 
 class BaseAI(Action):
 
@@ -224,14 +274,18 @@ class BaseAI(Action):
         entity's `sight_radius` attribute if present, otherwise 6.
         """
         try:
+
             gm = self.entity.gamemap
             if radius is None:
                 radius = getattr(self.entity, "sight_radius", 6)
 
             # Check if target actor is in darkness (harder to see)
-            target_in_darkness = any(getattr(e, "name", "") == "Darkness" for e in getattr(actor, "effects", []))
+            target_in_darkness = has_effect_name(actor, "Darkness")
+            if is_invisible(actor):
+                return False  # Can't see invisible actors at all
             if target_in_darkness:
                 radius = max(1, radius - 4)  # Significantly reduced sight range in darkness
+            
             
             # Check if this entity itself is in darkness (reduced sight) FUTURE IMPLEMENT
             #self_in_darkness = any(getattr(e, "name", "") == "Darkness" for e in getattr(self.entity, "effects", []))
@@ -281,6 +335,8 @@ class ConfusedEnemy(BaseAI):
             self.turns_remaining -= 1
 
             return BumpAction(self.entity, direction_X, direction_y).perform()
+
+
 
 class HostileEnemy(BaseAI):
     def __init__(self, entity: Actor):
@@ -334,6 +390,9 @@ class HostileEnemy(BaseAI):
             
             self.path = self.get_path_with_doors(target.x, target.y)
         else:
+            # Lost line-of-sight (including invisibility): drop stale chase path.
+            if self.last_saw_player == 0:
+                self.path = []
             self.last_saw_player += 1
             # Wander when player not visible
             if self.wander_wait_turns > 0:
@@ -380,6 +439,382 @@ class HostileEnemy(BaseAI):
             return result
         
         return WaitAction(self.entity).perform()
+
+
+class PhasingAI(HostileEnemy):
+    """Strategic AI for creatures that can phase/become invisible.
+    
+    Behavior:
+    - Maintains invisibility while approaching the player stealthily
+    - Attacks when adjacent (which breaks invisibility via action system)
+    - Attempts to re-phase after attacking to retreat and reposition
+    - Falls back to regular hostile behavior if can't phase
+    
+    This AI is modular and works with the existing invisibility effect system.
+    """
+    
+    def __init__(self, entity: "Actor"):
+        super().__init__(entity)
+        self.phasing_cooldown = 0  # Turns until phasing can be reapplied
+        self.phasing_cooldown_max = 3  # How many turns before can phase again
+        self.type = "PhasingAI"
+    
+    def perform(self) -> None:
+        """Override to add phasing logic before parent behavior."""
+        # Decrement cooldown each turn
+        if self.phasing_cooldown > 0:
+            self.phasing_cooldown -= 1
+        
+        # Move every turn (inherited speed control)
+        if not self.should_move_this_turn():
+            return WaitAction(self.entity).perform()
+        
+        self.check_and_close_doors()
+        
+        # Initialize home position on first move
+        if self.home_x is None or self.home_y is None:
+            self.home_x = self.entity.x
+            self.home_y = self.entity.y
+        
+        target = self.engine.player
+        dx = target.x - self.entity.x
+        dy = target.y - self.entity.y
+        distance = max(abs(dx), abs(dy))
+        
+        # If not currently phasing and cooldown expired, try to phase
+        if not has_phasing_effect(self.entity) and self.phasing_cooldown == 0:
+            # Re-apply phasing to retreat/reposition (lasts multiple turns)
+            if apply_phasing_effect(self.entity, duration=5):
+                # Phasing was successful; use it as ambush tactics
+                pass  # Will continue moving while invisible below
+        
+        # Chase player if visible
+        if self.can_see_actor(target):
+            # Player detected - maintain approach (phasing keeps us undetectable)
+            self.wander_wait_turns = 0
+            self.path = []
+            self.last_saw_player = 0
+            
+            if distance <= 1:
+                # Adjacent to player - attack!
+                # Explicitly break invisibility before attacking to ensure it's visible
+                remove_phasing_effect(self.entity)
+                
+                result = MeleeAction(self.entity, dx, dy).perform()
+                
+                # After attack, trigger cooldown so we can't immediately re-phase
+                self.phasing_cooldown = self.phasing_cooldown_max
+                
+                return result
+            
+            # Not adjacent yet - keep approaching (invisibly, if phasing active)
+            self.path = self.get_path_with_doors(target.x, target.y)
+        else:
+            # Lost line-of-sight: drop stale path
+            if self.last_saw_player == 0:
+                self.path = []
+            self.last_saw_player += 1
+            
+            # Wander when player not visible (while phasing if active)
+            if self.wander_wait_turns > 0:
+                self.wander_wait_turns -= 1
+                return WaitAction(self.entity).perform()
+        
+        # Wander if no path (similar to parent, but maintains phasing)
+        if not self.path:
+            dest_x = self.home_x + random.randint(-self.wander_range, self.wander_range)
+            dest_y = self.home_y + random.randint(-self.wander_range, self.wander_range)
+            
+            if (0 <= dest_x < self.engine.game_map.width and
+                0 <= dest_y < self.engine.game_map.height and
+                self.engine.game_map.tiles["walkable"][dest_x, dest_y]):
+                
+                self.path = self.get_path_with_doors(dest_x, dest_y)
+            
+            if not self.path:
+                self.wander_wait_turns = random.randint(1, 3)
+                return WaitAction(self.entity).perform()
+        
+        # Move along path (invisibly if phasing active)
+        if self.path:
+            dest_x, dest_y = self.path.pop(0)
+            
+            # Handle doors
+            if self.entity.gamemap.tiles["name"][dest_x, dest_y] == "Door":
+                if self.toggle_door_at(dest_x, dest_y):
+                    return WaitAction(self.entity).perform()
+                else:
+                    self.path = []
+                    self.wander_wait_turns = random.randint(1, 2)
+                    return WaitAction(self.entity).perform()
+            
+            # Move (phasing allows silent approach)
+            result = MovementAction(
+                self.entity, dest_x - self.entity.x, dest_y - self.entity.y,
+            ).perform()
+            
+            if not self.path:
+                self.wander_wait_turns = random.randint(1, 3)
+            
+            return result
+        
+        return WaitAction(self.entity).perform()
+
+
+class RetreatingPhasingAI(PhasingAI):
+    """Advanced phasing AI that attacks then retreats invisibly.
+    
+    Behavior cycle:
+    1. Approach player (invisible)
+    2. Attack when adjacent (materializes for attack)
+    3. Retreat away from player (re-applies invisibility)
+    4. Reposition while invisible
+    5. Repeat
+    
+    Inherits from PhasingAI and overrides attack/retreat behavior.
+    Easy to customize: adjust retreat_distance for different tactics.
+    """
+    
+    def __init__(self, entity: "Actor"):
+        super().__init__(entity)
+        self.retreat_distance = 4  # How far to path away after attacking.
+        self.is_retreating = False
+        self.type = "RetreatingPhasingAI"
+
+    def _get_retreat_path(self, target: "Actor") -> List[Tuple[int, int]]:
+        """Return a TCOD path that moves away from the target several tiles."""
+        gm = self.engine.game_map
+        dx = target.x - self.entity.x
+        dy = target.y - self.entity.y
+
+        away_dx = 0 if dx == 0 else (-1 if dx > 0 else 1)
+        away_dy = 0 if dy == 0 else (-1 if dy > 0 else 1)
+
+        if away_dx == 0 and away_dy == 0:
+            return []
+
+        candidates: List[Tuple[int, int]] = []
+
+        # Prefer farther retreat points first, then fall back to shorter points.
+        for step in range(self.retreat_distance, 0, -1):
+            primary_x = self.entity.x + away_dx * step
+            primary_y = self.entity.y + away_dy * step
+
+            if (
+                0 <= primary_x < gm.width
+                and 0 <= primary_y < gm.height
+                and gm.tiles["walkable"][primary_x, primary_y]
+            ):
+                candidates.append((primary_x, primary_y))
+
+            # If diagonal retreat is blocked, also try axis-aligned fallback points.
+            if away_dx != 0 and away_dy != 0:
+                x_only = (self.entity.x + away_dx * step, self.entity.y)
+                y_only = (self.entity.x, self.entity.y + away_dy * step)
+
+                if (
+                    0 <= x_only[0] < gm.width
+                    and 0 <= x_only[1] < gm.height
+                    and gm.tiles["walkable"][x_only[0], x_only[1]]
+                ):
+                    candidates.append(x_only)
+
+                if (
+                    0 <= y_only[0] < gm.width
+                    and 0 <= y_only[1] < gm.height
+                    and gm.tiles["walkable"][y_only[0], y_only[1]]
+                ):
+                    candidates.append(y_only)
+
+        for dest_x, dest_y in candidates:
+            retreat_path = self.get_path_with_doors(dest_x, dest_y)
+            if retreat_path:
+                return retreat_path
+
+        return []
+    
+    def perform(self) -> None:
+        """Override to add retreat logic after attacks."""
+        # Decrement cooldown each turn
+        if self.phasing_cooldown > 0:
+            self.phasing_cooldown -= 1
+        
+        # Move every turn (inherited speed control)
+        if not self.should_move_this_turn():
+            return WaitAction(self.entity).perform()
+        
+        self.check_and_close_doors()
+        
+        # Initialize home position on first move
+        if self.home_x is None or self.home_y is None:
+            self.home_x = self.entity.x
+            self.home_y = self.entity.y
+        
+        target = self.engine.player
+        dx = target.x - self.entity.x
+        dy = target.y - self.entity.y
+        distance = max(abs(dx), abs(dy))
+
+        # **RETREAT MODE**: Move away from player after attack
+        if self.is_retreating:
+            # Stay phased while retreating.
+            if not has_phasing_effect(self.entity):
+                apply_phasing_effect(self.entity, duration=5)
+
+            if not self.path:
+                self.path = self._get_retreat_path(target)
+
+            if not self.path:
+                self.is_retreating = False
+                self.wander_wait_turns = random.randint(1, 2)
+                return WaitAction(self.entity).perform()
+
+            dest_x, dest_y = self.path.pop(0)
+
+            if self.entity.gamemap.tiles["name"][dest_x, dest_y] == "Door":
+                if self.toggle_door_at(dest_x, dest_y):
+                    return WaitAction(self.entity).perform()
+                self.path = []
+                self.is_retreating = False
+                return WaitAction(self.entity).perform()
+
+            result = MovementAction(
+                self.entity, dest_x - self.entity.x, dest_y - self.entity.y,
+            ).perform()
+
+            if not self.path:
+                self.is_retreating = False
+                self.wander_wait_turns = random.randint(1, 2)
+
+            return result
+
+        # Apply invisibility while approaching (if not on cooldown).
+        if not has_phasing_effect(self.entity) and self.phasing_cooldown == 0:
+            apply_phasing_effect(self.entity, duration=5)
+        
+        # **NORMAL MODE**: Chase or wander
+        if self.can_see_actor(target):
+            self.wander_wait_turns = 0
+            self.path = []
+            self.last_saw_player = 0
+            
+            if distance <= 1:
+                # Adjacent - attack and enter retreat mode
+                remove_phasing_effect(self.entity)  # Materialize for attack
+                
+                result = MeleeAction(self.entity, dx, dy).perform()
+
+                # Trigger cooldown + retreat pathing.
+                self.phasing_cooldown = self.phasing_cooldown_max
+                self.is_retreating = True
+                self.path = []
+
+                return result
+            
+            # Chase player (invisibly)
+            self.path = self.get_path_with_doors(target.x, target.y)
+        else:
+            if self.last_saw_player == 0:
+                self.path = []
+            self.last_saw_player += 1
+            
+            if self.wander_wait_turns > 0:
+                self.wander_wait_turns -= 1
+                return WaitAction(self.entity).perform()
+        
+        # Wander if no path
+        if not self.path:
+            dest_x = self.home_x + random.randint(-self.wander_range, self.wander_range)
+            dest_y = self.home_y + random.randint(-self.wander_range, self.wander_range)
+            
+            if (0 <= dest_x < self.engine.game_map.width and
+                0 <= dest_y < self.engine.game_map.height and
+                self.engine.game_map.tiles["walkable"][dest_x, dest_y]):
+                
+                self.path = self.get_path_with_doors(dest_x, dest_y)
+            
+            if not self.path:
+                self.wander_wait_turns = random.randint(1, 3)
+                return WaitAction(self.entity).perform()
+        
+        # Move along path
+        if self.path:
+            dest_x, dest_y = self.path.pop(0)
+            
+            if self.entity.gamemap.tiles["name"][dest_x, dest_y] == "Door":
+                if self.toggle_door_at(dest_x, dest_y):
+                    return WaitAction(self.entity).perform()
+                else:
+                    self.path = []
+                    self.wander_wait_turns = random.randint(1, 2)
+                    return WaitAction(self.entity).perform()
+            
+            result = MovementAction(
+                self.entity, dest_x - self.entity.x, dest_y - self.entity.y,
+            ).perform()
+            
+            if not self.path:
+                self.wander_wait_turns = random.randint(1, 3)
+            
+            return result
+        
+        return WaitAction(self.entity).perform()
+
+
+class HostileCasterAI(HostileEnemy):
+    def __init__(self, entity: Actor):
+        super().__init__(entity)
+        self.cast_cooldown = 0
+        self.cast_cooldown_turns = 2
+
+    def perform(self) -> None:
+        if self.cast_cooldown > 0:
+            self.cast_cooldown -= 1
+
+        target = self.engine.player
+        dx = target.x - self.entity.x
+        dy = target.y - self.entity.y
+        distance = max(abs(dx), abs(dy))
+
+        if self.can_see_actor(target):
+            from actions import CastSpellAction
+
+            known_spells = list(getattr(self.entity, "known_spells", []) or [])
+            current_mana = int(getattr(self.entity, "mana", 0) or 0)
+            has_castable_spell = any(
+                current_mana >= int(getattr(spell, "mana_cost", 0) or 0)
+                for spell in known_spells
+            )
+
+            # Keep distance from melee range when possible.
+            if distance <= 2:
+                step_x = 0 if dx == 0 else (-1 if dx > 0 else 1)
+                step_y = 0 if dy == 0 else (-1 if dy > 0 else 1)
+                new_x = self.entity.x + step_x
+                new_y = self.entity.y + step_y
+                gm = self.entity.gamemap
+                if (
+                    gm.in_bounds(new_x, new_y)
+                    and gm.tiles["walkable"][new_x, new_y]
+                    and not gm.get_blocking_entity_at_location(new_x, new_y)
+                ):
+                    return MovementAction(self.entity, step_x, step_y).perform()
+                return WaitAction(self.entity).perform()
+
+            # Prefer spellcasting at safer mid-range and not every turn.
+            if distance <= 5 and has_castable_spell and self.cast_cooldown == 0:
+                self.cast_cooldown = self.cast_cooldown_turns
+                return CastSpellAction(self.entity, target).perform()
+
+            # If waiting on cooldown with player in range, keep some movement pressure
+            # without making spell damage unavoidable every action.
+            if distance <= 5 and self.cast_cooldown > 0:
+                if random.random() < 0.5:
+                    return WaitAction(self.entity).perform()
+
+        # Fall back to hostile movement/chasing behavior when not casting.
+        return super().perform()
+        
 
 class Friendly(BaseAI):
     # Friendly entity that paths around occasionally
@@ -652,6 +1087,55 @@ class FollowerAI(BaseAI):
                     self.path = self.get_path_to(*goal)
                 else:
                     self.path = self.get_path_to(tx, ty)
+
+        if self.path:
+            dest_x, dest_y = self.path.pop(0)
+            return MovementAction(
+                self.entity, dest_x - self.entity.x, dest_y - self.entity.y,
+            ).perform()
+
+        return WaitAction(self.entity).perform()
+
+
+
+class AnimalAI(BaseAI):
+    """Simple AI for non-hostile animals that wander around and flee when the player gets too close."""
+
+    def __init__(self, entity: "Actor", flee_distance: int = 5):
+        super().__init__(entity)
+        self.flee_distance = flee_distance
+        self.path: List[Tuple[int, int]] = []
+
+    def perform(self) -> None:
+        target = self.engine.player
+        dx = target.x - self.entity.x
+        dy = target.y - self.entity.y
+        distance = max(abs(dx), abs(dy))
+
+        if distance <= self.flee_distance:
+            # Flee from player: move in opposite direction
+            flee_x = self.entity.x - dx
+            flee_y = self.entity.y - dy
+
+            # Get path to flee location, treating doors as walkable so animals can flee through them
+            self.path = self.get_path_with_doors(flee_x, flee_y)
+
+            if self.path:
+                dest_x, dest_y = self.path.pop(0)
+                return MovementAction(
+                    self.entity, dest_x - self.entity.x, dest_y - self.entity.y,
+                ).perform()
+
+        # Otherwise, wander randomly
+        if not self.path and random.random() < 0.5:  # pick a new destination when idle
+            wander_x = self.entity.x + random.randint(-4, 4)
+            wander_y = self.entity.y + random.randint(-4, 4)
+
+            if (0 <= wander_x < self.engine.game_map.width and
+                0 <= wander_y < self.engine.game_map.height and
+                (self.engine.game_map.tiles["walkable"][wander_x, wander_y] or
+                 self.is_door_tile(wander_x, wander_y))):
+                self.path = self.get_path_with_doors(wander_x, wander_y)
 
         if self.path:
             dest_x, dest_y = self.path.pop(0)

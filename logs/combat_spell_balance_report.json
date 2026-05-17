@@ -1,0 +1,94 @@
+{
+  "seed": 7,
+  "duels_per_matchup": 100,
+  "matchups": [
+    {
+      "left": "soldier",
+      "right": "hunter",
+      "left_win_rate": 0.48,
+      "right_win_rate": 0.52,
+      "avg_rounds": 6.82,
+      "avg_spell_damage": 0.0,
+      "avg_weapon_damage": 56.74189500000002
+    },
+    {
+      "left": "soldier",
+      "right": "hedge_mage",
+      "left_win_rate": 0.91,
+      "right_win_rate": 0.09,
+      "avg_rounds": 4.69,
+      "avg_spell_damage": 20.140000000000022,
+      "avg_weapon_damage": 34.782000000000046
+    },
+    {
+      "left": "soldier",
+      "right": "laborer",
+      "left_win_rate": 0.59,
+      "right_win_rate": 0.41,
+      "avg_rounds": 6.53,
+      "avg_spell_damage": 0.0,
+      "avg_weapon_damage": 59.285199999999946
+    },
+    {
+      "left": "hunter",
+      "right": "hedge_mage",
+      "left_win_rate": 0.98,
+      "right_win_rate": 0.02,
+      "avg_rounds": 4.87,
+      "avg_spell_damage": 19.334400000000013,
+      "avg_weapon_damage": 32.545668750000004
+    },
+    {
+      "left": "hunter",
+      "right": "laborer",
+      "left_win_rate": 0.82,
+      "right_win_rate": 0.18,
+      "avg_rounds": 8.26,
+      "avg_spell_damage": 0.0,
+      "avg_weapon_damage": 61.95075
+    },
+    {
+      "left": "hedge_mage",
+      "right": "laborer",
+      "left_win_rate": 0.1,
+      "right_win_rate": 0.9,
+      "avg_rounds": 5.95,
+      "avg_spell_damage": 24.274,
+      "avg_weapon_damage": 37.2225
+    }
+  ],
+  "aggregate": [
+    {
+      "profession": "hunter",
+      "win_rate": 0.7733333333333333,
+      "avg_rounds": 6.65,
+      "spell_damage": 966.7200000000007,
+      "weapon_damage": 7561.915687500001,
+      "outlier": "none"
+    },
+    {
+      "profession": "soldier",
+      "win_rate": 0.66,
+      "avg_rounds": 6.013333333333334,
+      "spell_damage": 1007.0000000000011,
+      "weapon_damage": 7540.454750000001,
+      "outlier": "none"
+    },
+    {
+      "profession": "laborer",
+      "win_rate": 0.49666666666666665,
+      "avg_rounds": 6.913333333333333,
+      "spell_damage": 1213.7,
+      "weapon_damage": 7922.922499999997,
+      "outlier": "none"
+    },
+    {
+      "profession": "hedge_mage",
+      "win_rate": 0.07,
+      "avg_rounds": 5.17,
+      "spell_damage": 3187.420000000002,
+      "weapon_damage": 5227.508437500002,
+      "outlier": "low win-rate"
+    }
+  ]
+}

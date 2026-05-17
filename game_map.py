@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import threading
 from typing import Iterable, Iterator, Optional, TYPE_CHECKING
 import numpy as np
 from tcod.console import Console
@@ -11,7 +10,8 @@ from render_order import RenderOrder
 import color
 from liquid_system import LiquidSystem
 import sprite_manager
-
+from components.effect import is_invisible
+import random
 if TYPE_CHECKING:
     from engine import Engine
     from entity import Entity
@@ -184,10 +184,10 @@ class GameMap:
             # libtcod demo falloff: l = (R² − r) / R² + di, clamped to [0, max_intensity].
             # Gives 1.0+di at the centre and di at the edge; di pulses the cone
             # brighter/darker each frame while the clamp keeps values legal.
-            l = (squared_radius - r) / squared_radius + di
+            light_falloff = (squared_radius - r) / squared_radius + di
 
             mask = fov & (r <= squared_radius)
-            light_intensity = np.where(mask, np.clip(l, 0.0, max_intensity), 0.0)
+            light_intensity = np.where(mask, np.clip(light_falloff, 0.0, max_intensity), 0.0)
 
             # Accumulate light (multiple sources add together, capped at 1.0).
             self.tiles["light_level"] = np.minimum(
@@ -282,21 +282,29 @@ class GameMap:
             tile_cp = dw_current[(entity.x, entity.y)]
         else:
             tile_cp = int(tile["light"]["ch"])
-        tile_fg = (255, 255, 255)  # composited tile already has colour baked in
         tile_bg = tuple(int(v) for v in tile["light"]["bg"])
-        entity_cp = ord(entity.char)
+        entity_char = getattr(entity, "char", "?")
+        entity_cp = ord(entity_char)
+        entity_color = entity.color
+
+        # Invisibility visuals use fixed glyphs by actor role.
+        # If a stale invisibility glyph is present without the effect, render the
+        # actor's base sprite instead.
+        invisible_now = is_invisible(entity)
+        if invisible_now:
+            entity_cp = 0xE041 if getattr(entity, "is_player", False) else 0xE042
+        elif entity_cp in (0xE041, 0xE042):
+            base_char = getattr(entity, "base_char", None)
+            if isinstance(base_char, str) and len(base_char) == 1:
+                entity_cp = ord(base_char)
 
         try:
-            # Tint index 0 = tile layer (use tile's own fg), index 1 = entity layer (entity.color)
-            composed = sprite_manager.compose_sprite(
-                [tile_cp, entity_cp],
-                layer_tints=[tile_fg, entity.color],
-            )
+            composed = sprite_manager.compose_entity_tile(tile_cp, entity_cp, entity_color)
             self.screen_print(console, entity.x, entity.y, composed,
                               fg=(255, 255, 255), bg=tile_bg)
         except Exception:
             self.screen_print(console, entity.x, entity.y, entity.char,
-                              fg=entity.color)
+                              fg=entity_color)
 
     def screen_print(
         self,
@@ -353,10 +361,7 @@ class GameMap:
             dtype=console.tiles_rgb.dtype
         )
         
-        dark_tiles = self.tiles["dark"][x_slice, y_slice]
         light_tiles = self.tiles["light"][x_slice, y_slice]
-        # light_levels is a view into self.tiles so ambient writes propagate to build_lightmap.
-        light_levels = self.tiles["light_level"][x_slice, y_slice]
         
         if np.any(visible_mask):
             # All visible tiles rendered at full 'light' brightness.
@@ -607,6 +612,10 @@ class GameMap:
                 except Exception:
                     pass
 
+        # Recycle entity-on-tile composite slots from the previous frame before
+        # allocating any new ones this frame.
+        sprite_manager.begin_render_frame()
+
         entities_sorted_for_rendering = sorted(self.entities, key=lambda x: x.render_order.value)
 
         # Render non-actor entities first (corpses, items)
@@ -789,7 +798,8 @@ class GameWorld:
         """
 
     def generate_floor(self) -> None:
-        from procgen import generate_dungeon, generate_village, generate_tutorial_floor
+        # Outdated method
+        from procgen import generate_village
         import random
 
         print("TEST")
@@ -822,7 +832,8 @@ class GameWorld:
         
         self.engine.debug_log(f"Floors since village: {self.floors_since_village}, Gen Chance: {gen_chance:.2f}, < Village chance: {village_chance:.2f}", handler=type(self).__name__, event="generate_floor")
         self.engine.debug_log(f"Village chance equation: (({self.floors_since_village})^2) / 25 = {village_chance:.2f}", handler=type(self).__name__, event="generate_floor")
-        if 1 == 1:
+        print("VILLAGE: Chance {village_chance:.2f} vs Gen Chance {gen_chance:.2f}")
+        if village_chance > gen_chance:
             print("Generating village floor!")
             # Generate village and reset counter
             self.floors_since_village = 0  # Reset counter when village appears
@@ -833,6 +844,7 @@ class GameWorld:
             )
         else:
             # Generate dungeon (counter continues to accumulate)
+            self.floors_since_village += 1
             self.descend()  # Use the same generation method as normal descents
     def descend(self) -> None:
         """Descend one level, or enter a dungeon from the overworld."""
@@ -890,9 +902,21 @@ class GameWorld:
         else:
             prev_floor = self.current_floor
             self.current_floor += 1
+            self.floors_since_village += 1
             print(f"[DESCEND] Generating new floor {self.current_floor} (was {prev_floor})")
             # Village generation
-            if 1 == 1:
+            village_chance = ((self.floors_since_village)**2) / 25
+            print(f"[DESCEND] Floors since village: {self.floors_since_village}")
+            
+            gen_chance = random.random()
+            
+            self.engine.debug_log(f"Floors since village: {self.floors_since_village}, Gen Chance: {gen_chance:.2f}, < Village chance: {village_chance:.2f}", handler=type(self).__name__, event="generate_floor")
+            self.engine.debug_log(f"Village chance equation: (({self.floors_since_village})^2) / 25 = {village_chance:.2f}", handler=type(self).__name__, event="generate_floor")
+            print(f"VILLAGE: Chance {village_chance:.2f} vs Gen Chance {gen_chance:.2f}")
+            if village_chance > gen_chance:
+                print("Generating village floor!")
+                # Generate village and reset counter
+                self.floors_since_village = 0  # Reset counter when village appears
                 from procgen import generate_village
                 new_map = generate_village(
                     map_width=self.map_width,
@@ -900,6 +924,7 @@ class GameWorld:
                     engine=self.engine,
                 )
             else:
+                # Generate dungeon (counter continues to accumulate)
                 from procgen import generate_dungeon
                 new_map = generate_dungeon(
                     max_rooms=self.max_rooms,
@@ -962,5 +987,5 @@ class GameWorld:
 
         # Switch to travelling sprite when returning to the overworld
         if getattr(prev_map, 'type', None) == 'overworld':
-            self.engine.player.char = chr(0xE03B)
+            self.engine.player.char = self.engine.player.base_char
 

@@ -1,0 +1,110 @@
+[
+  {
+    "id": "soldier",
+    "name": "Soldier",
+    "description": "A trained front-liner with practical battlefield fundamentals.",
+    "skills": {
+      "strength": 2,
+      "swords": 2,
+      "vigor": 2
+    },
+    "starting_items": [
+      "shortsword",
+      "chain_mail_armor",
+      "torch",
+      "lesser_health_potion"
+    ],
+    "tags": [
+      "labor",
+      "martial"
+    ]
+  },
+  {
+    "id": "hunter",
+    "name": "Hunter",
+    "description": "A talented marksman, adept at picking off targets from a distance.",
+    "skills": {
+      "agility": 2,
+      "light armor": 2,
+      "daggers": 2,
+      "transmutation": 2
+    },
+    "starting_items": [
+      "bow",
+      "quiver",
+      "ring_of_darkvision",
+      "leather_armor",
+      "torch",
+      "lesser_health_potion" 
+    ],
+    "tags": [
+      "labor",
+      "martial"
+    ]
+  },
+  {
+    "id": "necromancer",
+    "name": "Necromancer",
+    "description": "A self-taught spellcaster with modest arcane discipline.",
+    "skills": {
+      "arcana": 2,
+      "necromancy": 2,
+      "transmutation": 2
+    },
+    "starting_spells": [
+      "Inflict Wounds"
+    ],
+    "starting_items": [
+      "apprentice_robe",
+      "torch",
+      "fireball_scroll",
+      "lesser_health_potion"
+    ],
+    "tags": [
+      "arcane",
+      "scholarly"
+    ]
+  },
+  {
+    "id": "illusionist",
+    "name": "Illusionist",
+    "description": "A deceptive spellcaster who manipulates perception.",
+    "skills": {
+      "arcana": 2,
+      "illusion": 2,
+      "agility": 2
+    },
+    "starting_spells": [
+      "Invisibility"
+    ],
+    "starting_items": [
+      "apprentice_robe",
+      "torch",
+      "lightning_scroll",
+      "lesser_health_potion"
+    ],
+    "tags": [
+      "arcane",
+      "scholarly"
+    ]
+  },
+  {
+    "id": "chaos_mage",
+    "name": "Chaos Mage",
+    "description": "An unpredictable spellcaster who cares not for the schools of magic.",
+    "skills": {
+      "arcana": 2,
+      "conjuration": 2,
+      "evocation": 2
+    },
+    "starting_spells": [],
+    "starting_items": [
+      "apprentice_robe",
+      "torch",
+      "generate_spellbook",
+      "generate_spellbook",
+      "generate_spellbook",
+      "lesser_health_potion"
+    ]
+  }
+]

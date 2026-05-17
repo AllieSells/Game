@@ -1262,7 +1262,7 @@ def generate_dungeon(
                         if abs(_dx) != _r and abs(_dy) != _r:
                             continue
                         _sx, _sy = _sx0 + _dx, _sy0 + _dy
-                        if (1 <= _sx < map_width - 1 and 1 <= _sy < map_height - 1
+                        if (2 <= _sx < map_width - 2 and 2 <= _sy < map_height - 2
                                 and dungeon.tiles[_sx, _sy]["walkable"]):
                             dungeon.tiles[_sx, _sy] = tile_types.down_stairs
                             dungeon.downstairs_location = (_sx, _sy)
@@ -1342,17 +1342,10 @@ def generate_dungeon(
             if len(rooms) > 1:  # Skip first room for entity placement  
                 place_entities(new_room, dungeon, _floor, dungeon.biome)
   
-    # Place stairs in the center of the last room (rectangular dungeon)
-    if rooms:
-        center_of_last_room = rooms[-1].center
-        dungeon.tiles[center_of_last_room] = tile_types.down_stairs
-        dungeon.downstairs_location = center_of_last_room
-
-    # Always place up stairs in the first room so the player can return to the overworld
-    if rooms:
-        center_of_first_room = rooms[0].center
-        dungeon.tiles[center_of_first_room] = tile_types.up_stairs
-        dungeon.upstairs_location = center_of_first_room
+    # Record room-based stair positions — written to the map AFTER water pools so
+    # water can never overwrite them.
+    _room_downstairs_pos = rooms[-1].center if rooms else None
+    _room_upstairs_pos   = rooms[0].center  if rooms else None
 
 
 
@@ -1450,9 +1443,21 @@ def generate_dungeon(
             pool_tiles = _noise_pool_tiles(start_x, start_y, base_radius, noise_amp, pool_seed)
             # Only overwrite walkable tiles so pools don't erase walls
             for x, y in pool_tiles:
-                if dungeon.tiles[x, y]["walkable"]:
+                # Never let water pools overwrite staircase tiles.
+                if dungeon.tiles[x, y]["walkable"] and str(dungeon.tiles[x, y]["name"]) not in {
+                    "<purple>Down Stairs</purple>",
+                    "<purple>Up Stairs</purple>",
+                }:
                     dungeon.tiles[x, y] = tile_types.water
     print("[GEN] water pools done")
+
+    # Stamp stair tiles after water pools so they are always on dry floor.
+    if _room_downstairs_pos is not None:
+        dungeon.tiles[_room_downstairs_pos] = tile_types.down_stairs
+        dungeon.downstairs_location = _room_downstairs_pos
+    if _room_upstairs_pos is not None:
+        dungeon.tiles[_room_upstairs_pos] = tile_types.up_stairs
+        dungeon.upstairs_location = _room_upstairs_pos
 
     # Build composited water animation frames (floor-edge bitmask compositing).
     # Must run while the tileset is available (deferred mode is active during
@@ -1475,6 +1480,63 @@ def generate_dungeon(
         dungeon.biome_str = "Lush " + dungeon.biome_str
     elif vegetation > 2:
         dungeon.biome_str = "Overgrown " + dungeon.biome_str
+
+    # Final stair safety pass: guarantee downstairs exists on a valid, non-water, unoccupied tile.
+    _down = getattr(dungeon, "downstairs_location", (0, 0))
+
+    def _tile_has_entity(x: int, y: int) -> bool:
+        return any(e.x == x and e.y == y for e in dungeon.entities)
+
+    def _valid_downstairs_tile(pos: Tuple[int, int]) -> bool:
+        if not isinstance(pos, tuple) or len(pos) != 2:
+            return False
+        x, y = pos
+        if not dungeon.in_bounds(x, y):
+            return False
+        tile = dungeon.tiles[x, y]
+        if not tile["walkable"]:
+            return False
+        if str(tile["name"]) in {"Water", "Foliage", "Mossy Floor"}:
+            return False
+        dw_anim = getattr(dungeon, "dungeon_water_anim", None)
+        if dw_anim and (x, y) in dw_anim:
+            return False
+        if _tile_has_entity(x, y):
+            return False
+        return True
+
+    if not _valid_downstairs_tile(_down):
+        _candidates: List[Tuple[int, int]] = []
+        for _x in range(2, dungeon.width - 2):
+            for _y in range(2, dungeon.height - 2):
+                _tile = dungeon.tiles[_x, _y]
+                if not _tile["walkable"]:
+                    continue
+                _name = str(_tile["name"])
+                if _name in {"Water", "<purple>Up Stairs</purple>", "Foliage", "Mossy Floor", "<purple>Down Stairs</purple>"}:
+                    continue
+                dw_anim = getattr(dungeon, "dungeon_water_anim", None)
+                if dw_anim and (_x, _y) in dw_anim:
+                    continue
+                if _tile_has_entity(_x, _y):
+                    continue
+                _candidates.append((_x, _y))
+
+        if _candidates:
+            # Favor a location far from player spawn for progression pacing.
+            _sx, _sy = max(
+                _candidates,
+                key=lambda p: (p[0] - _placer.x) * (p[0] - _placer.x) + (p[1] - _placer.y) * (p[1] - _placer.y),
+            )
+            if isinstance(_down, tuple) and len(_down) == 2 and dungeon.in_bounds(_down[0], _down[1]):
+                if str(dungeon.tiles[_down[0], _down[1]]["name"]) == "<purple>Down Stairs</purple>":
+                    dungeon.tiles[_down[0], _down[1]] = tile_types.random_floor_tile()
+            dungeon.tiles[_sx, _sy] = tile_types.down_stairs
+            dungeon.downstairs_location = (_sx, _sy)
+        else:
+            # Last-resort fallback: place at player tile to avoid missing stairs entirely.
+            dungeon.tiles[_placer.x, _placer.y] = tile_types.down_stairs
+            dungeon.downstairs_location = (_placer.x, _placer.y)
 
     print("[GEN] generate_dungeon complete")
     return dungeon

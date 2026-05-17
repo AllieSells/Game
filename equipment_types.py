@@ -13,3 +13,4 @@ class EquipmentType(Enum):
     GAUNTLETS = auto()
     GORGET = auto()
     BACKPACK = auto()
+    RING = auto()

@@ -20,12 +20,24 @@ TILE_W = 32
 TILE_H = 32
 EXTRAS_COLS = 16  # Width of extras.png grid in tiles
 EXTRAS_START_CP = 0xE000  # First Unicode Private Use Area codepoint
+_SPRITE_CP_MIN = 0xE000
+_SPRITE_CP_MAX = 0xF8FF
 
 # --- Composite sprite state ---
-COMPOSITE_START_CP = 0xEF00  # Reserved composite region (0xEF00–0xEFFF)
-_composite_cache: dict = {}   # tuple(codepoints) -> assigned codepoint int
+COMPOSITE_START_CP = 0xEF00  # Start of composite region
+_composite_cache: dict = {}   # full key -> assigned codepoint int
 _composite_next: int = COMPOSITE_START_CP
+_composite_free_list: list = []  # Recycled slots for permanent composites
+_entity_tile_free_list: list = []  # Recycled slots for per-frame entity-on-tile composites
 _tileset = None               # Set by load_extras; used by compose/refresh
+
+# Per-position puddle slot registry.
+# Guarantees at most ONE tileset slot per world tile for the puddle sprite,
+# and ONE for the tile+puddle composite, regardless of how many times depth
+# or neighbour pattern changes.  Slots are updated in-place instead of
+# allocating a new codepoint on every evaporation tick.
+_puddle_pos_slot: dict = {}       # (tile_x, tile_y) -> puddle codepoint int
+_tile_puddle_pos_slot: dict = {}  # (tile_x, tile_y) -> tile+puddle composite codepoint int
 
 # --- Deferred set_tile queue (used during background gen to avoid GPU calls) ---
 _deferred_mode: bool = False
@@ -56,6 +68,25 @@ def flush_deferred_tiles() -> None:
         _tileset.set_tile(cp, pixels)
     _deferred_tiles.clear()
     _deferred_pixel_store.clear()
+
+
+def reset_sprite_cache() -> None:
+    """Clear all runtime sprite cache state and reset composite allocation."""
+    global _composite_next, _composite_cache, _composite_free_list, _entity_tile_free_list
+    global _puddle_pos_slot, _tile_puddle_pos_slot, _puddle_sprite_cache
+    global _entity_tile_cache, _entity_tile_prev_slots
+
+    _composite_cache.clear()
+    _composite_free_list.clear()
+    _entity_tile_free_list.clear()
+    _puddle_pos_slot.clear()
+    _tile_puddle_pos_slot.clear()
+    _puddle_sprite_cache.clear()
+    _entity_tile_cache.clear()
+    _entity_tile_prev_slots.clear()
+    _deferred_tiles.clear()
+    _deferred_pixel_store.clear()
+    _composite_next = COMPOSITE_START_CP
 
 
 def _get_tile(cp: int) -> np.ndarray:
@@ -203,6 +234,8 @@ def load_extras(tileset, path: str = "RP/extras.png") -> int:
 def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_offset: int = 0, y_offset: int = 0, x_crop: int = 0, y_crop: int = 0, top_first_layer: bool = True, layer_tints: list | None = None) -> str:
     """Alpha-composite multiple tile layers into a new tileset slot.
 
+    Takes codepoints and converts to chr output
+
     Blends codepoints bottom-up (first = base, last = top layer) by default.
     If top_first_layer=False, the first layer is treated as the top, and all following
     layers are composed behind it.
@@ -273,12 +306,6 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
                 base = np.zeros_like(first)
             overlay_layers = []
 
-        if top_first_layer:
-            target_layers = overlay_layers
-        else:
-            # after building background from remaining layers, overlay first on top
-            target_layers = [layer_codepoints[0]]
-
         if not top_first_layer:
             # if first is top, we already have background base; now overlay first last.
             overlay_layers = []
@@ -289,9 +316,9 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
                 base[..., :3] = overlay_pixels[..., :3] * alpha + base[..., :3] * (1.0 - alpha)
                 base[..., 3] = np.maximum(base[..., 3], overlay_pixels[..., 3])
         else:
-            for cp in overlay_layers:
+            for layer_idx, cp in enumerate(overlay_layers, start=1):
                 overlay_pixels = _get_tile(cp)
-                overlay_pixels = _apply_tint(overlay_pixels, _tint_for(layer_codepoints.index(cp)))
+                overlay_pixels = _apply_tint(overlay_pixels, _tint_for(layer_idx))
                 if normalized_scale != 1.0:
                     overlay_pixels = _scale_overlay_tile(overlay_pixels, normalized_scale)
                 if x_offset != 0 or y_offset != 0:
@@ -302,19 +329,651 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
                 base[..., 3] = np.maximum(base[..., 3], overlay[..., 3])
 
         result = base.astype(np.uint8)
-        cp = _composite_next
+        # Reuse a previously freed slot before consuming a new codepoint.
+        if _composite_free_list:
+            cp = _composite_free_list.pop()
+        else:
+            cp = _composite_next
+            _composite_next += 1
         if _deferred_mode:
             _deferred_pixel_store[cp] = result
             _deferred_tiles.append((cp, result))
         else:
             _tileset.set_tile(cp, result)
         _composite_cache[key] = cp
-        _composite_next += 1
         return chr(cp)
     except Exception as e:
         print(f"[sprite_manager] Error composing sprite from layers {[hex(c) for c in layer_codepoints]}: {e}")
         return chr(layer_codepoints[0])  # fallback to base layer if composition fails
 
+
+# ---------------------------------------------------------------------------
+# Procedural puddle sprite generation
+# ---------------------------------------------------------------------------
+_puddle_sprite_cache: dict = {}   # (neighbor_key, tint_tuple, depth, seed) -> cp int
+
+
+def _generate_puddle_pixels(
+    tile_x: int, tile_y: int,
+    has_top: bool, has_bottom: bool, has_left: bool, has_right: bool,
+    has_tl: bool, has_tr: bool, has_bl: bool, has_br: bool,
+    tint: tuple, depth: int,
+) -> np.ndarray:
+    """Return a (TILE_H, TILE_W, 4) uint8 RGBA array for a splatter stain.
+
+    Edge jaggedness comes from world-space FBM value noise applied to the
+    metaball isosurface threshold.  Because both this tile and its neighbours
+    sample the same continuous noise function at the shared boundary, seams
+    are impossible — the edge shape is physically continuous across tiles.
+    """
+    W, H = TILE_W, TILE_H
+    # Per-tile RNG only drives satellite drop positions, not edge shape.
+    rng = np.random.default_rng((abs(tile_x) * 7919 + abs(tile_y) * 6271) & 0xFFFF)
+
+    pu = (np.arange(W, dtype=np.float32) + 0.5) / W
+    pv = (np.arange(H, dtype=np.float32) + 0.5) / H
+    U, V = np.meshgrid(pu, pv)
+    EPS = 1e-4
+
+    # World-space coordinates for each pixel — shared with neighbours.
+    WX = (tile_x + U).astype(np.float32)
+    WY = (tile_y + V).astype(np.float32)
+
+    field = np.zeros((H, W), dtype=np.float32)
+
+    def add_ball(cx: float, cy: float, r: float) -> None:
+        nonlocal field
+        d2 = (U - cx) ** 2 + (V - cy) ** 2
+        field += (r * r) / (d2 + EPS)
+
+    # --- Core blob -------------------------------------------------------
+    add_ball(0.5, 0.5, 0.27)
+
+    # --- Satellite splatter drops (per-tile seeded) ----------------------
+    n_drops = int(rng.integers(3, 8))
+    for _ in range(n_drops):
+        ang  = rng.uniform(0.0, 2 * np.pi)
+        dist = rng.uniform(0.18, 0.44)
+        dr   = rng.uniform(0.04, 0.09)
+        add_ball(0.5 + np.cos(ang) * dist, 0.5 + np.sin(ang) * dist, dr)
+
+    # --- Neighbour connectivity balls (unwarped for reliable seams) ------
+    EDGE_R = 0.26
+    if has_top:
+        add_ball(0.5, 0.0, EDGE_R)
+    if has_bottom:
+        add_ball(0.5, 1.0, EDGE_R)
+    if has_left:
+        add_ball(0.0, 0.5, EDGE_R)
+    if has_right:
+        add_ball(1.0, 0.5, EDGE_R)
+
+    CORNER_R = 0.19
+    if has_top and has_left:
+        add_ball(0.0, 0.0, CORNER_R)
+    if has_top and has_right:
+        add_ball(1.0, 0.0, CORNER_R)
+    if has_bottom and has_left:
+        add_ball(0.0, 1.0, CORNER_R)
+    if has_bottom and has_right:
+        add_ball(1.0, 1.0, CORNER_R)
+
+    DIAG_R = 0.16
+    if has_tl:
+        add_ball(0.18, 0.18, DIAG_R)
+    if has_tr:
+        add_ball(0.82, 0.18, DIAG_R)
+    if has_bl:
+        add_ball(0.18, 0.82, DIAG_R)
+    if has_br:
+        add_ball(0.82, 0.82, DIAG_R)
+
+    # --- World-space FBM to roughen the isosurface edge -----------------
+    # Both this tile and its neighbours sample the same noise values at the
+    # shared boundary row/column → zero visible seam.
+    def _hash(ix_arr: np.ndarray, iy_arr: np.ndarray) -> np.ndarray:
+        """Scramble int32 tile coords to float in [0,1]. Wraps on overflow."""
+        n = ix_arr.astype(np.int32) * np.int32(127) ^ iy_arr.astype(np.int32) * np.int32(311)
+        n = n * np.int32(1664525) + np.int32(1013904223)
+        return n.view(np.uint32).astype(np.float32) * np.float32(2.3283064365386963e-10)
+
+    def _val_noise(wx: np.ndarray, wy: np.ndarray) -> np.ndarray:
+        iwx = np.floor(wx).astype(np.int32)
+        iwy = np.floor(wy).astype(np.int32)
+        fx  = (wx - np.floor(wx)).astype(np.float32)
+        fy  = (wy - np.floor(wy)).astype(np.float32)
+        ux  = fx * fx * (3.0 - 2.0 * fx)
+        uy  = fy * fy * (3.0 - 2.0 * fy)
+        a = _hash(iwx,     iwy    )
+        b = _hash(iwx + 1, iwy    )
+        c = _hash(iwx,     iwy + 1)
+        d = _hash(iwx + 1, iwy + 1)
+        return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy
+
+    # 3 octaves — low freq gives broad lopsidedness, high freq jagged detail.
+    noise = (_val_noise(WX * 4.0,  WY * 4.0 ) * 1.00
+           + _val_noise(WX * 9.0,  WY * 9.0 ) * 0.50
+           + _val_noise(WX * 18.0, WY * 18.0) * 0.25) / 1.75  # → [0, 1]
+    # Add to field as a threshold shift: ±0.20 in field units.
+    field_noised = field + (noise - 0.5) * 0.40
+
+    # --- Edge fades on free (non-neighbour) sides -------------------------
+    # When 3 sides are connected, the combined connectivity-ball field can
+    # exceed the threshold all the way to the 4th (free) edge, producing a
+    # solid rectangular block instead of an organic rounded puddle.
+    # Applying a smoothstep fade on each free edge forces the blood to taper
+    # to zero at the tile boundary while leaving connected edges untouched,
+    # ensuring organic splat shapes on the pool perimeter.
+    # The FBM noise still varies the exact fade curve from tile to tile.
+    FADE_WIDTH = 0.22
+    if not has_left:
+        t = np.clip(U / FADE_WIDTH, 0.0, 1.0)
+        field_noised = field_noised * (t * t * (3.0 - 2.0 * t))
+    if not has_right:
+        t = np.clip((1.0 - U) / FADE_WIDTH, 0.0, 1.0)
+        field_noised = field_noised * (t * t * (3.0 - 2.0 * t))
+    if not has_top:
+        t = np.clip(V / FADE_WIDTH, 0.0, 1.0)
+        field_noised = field_noised * (t * t * (3.0 - 2.0 * t))
+    if not has_bottom:
+        t = np.clip((1.0 - V) / FADE_WIDTH, 0.0, 1.0)
+        field_noised = field_noised * (t * t * (3.0 - 2.0 * t))
+
+    # --- Corner rounding for concave corners ----------------------------
+    # When two adjacent cardinal edges are connected but the diagonal between
+    # them is NOT, the combined edge-ball potential at that corner exceeds
+    # the threshold → 90° square bite.  Apply a radial smoothstep fade
+    # inside each such corner to round it into an organic curve.
+    # Corners where the diagonal IS present are left untouched so the
+    # cross-tile seam stays seamless.
+    CORNER_ROUND = 0.25
+    if has_top and has_left and not has_tl:
+        dist = np.sqrt(U ** 2 + V ** 2)
+        t = np.clip(dist / CORNER_ROUND, 0.0, 1.0)
+        fade = t * t * (3.0 - 2.0 * t)
+        field_noised = np.where((U < CORNER_ROUND) & (V < CORNER_ROUND), field_noised * fade, field_noised)
+    if has_top and has_right and not has_tr:
+        dist = np.sqrt((1.0 - U) ** 2 + V ** 2)
+        t = np.clip(dist / CORNER_ROUND, 0.0, 1.0)
+        fade = t * t * (3.0 - 2.0 * t)
+        field_noised = np.where((U > 1.0 - CORNER_ROUND) & (V < CORNER_ROUND), field_noised * fade, field_noised)
+    if has_bottom and has_left and not has_bl:
+        dist = np.sqrt(U ** 2 + (1.0 - V) ** 2)
+        t = np.clip(dist / CORNER_ROUND, 0.0, 1.0)
+        fade = t * t * (3.0 - 2.0 * t)
+        field_noised = np.where((U < CORNER_ROUND) & (V > 1.0 - CORNER_ROUND), field_noised * fade, field_noised)
+    if has_bottom and has_right and not has_br:
+        dist = np.sqrt((1.0 - U) ** 2 + (1.0 - V) ** 2)
+        t = np.clip(dist / CORNER_ROUND, 0.0, 1.0)
+        fade = t * t * (3.0 - 2.0 * t)
+        field_noised = np.where((U > 1.0 - CORNER_ROUND) & (V > 1.0 - CORNER_ROUND), field_noised * fade, field_noised)
+
+    # --- Alpha: narrow feather = crisp stain edge ------------------------
+    THRESHOLD = 0.55
+    FEATHER   = 0.10
+    t = np.clip((field_noised - THRESHOLD) / FEATHER, 0.0, 1.0)
+    alpha_field = t * t * (3.0 - 2.0 * t)
+    max_opacity = 0.85 + (depth - 1) * 0.05
+    alpha_field *= max_opacity
+
+    # --- Colour ----------------------------------------------------------
+    tr, tg, tb = tint[0] / 255.0, tint[1] / 255.0, tint[2] / 255.0
+    wet = np.clip((field_noised - THRESHOLD) / 1.5, 0.0, 1.0)
+    brightness = np.clip(0.68 - wet * 0.22, 0.46, 0.72)
+
+    r_ch = np.clip(tr * brightness * 255, 0, 255).astype(np.uint8)
+    g_ch = np.clip(tg * brightness * 255, 0, 255).astype(np.uint8)
+    b_ch = np.clip(tb * brightness * 255, 0, 255).astype(np.uint8)
+    a_ch = np.clip(alpha_field * 255, 0, 255).astype(np.uint8)
+
+    return np.stack([r_ch, g_ch, b_ch, a_ch], axis=-1)
+
+
+def get_puddle_sprite(
+    tile_x: int, tile_y: int,
+    has_top: bool, has_bottom: bool, has_left: bool, has_right: bool,
+    has_tl: bool, has_tr: bool, has_bl: bool, has_br: bool,
+    tint: tuple, depth: int,
+) -> str:
+    """Return ``chr()`` of a procedural puddle codepoint for the given tile.
+
+    Each world position is given exactly one tileset slot.  When depth or
+    neighbour pattern changes the slot's pixels are updated in-place instead
+    of allocating a fresh codepoint, preventing slot exhaustion during
+    evaporation.  Downstream compose_sprite entries that referenced the old
+    pixels are evicted from the cache so they rebuild on the next call.
+    """
+    global _composite_next, _tileset, _puddle_sprite_cache, _puddle_pos_slot
+
+    norm_tint = tuple(int(v) for v in tint)
+    key = (
+        tile_x, tile_y,
+        has_top, has_bottom, has_left, has_right,
+        has_tl, has_tr, has_bl, has_br,
+        norm_tint, depth,
+    )
+    pos_key = (tile_x, tile_y)
+
+    existing_cp = _puddle_pos_slot.get(pos_key)
+
+    if existing_cp is not None:
+        # Slot already allocated for this world position.
+        if _puddle_sprite_cache.get(key) == existing_cp:
+            # Exact same config — pixels already up to date.
+            return chr(existing_cp)
+        # Config changed (new depth or new neighbours): regenerate pixels
+        # in the existing slot instead of consuming a new codepoint.
+        pixels = _generate_puddle_pixels(
+            tile_x, tile_y,
+            has_top, has_bottom, has_left, has_right,
+            has_tl, has_tr, has_bl, has_br,
+            tint, depth,
+        )
+        if _deferred_mode:
+            _deferred_pixel_store[existing_cp] = pixels
+            _deferred_tiles.append((existing_cp, pixels))
+        else:
+            if _tileset is None:
+                raise RuntimeError("[sprite_manager] get_puddle_sprite called before tileset is loaded.")
+            _tileset.set_tile(existing_cp, pixels)
+        # Evict any compose_sprite cache entries whose pixel inputs included
+        # this puddle codepoint — they are now stale.
+        # Guard: compose_dungeon_water stores keys like ('_dw', ...) where k[0] is
+        # a string, so skip those entries.
+        stale = [k for k, v in _composite_cache.items()
+                 if isinstance(k[0], tuple) and existing_cp in k[0]]
+        for k in stale:
+            _composite_free_list.append(_composite_cache.pop(k))
+        # Drop all previous puddle cache entries for this position — their
+        # pixels are now stale (GPU slot was overwritten).  Without this,
+        # a later config that happens to match an old key returns early with
+        # the wrong sprite (e.g. after evaporation reverts neighbour flags).
+        stale_puddle = [k for k, v in _puddle_sprite_cache.items()
+                        if k[0] == tile_x and k[1] == tile_y and v == existing_cp]
+        for k in stale_puddle:
+            del _puddle_sprite_cache[k]
+        _puddle_sprite_cache[key] = existing_cp
+        return chr(existing_cp)
+
+    # New world position — allocate a slot, preferring recycled entries.
+    pixels = _generate_puddle_pixels(
+        tile_x, tile_y,
+        has_top, has_bottom, has_left, has_right,
+        has_tl, has_tr, has_bl, has_br,
+        tint, depth,
+    )
+    if _composite_free_list:
+        cp = _composite_free_list.pop()
+    else:
+        cp = _composite_next
+        _composite_next += 1
+    _puddle_sprite_cache[key] = cp
+    _puddle_pos_slot[pos_key] = cp
+
+    if _deferred_mode:
+        _deferred_pixel_store[cp] = pixels
+        _deferred_tiles.append((cp, pixels))
+    else:
+        if _tileset is None:
+            raise RuntimeError("[sprite_manager] get_puddle_sprite called before tileset is loaded.")
+        _tileset.set_tile(cp, pixels)
+
+    return chr(cp)
+
+
+def compose_puddle_tile(tile_x: int, tile_y: int, orig_cp: int, puddle_cp: int) -> str:
+    """Composite orig_cp beneath puddle_cp and return chr() of the result.
+
+    Allocates a fresh codepoint for each update so the ch value written to
+    ``game_map.tiles`` always changes when blood state changes.
+    ``SDLConsoleRender`` uses dirty-tracking: it only re-renders console cells
+    whose ch/fg/bg changed vs the previous call.  If we overwrote pixel data
+    in-place without changing the codepoint the dirty flag would never fire and
+    blood depth/shape changes would stay invisible.  The old slot is returned to
+    ``_composite_free_list`` immediately so the total number of live slots stays
+    bounded.
+    """
+    global _composite_next, _tileset, _tile_puddle_pos_slot
+
+    pos_key = (tile_x, tile_y)
+    existing_cp = _tile_puddle_pos_slot.get(pos_key)
+
+    # Build composite pixels (orig tile as base, puddle on top).
+    base = _get_tile(orig_cp).astype(np.float32).copy()
+    overlay = _get_tile(puddle_cp).astype(np.float32)
+    alpha = overlay[..., 3:4] / 255.0
+    base[..., :3] = overlay[..., :3] * alpha + base[..., :3] * (1.0 - alpha)
+    base[..., 3] = np.maximum(base[..., 3], overlay[..., 3])
+    result = base.astype(np.uint8)
+
+    if existing_cp is not None:
+        # Allocate a NEW slot so the codepoint changes, forcing SDL dirty-render.
+        if _composite_free_list:
+            new_cp = _composite_free_list.pop()
+        else:
+            new_cp = _composite_next
+            _composite_next += 1
+
+        if _deferred_mode:
+            _deferred_pixel_store[new_cp] = result
+            _deferred_tiles.append((new_cp, result))
+        else:
+            _tileset.set_tile(new_cp, result)
+
+        # Return the old slot to the free list for immediate reuse.
+        _composite_free_list.append(existing_cp)
+
+        # Evict entity/item composites built on the OLD codepoint.
+        stale = [k for k, v in _composite_cache.items()
+                 if isinstance(k[0], tuple) and existing_cp in k[0]]
+        for k in stale:
+            _composite_free_list.append(_composite_cache.pop(k))
+
+        _tile_puddle_pos_slot[pos_key] = new_cp
+        return chr(new_cp)
+
+    # First time for this position — allocate a fresh slot.
+    if _composite_free_list:
+        cp = _composite_free_list.pop()
+    else:
+        cp = _composite_next
+        _composite_next += 1
+    _tile_puddle_pos_slot[pos_key] = cp
+    if _deferred_mode:
+        _deferred_pixel_store[cp] = result
+        _deferred_tiles.append((cp, result))
+    else:
+        _tileset.set_tile(cp, result)
+    return chr(cp)
+
+
+def release_puddle_slots(tile_x: int, tile_y: int) -> None:
+    """Release per-position puddle and composite slots for a tile.
+
+    Call this when blood/liquid is fully removed from a world position.
+    The codepoints themselves cannot be recycled (tcod tileset slots are
+    permanent), but clearing the registry prevents stale cache hits and
+    lets the position receive fresh slots if liquid returns later.
+    """
+    pos_key = (tile_x, tile_y)
+
+    puddle_cp = _puddle_pos_slot.pop(pos_key, None)
+    if puddle_cp is not None:
+        # Evict composite cache entries that used this puddle as input.
+        # Guard: compose_dungeon_water stores keys like ('_dw', ...) where k[0] is
+        # a string, so skip those entries.
+        stale = [k for k, v in _composite_cache.items()
+                 if isinstance(k[0], tuple) and puddle_cp in k[0]]
+        for k in stale:
+            _composite_free_list.append(_composite_cache.pop(k))
+        stale_p = [k for k, v in _puddle_sprite_cache.items() if v == puddle_cp]
+        for k in stale_p:
+            del _puddle_sprite_cache[k]
+        # The puddle sprite slot itself is now unused — return it for reuse.
+        _composite_free_list.append(puddle_cp)
+
+    tile_puddle_cp = _tile_puddle_pos_slot.pop(pos_key, None)
+    if tile_puddle_cp is not None:
+        # Also evict entity composites that used this tile+puddle codepoint.
+        stale = [k for k, v in _composite_cache.items()
+                 if isinstance(k[0], tuple) and tile_puddle_cp in k[0]]
+        for k in stale:
+            _composite_free_list.append(_composite_cache.pop(k))
+        _composite_free_list.append(tile_puddle_cp)
+
+
+# ---------------------------------------------------------------------------
+# Per-frame entity-on-tile compositing  (recycled every render pass)
+# ---------------------------------------------------------------------------
+_entity_tile_cache: dict = {}       # (tile_cp, entity_cp, tint_tuple) -> cp int  (current frame)
+_entity_tile_prev_slots: list = []  # cp ints from the previous frame — freed at next begin_render_frame
+
+
+def begin_render_frame() -> None:
+    """Rotate entity-on-tile composite slots.
+
+    Call once at the start of each map render pass, before any entity
+    rendering.  Slots used last frame are returned to the free list so they
+    can be reused immediately without permanently growing the tileset.
+    """
+    global _entity_tile_cache, _entity_tile_prev_slots
+    # Return last frame's slots to the pool.
+    _entity_tile_free_list.extend(_entity_tile_prev_slots)
+    # Save current frame's slots to free next time.
+    _entity_tile_prev_slots = list(_entity_tile_cache.values())
+    # Fresh cache for the new frame.
+    _entity_tile_cache = {}
+
+
+def compose_entity_tile(tile_cp: int, entity_cp: int, entity_tint) -> str:
+    """Composite entity_cp on top of tile_cp for a single render frame.
+
+    Unlike compose_sprite the returned codepoint is only valid for the current
+    frame — the slot is recycled by the next begin_render_frame() call, so the
+    total number of permanent tileset slots does not grow as entities walk
+    around the map.
+
+    The tile layer is rendered un-tinted; entity_tint is applied to the entity
+    layer.  Returns the raw entity char as a fallback if the tileset is not
+    initialised.
+    """
+    global _entity_tile_cache, _composite_next, _tileset
+    if _tileset is None:
+        return chr(entity_cp)
+
+    norm_tint: tuple = tuple(int(v) for v in entity_tint) if entity_tint else (255, 255, 255)
+    key = (tile_cp, entity_cp, norm_tint)
+
+    if key in _entity_tile_cache:
+        return chr(_entity_tile_cache[key])
+
+    try:
+        base = _get_tile(tile_cp).astype(np.float32).copy()
+        overlay = _get_tile(entity_cp).astype(np.float32)
+        if norm_tint != (255, 255, 255):
+            t = np.array(norm_tint[:3], dtype=np.float32) / 255.0
+            overlay[..., :3] *= t
+        alpha = overlay[..., 3:4] / 255.0
+        base[..., :3] = overlay[..., :3] * alpha + base[..., :3] * (1.0 - alpha)
+        base[..., 3] = np.maximum(base[..., 3], overlay[..., 3])
+        result = base.astype(np.uint8)
+
+        if _entity_tile_free_list:
+            cp = _entity_tile_free_list.pop()
+        else:
+            cp = _composite_next
+            _composite_next += 1
+
+        if _deferred_mode:
+            _deferred_pixel_store[cp] = result
+            _deferred_tiles.append((cp, result))
+        else:
+            _tileset.set_tile(cp, result)
+
+        _entity_tile_cache[key] = cp
+        return chr(cp)
+    except Exception as e:
+        print(f"[sprite_manager] compose_entity_tile tile={hex(tile_cp)} entity={hex(entity_cp)}: {e}")
+        return chr(entity_cp)
+
+
+def get_composite_slot_usage() -> dict:
+    """Return a dict with composite slot usage info for debugging."""
+    allocated = _composite_next - COMPOSITE_START_CP
+    frame_slots = len(_entity_tile_cache) + len(_entity_tile_prev_slots)
+    return {
+        "next_cp": _composite_next,
+        "start_cp": COMPOSITE_START_CP,
+        "slots_allocated": allocated,
+        "slots_free": len(_composite_free_list) + len(_entity_tile_free_list),
+        "permanent_free": len(_composite_free_list),
+        "frame_free": len(_entity_tile_free_list),
+        "slots_live": allocated - len(_composite_free_list) - len(_entity_tile_free_list),
+        "puddle_positions": len(_puddle_pos_slot),
+        "tile_puddle_positions": len(_tile_puddle_pos_slot),
+        "compose_cache_entries": len(_composite_cache),
+        "puddle_sprite_cache_entries": len(_puddle_sprite_cache),
+        "entity_tile_frame_slots": frame_slots,
+    }
+
+
+def _collect_codepoints_from_value(value, live_codepoints: set[int]) -> None:
+    if isinstance(value, np.ndarray):
+        flat = np.asarray(value).ravel()
+        for item in flat:
+            try:
+                cp = int(item)
+            except Exception:
+                continue
+            if _SPRITE_CP_MIN <= cp <= _SPRITE_CP_MAX:
+                live_codepoints.add(cp)
+        return
+
+    if isinstance(value, (int, np.integer)):
+        cp = int(value)
+        if _SPRITE_CP_MIN <= cp <= _SPRITE_CP_MAX:
+            live_codepoints.add(cp)
+        return
+
+    if isinstance(value, str):
+        if len(value) == 1:
+            cp = ord(value)
+            if _SPRITE_CP_MIN <= cp <= _SPRITE_CP_MAX:
+                live_codepoints.add(cp)
+        return
+
+    if isinstance(value, dict):
+        for item in value.values():
+            _collect_codepoints_from_value(item, live_codepoints)
+        return
+
+    if isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
+            _collect_codepoints_from_value(item, live_codepoints)
+
+
+def collect_live_codepoints(engine) -> set[int]:
+    """Return the set of sprite codepoints still reachable from the loaded engine."""
+    live_codepoints: set[int] = set()
+    seen_maps: set[int] = set()
+    seen_entities: set[int] = set()
+    seen_items: set[int] = set()
+
+    def _add_item(item) -> None:
+        if item is None:
+            return
+        item_id = id(item)
+        if item_id in seen_items:
+            return
+        seen_items.add(item_id)
+
+        for attr_name in ("char", "base_char", "equip_sprite_cp"):
+            _collect_codepoints_from_value(getattr(item, attr_name, None), live_codepoints)
+
+        container = getattr(item, "container", None)
+        for nested in list(getattr(container, "items", []) or []) if container is not None else []:
+            _add_item(nested)
+
+    def _add_entity(entity) -> None:
+        if entity is None:
+            return
+        entity_id = id(entity)
+        if entity_id in seen_entities:
+            return
+        seen_entities.add(entity_id)
+
+        for attr_name in ("char", "base_char", "_portrait_cp"):
+            _collect_codepoints_from_value(getattr(entity, attr_name, None), live_codepoints)
+
+        equipment = getattr(entity, "equipment", None)
+        for group_name in ("grasped_items", "equipped_items", "body_part_coverage"):
+            for item in list(getattr(equipment, group_name, {}).values()) if equipment is not None else []:
+                _collect_codepoints_from_value(getattr(item, "equip_sprite_cp", None), live_codepoints)
+                _collect_codepoints_from_value(getattr(item, "char", None), live_codepoints)
+
+        inventory = getattr(entity, "inventory", None)
+        for item in list(getattr(inventory, "items", []) or []) if inventory is not None else []:
+            _add_item(item)
+
+        container = getattr(entity, "container", None)
+        for item in list(getattr(container, "items", []) or []) if container is not None else []:
+            _add_item(item)
+
+    def _add_map(game_map) -> None:
+        if game_map is None:
+            return
+        map_id = id(game_map)
+        if map_id in seen_maps:
+            return
+        seen_maps.add(map_id)
+
+        tiles = getattr(game_map, "tiles", None)
+        if tiles is not None:
+            try:
+                _collect_codepoints_from_value(tiles["dark"]["ch"], live_codepoints)
+                _collect_codepoints_from_value(tiles["light"]["ch"], live_codepoints)
+            except Exception:
+                pass
+
+        for entity in list(getattr(game_map, "entities", []) or []):
+            _add_entity(entity)
+
+        for anim_attr in ("river_anim", "beach_water_anim", "dungeon_water_anim"):
+            _collect_codepoints_from_value(getattr(game_map, anim_attr, None), live_codepoints)
+
+    _add_map(getattr(engine, "game_map", None))
+
+    game_world = getattr(engine, "game_world", None)
+    if game_world is not None:
+        for stack_name in ("up_stack", "down_stack"):
+            for entry in list(getattr(game_world, stack_name, []) or []):
+                if isinstance(entry, tuple) and entry:
+                    _add_map(entry[0])
+
+        for cached in (getattr(game_world, "dungeon_cache", {}) or {}).values():
+            if isinstance(cached, tuple) and cached:
+                _add_map(cached[0])
+
+    animation_queue = getattr(engine, "animation_queue", None)
+    if animation_queue is not None:
+        for animation in list(animation_queue):
+            _add_entity(getattr(animation, "entity", None))
+            _collect_codepoints_from_value(getattr(animation, "frames", None), live_codepoints)
+            _collect_codepoints_from_value(getattr(animation, "frame_cp", None), live_codepoints)
+
+    return live_codepoints
+
+
+def prune_unused_composites(engine) -> dict:
+    """Drop composite cache entries that are no longer reachable from *engine*."""
+    live_codepoints = collect_live_codepoints(engine)
+    pruned_entries = 0
+
+    for key, cp in list(_composite_cache.items()):
+        if cp not in live_codepoints:
+            _composite_free_list.append(cp)
+            del _composite_cache[key]
+            pruned_entries += 1
+
+    return {
+        "live_codepoints": len(live_codepoints),
+        "pruned_entries": pruned_entries,
+        "remaining_cache_entries": len(_composite_cache),
+        "free_slots": len(_composite_free_list),
+    }
+
+
+def invalidate_all_puddle_sprites() -> None:
+    """Clear the puddle sprite content-cache so every active blood tile
+    regenerates its pixels on the next _update_tile_graphics call.
+
+    The per-position SLOT registry (_puddle_pos_slot / _tile_puddle_pos_slot)
+    is preserved, so regeneration reuses existing codepoints in-place rather
+    than consuming new slots.  Call this after changing the puddle generation
+    algorithm at runtime (e.g. adjusting FADE_WIDTH) to see the effect
+    immediately on already-placed blood tiles.
+    """
+    _puddle_sprite_cache.clear()
 
 
 def refresh_actor_sprite(actor) -> None:
@@ -444,14 +1103,17 @@ def compose_dungeon_water(floor_cp: int, water_cp: int, neighbor_mask: int) -> s
         a = water_alpha[:, :, np.newaxis]                      # broadcast over RGBA
         result = np.clip(floor_f * (1.0 - a) + water_f * a, 0, 255).astype(np.uint8)
 
-    cp = _composite_next
+    if _composite_free_list:
+        cp = _composite_free_list.pop()
+    else:
+        cp = _composite_next
+        _composite_next += 1
     if _deferred_mode:
         _deferred_pixel_store[cp] = result
         _deferred_tiles.append((cp, result))
     else:
         _tileset.set_tile(cp, result)
     _composite_cache[key] = cp
-    _composite_next += 1
     return chr(cp)
 
 
@@ -737,7 +1399,8 @@ def compose_portrait(actor) -> str | None:
         return None
 
     # ── Cache key ─────────────────────────────────────────────────────────────
-    import hashlib, json as _json
+    import hashlib
+    import json as _json
     _cache_fields = ["skin_tone", "gender", "hair_color", "hair_style",
                      "facial_hair", "torso", "legs", "feet", "head", "accessories"]
     cache_data  = {k: know.get(k) for k in _cache_fields}
@@ -893,8 +1556,13 @@ def compose_portrait(actor) -> str | None:
     canvas.save(out_path, "PNG")
     print(f"[portrait] {getattr(actor, 'name', '?')} → {cache_hash}.png | layers: {', '.join(_log)}")
     actor._portrait_path = out_path
-
-    actor.char = compose_sprite(composite_sprite_layers, layer_tints=composite_sprite_tints)
+    # Check if actor is guide
+    if not actor.name == "The Guide":
+        actor.base_char = compose_sprite(composite_sprite_layers, layer_tints=composite_sprite_tints)
+        if hasattr(actor, 'equipment'):
+            refresh_actor_sprite(actor)
+        else:
+            actor.char = actor.base_char
 
     return out_path
 
@@ -921,3 +1589,97 @@ def save_composites_sheet(path: str = "RP/composites.png") -> None:
         sheet.paste(tile_img, (col * TILE_W, row * TILE_H))
     sheet.save(path)
     print(f"[sprite_manager] Saved {count} composite tile(s) to '{path}'.")
+
+
+def save_full_atlas(path: str = "RP/full_atlas.png") -> None:
+    """Dump every assigned tileset codepoint to a labelled PNG grid.
+
+    Covers the full private-use range from EXTRAS_START_CP (0xE000) up to
+    (but not including) _composite_next, so it shows:
+      - Extras sheet tiles  (0xE000–0xEEFF)
+      - Composite sprites   (0xEF00 onwards)
+    Tiles are arranged left-to-right, top-to-bottom in rows of 32.
+    A 1-pixel grey border is drawn around each tile and the codepoint is
+    printed as a 4-char hex label in the top-left corner of each cell.
+    Free-list slots (recycled) are tinted red so you can see churn.
+    """
+    if _tileset is None:
+        print("[sprite_manager] Tileset not loaded — nothing to dump.")
+        return
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        print("[sprite_manager] Pillow not installed — cannot save atlas.")
+        return
+
+    free_set = set(_composite_free_list)
+
+    COLS = 32
+    BORDER = 1
+    CELL_W = TILE_W + BORDER * 2
+    CELL_H = TILE_H + BORDER * 2
+
+    start_cp = EXTRAS_START_CP
+    end_cp   = _composite_next          # exclusive upper bound
+    total    = end_cp - start_cp
+    if total <= 0:
+        print("[sprite_manager] No codepoints in range to dump.")
+        return
+
+    rows = (total + COLS - 1) // COLS
+    img_w = COLS * CELL_W
+    img_h = rows * CELL_H
+
+    sheet = Image.new("RGBA", (img_w, img_h), (20, 20, 20, 255))
+    draw  = ImageDraw.Draw(sheet)
+
+    try:
+        font = ImageFont.truetype("C:/Windows/Fonts/cour.ttf", 7)
+    except Exception:
+        font = ImageFont.load_default()
+
+    for idx in range(total):
+        cp    = start_cp + idx
+        col   = idx % COLS
+        row   = idx // COLS
+        px    = col * CELL_W + BORDER
+        py    = row * CELL_H + BORDER
+
+        try:
+            pixels = _tileset.get_tile(cp)
+            tile   = Image.fromarray(pixels, "RGBA")
+        except Exception:
+            tile = Image.new("RGBA", (TILE_W, TILE_H), (0, 0, 0, 0))
+
+        # Red tint for free-list (recycled, content may be stale)
+        if cp in free_set:
+            r, g, b, a = tile.split()
+            r = r.point(lambda v: min(255, v + 120))
+            g = g.point(lambda v: max(0,   v - 60))
+            b = b.point(lambda v: max(0,   v - 60))
+            tile = Image.merge("RGBA", (r, g, b, a))
+
+        # Checkerboard background so transparency is visible
+        check = Image.new("RGBA", (TILE_W, TILE_H), (0, 0, 0, 0))
+        cd = ImageDraw.Draw(check)
+        sq = 4
+        for cy in range(0, TILE_H, sq):
+            for cx in range(0, TILE_W, sq):
+                c = (60, 60, 60, 255) if (cx // sq + cy // sq) % 2 == 0 else (40, 40, 40, 255)
+                cd.rectangle([cx, cy, cx + sq - 1, cy + sq - 1], fill=c)
+        combined = Image.alpha_composite(check, tile)
+        sheet.paste(combined, (px, py))
+
+        # Border
+        border_colour = (180, 60, 60) if cp in free_set else (80, 80, 80)
+        draw.rectangle([col * CELL_W, row * CELL_H,
+                        col * CELL_W + CELL_W - 1, row * CELL_H + CELL_H - 1],
+                       outline=border_colour)
+
+        # Hex label — prefix EXT (extras sheet) or CMP (composite)
+        label = f"{'E' if cp < COMPOSITE_START_CP else 'C'}{cp:04X}"
+        draw.text((px, py), label, fill=(220, 220, 100, 220), font=font)
+
+    sheet.save(path)
+    print(f"[sprite_manager] Full atlas ({total} tiles, {rows} rows) saved to '{path}'.")
+    print(f"  Range: 0x{start_cp:04X}–0x{end_cp - 1:04X}   Free slots (red): {len(free_set)}")

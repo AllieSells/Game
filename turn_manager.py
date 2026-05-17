@@ -19,13 +19,15 @@ add it to the process_player_turn_end() method or create a new helper method.
 from __future__ import annotations
 
 import random
+import heapq
+import time
+from balance_config import MANA_REGEN_CHANCE, MANA_REGEN_FRACTION
 from typing import TYPE_CHECKING
 
 import color
-from components.effect import Effect
-from liquid_system import LiquidSystem, LiquidType
-from text_utils import orange, red
+from liquid_system import LiquidType
 import sounds
+import sprite_manager
 
 if TYPE_CHECKING:
     from engine import Engine
@@ -42,6 +44,14 @@ class TurnManager:
         self.total_player_moves = 0  # Track total player moves for hunger system
         self.turn_queue = []  # List of (initiative, actor) tuples
         self.current_turn_actor = None
+        # Pruning budget controls. Full sprite prune can be expensive because it
+        # traverses cached floors and entities; avoid running it every turn.
+        self._prune_check_interval_turns = 40
+        self._last_prune_turn = -10_000
+
+    def _is_sleeping(self, actor) -> bool:
+        from components.effect import has_effect_name
+        return has_effect_name(actor, "Sleep")
     
     def process_pre_player_turn(self) -> BaseEventHandler | None:
         """Process all actors who should act before the player based on initiative."""
@@ -50,25 +60,33 @@ class TurnManager:
     def _process_turn_queue_until_player(self) -> BaseEventHandler | None:
         """Process turns until it's the player's turn or queue is empty."""
         self._rebuild_turn_queue()
+        ai_elapsed = 0.0
         
         while self.turn_queue:
             # Get the next actor to act (highest initiative)
-            initiative, actor = self.turn_queue.pop(0)
+            initiative, actor = self.turn_queue.pop()
             
             # If it's the player's turn, stop here
             if actor == self.engine.player:
                 return None
                 
             # Process enemy turn
-            if actor.ai:
+            if actor.ai and not self.engine.is_actor_asleep(actor):
                 try:
+                    _ai_start = time.perf_counter()
                     actor.ai.perform()
+                    ai_elapsed += time.perf_counter() - _ai_start
                     actor.initiative_counter -= 100  # Consume action
-                except Exception:
+                except Exception as e:
+                    print(f"ERROR: Actor {actor.name} failed to perform action: {e}")
                     actor.initiative_counter -= 100  # Still consume turn
+            elif actor.ai:
+                actor.initiative_counter -= 100  # Sleep still burns the turn
                     
 
         
+        if ai_elapsed > 0.0:
+            self.engine.profile_external_ms("ai_preturn", ai_elapsed * 1000.0)
         return None
     
     def _rebuild_turn_queue(self) -> None:
@@ -85,8 +103,8 @@ class TurnManager:
                 if actor.initiative_counter >= 100:
                     self.turn_queue.append((actor.initiative_counter, actor))
         
-        # Sort by initiative (highest first)
-        self.turn_queue.sort(key=lambda x: x[0], reverse=True)
+        # Sort ascending and pop() from the end for O(1) retrieval of highest initiative.
+        self.turn_queue.sort(key=lambda x: x[0])
     
     def process_player_turn_end(self) -> BaseEventHandler | None:
         """
@@ -95,6 +113,10 @@ class TurnManager:
         Returns:
             BaseEventHandler if we need to switch handlers (like GameOver), None otherwise.
         """
+        # Refresh passive ring effects first so expiring buffs are extended
+        # before their tick/message phase runs.
+        self._handle_equipped_ring_effects()
+
         # Handle all effects on entities
 
         for actor in list(self.engine.game_map.actors):
@@ -107,7 +129,8 @@ class TurnManager:
                     get_message = getattr(effect, "get_message", None)
                     if callable(get_message):
                         message = get_message()
-                    if message:
+                    # Effect UI messages are player-facing; suppress NPC/enemy spam.
+                    if message and actor.is_player:
                         message_text = message[0]
                         message_color = message[1]
                         self.engine.message_log.add_message(message_text, message_color)
@@ -130,8 +153,8 @@ class TurnManager:
         # - While saturation is high, hunger decreases slowly. As saturation depletes
         #   the hunger decrease ramps up to the full rate when saturation == 0.
         player = self.engine.player
-        base_hunger_decrease = 0.13
-        saturation_decay = 0.22  # how quickly saturation is consumed per tick
+        base_hunger_decrease = 0.05   # hunger drain once saturation is gone
+        saturation_decay = 0.25        # saturation consumed per player turn; stew (+100) lasts ~100 turns
 
         # Drain saturation first (can't go below 0)
         player.saturation = max(0.0, player.saturation - saturation_decay)
@@ -179,6 +202,29 @@ class TurnManager:
         self._process_body_part_coating_evaporation()
         self._process_body_part_liquid_coating()
         self._process_body_part_liquid_effects()
+
+        # Keep composite sprite pressure bounded by reclaiming entries that are
+        # no longer reachable from the current engine state.
+        try:
+            # Check pressure cheaply every turn, but only run the expensive prune
+            # pass periodically while pressure remains high.
+            slot_info = sprite_manager.get_composite_slot_usage()
+            slots_allocated = int(slot_info.get("slots_allocated", 0) or 0)
+            compose_entries = int(slot_info.get("compose_cache_entries", 0) or 0)
+
+            should_prune = (
+                slots_allocated >= 512
+                and compose_entries > 32
+                and (self.total_player_moves - self._last_prune_turn) >= self._prune_check_interval_turns
+            )
+
+            if should_prune:
+                _prune_start = time.perf_counter()
+                sprite_manager.prune_unused_composites(self.engine)
+                self._last_prune_turn = self.total_player_moves
+                self.engine.profile_external_ms("sprite_prune", (time.perf_counter() - _prune_start) * 1000.0)
+        except Exception:
+            pass
 
 
         
@@ -277,36 +323,34 @@ class TurnManager:
             traceback.print_exc()
     def _update_player_state(self) -> None:
         """Update player state"""
-        if self.engine.player.hunger <= 25.0:
-            # Check if already has hunger effect
-            has_hunger = any(getattr(e, "type", "") == ("Hungry") or getattr(e, "type", "") == ("Starving") for e in self.engine.player.effects)
-            if not has_hunger:
+        from components.effect import HungryEffect, StarvingEffect
+        player = self.engine.player
+        player_saturation = getattr(player, 'saturation', 0.0)
+
+        # Remove SaturatedEffect when saturation drops below the well-fed threshold.
+        if player_saturation < 75.0:
+            has_saturated = any(getattr(e, 'type', '') == 'Saturated' for e in player.effects)
+            if has_saturated:
+                player.remove_effect('Saturated')
+
+        # Suppress hunger/starving while saturation is still providing a buffer.
+        if player_saturation > 0.0:
+            return
+
+        if player.hunger <= 25.0:
+            has_hunger_or_starving = any(
+                getattr(e, "type", "") in ("Hungry", "Starving")
+                for e in player.effects
+            )
+            if not has_hunger_or_starving:
                 self.engine.message_log.add_message("You feel hungry.", color.yellow)
-                
-                self.engine.player.add_effect(
-                    effect = Effect(
-                                name=orange("Hungry"),
-                                duration=None,
-                                description="Causes periodic damage due to starvation.",
-                                type="Hungry"
-                    )
-                )
-        if self.engine.player.hunger <= 10.0:
-            # Already starving?
-            has_starving = any(getattr(e, "type", "") == ("Starving") for e in self.engine.player.effects)
+                player.add_effect(HungryEffect())
+        if player.hunger <= 10.0:
+            has_starving = any(getattr(e, "type", "") == "Starving" for e in player.effects)
             if not has_starving:
                 self.engine.message_log.add_message("You are starving!", color.red)
-                self.engine.player.add_effect(
-                    effect=Effect(
-                        name=red("Starving"),
-                        duration=None,
-                        description="Causes severe damage due to starvation.",
-                        type="Starving"
-                ))
-            # Remove hungry effect if present
-            has_hunger = any(getattr(e, "type", "") == "Hungry" for e in self.engine.player.effects)
-            if has_hunger:
-                self.engine.player.remove_effect("Hungry")
+                player.add_effect(StarvingEffect())
+            player.remove_effect("Hungry")
     def _handle_equipment_durability(self) -> BaseEventHandler | None:
         """Handle equipment that degrades over time (like torches)."""
         try:
@@ -341,21 +385,52 @@ class TurnManager:
 
     
     def _process_remaining_turns(self) -> None:
-        """Process any actors who still have initiative to act after the player."""
+        """Process any actors who still have initiative to act after the player.
+        
+        Actors may act multiple times in a single turn if they have speed >= 100
+        and still have >= 100 initiative remaining after each action.
+        """
         # Consume player's action
         self.engine.player.initiative_counter -= 100
 
-        # Use the queue already built in _process_turn_queue_until_player (do NOT rebuild
-        # here - that would add speed a second time and double every actor's accumulation).
-        for initiative, actor in list(self.turn_queue):
-            if actor != self.engine.player and actor.ai:
-                try:
-                    actor.ai.perform()
-                    actor.initiative_counter -= 100
-                except Exception:
-                    actor.initiative_counter -= 100
+        # Build a max-heap once, then requeue actors as they keep initiative.
+        # This avoids repeated full scans of all actors on deep, crowded floors.
+        ai_elapsed = 0.0
+        action_heap: list[tuple[int, int, object]] = []
+        tie_breaker = 0
+        for actor in self.engine.game_map.actors:
+            if actor.is_alive and actor != self.engine.player and actor.initiative_counter >= 100:
+                heapq.heappush(action_heap, (-int(actor.initiative_counter), tie_breaker, actor))
+                tie_breaker += 1
+
+        while action_heap:
+            _neg_init, _seq, next_actor = heapq.heappop(action_heap)
+
+            if (not getattr(next_actor, "is_alive", False)
+                    or next_actor == self.engine.player
+                    or int(getattr(next_actor, "initiative_counter", 0)) < 100):
+                continue
+
+            try:
+                if not self.engine.is_actor_asleep(next_actor):
+                    _ai_start = time.perf_counter()
+                    next_actor.ai.perform()
+                    ai_elapsed += time.perf_counter() - _ai_start
+            except Exception:
+                pass
+            finally:
+                next_actor.initiative_counter -= 100
+
+            if next_actor.is_alive and next_actor != self.engine.player and next_actor.initiative_counter >= 100:
+                heapq.heappush(
+                    action_heap,
+                    (-int(next_actor.initiative_counter), tie_breaker, next_actor),
+                )
+                tie_breaker += 1
 
         self.turn_queue = []  # Clear – next round will be built fresh
+        if ai_elapsed > 0.0:
+            self.engine.profile_external_ms("ai_postturn", ai_elapsed * 1000.0)
     
     def _update_fov(self) -> None:
         """Update the player's field of view."""
@@ -369,11 +444,46 @@ class TurnManager:
         player_effects = getattr(self.engine.player, "effects", [])
         has_darkness = any(isinstance(e, Darkness) for e in player_effects)
 
-        if random.random() < 0.10:
-            # 10% chance to recover 10% of max mana
-            mana_recovered = int(self.engine.player.mana_max * 0.10)
+
+
+        if random.random() < max(0.0, min(1.0, MANA_REGEN_CHANCE + self.engine.player.equipment.mana_regen)):
+            # Frequent but smaller mana ticks smooth out caster pacing.
+            mana_recovered = max(1, int(self.engine.player.mana_max * (MANA_REGEN_FRACTION + self.engine.player.equipment.mana_regen)))
             self.engine.debug_log(f"DEBUG: Recovered {mana_recovered} mana due to natural regeneration.", handler=self.__class__.__name__, event="ManaRecovery")
             self.engine.player.mana = min(self.engine.player.mana + mana_recovered, self.engine.player.mana_max)
+
+        # Non-player mana regen (casters and any AI with mana pools).
+        for actor in self.engine.game_map.actors:
+            if actor == self.engine.player:
+                continue
+            actor_mana_max = int(getattr(actor, "mana_max", 0) or 0)
+            actor_mana = int(getattr(actor, "mana", 0) or 0)
+            if actor_mana_max <= 0 or actor_mana >= actor_mana_max:
+                continue
+            if random.random() < MANA_REGEN_CHANCE:
+                mana_recovered = max(1, int(actor_mana_max * MANA_REGEN_FRACTION))
+                actor.mana = min(actor_mana + mana_recovered, actor_mana_max)
+        
+        if random.random() < self.engine.player.passive_healing * 2:
+            player_effects = getattr(self.engine.player, 'effects', [])
+            effect_types = {getattr(e, 'type', '') for e in player_effects}
+            player_saturation = getattr(self.engine.player, 'saturation', 0.0)
+            if 'Starving' in effect_types:
+                pass  # Starvation negates passive healing
+            elif 'Hungry' in effect_types:
+                # Half healing while hungry
+                heal_amount = max(1, int(self.engine.player.fighter.max_hp * self.engine.player.passive_healing * 0.5))
+                self.engine.debug_log(f"DEBUG: Healed {heal_amount} HP (halved, hungry).", handler=self.__class__.__name__, event="PassiveHealing")
+                self.engine.player.fighter.heal(heal_amount)
+            elif player_saturation >= 75.0:
+                # Well-fed: enhanced regen (5× amount, 2× chance already implicit via roll)
+                heal_amount = max(1, int(self.engine.player.fighter.max_hp * self.engine.player.passive_healing * 5))
+                self.engine.debug_log(f"DEBUG: Healed {heal_amount} HP (well-fed bonus).", handler=self.__class__.__name__, event="PassiveHealing")
+                self.engine.player.fighter.heal(heal_amount)
+            else:
+                heal_amount = max(1, int(self.engine.player.fighter.max_hp * self.engine.player.passive_healing))
+                self.engine.debug_log(f"DEBUG: Healed {heal_amount} HP due to passive healing.", handler=self.__class__.__name__, event="PassiveHealing")
+                self.engine.player.fighter.heal(heal_amount)
         
         if has_darkness:
             # Player is in darkness; lose lucidity
@@ -410,7 +520,7 @@ class TurnManager:
     def _handle_game_state_checks(self) -> BaseEventHandler | None:
         """Check for game state changes that require handler switches."""
         # Import here to avoid circular imports
-        from input_handlers import GameOverEventHandler, LevelUpEventHandler
+        from input_handlers import GameOverEventHandler
         
         if not self.engine.player.is_alive:
             sounds.stop_all_music()
@@ -424,3 +534,26 @@ class TurnManager:
             return None
 
         return None
+
+    def _handle_equipped_ring_effects(self) -> None:
+        """Apply effects from equipped rings, honoring per-ring cooldowns."""
+        for actor in list(self.engine.game_map.actors):
+            equipment = getattr(actor, "equipment", None)
+            if not equipment:
+                continue
+
+            for item in list(getattr(equipment, "equipped_items", {}).values()):
+                if not item:
+                    continue
+                equippable = getattr(item, "equippable", None)
+                if not equippable:
+                    continue
+                eq_type = getattr(equippable, "equipment_type", None)
+                if not eq_type or getattr(eq_type, "name", "") != "RING":
+                    continue
+
+                try:
+                    equippable.apply_effect(actor)
+                except Exception:
+                    # Ring effects are optional; never crash turn flow.
+                    pass

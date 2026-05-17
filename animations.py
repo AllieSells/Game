@@ -1,8 +1,8 @@
 import random
 from tcod.map import compute_fov
 import tcod
-from tcod import libtcodpy
 import color
+from gpu_stack import DripParticle as DripParticle, EmberParticle as EmberParticle, SmokeCloudParticle as SmokeCloudParticle
 
 class ThrowAnimation:
     def __init__(self, path, item_char="|", item_color=(255, 255, 0)):
@@ -31,6 +31,7 @@ class ThrowAnimation:
                 game_map.screen_print_lit(console, x, y, self.item_char, fg=self.item_color)
                 
                 # Add trail effect - show previous positions fading
+                """
                 for i in range(1, min(3, current_index + 1)):
                     if current_index - i >= 0:
                         trail_x, trail_y = self.path[current_index - i]
@@ -43,7 +44,7 @@ class ThrowAnimation:
                                 max(50, self.item_color[2] - i * 60)
                             )
                             game_map.screen_print_lit(console, trail_x, trail_y, "·", fg=fade_color)
-
+                """   # Needs rework TODO
         self.current_frame += 1
         self.frames -= 1
 
@@ -119,8 +120,6 @@ class ExplosionAnimation:
 
         if game_map.visible[x, y]:
             # Animate explosion with expanding circles
-            import math
-            
             progress = (10 - self.frames) / 10.0  # 0.0 to 1.0 progress through animation
             radius = int(progress * 3)  # Expand from 0 to 3 tiles
             
@@ -152,8 +151,6 @@ class SplashAnimation:
 
         if game_map.visible[x, y]:
             # Animate splash with expanding circles
-            import math
-            
             progress = (10 - self.frames) / 10.0  # 0.0 to 1.0 progress through animation
             radius = int(progress * 2)  # Expand from 0 to 2 tiles
             
@@ -406,10 +403,6 @@ class FireballAnimation:
         center_x = int(self.path[0][0])
         center_y = int(self.path[0][1])
 
-        progress = 1.0 - (self.frames / float(max(1, self.frames + 1)))
-
-        life_index = max(0, (self.frames - 1))
-
         total_frames = 6
         current_radius = int(self.base_radius + (self.max_radius - self.base_radius) * (1 - (self.frames / total_frames)))
         current_radius = max(self.base_radius, min(self.max_radius, current_radius))
@@ -523,9 +516,12 @@ class FlameAnimation:
             self.frames -= 1
             return
         if game_map.visible[x, y]:
+            import sprite_manager
             chars = [chr(0xE110), chr(0xE111), chr(0xE112), chr(0xE113), chr(0xE114), chr(0xE115)]
             char = chars[(10 - self.frames) // 2 % len(chars)]
-            game_map.screen_print(console, x, y, char, fg=(255, 255, 255))
+            tile_cp = int(game_map.tiles[x, y]["light"]["ch"])
+            composite_char = sprite_manager.compose_entity_tile(tile_cp, ord(char), (255, 255, 255))
+            game_map.screen_print(console, x, y, composite_char, fg=(255, 255, 255))
         self.frames -= 1
 
 
@@ -806,7 +802,6 @@ class GlobalWaterAnimation:
         idx = (self._tick // self.FRAME_DURATION) % len(sequence)
         char_cp = ord(self.CHARS[sequence[idx]])
         try:
-            import numpy as np
             origin_x, origin_y, view_width, view_height = game_map.get_viewport(console)
             x_slice = slice(origin_x, origin_x + view_width)
             y_slice = slice(origin_y, origin_y + view_height)
@@ -834,7 +829,6 @@ class GlobalOceanAnimation:
         idx = (self._tick // self.FRAME_DURATION) % len(self.CHARS)
         char_cp = ord(self.CHARS[idx])
         try:
-            import numpy as np
             origin_x, origin_y, view_width, view_height = game_map.get_viewport(console)
             x_slice = slice(origin_x, origin_x + view_width)
             y_slice = slice(origin_y, origin_y + view_height)
@@ -879,7 +873,6 @@ class GlobalBeachWaterAnimation:
             return
         idx = (self._tick // self.FRAME_DURATION) % 8
         try:
-            import numpy as np
             origin_x, origin_y, view_width, view_height = game_map.get_viewport(console)
             for (x, y), seq in anim_map.items():
                 vx = x - origin_x
@@ -970,5 +963,3 @@ class GlobalDungeonWaterAnimation:
 # --------------------------------- #
 # Physics classes now live in gpu_stack.py alongside their render passes.
 # Re-exported here so existing code that imports from animations still works.
-
-from gpu_stack import DripParticle, SmokeCloudParticle, EmberParticle
