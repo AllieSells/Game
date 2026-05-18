@@ -16,7 +16,7 @@ import random
 from roman import toRoman
 
 class Spell():
-    def __init__(self, name, duration, description, damage, mana_cost, components, spell_tags, school, arcana_level = 1, cast_xp = 5, radius = 0):
+    def __init__(self, name, duration, description, damage, mana_cost, components, spell_tags, school, arcana_level = 1, cast_xp = 5, radius = 0, max_spell_level: int = 5):
         self.name = name
         self.duration = duration
         self.description = description
@@ -28,6 +28,7 @@ class Spell():
         self.arcana_level = arcana_level
         self.cast_xp = cast_xp
         self.radius = radius
+        self.max_spell_level = max(1, int(max_spell_level))
         self.spell_level = 1  # tracks how many times spell has been upgraded
 
     def calculate_arcana_modifiers(self, caster):
@@ -73,9 +74,11 @@ class Spell():
 
     def level_up_spell(self, level: int, entity=None) -> None:
         try:
-            target_level = max(1, int(level or 1))
+            requested_level = max(1, int(level or 1))
         except Exception:
             return
+
+        target_level = min(requested_level, self.max_spell_level)
 
         if target_level <= self.spell_level:
             return
@@ -114,7 +117,8 @@ class IronskinSpell(Spell):
             spell_tags=["ironskin"],
             school='abjuration',
             arcana_level = 2,
-            cast_xp = 5
+            cast_xp = 5,
+            max_spell_level=5
         )
     def get_description(self, caster=None):
         return f"Grants x1.5 defense for {self.duration} turns."
@@ -123,7 +127,7 @@ class IronskinSpell(Spell):
         consumer = action.entity
 
         self._spend_mana_and_award_xp(consumer)
-        self._apply_effect(consumer, effect.IronskinEffect(duration=self.duration), action)
+        self._apply_effect(consumer, effect.IronskinEffect(duration=self.duration, multiplier=(self.spell_level * 0.5)), action)
         sounds.play_confusion_sound()  # temp
         action.engine.message_log.add_message(
             "Your skin hardens like iron!", color.light_gray
@@ -142,7 +146,8 @@ class InvisibilitySpell(Spell):
             spell_tags=["invisibility"],
             school="illusion",
             arcana_level = 2,
-            cast_xp=5
+            cast_xp=5,
+            max_spell_level=5
         )
 
     def get_description(self, caster=None):
@@ -172,7 +177,8 @@ class DarkvisionSpell(Spell):
             spell_tags=["darkvision"],
             school="transmutation",
             arcana_level = 2,
-            cast_xp=5
+            cast_xp=5,
+            max_spell_level=5
         )
 
     def get_description(self, caster=None):
@@ -200,7 +206,8 @@ class TeleportSpell(Spell):
             spell_tags=["teleport"],
             school="conjuration",
             arcana_level = 3,
-            cast_xp = 10
+            cast_xp = 10,
+            max_spell_level=1
 
         )
     
@@ -277,7 +284,7 @@ class PoisonSpraySpell(Spell):
         super().__init__(
             name="Poison Spray",
             description="Hurl a glob of acid that damages a single target.",
-            damage=3,
+            damage=1,
             duration=0,
             mana_cost=5,
             components=['V', 'S'],
@@ -285,7 +292,8 @@ class PoisonSpraySpell(Spell):
             school="conjuration",
             arcana_level = 2,
             cast_xp = 5,
-            radius = 1
+            radius = 1,
+            max_spell_level=5
         )
 
     def get_description(self, caster=None):
@@ -346,7 +354,8 @@ class SleepSpell(Spell):
             spell_tags=["sleep", "ranged"],
             school="enchantment",
             arcana_level = 2,
-            cast_xp = 5
+            cast_xp = 5,
+            max_spell_level=3
         )
 
     def get_description(self, caster=None):
@@ -387,6 +396,72 @@ class SleepSpell(Spell):
             sounds.play_heal_spell_sound()
             return
         
+class ClairvoyanceSpell(Spell):
+    def __init__(self):
+        super().__init__(
+            name="Clairvoyance",
+            description="Find the path to the nearest exit",
+            damage=0,
+            duration=0,
+            mana_cost=15,
+            components=['V', 'S'],
+            spell_tags=["clairvoyance"],
+            school="divination",
+            arcana_level = 3,
+            cast_xp = 10,
+            max_spell_level=1
+        )
+    def get_description(self, caster=None):
+        return "Find the path to the nearest exit."
+    
+    def activate(self, action: actions.SpellAction) -> None:
+        consumer = action.entity
+        gm = action.engine.game_map
+
+        # Find nearest exit
+        exit_locations = getattr(gm, "downstairs_location", None)
+        if not exit_locations:
+            action.engine.message_log.add_message(
+                "There is no exit to find!", color.impossible
+            )
+            return
+
+        # Support either a single (x, y) tuple or an iterable of (x, y) tuples.
+        if (
+            isinstance(exit_locations, tuple)
+            and len(exit_locations) == 2
+            and all(isinstance(v, int) for v in exit_locations)
+        ):
+            nearest_exit = exit_locations
+        else:
+            nearest_exit = min(exit_locations, key=lambda loc: consumer.distance(*loc))
+
+        # Reveal path to exit - create custom walkability that includes doors
+        walkable_with_doors = gm.tiles['walkable'].copy()
+        # Mark all door tiles as walkable for pathfinding
+        door_tiles = (gm.tiles['name'] == 'Door') | (gm.tiles['name'] == 'Open Door') | (gm.tiles['name'] == 'Locked Door')
+        walkable_with_doors = walkable_with_doors | door_tiles
+        
+        path = tcod.path.AStar(walkable_with_doors, diagonal=0)
+        path_result = path.get_path(consumer.x, consumer.y, nearest_exit[0], nearest_exit[1])
+        if not path_result:
+            action.engine.message_log.add_message(
+                "No path to the exit could be found!", color.impossible
+            )
+            return
+        # Reveal the path on the map
+        #for x, y in path_result:
+            #gm.visible[x, y] = True
+            #gm.explored[x, y] = True
+        action.engine.animation_queue.append(
+            gpu_stack.RevealParticle(position=path_result[0], path=path_result, color=(0, 255, 255))
+        )
+        consumer.mana -= self.mana_cost
+        self.give_xp(consumer)
+        action.engine.message_log.add_message(
+            "Your vision extends to reveal the path to the exit!", color.cyan)
+        sounds.play_darkvision_sound()
+
 class FireballSpell(Spell):
     def __init__(self):
         super().__init__(
@@ -400,7 +475,8 @@ class FireballSpell(Spell):
             school="evocation",
             arcana_level = 3,
             cast_xp = 15,
-            radius = 2
+            radius = 2,
+            max_spell_level=5
         )
 
     def get_description(self, caster=None):
@@ -455,7 +531,8 @@ class LightSpell(Spell):
             school="evocation",
             arcana_level = 1,
             cast_xp = 1,
-            radius = 5
+            radius = 5,
+            max_spell_level=5
         )
     def get_description(self, caster=None):
         return f"Summon a floating orb of light that illuminates the area for {self.duration} turns."
@@ -504,7 +581,8 @@ class HealingWordSpell(Spell):
             spell_tags=["healing", "ranged"],
             school="evocation",
             arcana_level = 1,
-            cast_xp = 5
+            cast_xp = 5,
+            max_spell_level=5
         )
 
 
@@ -565,7 +643,8 @@ class InflictWoundsSpell(Spell):
             spell_tags=["necromancy", "ranged"],
             school="necromancy",
             arcana_level = 1,
-            cast_xp = 5
+            cast_xp = 5,
+            max_spell_level=4
         )
 
     def get_description(self, caster=None):

@@ -5,6 +5,12 @@ initial_time = time.time() # Track total loading
 
 
 import os
+os.environ["SDL_APP_NAME"] = "DoA: Dungeons of Ærrok"
+os.environ["SDL_APP_ID"] = "com.loxen.doa"
+os.environ["SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR"] = "0"  
+os.environ["SDL_VIDEO_ALLOW_SCREENSAVER"] = "0"
+os.environ["SDL_HINT_RENDER_DRIVER"] = "D3D11"
+# Set version
 os.environ["SDL_RENDER_SCALE_QUALITY"] = "1"  #  filtering when tiles are scaled
 import warnings
 import sys
@@ -131,6 +137,7 @@ from gpu_stack import (
     VHSGlitchAnimation,
     VideoModeSwitchAnimation,
 )
+import render_boot_screen
 
 # --- Procedural scanlines ---
 renderer = context.sdl_renderer
@@ -169,6 +176,46 @@ game_view_height = game_height // 2
 
 game_console = tcod.console.Console(game_view_width, game_view_height, order="F")
 ui_console = tcod.console.Console(screen_width, screen_height, order="F")
+
+# Initialize tileset atlas and console renderer for later use in main()
+tileset_atlas = tcod.render.SDLTilesetAtlas(renderer, tileset)
+ui_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
+
+# Load settings before GPU initialization
+def load_settings():
+    """Load settings from JSON file."""
+    import json  # Import here if not already imported
+    try:
+        with open(get_data_path("json/settings.json"), 'r') as f:
+            content = f.read()
+            # Remove JSON comments
+            lines = [line for line in content.split('\n') if not line.strip().startswith('//')]
+            clean_content = '\n'.join(lines)
+            return json.loads(clean_content)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"fullscreen": False, "audio": 50, "crt_scanlines": True, "crt_vignette": True, "crt_bloom": True, "crt_ca": True, "crt_curvature": True}
+
+settings = load_settings()
+
+# Initialize GPU stack for CRT effects (used later in main loop and world gen)
+from gpu_stack import GPUStack
+gpu = GPUStack(
+    renderer=renderer,
+    tileset=tileset,
+    game_view_width=game_view_width,
+    game_view_height=game_view_height,
+    screen_width=screen_width,
+    screen_height=screen_height,
+    get_data_path_fn=get_data_path,
+)
+
+# Sync CRT toggles from settings into the gpu stack
+gpu.crt_scanlines_on = settings.get("crt_scanlines", True)
+gpu.crt_vignette_on  = settings.get("crt_vignette",  True)
+gpu.crt_bloom_on     = settings.get("crt_bloom",      True)
+gpu.crt_ca_on        = settings.get("crt_ca",         True)
+gpu.crt_curvature_on = settings.get("crt_curvature",  True)
+gpu.crt_bands        = 116  # smooth curvature
 
 _transparency_idx_cache: dict = {}  # (h, w, tile_h, tile_w) -> (x_idx, y_idx)
 
@@ -224,63 +271,60 @@ def get_game_screen_tile(position: tuple[float, float], window_w: float, window_
 
 boot_str = []
 def show_loading_screen(context, console, status: str) -> None:
-    """Display a DOS BIOS-style boot loading screen."""
-    # Pump the SDL event queue so the OS doesn't mark the window as
-    # non-responsive during heavy loading pauses.  Events are discarded
-    # because no input is processed on the loading screen.
+    """Display a DOS BIOS-style boot loading screen with full CRT effects."""
     for _ in tcod.event.get():
         pass
-    console.clear()
-    global boot_str
+    
+    global boot_str, ui_console_renderer, gpu, renderer, scanlines_tex, scanlines_h, vignette_tex, glare_tex
     boot_str.append(status)
 
-    W      = (200, 200, 200)
-    DIM    = (100, 100, 100)
-    BG     = (0,   0,   0  )
-    BAR_BG = (0,   170, 170)
-    BAR_FG = (0,   0,   0  )
-    SEP    = (160, 160, 160)
-    COLS   = console.width
-
-    # ── Header bar (row 0) ──────────────────────────────────────────────
-    console.draw_rect(0, 0, COLS, 1, ord(' '), fg=BAR_FG, bg=BAR_BG)
-    console.print(0, 0, " DOA BIOS v18.23.00", fg=BAR_FG, bg=BAR_BG)
-    cr = "(C) 1998 Loxen Inc. "
-    console.print(COLS - len(cr), 0, cr, fg=BAR_FG, bg=BAR_BG)
-
-    # ── Separator ────────────────────────────────────────────────────────
-    console.print(0, 1, chr(0x2550) * COLS, fg=SEP, bg=BG)
-
-    # ── System info block ────────────────────────────────────────────────
-    console.print(2, 3, "Dungeons of Aerrok: The Divine Stone", fg=W, bg=BG)
-    console.print(2, 4, "BIOS DATE 11/19/98 12:40:36  |  VER: 18.23.00", fg=DIM, bg=BG)
-    console.print(2, 5, "CPU: Intel(R) 330 @ 40 MHz  |  SPEED: 40MHz", fg=DIM, bg=BG)
-
-    # ── Separator ────────────────────────────────────────────────────────
-    console.print(0, 7, chr(0x2550) * COLS, fg=SEP, bg=BG)
-
-    # ── Boot log section ─────────────────────────────────────────────────
-    console.print(2, 9, "BOOT LOG:", fg=W, bg=BG)
-    for i, msg in enumerate(boot_str):
-        row = 11 + i
-        if row >= console.height - 2:
-            break
-        console.print(4, row, msg, fg=W, bg=BG)
-
-    # Blinking block cursor after last message
-    cursor_row = 11 + len(boot_str)
-    if cursor_row < console.height - 2:
-        console.print(4, cursor_row, chr(0x2588), fg=W, bg=BG)
-
-    # ── Footer bar ───────────────────────────────────────────────────────
-    console.draw_rect(0, console.height - 1, COLS, 1, ord(' '), fg=BAR_FG, bg=BAR_BG)
-    console.print(0, console.height - 1, "  Loading...", fg=BAR_FG, bg=BAR_BG)
-
-    # context.present() renders the console AND calls SDL_RenderPresent internally.
-    # Do NOT call renderer.present() afterwards — that would be a second
-    # SDL_RenderPresent on an undefined backbuffer while vsync=True, which
-    # causes a GPU pipeline stall / hang on Windows DXGI backends.
-    context.present(console)
+    window_w, window_h = context.sdl_window.size
+    base_tile_w = window_w / screen_width
+    base_tile_h = window_h / screen_height
+    
+    # Update GPU frame dimensions so barrel distortion works correctly
+    gpu.update_frame_dims(window_w, window_h, base_tile_w, base_tile_h)
+    
+    # Render to scene_tex for CRT processing
+    gpu.ensure_bloom_targets(window_w, window_h)
+    with renderer.set_render_target(gpu.scene_tex):
+        renderer.draw_color = (0, 0, 0, 255)
+        renderer.clear()
+        render_boot_screen.render_boot_screen(renderer, boot_str, window_w, window_h, ui_console_renderer)
+    
+    # Apply barrel distortion + chromatic aberration: scene_tex → post_crt_tex
+    gpu.apply_barrel_and_ca(window_w, window_h)
+    
+    # Blit post_crt_tex to framebuffer with full CRT effects
+    renderer.draw_color = (0, 0, 0, 255)
+    renderer.clear()
+    gpu.post_crt_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+    gpu.post_crt_tex.alpha_mod = 255
+    gpu.post_crt_tex.color_mod = (255, 255, 255)
+    renderer.copy(gpu.post_crt_tex, dest=(0, 0, window_w, window_h))
+    
+    # Apply scanlines
+    if gpu.crt_scanlines_on and scanlines_tex is not None:
+        y = 0
+        while y < window_h:
+            draw_h = min(scanlines_h, window_h - y)
+            if draw_h > 0:
+                renderer.copy(scanlines_tex,
+                              source=(0, 0, 1, draw_h),
+                              dest=(0, y, window_w, draw_h))
+            y += scanlines_h
+    
+    if gpu.crt_vignette_on and vignette_tex is not None:
+        renderer.copy(vignette_tex, dest=(0, 0, window_w, window_h))
+    
+    if glare_tex is not None:
+        renderer.copy(glare_tex, dest=(0, 0, window_w, window_h))
+    
+    # Apply bloom (must be after vignette/glare, before present)
+    if gpu.crt_bloom_on:
+        gpu.gpu_bloom(gpu.post_crt_tex, window_w, window_h)
+    
+    renderer.present()
 
 # Show loading screen immediately
 show_loading_screen(context, ui_console, "Initializing hardware...")
@@ -330,18 +374,6 @@ str = (f"Loaded tcod.sdl.video and traceback modules in {time.time() - start_tim
 print(str)
 with open(get_data_path('logs/log.txt'), 'a') as log_file:
     log_file.write(str + "\n")
-
-def load_settings():
-    """Load settings from JSON file."""
-    try:
-        with open("json/settings.json", 'r') as f:
-            content = f.read()
-            # Remove JSON comments
-            lines = [line for line in content.split('\n') if not line.strip().startswith('//')]
-            clean_content = '\n'.join(lines)
-            return json.loads(clean_content)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"fullscreen": False, "audio": 50, "crt_scanlines": True, "crt_vignette": True, "crt_bloom": True, "crt_ca": True, "crt_curvature": True}
 
 # Global reference for settings access
 _game_context = None
@@ -482,10 +514,9 @@ def main() -> None:
     target_fps = 30
     frame_time = 1.0 / target_fps
     last_time = time.time()
-    renderer = context.sdl_renderer
-    tileset_atlas = tcod.render.SDLTilesetAtlas(renderer, tileset)
+    # tileset_atlas and ui_console_renderer already created earlier for boot screen
     game_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
-    ui_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
+    # ui_console_renderer already created earlier for boot screen CRT effects
     debug_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
     # Dedicated renderer for the 40×25 inventory grid (never shares state with game renderer)
     inv_console_renderer = tcod.render.SDLConsoleRender(tileset_atlas)
@@ -580,29 +611,10 @@ def main() -> None:
     _ui_tex_h = screen_height * tileset.tile_height
     _dbg_tex_w = 40 * tileset.tile_width
     _dbg_tex_h = 9 * tileset.tile_height
-    _crt_bands = 116  # smooth curvature
 
-    # --- Create GPU stack (owns all render targets, particles, post-processing) ---
-    from gpu_stack import GPUStack
-    gpu = GPUStack(
-        renderer=renderer,
-        tileset=tileset,
-        game_view_width=game_view_width,
-        game_view_height=game_view_height,
-        screen_width=screen_width,
-        screen_height=screen_height,
-        get_data_path_fn=get_data_path,
-    )
+    # GPU stack and CRT settings already initialized earlier for boot screen
     global _gpu_instance
     _gpu_instance = gpu
-    # Sync CRT toggles from settings into the gpu stack
-    s = load_settings()
-    gpu.crt_scanlines_on = s.get("crt_scanlines", True)
-    gpu.crt_vignette_on  = s.get("crt_vignette",  True)
-    gpu.crt_bloom_on     = s.get("crt_bloom",      True)
-    gpu.crt_ca_on        = s.get("crt_ca",         True)
-    gpu.crt_curvature_on = s.get("crt_curvature",  True)
-    gpu.crt_bands        = _crt_bands
 
     # Convenience aliases used in the loop below
     def copy_curved(tex, dest, source=None, src_size=None):
@@ -760,12 +772,56 @@ def main() -> None:
                 # Render the BIOS-style loading screen on black (LoadingScreen only;
                 # CRTTransition just holds black for one frame then falls to the elif branch)
                 
-                renderer.draw_color = (0, 0, 0, 255)
-                renderer.clear()
                 if isinstance(handler, setup_game.LoadingScreen) and _gen_bar_start_time is not None:
                     _bar_elapsed = time.monotonic() - _gen_bar_start_time
                     _bar_progress = min(0.92, _bar_elapsed / 8.0)
-                    render_functions.render_gpu_loading_bar(renderer, _bar_progress, window_w, window_h, ui_console_renderer)
+                    
+                    # Render to scene_tex for full CRT pipeline
+                    gpu.ensure_bloom_targets(window_w, window_h)
+                    with renderer.set_render_target(gpu.scene_tex):
+                        renderer.draw_color = (0, 0, 0, 255)
+                        renderer.clear()
+                        render_functions.render_gpu_loading_bar(renderer, _bar_progress, window_w, window_h, ui_console_renderer)
+                    
+                    # Apply barrel distortion + chromatic aberration: scene_tex → post_crt_tex
+                    gpu.apply_barrel_and_ca(window_w, window_h)
+                    
+                    # Blit post_crt_tex to framebuffer with full CRT effects
+                    renderer.draw_color = (0, 0, 0, 255)
+                    renderer.clear()
+                    gpu.post_crt_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                    gpu.post_crt_tex.alpha_mod = 255
+                    gpu.post_crt_tex.color_mod = (255, 255, 255)
+                    renderer.copy(gpu.post_crt_tex, dest=(0, 0, window_w, window_h))
+                    
+                    # Apply scanlines with scroll
+                    if gpu.crt_scanlines_on and scanlines_tex is not None:
+                        scanlines_scroll = (scanlines_scroll + scanlines_speed * (1.0 / target_fps)) % scanlines_h
+                        y = -int(scanlines_scroll)
+                        while y < window_h:
+                            src_y = 0 if y >= 0 else -y
+                            dst_y = max(y, 0)
+                            draw_h = min(scanlines_h - src_y, window_h - dst_y)
+                            if draw_h > 0:
+                                renderer.copy(scanlines_tex,
+                                              source=(0, src_y, 1, draw_h),
+                                              dest=(0, dst_y, window_w, draw_h))
+                            y += scanlines_h
+                    
+                    if gpu.crt_vignette_on and vignette_tex is not None:
+                        renderer.copy(vignette_tex, dest=(0, 0, window_w, window_h))
+                    
+                    if glare_tex is not None:
+                        renderer.copy(glare_tex, dest=(0, 0, window_w, window_h))
+                    
+                    # Apply bloom (must be after vignette/glare, before present)
+                    if gpu.crt_bloom_on:
+                        gpu.gpu_bloom(gpu.post_crt_tex, window_w, window_h)
+                else:
+                    # CRTTransition or early frame - just black
+                    renderer.draw_color = (0, 0, 0, 255)
+                    renderer.clear()
+                
                 renderer.present()
                 for _ in tcod.event.get():
                     pass
@@ -782,9 +838,47 @@ def main() -> None:
                     _sm.flush_deferred_tiles()
 
                     # Show 100% loading screen briefly so player sees completion
+                    # Render to scene_tex for full CRT pipeline
+                    gpu.ensure_bloom_targets(window_w, window_h)
+                    with renderer.set_render_target(gpu.scene_tex):
+                        renderer.draw_color = (0, 0, 0, 255)
+                        renderer.clear()
+                        render_functions.render_gpu_loading_bar(renderer, 1.0, window_w, window_h, ui_console_renderer)
+                    
+                    # Apply barrel distortion + chromatic aberration
+                    gpu.apply_barrel_and_ca(window_w, window_h)
+                    
+                    # Blit to framebuffer with full CRT effects
                     renderer.draw_color = (0, 0, 0, 255)
                     renderer.clear()
-                    render_functions.render_gpu_loading_bar(renderer, 1.0, window_w, window_h, ui_console_renderer)
+                    gpu.post_crt_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                    gpu.post_crt_tex.alpha_mod = 255
+                    gpu.post_crt_tex.color_mod = (255, 255, 255)
+                    renderer.copy(gpu.post_crt_tex, dest=(0, 0, window_w, window_h))
+                    
+                    # Apply scanlines
+                    if gpu.crt_scanlines_on and scanlines_tex is not None:
+                        y = -int(scanlines_scroll)
+                        while y < window_h:
+                            src_y = 0 if y >= 0 else -y
+                            dst_y = max(y, 0)
+                            draw_h = min(scanlines_h - src_y, window_h - dst_y)
+                            if draw_h > 0:
+                                renderer.copy(scanlines_tex,
+                                              source=(0, src_y, 1, draw_h),
+                                              dest=(0, dst_y, window_w, draw_h))
+                            y += scanlines_h
+                    
+                    if gpu.crt_vignette_on and vignette_tex is not None:
+                        renderer.copy(vignette_tex, dest=(0, 0, window_w, window_h))
+                    
+                    if glare_tex is not None:
+                        renderer.copy(glare_tex, dest=(0, 0, window_w, window_h))
+                    
+                    # Apply bloom
+                    if gpu.crt_bloom_on:
+                        gpu.gpu_bloom(gpu.post_crt_tex, window_w, window_h)
+                    
                     renderer.present()
                     time.sleep(0.45)
 
@@ -795,9 +889,33 @@ def main() -> None:
                         )
                         _gen_scene_tex_size = (window_w, window_h)
                     with renderer.set_render_target(_gen_scene_tex):
+                        # Capture the full CRT-processed frame for the video mode switch animation
                         renderer.draw_color = (0, 0, 0, 255)
                         renderer.clear()
-                        render_functions.render_gpu_loading_bar(renderer, 1.0, window_w, window_h, ui_console_renderer)
+                        gpu.post_crt_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                        gpu.post_crt_tex.alpha_mod = 255
+                        gpu.post_crt_tex.color_mod = (255, 255, 255)
+                        renderer.copy(gpu.post_crt_tex, dest=(0, 0, window_w, window_h))
+                        
+                        # Include scanlines in the capture
+                        if gpu.crt_scanlines_on and scanlines_tex is not None:
+                            y = -int(scanlines_scroll)
+                            while y < window_h:
+                                src_y = 0 if y >= 0 else -y
+                                dst_y = max(y, 0)
+                                draw_h = min(scanlines_h - src_y, window_h - dst_y)
+                                if draw_h > 0:
+                                    renderer.copy(scanlines_tex,
+                                                  source=(0, src_y, 1, draw_h),
+                                                  dest=(0, dst_y, window_w, draw_h))
+                                y += scanlines_h
+                        
+                        if gpu.crt_vignette_on and vignette_tex is not None:
+                            renderer.copy(vignette_tex, dest=(0, 0, window_w, window_h))
+                        
+                        # Bloom is applied to the capture via ADD compositing
+                        if gpu.crt_bloom_on:
+                            gpu.gpu_bloom(gpu.post_crt_tex, window_w, window_h)
 
                 # Video mode switch — register tear → noise → blank (no CRT power-off)
                 _rlog(f"CRT: playing video mode switch (INT 10h) from completed loading screen")

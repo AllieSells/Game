@@ -383,10 +383,11 @@ class LiquidSystem:
                         part.coating = liquid_type
                         part.coating_age = 0
                         coated_parts.append(part.name)
-                        
-                        # Apply immediate liquid effect for splash damage
-                        splash_depth = max(1, int(3 * (1 - distance / radius)))  # More depth closer to center
-                        self._apply_liquid_effect(entity, liquid_type, splash_depth, part)
+
+            # Apply immediate splash effect once per affected entity, not once per coated body part.
+            if coated_parts:
+                splash_depth = max(1, int(3 * (1 - distance / radius)))  # More depth closer to center
+                self._apply_liquid_effect(entity, liquid_type, splash_depth)
             
             # Show message if any parts were coated and this is the player
             if coated_parts and entity == self.game_map.engine.player:

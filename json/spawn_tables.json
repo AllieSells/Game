@@ -1,32 +1,89 @@
 [
-  { "biome": "any",     "factory": "rat",          "min_floor": 0, "max_floor": 3, "weight": 15 },
-  { "biome": "any",     "factory": "kobold",       "min_floor": 0, "max_floor": 4, "weight": 25 },
-  { "biome": "any",     "factory": "goblin",       "min_floor": 0, "max_floor": 5, "weight": 70 },
-  { "biome": "any",     "factory": "kobold",       "min_floor": 4, "max_floor": 5, "weight": 15 },
-  { "biome": "any",     "factory": "goblin",       "min_floor": 4, "max_floor": 8, "weight": 30 },
-  { "biome": "any",     "factory": "troll",        "min_floor": 3,                 "weight": 15 },
-  { "biome": "any",     "factory": "troll",        "min_floor": 5,                 "weight": 30 },
-  { "biome": "any",     "factory": "troll",        "min_floor": 7,                 "weight": 60 },
-  { "biome": "any",     "factory": "ogre",         "min_floor": 5,                 "weight": 30 },
-  { "biome": "any",     "factory": "ogre",         "min_floor": 7,                 "weight": 60 },
-  { "biome": "any",     "factory": "lunatic_mage", "min_floor": 3,                 "weight": 15 },
-  { "biome": "any",     "factory": "lunatic_mage", "min_floor": 5,                 "weight": 30 },
-  { "biome": "any",     "factory": "lunatic_mage", "min_floor": 7,                 "weight": 60 },
-  { "biome": "any",     "factory": "phase_spider", "min_floor": 3,                 "weight": 10 },
-
-  { "biome": "dungeon", "factory": "giant_spider", "min_floor": 0,                 "weight":  5 },
-  { "biome": "dungeon", "factory": "statue",       "min_floor": 2,                 "weight": 10 },
-  { "biome": "dungeon", "factory": "statue",       "min_floor": 4,                 "weight": 30 },
-
-  { "biome": "caverns", "factory": "giant_spider", "min_floor": 0,                 "weight": 20 },
-  { "biome": "caverns", "factory": "naga",         "min_floor": 4,                 "weight": 30 },
-  { "biome": "caverns", "factory": "naga",         "min_floor": 7,                 "weight": 60 },
-
-  { "biome": "ruins",   "factory": "giant_spider", "min_floor": 0,                 "weight": 10 },
-  { "biome": "ruins",   "factory": "statue",       "min_floor": 2,                 "weight": 20 },
-  { "biome": "ruins",   "factory": "statue",       "min_floor": 4,                 "weight": 30 },
-  { "biome": "ruins",   "factory": "naga",         "min_floor": 5,                 "weight": 15 },
-
-  { "biome": "lush",    "factory": "giant_spider", "min_floor": 0,                 "weight": 40 },
-  { "biome": "lush",    "factory": "naga",         "min_floor": 2,                 "weight": 25 }
+  {
+    "factory": "rat",
+    "biome": "any",
+    "threat": 0.5,
+    "rank_cap": 6,
+    "weight": 100,
+    "scale_traits": ["agility"]
+  },
+  {
+    "factory": "kobold",
+    "biome": "any",
+    "threat": 1.2,
+    "rank_cap": 5,
+    "weight": 100,
+    "scale_traits": ["agility", "daggers"]
+  },
+  {
+    "factory": "goblin",
+    "biome": "any",
+    "threat": 2.0,
+    "rank_cap": 4,
+    "weight": 100,
+    "scale_traits": ["strength", "agility", "blades"]
+  },
+  {
+    "factory": "troll",
+    "biome": "any",
+    "threat": 5.0,
+    "rank_cap": 2,
+    "weight": 100,
+    "scale_traits": ["strength", "vigor"]
+  },
+  {
+    "factory": "ogre",
+    "biome": "any",
+    "threat": 7.0,
+    "rank_cap": 2,
+    "weight": 100,
+    "scale_traits": ["strength", "vigor", "heavy armor"]
+  },
+  {
+    "factory": "lunatic_mage",
+    "biome": "any",
+    "threat": 4.0,
+    "rank_cap": 2,
+    "weight": 80,
+    "scale_traits": ["arcana", "evocation", "necromancy"]
+  },
+  {
+    "factory": "phase_spider",
+    "biome": "any",
+    "threat": 3.5,
+    "rank_cap": 3,
+    "weight": 60,
+    "scale_traits": ["agility"]
+  },
+  {
+    "factory": "giant_spider",
+    "biome": ["dungeon", "caverns", "ruins", "lush"],
+    "threat": 2.5,
+    "rank_cap": 4,
+    "weight": 100,
+    "scale_traits": ["agility"]
+  },
+  {
+    "factory": "statue",
+    "biome": ["dungeon", "ruins"],
+    "threat": 3.0,
+    "rank_cap": 3,
+    "weight": 75
+  },
+  {
+    "factory": "naga",
+    "biome": ["caverns", "ruins", "lush"],
+    "threat": 5.5,
+    "rank_cap": 2,
+    "weight": 90,
+    "scale_traits": ["strength", "agility", "blades"]
+  },
+  {
+    "factory": "gelatinous_cube",
+    "biome": ["dungeon", "caverns"],
+    "threat": 4.5,
+    "rank_cap": 2,
+    "weight": 70,
+    "scale_traits": ["vigor", "agility"]
+  }
 ]

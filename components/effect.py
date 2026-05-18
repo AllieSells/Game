@@ -215,7 +215,7 @@ class SleepEffect(Effect):
 class IronskinEffect(Effect):
     """Applies x1.5 defense to target"""
 
-    def __init__(self, duration: int):
+    def __init__(self, duration: int, multiplier: float = 1.0):
         super().__init__(
             name="Ironskin",
             duration=duration,
@@ -223,6 +223,7 @@ class IronskinEffect(Effect):
             type="buff",
             display=EffectDisplay(glyph=chr(0xE02C), fg=(255, 255, 255), label="Ironskin"),
         )
+        self.multiplier = multiplier
 
     def tick(self, target):
         if self.duration is None:
@@ -231,7 +232,7 @@ class IronskinEffect(Effect):
         return self.duration <= 0
 
     def get_defense_multiplier(self) -> float:
-        return 2.0
+        return 2.0 * self.multiplier
 
 class LightEffect(Effect):
     """Applied to a summoned light orb. When it expires the orb is silently

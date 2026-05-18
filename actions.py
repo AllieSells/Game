@@ -692,6 +692,7 @@ class CastSpellAction(Action):
         else:
             target_xy = (self.entity.x, self.entity.y)
 
+        self.engine.message_log.add_message(f"The {self.entity.name} casts {chosen_spell.name}!", color.light_purple)
         return SpellAction(self.entity, chosen_spell, target_xy).perform()
 
 
@@ -1849,6 +1850,14 @@ class MovementAction(ActionWithDirection):
                     if not hasattr(self, '_shown_movement_warning'):
                         self.engine.message_log.add_message("Your damaged legs make movement difficult!", color.yellow)
                         self._shown_movement_warning = True
+
+        # Check for noclip mode (debug cheat)
+        if getattr(self.entity, "noclip", False):
+            # Noclip enabled - skip all collision checks
+            self.entity.x = dest_x
+            self.entity.y = dest_y
+            self._update_swim_state(dest_x, dest_y)
+            return
 
         if not self.engine.game_map.in_bounds(dest_x, dest_y):
             raise exceptions.Impossible("That way is blocked.")  # Destination is out of bounds.

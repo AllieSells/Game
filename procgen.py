@@ -12,13 +12,14 @@ from game_map import GameMap
 from typing import Optional
 import numpy as np
 import tile_types
-from enemy_spawning import get_enemy_count_for_floor, get_enemies_for_floor
+from enemy_spawning import get_enemies_for_floor
 
 from setup_game import _current_seed
 
 # Spawn configuration data
 max_items_by_floor = {1: 2, 4: 2}
-max_chests_by_floor = {1: 1, 3: 2}
+max_chests_per_room_by_floor = {1: 1, 3: 3}
+chest_spawn_chance_per_room_by_floor = {1: 0.60, 3: 0.80}
 max_flora_by_floor = {1: 3, 4: 5}
 
 # Tile names that should never have anything spawned on them.
@@ -77,6 +78,18 @@ def get_max_value_for_floor(
             current_value = value
 
     return current_value
+
+def get_chance_for_floor(
+        chance_by_floor: Dict[int, float], floor: int
+) -> float:
+    current_value = 0.0
+
+    for floor_minimum, value in sorted(chance_by_floor.items()):
+        if floor_minimum > floor:
+            break
+        current_value = float(value)
+
+    return max(0.0, min(1.0, current_value))
 
 def get_entities_at_random(
         weighted_chances_by_floor: Dict[int, Dict[Entity, int]],
@@ -167,20 +180,20 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int, b
     # Don't re-seed here as it breaks dungeon generation flow
     # The main generation seed is set at the start of generate_dungeon
     
-    # Use new dynamic enemy spawning system
-    number_of_monsters = get_enemy_count_for_floor(floor_number)
+    # Use budget-based enemy spawning system (count determined by budget)
+    monsters = get_enemies_for_floor(floor_number, biome=biome)
     
     number_of_items = random.randint(
         0, get_max_value_for_floor(max_items_by_floor, floor_number)
     )
 
-    # Get scaled enemies using new system
-    monsters = get_enemies_for_floor(floor_number, number_of_monsters, biome)
 
 
-
-    # Place chests based on floor
-    for entity in range(random.randint(0, get_max_value_for_floor(max_chests_by_floor, floor_number))):
+    # Place chests based on floor: separate spawn chance from per-room cap.
+    chest_max_per_room = get_max_value_for_floor(max_chests_per_room_by_floor, floor_number)
+    chest_spawn_chance = get_chance_for_floor(chest_spawn_chance_per_room_by_floor, floor_number)
+    number_of_chests = random.randint(1, chest_max_per_room) if chest_max_per_room > 0 and random.random() < chest_spawn_chance else 0
+    for entity in range(number_of_chests):
         # Spawn chests in room, aligning to a wall if possible; retry up to 10 times.
         for _ in range(10):
             if random.random() < 0.5:
@@ -875,8 +888,8 @@ def place_entities_cave(floor_tiles: List[Tuple[int, int]], dungeon: GameMap, fl
     if len(floor_tiles) > max_rooms:
         floor_tiles = random.sample(floor_tiles, max_rooms)
 
-    number_of_monsters = get_enemy_count_for_floor(floor_number)
-    monsters = get_enemies_for_floor(floor_number, number_of_monsters, biome)
+    # Use budget-based enemy spawning system
+    monsters = get_enemies_for_floor(floor_number, biome=biome)
 
     shuffled = list(floor_tiles)
     random.shuffle(shuffled)
@@ -1254,8 +1267,9 @@ def generate_dungeon(
             (map_width * 3 // 4, map_height // 4),
             (map_width // 4,     map_height // 4),
         ]
-        for _sx0, _sy0 in stair_candidates:
-            for _r in range(max(map_width, map_height)):
+        max_search_radius = max(map_width, map_height) // 3  # Limit search to reasonable distance
+        for candidate_idx, (_sx0, _sy0) in enumerate(stair_candidates):
+            for _r in range(max_search_radius):
                 _stair_placed = False
                 for _dx in range(-_r, _r + 1):
                     for _dy in range(-_r, _r + 1):
@@ -1263,9 +1277,11 @@ def generate_dungeon(
                             continue
                         _sx, _sy = _sx0 + _dx, _sy0 + _dy
                         if (2 <= _sx < map_width - 2 and 2 <= _sy < map_height - 2
-                                and dungeon.tiles[_sx, _sy]["walkable"]):
+                                and dungeon.tiles[_sx, _sy]["walkable"]
+                                and str(dungeon.tiles[_sx, _sy]["name"]) not in {"Water", "Foliage"}):
                             dungeon.tiles[_sx, _sy] = tile_types.down_stairs
                             dungeon.downstairs_location = (_sx, _sy)
+                            print(f"[GEN] Cave stairs placed at {(_sx, _sy)} from corner candidate {candidate_idx} (radius {_r})")
                             _stair_placed = True
                             break
                     if _stair_placed:
@@ -1274,6 +1290,9 @@ def generate_dungeon(
                     break
             if dungeon.downstairs_location != (0, 0):
                 break
+        
+        if dungeon.downstairs_location == (0, 0):
+            print(f"[GEN] WARNING: Could not place cave stairs from any corner, will rely on safety pass")
 
         # Place up stairs at player start for cavern-only floors
         if erosion > 2.0:
@@ -1506,6 +1525,13 @@ def generate_dungeon(
         return True
 
     if not _valid_downstairs_tile(_down):
+        # Clean up invalid stair tile FIRST before placing new stairs
+        if isinstance(_down, tuple) and len(_down) == 2 and dungeon.in_bounds(_down[0], _down[1]):
+            old_tile_name = str(dungeon.tiles[_down[0], _down[1]]["name"])
+            if old_tile_name == "<purple>Down Stairs</purple>":
+                dungeon.tiles[_down[0], _down[1]] = tile_types.random_floor_tile()
+                print(f"[GEN] Cleaned up invalid stairs at {_down} - replacing with floor")
+        
         _candidates: List[Tuple[int, int]] = []
         for _x in range(2, dungeon.width - 2):
             for _y in range(2, dungeon.height - 2):
@@ -1528,15 +1554,14 @@ def generate_dungeon(
                 _candidates,
                 key=lambda p: (p[0] - _placer.x) * (p[0] - _placer.x) + (p[1] - _placer.y) * (p[1] - _placer.y),
             )
-            if isinstance(_down, tuple) and len(_down) == 2 and dungeon.in_bounds(_down[0], _down[1]):
-                if str(dungeon.tiles[_down[0], _down[1]]["name"]) == "<purple>Down Stairs</purple>":
-                    dungeon.tiles[_down[0], _down[1]] = tile_types.random_floor_tile()
             dungeon.tiles[_sx, _sy] = tile_types.down_stairs
             dungeon.downstairs_location = (_sx, _sy)
+            print(f"[GEN] Relocated stairs from {_down} to {(_sx, _sy)}")
         else:
             # Last-resort fallback: place at player tile to avoid missing stairs entirely.
             dungeon.tiles[_placer.x, _placer.y] = tile_types.down_stairs
             dungeon.downstairs_location = (_placer.x, _placer.y)
+            print(f"[GEN] No valid stair locations found, placing at player spawn")
 
     print("[GEN] generate_dungeon complete")
     return dungeon

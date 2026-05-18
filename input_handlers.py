@@ -5674,8 +5674,12 @@ chest [basic|advanced]        - Spawn a chest with generated loot
 
 level <TRAIT>                 - Force levelup trait
 descend                       - Go to next dungeon level
+noclip                        - Toggle noclip mode (phase through walls)
                 
 """)
+            elif command.startswith("seed"):
+                from setup_game import _current_seed
+                self.push_output(f"Current game seed: {_current_seed}")
             elif command.startswith("effect "):
                 from components.effect import get_effect_by_name
                 
@@ -5820,6 +5824,20 @@ descend                       - Go to next dungeon level
                             break
                     if not spawned:
                         self.push_output(f"No free tile found near player to spawn {entity_name}")
+
+            elif command == "noclip":
+                # Toggle noclip mode - allows player to phase through walls and entities
+                noclip_enabled = getattr(self.engine.player, "noclip", False)
+                self.engine.player.noclip = not noclip_enabled
+                status = "ENABLED" if self.engine.player.noclip else "DISABLED"
+                self.push_output(f"Noclip {status}")
+            
+            elif command == "reveal":
+                # Reveals the whole map
+                if self.engine.game_map:
+                    self.engine.game_map.visible[:] = True
+                    self.engine.game_map.explored[:] = True
+                    self.push_output("Map revealed!")
 
             # ----------------------------------------------------------------
             # ADD YOUR COMMAND HANDLING CODE HERE

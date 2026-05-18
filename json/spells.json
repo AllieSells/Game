@@ -59,6 +59,12 @@
             "school": "enchantment",
             "description": "Lull enemies into a slumber",
             "color": [50, 0, 255]
-        }        
+        },
+		{
+			"name": "Clairvoyance",
+			"school": "divination",
+			"description": "Gain insight into distant places",
+			"color": [0, 255, 255]
+		}
 	]
 }

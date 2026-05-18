@@ -102,6 +102,23 @@ class LightShaftParticles:
     def tick(self, console, game_map) -> None:
         pass  # perpetual; no countdown
 
+class RevealParticle:
+    """Sparkles along a path or at a point"""
+
+    def __init__(self, position: tuple, color: tuple = (255, 255, 255), path: list[tuple] = None):
+        x, y = position
+        self.fx = float(x)
+        self.fy = float(y)
+        self.path = path or []
+        self.frames = 1200
+        self.total_frames = self.frames
+        self.render_priority = 2
+        self.color = color
+
+    def tick(self, console, game_map) -> None:
+        if self.frames <= 0:
+            return
+        self.frames -= 1
 
 class SpaceDistortSpellParticle:
     """A brief expanding distortion effect for space-warping spells like Blink.
@@ -128,7 +145,7 @@ class SpaceDistortSpellParticle:
 class JaggedLineSpellParticle:
     """Jagged line spell that follows path from caster to target."""
 
-    def __init__(self, path: list[tuple], color: tuple):
+    def __init__(self, path: list[tuple], color: tuple, frames: int = 12):
         self.path = path
         self.color = color
         self.frames = 12
@@ -1763,6 +1780,7 @@ class GPUStack:
         self.gpu_anim_registry.append(self._poison_spray_render)           # bloom
         self.gpu_anim_registry.append(self._sleep_render)                 # bloom
         self.gpu_anim_registry.append(self._illuminated_render)            # bloom
+        self.gpu_anim_registry.append(self._reveal_render)                 # bloom
 
     # ------------------------------------------------------------------
     # Frame dimension update
@@ -2056,6 +2074,109 @@ class GPUStack:
                 drew = True
         return drew
 
+    def _reveal_render(self, active_engine) -> bool:
+        """Draw sparkles along a path or at a point (bloom pass)."""
+        particles = [a for a in active_engine.animation_queue
+                    if isinstance(a, RevealParticle) and a.frames > 0]
+        if not particles:
+            return False
+
+        tile_px_w = self.base_tile_w * 2.0
+        tile_px_h = self.base_tile_h * 2.0
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        game_map = active_engine.game_map
+        renderer = self.renderer
+        drew = False
+        spread = tile_px_w * 0.35
+
+        with renderer.set_render_target(self._gal_src):
+            for p in particles:
+                age     = 1.0 - (p.frames / float(p.total_frames))
+                elapsed = p.total_frames - p.frames
+
+                if age < 0.03:
+                    fade = age / 0.03
+                elif age > 0.95:
+                    fade = (1.0 - age) / 0.05
+                else:
+                    fade = 1.0
+
+                if fade <= 0.0:
+                    continue
+
+                if hasattr(p, 'path') and p.path:
+                    path_len = len(p.path)
+                    for i, (wx, wy) in enumerate(p.path):
+                        if not game_map.in_bounds(wx, wy):
+                            continue
+                        if not game_map.visible[wx, wy]:
+                            continue
+                        scr_x = wx - origin_x
+                        scr_y = wy - origin_y
+                        if not (0.0 <= scr_x < self.game_view_width and
+                                0.0 <= scr_y < self.game_view_height):
+                            continue
+
+                        cx = int(scr_x * tile_px_w + tile_px_w * 0.5)
+                        cy = int(scr_y * tile_px_h + tile_px_h * 0.5)
+
+                        # Stable positions per tile — seed never changes
+                        pos_rng = random.Random(hash((wx, wy, id(p))))
+                        offsets = [(pos_rng.uniform(-spread, spread),
+                                    pos_rng.uniform(-spread, spread),
+                                    pos_rng.randint(1, 2))   # sz capped at 2
+                                for _ in range(4)]        # 4 sparkles, not 5
+
+                        for j, (ox, oy, sz) in enumerate(offsets):
+                            # Each sparkle twinkles on its own sine, no position jitter
+                            phase     = elapsed * 0.13 + i * 1.7 + j * 2.4
+                            twinkle   = 0.25 + 0.75 * (math.sin(phase) * 0.5 + 0.5)
+                            alpha     = int(180 * fade * twinkle)
+                            alpha     = max(0, min(255, alpha))
+                            if alpha < 12:
+                                continue
+                            renderer.draw_color = (255, 80, 255, alpha)
+                            renderer.fill_rect((float(cx + ox - sz), float(cy + oy - sz),
+                                                float(sz * 2), float(sz * 2)))
+                        drew = True
+
+                else:
+                    world_xi = int(round(p.fx))
+                    world_yi = int(round(p.fy))
+                    if not game_map.in_bounds(world_xi, world_yi):
+                        continue
+                    if not game_map.visible[world_xi, world_yi]:
+                        continue
+                    scr_x = p.fx - origin_x
+                    scr_y = p.fy - origin_y
+                    if not (0.0 <= scr_x < self.game_view_width and
+                            0.0 <= scr_y < self.game_view_height):
+                        continue
+
+                    cx = int(scr_x * tile_px_w + tile_px_w * 0.5)
+                    cy = int(scr_y * tile_px_h + tile_px_h * 0.5)
+
+                    pos_rng = random.Random(hash((world_xi, world_yi, id(p))))
+                    offsets = [(pos_rng.uniform(-spread, spread),
+                                pos_rng.uniform(-spread, spread),
+                                pos_rng.randint(1, 2))
+                            for _ in range(4)]
+
+                    for j, (ox, oy, sz) in enumerate(offsets):
+                        phase   = elapsed * 0.13 + j * 2.4
+                        twinkle = 0.25 + 0.75 * (math.sin(phase) * 0.5 + 0.5)
+                        alpha   = int(160 * fade * twinkle)
+                        alpha   = max(0, min(255, alpha))
+                        if alpha < 12:
+                            continue
+                        renderer.draw_color = (255, 80, 255, alpha)
+                        renderer.fill_rect((float(cx + ox - sz), float(cy + oy - sz),
+                                            float(sz * 2), float(sz * 2)))
+                    drew = True
+
+        return drew
+    
     def _space_distort_spell_render(self, active_engine) -> bool:
         """Expanding warp-rings for SpaceDistortSpellParticle (bloom pass).
 

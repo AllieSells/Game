@@ -1,4 +1,4 @@
-from components.ai import DarkHostileEnemy, Friendly, HostileEnemy, BaseAI, StatueAI, FollowerAI, AnimalAI, HostileCasterAI, PhasingAI, RetreatingPhasingAI
+from components.ai import DarkHostileEnemy, Friendly, HostileEnemy, BaseAI, StatueAI, FollowerAI, AnimalAI, HostileCasterAI, PhasingAI, RetreatingPhasingAI, SplittingEnemyAI
 from components import equippable
 from components.equipment import Equipment
 from components.fighter import Fighter
@@ -828,14 +828,18 @@ def generate_spellbook() -> Item:
 
     spell_entry = random.choice(spell_entries)
     spell_name = spell_entry["name"]
-    spell_name = "Sleep" # Debug setter
+    #spell_name = "Clairvoyance" # Debug setter
+    
+    # After changing spell_name, look up the correct entry for that spell
+    spell_entry = next((e for e in spell_entries if e["name"].lower() == spell_name.lower()), spell_entry)
+    
     desc = spell_entry["description"] or "An ancient tome of arcane knowledge."
     item_color = spell_entry["color"]
     import sprite_manager as _sm
     _item = Item(
         char = _sm.compose_sprite([0xE0B6, 0xE0B7], layer_tints=[None, item_color]),
         color=(color.sprite_sheet),
-        name="Spell Tome",
+        name=f"{spell_name} Spell Tome",
         description=desc,
         value=30,
         consumable=consumable.SpellbookConsumable(unlock_name=spell_name),
@@ -843,7 +847,7 @@ def generate_spellbook() -> Item:
         drop_sound=sounds.drop_paper_sound,
         equip_sound=sounds.play_equip_paper_sound,
         unequip_sound=sounds.play_unequip_paper_sound,
-        rarity_color=color.rare,
+        rarity_color=color.uncommon,
         tags = ["spellbook", "consumable", "paper", spell_name],
     )
     pass_book = copy.deepcopy(_item)
@@ -999,6 +1003,20 @@ basic_entity_levelling = Level(
     level_up_base=50
 )
 
+def create_levelling_with_traits(**trait_levels):
+    """Create a Level instance with custom trait levels.
+    
+    Example:
+        level=create_levelling_with_traits(agility=3, strength=2)
+    """
+    lvl = copy.deepcopy(basic_entity_levelling)
+    for trait_name, level_value in trait_levels.items():
+        if trait_name in lvl.traits:
+            lvl.traits[trait_name]['level'] = level_value
+    return lvl
+
+
+
 # =====================================================
 # ACTORS - All actor definitions grouped together
 # =====================================================
@@ -1091,6 +1109,26 @@ shade = Actor(
     speed=130,  # Very fast - supernatural creature
     opinion=0,
 )
+
+gelatinous_cube = Actor(
+    char=chr(0xE044),
+    color=(color.sprite_sheet),
+    name="Gelatinous Cube",
+    ai_cls=SplittingEnemyAI,
+    equipment=Equipment(),
+    fighter=Fighter(hp=50, base_defense=1, base_power=10, can_bleed=False, leave_corpse=False),
+    inventory=Inventory(capacity=0),
+    level=copy.deepcopy(basic_entity_levelling),
+    speed=50,
+    body_parts=BodyParts(AnatomyType.SIMPLE, max_hp=40),
+    verb_base="ooze",
+    verb_present="oozes",
+    verb_past="oozed",
+    verb_participial="oozing",
+    dodge_chance=0.05,
+    equipment_table={},
+)
+
 
 goblin = Actor(
     char=chr(0xE031),
@@ -1273,10 +1311,16 @@ lunatic_mage = Actor(
     verb_past="struck",
     verb_participial="striking",
     dodge_chance=0.10,
-    equipment_table=None,
+    equipment_table={
+        "tome": {
+            generate_spellbook(): 30,
+            None: 70
+        }
+    },
     known_spells=[InflictWoundsSpell()],
     mana=20,
     mana_max=20,
+    
 )
 lunatic_mage.level.traits["arcana"]["level"] = 3
 lunatic_mage.level.traits["necromancy"]["level"] = 3
@@ -1483,10 +1527,10 @@ UNCOMMON_POOL = [
     LootEntry(lambda: get_scroll("lightning"),       6),
     LootEntry(lambda: get_scroll("fireball"),        5),
     LootEntry(apprentice_robe,         8),
+    LootEntry(generate_spellbook,      8),
 ]
 
 RARE_POOL = [
-    LootEntry(generate_spellbook,      20),
     LootEntry(mythril_dagger,          10),
     LootEntry(plate_helmet,            10),
     LootEntry(plate_armor,             10),

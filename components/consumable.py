@@ -21,6 +21,7 @@ from input_handlers import (
     SingleRangedAttackHandler,
 )
 from components.spells import (
+    ClairvoyanceSpell,
     DarkvisionSpell,
     FireballSpell,
     HealingWordSpell,
@@ -50,6 +51,7 @@ _SPELL_CLASS_BY_NAME = {
     "Invisibility": InvisibilitySpell,
     "Ironskin": IronskinSpell,
     "Sleep": SleepSpell,
+    "Clairvoyance": ClairvoyanceSpell
 }
 
 _SPELL_BOOK_CACHE = None

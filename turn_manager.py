@@ -315,9 +315,18 @@ class TurnManager:
         try:
             for entity in list(self.engine.game_map.entities):
                 if hasattr(entity, 'body_parts') and entity.body_parts:
+                    # Aggregate by liquid type so each coating type applies once per entity per tick.
+                    coated_liquids = {}
                     for body_part in entity.body_parts.body_parts.values():
-                        if body_part.coating != LiquidType.NONE:
-                            self.engine.game_map.liquid_system.tick_liquid_effects(target = entity, coating = body_part.coating, affected_body_part = body_part)
+                        if body_part.coating != LiquidType.NONE and body_part.coating not in coated_liquids:
+                            coated_liquids[body_part.coating] = body_part
+
+                    for liquid_type, representative_part in coated_liquids.items():
+                        self.engine.game_map.liquid_system.tick_liquid_effects(
+                            target=entity,
+                            coating=liquid_type,
+                            affected_body_part=representative_part,
+                        )
         except Exception:
             import traceback
             traceback.print_exc()

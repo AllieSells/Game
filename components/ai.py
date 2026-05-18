@@ -440,6 +440,85 @@ class HostileEnemy(BaseAI):
         
         return WaitAction(self.entity).perform()
 
+class SplittingEnemyAI(HostileEnemy):
+    """AI that splits into smaller enemies when below half health."""
+    def __init__(self, entity: "Actor"):
+        super().__init__(entity)
+        self.has_split = False
+        self.type = "SplittingEnemyAI"
+
+    def perform(self) -> None:
+        # Check health and split FIRST, before any other logic
+        if not self.has_split and self.entity.fighter and self.entity.fighter.hp < self.entity.fighter.max_hp / 2:
+            self.has_split = True
+            print(f"[AI] {self.entity.name} is splitting into smaller enemies!")
+            # Create two smaller enemies at the current location
+            for foo in range(2):
+                # check if is slime
+                if self.entity.name == "Gelatinous Cube":
+                    from entity import Actor
+                    from components.fighter import Fighter
+                    from components.body_parts import BodyParts, AnatomyType
+                    template = Actor(
+                        char=chr(0xE045),
+                        color=(color.sprite_sheet),
+                        name="Gelatinous Fragment",
+                        ai_cls=HostileEnemy,
+                        equipment=self.entity.equipment,
+                        fighter=Fighter(hp=(self.entity.fighter.hp / 2), base_defense=1, base_power=4, can_bleed=False, leave_corpse=False),
+                        inventory=None,
+                        level=None,
+                        speed=50,
+                        body_parts=BodyParts(AnatomyType.SIMPLE, max_hp=(self.entity.fighter.hp / 2)),
+                        verb_base="ooze",
+                        verb_present="oozes",
+                        verb_past="oozed",
+                        verb_participial="oozing",
+                        dodge_chance=0.05,
+                        equipment_table={},
+                    )
+                    import copy
+                    push = copy.deepcopy(template)
+                    
+                    if foo == 0:
+                        # First spawn: at mother's position
+                        dest_x = self.entity.x
+                        dest_y = self.entity.y
+                        if (0 <= dest_x < self.engine.game_map.width and
+                            0 <= dest_y < self.engine.game_map.height and
+                            self.engine.game_map.tiles["walkable"][dest_x, dest_y]):
+                            push.x = dest_x
+                            push.y = dest_y
+                            push.spawn(self.engine.game_map, dest_x, dest_y)
+                    else:
+                        # Second spawn: find adjacent tile
+                        spawned = False
+                        for dx in range(-1, 2):
+                            for dy in range(-1, 2):
+                                if (dx == 0 and dy == 0):
+                                    continue
+                                dest_x = self.entity.x + dx
+                                dest_y = self.entity.y + dy
+                                if (0 <= dest_x < self.engine.game_map.width and
+                                    0 <= dest_y < self.engine.game_map.height and
+                                    self.engine.game_map.tiles["walkable"][dest_x, dest_y] and
+                                    not self.engine.game_map.get_blocking_entity_at_location(dest_x, dest_y)):
+                                    push.x = dest_x
+                                    push.y = dest_y
+                                    push.spawn(self.engine.game_map, dest_x, dest_y)
+                                    spawned = True
+                                    break
+                            if spawned:
+                                break
+            
+            # Delete original entity after both spawns are complete
+            self.engine.message_log.add_message(f"The {self.entity.name} splits into smaller fragments!", color.orange)
+            self.engine.game_map.entities.remove(self.entity)
+            # Don't continue with normal behavior after splitting - entity is dead
+            return
+        
+        # Only continue with normal hostile behavior if we haven't split
+        return super().perform()
 
 class PhasingAI(HostileEnemy):
     """Strategic AI for creatures that can phase/become invisible.

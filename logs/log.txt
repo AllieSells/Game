@@ -1,6 +1,66 @@
 Log file cleared at startup.
-Sun May 17 14:59:26 2026: Game started.
+Mon May 18 02:51:56 2026: Game started.
 Loaded exceptions module in 0.00 seconds
-Loaded input_handlers module in 0.00 seconds
-Loaded setup_game module in 0.00 seconds
+Loaded input_handlers module in 0.09 seconds
+Loaded 240 frames for animated background.
+Loaded setup_game module in 0.35 seconds
 Loaded tcod.sdl.video and traceback modules in 0.00 seconds
+Finished loading in 5.03 seconds
+Settings loaded: {'fullscreen': False, 'audio': 100, 'crt_scanlines': True, 'crt_vignette': True, 'crt_bloom': True, 'crt_ca': True, 'crt_curvature': True, 'light_flicker': True}
+=========================================================================================================================================================================================================================
+[frame 74] CRT: starting generation thread (loading screen visible)
+[frame 87] TRANSITION: entering game view (handler=LoadingScreen)
+[frame 88] CRT: playing video mode switch (INT 10h) from completed loading screen
+[frame 88] CRT: video mode switch blank phase done, transitioning handler
+[frame 88] CRT: handler after transition = CharacterCreationHandler
+[frame 88] CRT: capturing game frame for play_on
+[frame 88] CRT: playing video mode resync + snap with real game frame
+[frame 88] CRT: video mode resync done
+Error loading sound RP/sfx/walk/moss/moss1.mp3: Error opening 'C:\\Users\\User\\New folder\\Game\\RP/sfx/walk/moss/moss1.mp3': System error.
+Error loading sound RP/sfx/walk/moss/moss2.mp3: Error opening 'C:\\Users\\User\\New folder\\Game\\RP/sfx/walk/moss/moss2.mp3': System error.
+Error loading sound RP/sfx/walk/moss/moss3.mp3: Error opening 'C:\\Users\\User\\New folder\\Game\\RP/sfx/walk/moss/moss3.mp3': System error.
+Error loading sound RP/sfx/walk/moss/moss4.mp3: Error opening 'C:\\Users\\User\\New folder\\Game\\RP/sfx/walk/moss/moss4.mp3': System error.
+DEBUG: Gave 65 XP to necromancy and 36 XP to arcana for casting Inflict Wounds IV.
+DEBUG: Gave 65 XP to necromancy and 36 XP to arcana for casting Inflict Wounds IV.
+DEBUG: Gave 65 XP to necromancy and 36 XP to arcana for casting Inflict Wounds IV.
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Mossy' with color (255, 255, 255)
+Processing text fragment 7: ' ' with color (255, 255, 255)
+Processing text fragment 8: 'Floor.' with color (255, 255, 255)
+Processing text fragment 0: 'You can walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You can see through this.' with color (255, 255, 255)
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Stone' with color (255, 255, 255)
+Processing text fragment 7: ' ' with color (255, 255, 255)
+Processing text fragment 8: 'Wall.' with color (255, 255, 255)
+Processing text fragment 0: 'You cannot walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You cannot see through this.' with color (255, 255, 255)
+Processing text fragment 0: 'This' with color (255, 255, 255)
+Processing text fragment 1: ' ' with color (255, 255, 255)
+Processing text fragment 2: 'is' with color (255, 255, 255)
+Processing text fragment 3: ' ' with color (255, 255, 255)
+Processing text fragment 4: 'a' with color (255, 255, 255)
+Processing text fragment 5: ' ' with color (255, 255, 255)
+Processing text fragment 6: 'Mossy' with color (255, 255, 255)
+Processing text fragment 7: ' ' with color (255, 255, 255)
+Processing text fragment 8: 'Floor.' with color (255, 255, 255)
+Processing text fragment 0: 'You can walk here.' with color (255, 255, 255)
+Processing text fragment 0: 'You can see through this.' with color (255, 255, 255)
+DEBUG: Gave 65 XP to necromancy and 36 XP to arcana for casting Inflict Wounds IV.
+[frame 1383] CRT: starting generation thread (loading screen visible)
+[frame 1384] CRT: playing video mode switch (INT 10h) from completed loading screen
+[frame 1384] CRT: video mode switch blank phase done, transitioning handler
+[frame 1384] CRT: handler after transition = MainMenu
+[frame 1384] CRT: capturing game frame for play_on
+[frame 1384] CRT: playing video mode resync + snap with real game frame
+[frame 1384] CRT: video mode resync done
