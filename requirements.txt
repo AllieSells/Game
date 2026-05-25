@@ -7,3 +7,4 @@ sounddevice==0.5.5
 soundfile==0.13.1
 tcod==20.1.0
 trimesh==4.11.3
+moderngl==5.12.0

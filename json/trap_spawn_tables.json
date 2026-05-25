@@ -1,0 +1,10 @@
+[
+  {
+    "factory": "oil_barrel",
+    "biome": "any",
+    "threat": 1.0,
+    "rank_cap": 2,
+    "weight": 100
+  }
+
+]

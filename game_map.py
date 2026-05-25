@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 # Minimum brightness in complete darkness (0.0 = pure black, 0.2 = 20% floor).
-LIGHT_MIN_BRIGHTNESS: float = 0.2
+LIGHT_MIN_BRIGHTNESS: float = 0.1
 
 # Lightmap multiplier for explored-but-not-currently-visible tiles.
 # Set equal to LIGHT_MIN_BRIGHTNESS so explored areas match the darkest
@@ -116,6 +116,8 @@ class GameMap:
         # Sources with light_color=(255,255,255) contribute here; build_lightmap blends
         # warm and white contributions to produce the final per-tile tint.
         self._white_light_level = np.zeros((width, height), dtype=np.float32, order="F")
+        # Active dynamic light descriptors for normal-based directional modulation.
+        self._active_lights: list[dict] = []
         
     @property
     def gamemap(self) -> GameMap:
@@ -123,9 +125,11 @@ class GameMap:
         
     @property
     def actors(self) -> Iterator[Actor]:
+        # Create a list copy to avoid "Set changed size during iteration" errors
+        # when entities die during spell effects
         yield from (
             entity
-            for entity in self.entities
+            for entity in list(self.entities)
             if isinstance(entity, Actor) and entity.is_alive
         )
 
@@ -160,6 +164,15 @@ class GameMap:
         torch-flicker formula exactly.
         """
         try:
+            self._active_lights.append(
+                {
+                    "x": float(source_x) + float(wobble_dx),
+                    "y": float(source_y) + float(wobble_dy),
+                    "radius": max(1.0, float(radius)),
+                    "intensity": max(0.0, float(max_intensity) + float(di)),
+                    "is_white": bool(light_color is not None),
+                }
+            )
             from tcod.map import compute_fov
             import tcod
 
@@ -200,6 +213,15 @@ class GameMap:
                     self._white_light_level = np.minimum(1.0, wl + light_intensity)
 
         except Exception:
+            self._active_lights.append(
+                {
+                    "x": float(source_x),
+                    "y": float(source_y),
+                    "radius": max(1.0, float(radius)),
+                    "intensity": max(0.0, float(max_intensity)),
+                    "is_white": bool(light_color is not None),
+                }
+            )
             # Fallback: simple distance-based lighting without wobble.
             xs = np.arange(0, self.width)
             ys = np.arange(0, self.height)
@@ -382,90 +404,27 @@ class GameMap:
         console.tiles_rgb[0:view_width, 0:view_height] = result_tiles
 
     def build_lightmap(self, console: Console) -> np.ndarray:
-        """Build a per-tile RGBA lightmap for the GPU MOD blend lighting pass.
+        """Return the MOD-blend lightmap from the PBR shader pipeline.
 
-        Returns a ``(view_height, view_width, 4)`` uint8 array.  SDL's bilinear
-        filtering (SDL_RENDER_SCALE_QUALITY=1) stretches this tiny texture to
-        the full game-area pixel size, giving smooth sub-tile light falloff
-        across every tile boundary without any CPU per-pixel work.
-
-        Encoding (non-sunlit maps):
-          R = brightness                      (warm tint leaves R unchanged)
-          G = brightness × (1 − 0.12 × ll)   (slight amber at high light)
-          B = brightness × (1 − 0.40 × ll)   (strong warm reduction at full light)
-        where brightness = 0.2 + 0.8 × ll and ll = clamped light_level [0..1].
-
-        Non-visible tiles are encoded as (255,255,255) so already-dim dark
-        tile colours are not multiplied down a second time.
-        Sunlit maps return a full-white array (MOD no-op).
+        Delegates to shader.build_all_lighting_passes and returns only the
+        first map.  Used by any legacy caller that only needs the diffuse pass;
+        gpu_stack.apply_lightmap calls the full three-pass version directly.
         """
-        origin_x, origin_y, view_width, view_height = self.get_viewport(console)
-        x_slice = slice(origin_x, origin_x + view_width)
-        y_slice = slice(origin_y, origin_y + view_height)
+        import shader as _shader
+        lm, _, _ = _shader.build_all_lighting_passes(self, console)
+        return lm
 
-        out = np.empty((view_height, view_width, 4), dtype=np.uint8)
-        out[..., 3] = 255
+    def build_specular_map(self, console: Console) -> np.ndarray:
+        """Return the ADD-blend specular highlight map from the PBR shader."""
+        import shader as _shader
+        _, sp, _ = _shader.build_all_lighting_passes(self, console)
+        return sp
 
-        if getattr(self, "sunlit", False):
-            out[..., :3] = 165 # Overworld lightmap ambient dim — tune this value (0=black, 255=full bright)
-            return out
-
-        # self.tiles uses (width, height) F-order; transpose to (view_height, view_width).
-        ll = self.tiles["light_level"][x_slice, y_slice].T.astype(np.float32)
-        ll = np.clip(ll, 0.0, 1.0)
-
-
-        brightness = LIGHT_MIN_BRIGHTNESS + (1.0 - LIGHT_MIN_BRIGHTNESS) * ll
-
-        # Blend warm-amber tint with neutral white based on white-light contribution.
-        # white_ratio=1.0 → pure white (no tint); white_ratio=0.0 → full warm amber.
-        raw_wl = getattr(self, '_white_light_level', None)
-        if raw_wl is not None:
-            wl = np.clip(raw_wl[x_slice, y_slice].T.astype(np.float32), 0.0, 1.0)
-        else:
-            wl = np.zeros_like(ll)
-        safe_ll = np.where(ll > 0.0, ll, np.float32(1.0))
-        white_ratio = np.clip(wl / safe_ll, 0.0, 1.0)  # fraction of light that is white
-        warm_ratio  = 1.0 - white_ratio
-
-        r = brightness                                                               # R: unchanged for both tints
-        g = brightness * (warm_ratio * (1.0 - LIGHT_WARM_G * ll) + white_ratio)    # G: amber only on warm portion
-        b = brightness * (warm_ratio * (1.0 - LIGHT_WARM_B * ll) + white_ratio)    # B: amber only on warm portion
-
-        # Lightmap encoding per tile state:
-        #   visible          → brightness formula + warm-amber tint
-        #   explored !visible → per-channel dark_bg/light_bg ratio capped at
-        #                       LIGHT_EXPLORED_MOD.  For neutral tiles (stone/walls)
-        #                       the ratio ≈ 0.31 which clamps to 0.2 — no change.
-        #                       For colourful tiles (water) the low-value channels
-        #                       (G/B ≈ 0.09/0.07) fall well below the cap, making
-        #                       explored water near-black rather than teal-coloured.
-        #                       Capping at LIGHT_EXPLORED_MOD ensures explored tiles
-        #                       are never brighter than unlit visible tiles, so there
-        #                       is no bright fringe at the FOV boundary.
-        #   unexplored shroud → 0.0 (fully black)
-        vis      = self.visible[x_slice, y_slice].T        # (view_height, view_width)
-        explored = self.explored[x_slice, y_slice].T
-        zero     = np.float32(0.0)
-
-        dark_bg  = self.tiles["dark"]["bg"][x_slice, y_slice].astype(np.float32)   # (vw, vh, 3)
-        light_bg = self.tiles["light"]["bg"][x_slice, y_slice].astype(np.float32)  # (vw, vh, 3)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            bg_ratio = np.where(light_bg > 0.0, dark_bg / light_bg, 0.0)
-        # Cap so explored tiles never exceed the brightness of unlit visible tiles.
-        bg_ratio = np.clip(bg_ratio, 0.0, float(LIGHT_EXPLORED_MOD))  # (vw, vh, 3)
-        exp_r = bg_ratio[..., 0].T  # (vh, vw)
-        exp_g = bg_ratio[..., 1].T
-        exp_b = bg_ratio[..., 2].T
-
-        r = np.where(vis, r, np.where(explored, exp_r, zero))
-        g = np.where(vis, g, np.where(explored, exp_g, zero))
-        b = np.where(vis, b, np.where(explored, exp_b, zero))
-
-        out[..., 0] = np.clip(r * 255.0, 0, 255).astype(np.uint8)
-        out[..., 1] = np.clip(g * 255.0, 0, 255).astype(np.uint8)
-        out[..., 2] = np.clip(b * 255.0, 0, 255).astype(np.uint8)
-        return out
+    def build_emissive_map(self, console: Console) -> np.ndarray:
+        """Return the ADD-blend emissive self-illumination map from the PBR shader."""
+        import shader as _shader
+        _, _, em = _shader.build_all_lighting_passes(self, console)
+        return em
     
     def render(self, console: Console) -> None:
         # Update tile lighting with gradient falloff based on distance to light sources  
@@ -473,6 +432,7 @@ class GameMap:
         self.tiles["light_level"][:] = 0.0
         if hasattr(self, '_white_light_level'):
             self._white_light_level[:] = 0.0
+        self._active_lights = []
 
         # Advance the torch-flicker time variable exactly like fov_torchx in the
         # libtcod demo (0.2 per frame).  Three 1-D noise samples at fixed offsets
@@ -592,7 +552,7 @@ class GameMap:
             window_name = np.array("Window", dtype="U64")
             window_positions = np.argwhere(self.tiles["name"] == window_name)
             for wx, wy in window_positions:
-                self._add_light_source(int(wx), int(wy), radius=8, max_intensity=1.0,
+                self._add_light_source(int(wx), int(wy), radius=8, max_intensity=50.0,
                                        light_color=(255, 255, 255))
 
         # Render tiles with gradient lighting based on light levels
@@ -913,7 +873,7 @@ class GameWorld:
             self.engine.debug_log(f"Floors since village: {self.floors_since_village}, Gen Chance: {gen_chance:.2f}, < Village chance: {village_chance:.2f}", handler=type(self).__name__, event="generate_floor")
             self.engine.debug_log(f"Village chance equation: (({self.floors_since_village})^2) / 25 = {village_chance:.2f}", handler=type(self).__name__, event="generate_floor")
             print(f"VILLAGE: Chance {village_chance:.2f} vs Gen Chance {gen_chance:.2f}")
-            if village_chance > gen_chance:
+            if village_chance > gen_chance and not self.current_floor == 11: # Floor 11 is never a village
                 print("Generating village floor!")
                 # Generate village and reset counter
                 self.floors_since_village = 0  # Reset counter when village appears

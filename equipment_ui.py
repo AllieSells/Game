@@ -13,6 +13,7 @@ from input_handlers import AskUserEventHandler, PopupEventHandler, ItemContextMe
 from render_functions import MenuRenderer
 from tcod.console import Console
 import actions
+import identify as identify_system
 
 if TYPE_CHECKING:
     from engine import Engine
@@ -147,7 +148,7 @@ class EquipmentUI(PopupEventHandler):
                             'item': item,
                             'items': [item],
                             'quantity': 1,
-                            'display_name': item.name
+                            'display_name': identify_system.get_display_name(self.engine.player, item)
                         })
 
             # Add items from equipped_items
@@ -163,7 +164,7 @@ class EquipmentUI(PopupEventHandler):
                             'item': item,
                             'items': [item],
                             'quantity': 1,
-                            'display_name': item.name
+                            'display_name': identify_system.get_display_name(self.engine.player, item)
                         })
 
             # Add items from body_part_coverage if it exists
@@ -180,7 +181,7 @@ class EquipmentUI(PopupEventHandler):
                                 'item': item,
                                 'items': [item],
                                 'quantity': 1,
-                                'display_name': item.name
+                                'display_name': identify_system.get_display_name(self.engine.player, item)
                             })
 
         # Clamp selected_item to valid range
@@ -310,10 +311,11 @@ class EquipmentUI(PopupEventHandler):
             ]
             
             if equipped_item:
-                item_name = equipped_item.name[:20]  # Longer truncation for wider window
+                shown_name = identify_system.get_display_name(self.engine.player, equipped_item)
+                item_name = shown_name[:20]  # Longer truncation for wider window
                 text_parts.append((":", fg_color))
                 # Safely get rarity color or use white as fallback
-                item_color = getattr(equipped_item, 'rarity_color', color.white)
+                item_color = identify_system.get_display_rarity_color(self.engine.player, equipped_item)
                 text_parts.append((item_name, item_color))
             
             print_colored_text_with_bg(console, slot_x, slot_y, text_parts, bg_color)
@@ -370,9 +372,10 @@ class EquipmentUI(PopupEventHandler):
             ]
 
             if equipped_item:
-                item_name = equipped_item.name[:16]
+                shown_name = identify_system.get_display_name(self.engine.player, equipped_item)
+                item_name = shown_name[:16]
                 text_parts.append((":", fg_color))
-                item_color = getattr(equipped_item, 'rarity_color', color.white)
+                item_color = identify_system.get_display_rarity_color(self.engine.player, equipped_item)
                 text_parts.append((item_name, item_color))
 
             print_colored_text_with_bg(console, slot_x, slot_y, text_parts, bg_color)

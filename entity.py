@@ -8,6 +8,7 @@ import color
 import enchants
 import liquid_system
 from render_order import RenderOrder
+from components.damage_types import DamageType
 
 """Entity module for game characters and objects."""
 
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from components.effect import Effect
     from components.body_parts import BodyParts
     from game_map import GameMap
+    from components.ability import Ability
 
 
 T = TypeVar("T", bound="Entity")
@@ -37,10 +39,13 @@ class Entity:
         x: int = 0,
         y: int = 0,
         char: str = "?",
+        active_ability: Optional[Ability] = None,
         color: Tuple[int, int, int] = (255, 255, 255),
         name: str = "<Unnamed>",
         blocks_movement: bool = False,
-        render_order: RenderOrder = RenderOrder.CORPSE
+        render_order: RenderOrder = RenderOrder.CORPSE,
+        entity_clones: list = [],
+
         ):
         self.x = x
         self.y = y
@@ -50,7 +55,12 @@ class Entity:
         self.blocks_movement = blocks_movement
         self.render_order = render_order
         self.grammar_countable = False
+        self.entity_clones = entity_clones
         self.parent = parent
+        # Multi-part entity system for bosses
+        self.child_parts = []  # Other entities that move with this one
+        self.parent_entity = None  # Main entity if this is a child part
+        self.active_ability = active_ability
         if parent:
             parent.entities.add(self)
 
@@ -97,8 +107,12 @@ class Entity:
             chosen_item = random.choices(item_names, weights=item_weights, k=1)[0]
             
             if chosen_item is not None:
-                # Deep copy to avoid shared references
-                item_copy = copy.deepcopy(chosen_item)
+                # If it's a callable (factory function), call it to get a fresh item
+                if callable(chosen_item):
+                    item_copy = chosen_item()
+                else:
+                    # Deep copy to avoid shared references
+                    item_copy = copy.deepcopy(chosen_item)
                 # Roll for enchantment
                 item_copy.roll_for_enchantment()
                 item_copy.parent = self.inventory
@@ -120,6 +134,13 @@ class Entity:
 
         self.x += dx
         self.y += dy
+        
+        # Move all child parts to maintain formation
+        if hasattr(self, 'child_parts'):
+            for part in self.child_parts:
+                if part and hasattr(part, 'x') and hasattr(part, 'y'):
+                    part.x += dx
+                    part.y += dy
 
         # Auto-pickup ammo-tagged items whenever the player moves, regardless of
         # which action path performed the movement.
@@ -181,6 +202,9 @@ class Actor(Entity):
         mana_max: int = 0,
         harvestable: bool = False,
         passive_healing: float = 0.025,  
+        damage_resistances: Optional[list] = None,
+        effect_resistances: Optional[list] = None,
+        active_ability: Optional[Ability] = None,
     ):
         super().__init__(
             x=x,
@@ -271,6 +295,8 @@ class Actor(Entity):
         self.dodge_cooldown_max = 5  # Cooldown in turns
         self._portrait_path: Optional[str] = None  # set by generate_portrait()
         self.passive_healing = passive_healing
+        self.damage_resistances = damage_resistances if damage_resistances is not None else []
+        self.effect_resistances = effect_resistances if effect_resistances is not None else []
 
     
     def add_effect(self, effect: Effect) -> None:
@@ -833,8 +859,10 @@ class Item(Entity):
             liquid_amount: Optional[int] = None,
             weight: Optional[float] = None,
             identification_level: int = 0,  # Required skill level to see true description
-            identification_skill: str = "lore",  # Which skill is used for identification
+            identification_skill: str = "identification",  # Which skill is used for identification
             equip_sprite_cp: int | None = None,
+            damage_type: DamageType = DamageType.PHYSICAL,
+            unknown_name: Optional[str] = None,
 
 
 
@@ -874,6 +902,11 @@ class Item(Entity):
         self.verb_past = verb_past or self.verb_base + "d"
         self.verb_participial = verb_participial or self.verb_base + "ing"
         self.rarity_color = rarity_color
+        # Preserve base presentation so identification can mask enchanted variants
+        # (name/color/rarity) until the item is identified.
+        self.base_name = name
+        self.base_color = color
+        self.base_rarity_color = rarity_color
         self.tags = tags if tags else []
         self.liquid_type = liquid_type
         self.liquid_amount = liquid_amount
@@ -883,23 +916,16 @@ class Item(Entity):
         self.enchantment_level = 0
         self.enchantments = []
         self.equip_sprite_cp = equip_sprite_cp  # Sprite sheet cell index for equipped appearance
+        self.damage_type = damage_type
+        self.unknown_name = unknown_name
         
     def get_description(self, observer=None) -> str:
         """Get the item description, potentially distorted based on observer's skill level."""
         if not observer or not hasattr(observer, 'level') or self.identification_level == 0:
             return self.description
             
-        # Check if observer has the required skill level
-        if hasattr(observer.level, 'traits') and self.identification_skill in observer.level.traits:
-            observer_skill_level = observer.level.traits[self.identification_skill]['level']
-            
-            if observer_skill_level >= self.identification_level:
-                return self.description
-            else:
-                return self._distort_description()
-        
-        # Fallback: if observer doesn't have the skill, show distorted version
-        return self._distort_description() if self.identification_level > 0 else self.description
+
+        return self.description
     
     def _distort_description(self) -> str:
         """Create a distorted version of the description."""
@@ -937,27 +963,44 @@ class Item(Entity):
         is_weapon = hasattr(self, 'tags') and 'weapon' in self.tags
         is_armor = hasattr(self, 'tags') and 'armor' in self.tags
         
-        if random.random() < 0.5: # 25% chance to be enchanted
+        if random.random() < 0.25: # 25% chance to be enchanted
 
-            if (is_weapon or is_armor) and random.random() < 0.5:  # 50% chance to increase enchantment level
+            if is_weapon and random.random() < 0.5:  # 50% chance to increase enchantment level
                 self.enchantment_level += 1
                 self.name = f"{self.name} +{roman.toRoman(self.enchantment_level)}"
                 if hasattr(self.equippable, 'power_bonus') and self.equippable.power_bonus >= 0:
                     self.equippable.power_bonus += self.enchantment_level
-                    self.description += f" Well-made, gives +{self.enchantment_level} power."
-                elif hasattr(self.equippable, 'defense_bonus') and self.equippable.defense_bonus >= 0:
+                self.value += 20
+            elif is_armor and random.random() < 0.5:  # 50% chance to get a defensive enchantment
+                self.enchantment_level += 1
+                self.name = f"{self.name} +{roman.toRoman(self.enchantment_level)}"
+                if hasattr(self.equippable, 'defense_bonus') and self.equippable.defense_bonus >= 0:
                     self.equippable.defense_bonus += self.enchantment_level
-                    self.description += f" Well-made, gives +{self.enchantment_level} defense."
                 self.value += 20
 
             # Only apply FLAME enchantment to weapons
             if is_weapon and random.random() < 0.25: # 25% chance for magical enchantment
-                enchantment = enchants.Enchantment.FLAME
+                enchantment = random.choice([enchants.Enchantment.FLAME, enchants.Enchantment.CURSED])
                 self.enchantments.append(enchantment)
                 # Update the name to show it's enchanted
-                self.name = f"Flaming {self.name}"
-                self.color = color.orange
-                self.description += " Flames dance along its surface."
-                self.rarity_color = color.orange
+                self.name = f"{enchantment.get_enchantment_name()} {self.name}"
+                self.rarity_color = enchantment.get_color()
+                self.value += 50
+            elif is_armor and random.random() < 1.25: # 25% chance for magical enchantment
+                enchantment = random.choice([enchants.Enchantment.CURSED])
+                self.enchantments.append(enchantment)
+                self.name = f"{enchantment.get_enchantment_name()} {self.name}"
+                self.rarity_color = enchantment.get_color()
                 self.value += 50
         return self
+
+
+    def _is_cursed(self) -> bool:
+        """Return True when item has a CURSED enchantment marker."""
+        try:
+            for ench in (getattr(self, "enchantments", None) or []):
+                if str(getattr(ench, "name", "")).upper() == "CURSED":
+                    return True
+        except Exception:
+            pass
+        return False

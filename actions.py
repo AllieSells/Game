@@ -6,6 +6,9 @@ import random
 import color
 import exceptions
 import copy 
+import identify as identify_system
+
+from components.damage_types import DamageType
 
 if TYPE_CHECKING:
     from engine import Engine
@@ -164,6 +167,27 @@ def get_weighted_part_selection(body_parts):
     if not parts:
         return None
     return random.choices(parts, weights=weights, k=1)[0]
+
+
+def get_adjacent_miss_position(target_x: int, target_y: int, game_map) -> tuple[int, int]:
+    """Get a random adjacent tile position for missed attacks.
+    
+    Returns an adjacent walkable tile, or the original position if none available.
+    """
+    adjacent_offsets = [
+        (1, 0), (-1, 0), (0, 1), (0, -1),  # Cardinal directions
+        (1, 1), (1, -1), (-1, 1), (-1, -1)  # Diagonals
+    ]
+    random.shuffle(adjacent_offsets)
+    
+    for dx, dy in adjacent_offsets:
+        miss_x, miss_y = target_x + dx, target_y + dy
+        if (game_map.in_bounds(miss_x, miss_y) and 
+            game_map.tiles["walkable"][miss_x, miss_y]):
+            return miss_x, miss_y
+    
+    # If no valid adjacent tile, return original position
+    return target_x, target_y
 
 
 def get_part_from_tile_position(body_parts, tile_rel_x: float, tile_rel_y: float):
@@ -345,6 +369,160 @@ def _break_invisibility(actor: Actor) -> None:
     ]
     if len(remaining) != len(effects):
         actor.effects = remaining
+
+def _calculate_resistance(target: Actor, damage_type: DamageType) -> float:
+    """Calculate damage resistance multiplier for a given target and damage type.
+    
+    Resistance format: list of tuples like (DamageType.FIRE, 0.5) where:
+    - 0.0 = immune (no damage)
+    - 0.5 = resistant (half damage)  
+    - 1.0 = normal damage
+    - 2.0 = vulnerable (double damage)
+    """
+    if not damage_type or damage_type == DamageType.NONE:
+        return 1.0
+
+    # Debug output if debug mode is enabled
+    debug_enabled = False
+    try:
+        if hasattr(target, 'gamemap') and target.gamemap and hasattr(target.gamemap, 'engine'):
+            debug_enabled = target.gamemap.engine.debug
+    except Exception as e:
+        print(f'[COMBAT RES] Error checking debug mode: {e}')
+
+    for resistance_entry in target.damage_resistances:
+        res_type, res_value = resistance_entry[0], resistance_entry[1]
+        if debug_enabled:
+            print(f"[COMBAT RES] Checking resistance {res_type} with value {res_value} against damage type {damage_type}")
+        if res_type == damage_type:  # Compare enum to enum
+            return res_value
+    for resistance_entry in target.effect_resistances:
+        res_type, res_value = resistance_entry[0], resistance_entry[1]
+        if debug_enabled:
+            print(f"[COMBAT RES] Checking effect resistance {res_type} with value {res_value} against damage type {damage_type}")
+        if res_type == damage_type:  # Compare enum to enum
+            return res_value
+    
+    return 1.0  # No resistance found, return normal multiplier
+
+
+def is_immune_to_damage_type(target: Actor, damage_type: DamageType) -> bool:
+    """Check if a target is immune to a specific damage type.
+    
+    Returns True if the target has 0.0 resistance (immunity) to the damage type.
+    Used for non-damaging effects that should respect immunity (e.g., sleep spell vs psychic immunity).
+    """
+    return _calculate_resistance(target, damage_type) == 0.0
+
+
+def apply_typed_damage(target: Actor, base_damage: int, damage_type: DamageType) -> int:
+    """
+    Apply damage with a damage type, respecting resistances.
+    Used for environmental damage (burning, poison, liquids) that don't come from an attacker.
+    
+    Args:
+        target: The entity taking damage
+        base_damage: Base damage amount before resistances
+        damage_type: Type of damage being dealt
+    
+    Returns:
+        int: Final damage dealt after resistances
+    """
+    if base_damage <= 0:
+        return 0
+    
+    # Calculate resistance multiplier
+    resistance_multiplier = 1.0
+    if damage_type and hasattr(target, 'damage_resistances'):
+        resistance_multiplier = _calculate_resistance(target, damage_type)
+    
+    # Apply resistance
+    final_damage = max(0, int(base_damage * resistance_multiplier))
+    return final_damage
+
+
+def calculate_damage(
+    attacker: Actor,
+    target: Actor,
+    base_damage: int,
+    attack_type: str,
+    *,
+    damage_type: DamageType = DamageType.NONE,
+    damage_modifier: float = 1.0,
+    hit_part=None,
+    proficiency_profile: profsys.ProficiencyResult = None,
+    armor_tags: list[str] = None,
+) -> tuple[int, int, bool]:
+    """
+    Centralized damage calculation for melee, ranged, and spell attacks.
+    
+    Args:
+        attacker: The entity performing the attack
+        target: The entity being attacked
+        base_damage: Base damage value (power for melee/ranged, damage for spells)
+        attack_type: One of "melee", "ranged", or "spell"
+        damage_modifier: Modifier from body part targeting or other sources
+        hit_part: The specific body part being targeted
+        proficiency_profile: Weapon/spell proficiency result (optional, calculated if not provided)
+        armor_tags: Armor tags for the hit part (optional, calculated if not provided)
+    
+    Returns:
+        tuple[int, int, bool]: (final_damage, armor_defense, was_fully_resisted)
+    """
+    # Calculate stat-based multipliers
+    stat_multiplier = 1.0
+    if attack_type == "melee":
+        strength_bonus = trait_delta(_get_trait_level(attacker, "strength"))
+        stat_multiplier = 1.0 + (strength_bonus * STRENGTH_MELEE_DAMAGE_PER_LEVEL)
+    elif attack_type == "ranged":
+        agility_bonus = trait_delta(_get_trait_level(attacker, "agility"))
+        stat_multiplier = 1.0 + (agility_bonus * AGILITY_RANGED_DAMAGE_PER_LEVEL)
+    elif attack_type == "spell":
+        # Spells use cast potency multiplier from the spell itself
+        # This is handled externally via _scaled_amount in spell classes
+        stat_multiplier = 1.0
+    
+    # Get proficiency multiplier
+    proficiency_multiplier = 1.0
+    if proficiency_profile is not None:
+        proficiency_multiplier = proficiency_profile.damage_multiplier
+
+    resistance_multiplier = 1.0
+    if damage_type and hasattr(target, 'damage_resistances'):
+        resistance_multiplier = _calculate_resistance(target, damage_type)
+    
+    # Track if damage was reduced to 0 due to resistance
+    was_fully_resisted = False
+    
+    # Calculate total damage multiplier
+    total_damage_multiplier = (damage_modifier * stat_multiplier *
+                                proficiency_multiplier * resistance_multiplier)
+    
+    # Get armor tags if not provided
+    if armor_tags is None:
+        armor_tags = []
+        if hit_part and hasattr(target, 'equipment') and target.equipment:
+            armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name)
+    
+    # Apply damage mitigation for melee and ranged attacks
+    # Spells typically bypass armor mitigation in this codebase
+    # Track if damage was fully resisted (immunity = 0.0 multiplier)
+    was_fully_resisted = (base_damage > 0 and resistance_multiplier == 0.0)
+    
+    if attack_type in ("melee", "ranged"):
+        final_damage, armor_defense = target.fighter.mitigate_incoming_damage(
+            base_damage,
+            damage_multiplier=total_damage_multiplier,
+            targeted_part=hit_part,
+            armor_tags=armor_tags,
+        )
+    else:  # spell
+        # Spells use direct damage without mitigation
+        final_damage = max(0, int(base_damage * total_damage_multiplier))
+        armor_defense = 0
+    
+    return final_damage, armor_defense, was_fully_resisted
+
 
 class Action:
     def __init__(self, entity: Actor) -> None:
@@ -657,7 +835,8 @@ class PickupAction(Action):
                         event="perform",
                     )
 
-            self.engine.message_log.add_message(f"You picked up the {item.name}!")
+            shown_name = identify_system.get_display_name(self.engine.player, item)
+            self.engine.message_log.add_message(f"You picked up the {shown_name}!")
             return
 
         raise exceptions.Impossible("There is nothing here to pick up.")
@@ -695,6 +874,21 @@ class CastSpellAction(Action):
         self.engine.message_log.add_message(f"The {self.entity.name} casts {chosen_spell.name}!", color.light_purple)
         return SpellAction(self.entity, chosen_spell, target_xy).perform()
 
+
+class AbilityAction(Action):
+    def __init__(self, entity: Actor, target_xy: Optional[Tuple[int, int]] = None):
+        super().__init__(entity)
+        self.target_xy = target_xy
+
+    @property
+    def target_actor(self) -> Optional[Actor]:
+        if not self.target_xy:
+            return None
+        return self.engine.game_map.get_actor_at_location(*self.target_xy)
+
+    def perform(self) -> None:
+        _break_invisibility(self.entity)
+        self.entity.active_ability.activate(self)
 
 class SpellAction(Action):
     def __init__(self, entity: Actor, spell: Spell, target_xy: Optional[Tuple[int, int]] = None):
@@ -749,11 +943,60 @@ class ItemAction(Action):
             self.item.consumable.activate(self)
 
 
+class IdentifyItemAction(Action):
+    def __init__(self, entity: Actor, item: Item):
+        super().__init__(entity)
+        self.item = item
+
+    def perform(self) -> None:
+        if self.item not in self.entity.inventory.items:
+            raise exceptions.Impossible("You can only identify items in your inventory.")
+
+        started, message = identify_system.start_identification(self.entity, self.item)
+        if not started:
+            raise exceptions.Impossible(message)
+
+        if message:
+            self.engine.message_log.add_message(message, color.light_blue)
+
+
+class RemoveCurseAction(Action):
+    def __init__(self, entity: Actor, spell: Spell, item: Item):
+        super().__init__(entity)
+        self.spell = spell
+        self.item = item
+
+    def perform(self) -> None:
+        if self.item not in self.entity.inventory.items:
+            raise exceptions.Impossible("You can only target items in your inventory.")
+
+        if not self.entity.equipment.item_is_equipped(self.item):
+            raise exceptions.Impossible("You can only target equipped items.")
+
+        if not self.item._is_cursed():
+            raise exceptions.Impossible(f"The {self.item.name} is not cursed.")
+
+        if self.entity.mana < self.spell.mana_cost:
+            raise exceptions.Impossible(f"Not enough mana ({self.spell.mana_cost} required).")
+
+        self.entity.equipment.force_unequip_item(self.item, add_message=True)
+
+        self.spell._spend_mana_and_award_xp(self.entity)
+
+        self.engine.message_log.add_message(
+            f"The spell breaks the {self.item.name}'s hold on you!",
+            color.light_blue,
+        )
+
+
 class DropItem(ItemAction):
     def perform(self) -> None:
         if self.entity.equipment.item_is_equipped(self.item):
             self.entity.equipment.toggle_equip(self.item)
         
+        if self.item._is_cursed() and self.entity.equipment.item_is_equipped(self.item):
+            return
+
         self.entity.inventory.drop(self.item) 
 class OpenAction(Action):
     def perform(self) -> None:
@@ -836,6 +1079,11 @@ class TakeStairsAction(Action):
         # Ascend if on an upstairs tile
         if hasattr(gm, "upstairs_location") and pos == gm.upstairs_location:
             print(f"[STAIRS] Ascending from floor {gw.current_floor}")
+            
+            # If leaving boss floor, restore dungeon music
+            if gm.name == "Boss Room":
+                sounds.start_dungeon_music()
+            
             # Call ascend on the GameWorld if available; if not, try map-level ascend
             try:
                 gw.ascend()
@@ -1190,41 +1438,51 @@ class RangedAction(ActionWithDirection):
         if self.entity is self.engine.player:
             self.engine.message_log.add_message("You ready another arrow.", color.light_gray)
 
-    def perform(self) -> None:
+    def perform(self, innate: bool = False, break_chance: bool = True) -> None:
         _break_invisibility(self.entity)
-        bow_item, projectile_item = self._get_ready_ranged_items()
-        quiver_item = self._get_equipped_quiver()
+        
+        # Initialize variables that may be used later
+        bow_item = None
+        projectile_item = None
+        quiver_item = None
         using_quiver = False
         shot_ammo_type = None
+        
+        if not innate:
+            bow_item, projectile_item = self._get_ready_ranged_items()
+            quiver_item = self._get_equipped_quiver()
 
-        if bow_item and quiver_item and _get_quiver_total_count(quiver_item) > 0:
-            ammo_counts, selected_type = _ensure_quiver_ammo_state(quiver_item)
-            if int(ammo_counts.get(selected_type, 0) or 0) > 0:
-                shot_ammo_type = selected_type
-            else:
-                shot_ammo_type = next((k for k, v in ammo_counts.items() if int(v or 0) > 0), None)
-            projectile_item = self._get_quiver_projectile_template(quiver_item, shot_ammo_type)
-            using_quiver = projectile_item is not None
+            if bow_item and quiver_item and _get_quiver_total_count(quiver_item) > 0:
+                ammo_counts, selected_type = _ensure_quiver_ammo_state(quiver_item)
+                if int(ammo_counts.get(selected_type, 0) or 0) > 0:
+                    shot_ammo_type = selected_type
+                else:
+                    shot_ammo_type = next((k for k, v in ammo_counts.items() if int(v or 0) > 0), None)
+                projectile_item = self._get_quiver_projectile_template(quiver_item, shot_ammo_type)
+                using_quiver = projectile_item is not None
 
-        if not bow_item or not projectile_item:
-            if bow_item and quiver_item and _get_quiver_total_count(quiver_item) <= 0:
-                raise exceptions.Impossible("Your quiver is empty.")
-            raise exceptions.Impossible("You need a bow and arrows to fire.")
+            if not bow_item or not projectile_item:
+                if bow_item and quiver_item and _get_quiver_total_count(quiver_item) <= 0:
+                    raise exceptions.Impossible("Your quiver is empty.")
+                raise exceptions.Impossible("You need a bow and arrows to fire.")
 
         import tcod.los
         from animations import ThrowAnimation
+        from entity_factories import steel_arrow
+        if not projectile_item and innate:
+            projectile_item = steel_arrow
 
         # Store projectile info before consuming it
         projectile_char = projectile_item.char
         projectile_color = projectile_item.color
-
-        # Always consume projectile when firing (regardless of hit/miss)
-        self._consume_projectile(
-            projectile_item,
-            using_quiver=using_quiver,
-            quiver_item=quiver_item,
-            shot_ammo_type=shot_ammo_type,
-        )
+        if not innate:
+            # Always consume projectile when firing (regardless of hit/miss)
+            self._consume_projectile(
+                projectile_item,
+                using_quiver=using_quiver,
+                quiver_item=quiver_item,
+                shot_ammo_type=shot_ammo_type,
+            )
 
         # Play shooting sound
         sounds.play_throw_sound()  # Use throw sound for bow firing
@@ -1234,6 +1492,7 @@ class RangedAction(ActionWithDirection):
             bow_range = int(getattr(bow_item.equippable, "max_range", BOW_DEFAULT_MAX_RANGE) or BOW_DEFAULT_MAX_RANGE)
 
         target, collision_pos, collision_type = self._find_target_in_line(max_range=bow_range)
+        allow_projectile_drop = not innate
 
         # Use bow verb if available
         shot_verb = "shoots"
@@ -1245,13 +1504,20 @@ class RangedAction(ActionWithDirection):
         # Handle different collision types
         if collision_type == 'actor' and target:
             # Hit an actor - proceed with normal combat
-            self._handle_actor_hit(target, shot_verb, bow_item, projectile_item)
+            self._handle_actor_hit(
+                target,
+                shot_verb,
+                bow_item,
+                projectile_item,
+                allow_projectile_drop=allow_projectile_drop,
+            )
             # Add projectile animation
             path = list(tcod.los.bresenham((self.entity.x, self.entity.y), collision_pos).tolist())
             self.engine.animation_queue.append(ThrowAnimation(path, projectile_char, projectile_color))
         elif collision_type == 'obstacle':
             # Hit an obstacle - 50/50 chance to break or fall
-            break_chance = random.random() < ARROW_OBSTACLE_BREAK_CHANCE
+            if not break_chance:
+                break_chance = random.random() < ARROW_OBSTACLE_BREAK_CHANCE
             
             # Add projectile animation to collision point
             obstacle_x = collision_pos[0] + self.dx
@@ -1264,7 +1530,8 @@ class RangedAction(ActionWithDirection):
                 self.engine.message_log.add_message("Your arrow hits an obstacle and breaks!", color.gray)
             else:
                 self.engine.message_log.add_message("Your arrow hits an obstacle and falls to the ground.", color.gray)
-                self._drop_projectile_at(collision_pos, projectile_item)
+                if allow_projectile_drop:
+                    self._drop_projectile_at(collision_pos, projectile_item)
         elif collision_type == 'out_of_bounds':
             # Add projectile animation to edge of map
             path = list(tcod.los.bresenham((self.entity.x, self.entity.y), collision_pos).tolist())
@@ -1275,7 +1542,8 @@ class RangedAction(ActionWithDirection):
             path = list(tcod.los.bresenham((self.entity.x, self.entity.y), collision_pos).tolist())
             self.engine.animation_queue.append(ThrowAnimation(path, projectile_char, projectile_color))
             self.engine.message_log.add_message("Your arrow lands in the distance.", color.gray)
-            self._drop_projectile_at(collision_pos, projectile_item)
+            if allow_projectile_drop:
+                self._drop_projectile_at(collision_pos, projectile_item)
         else:
             # No target found in range
             self.engine.message_log.add_message("Your arrow flies through empty air.", color.gray)
@@ -1297,7 +1565,15 @@ class RangedAction(ActionWithDirection):
             self.engine.debug_log(f"Error creating dropped arrow: {e}", handler=type(self).__name__, event="_drop_projectile_at")
             # Silently fail if we can't create the arrow
     
-    def _handle_actor_hit(self, target: Actor, shot_verb: str, bow_item, projectile_item) -> None:
+    def _handle_actor_hit(
+        self,
+        target: Actor,
+        shot_verb: str,
+        bow_item,
+        projectile_item,
+        *,
+        allow_projectile_drop: bool = True,
+    ) -> None:
         """Handle hitting an actor with the projectile."""
         # Manipulation check
         for part in self.entity.body_parts.get_all_parts().values():
@@ -1330,13 +1606,20 @@ class RangedAction(ActionWithDirection):
             projectile_power = int(getattr(projectile_item.equippable, "power_bonus", 0) or 0)
 
         armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name) if hit_part and target.equipment else []
-        agility_bonus = trait_delta(_get_trait_level(self.entity, "agility"))
-        ranged_multiplier = 1.0 + (agility_bonus * AGILITY_RANGED_DAMAGE_PER_LEVEL)
-        damage_multiplier = damage_modifier * ranged_multiplier * arrow_profile.damage_multiplier
-        final_damage, armor_defense = target.fighter.mitigate_incoming_damage(
-            projectile_power,
-            damage_multiplier=damage_multiplier,
-            targeted_part=hit_part,
+        
+        # Get damage type from projectile
+        projectile_damage_type = getattr(projectile_item, 'damage_type', DamageType.PIERCING) if projectile_item else DamageType.PIERCING
+        
+        # Use centralized damage calculation for ranged attacks
+        final_damage, armor_defense, was_fully_resisted = calculate_damage(
+            attacker=self.entity,
+            target=target,
+            base_damage=projectile_power,
+            attack_type="ranged",
+            damage_type=projectile_damage_type,
+            damage_modifier=damage_modifier,
+            hit_part=hit_part,
+            proficiency_profile=arrow_profile,
             armor_tags=armor_tags,
         )
 
@@ -1423,6 +1706,9 @@ class RangedAction(ActionWithDirection):
 
         # Display results
         if not hit_success:
+            # Get a nearby tile for the missed attack
+            miss_x, miss_y = get_adjacent_miss_position(target.x, target.y, self.engine.game_map)
+            
             if dodge_success:
                 self.engine.message_log.add_message(
                     f"{attack_desc}, but {target.name} dodges!", color.teal
@@ -1431,8 +1717,21 @@ class RangedAction(ActionWithDirection):
                 self.engine.message_log.add_message(
                     f"{attack_desc}, but misses!", color.dark_gray
                 )
-            # Arrow always drops when missing/dodged - drop at target location
-            self._drop_projectile_at((target.x, target.y), projectile_item)
+            
+            # Arrow drops at the miss position unless this is innate ammo.
+            if allow_projectile_drop:
+                self._drop_projectile_at((miss_x, miss_y), projectile_item)
+            
+            # Check for collateral targets at the miss position
+            collateral_target = self.engine.game_map.get_actor_at_location(miss_x, miss_y)
+            if collateral_target and collateral_target != self.entity and collateral_target != target:
+                # Calculate reduced damage for collateral hit (50% of original)
+                collateral_damage = max(1, final_damage // 2)
+                collateral_target.fighter.take_damage(collateral_damage)
+                self.engine.message_log.add_message(
+                    f"The arrow strikes {collateral_target.name} instead for {collateral_damage} damage!",
+                    color.orange
+                )
         elif final_damage > 0:
             if hit_part:
                 part_damage = hit_part.take_damage(final_damage)
@@ -1455,7 +1754,7 @@ class RangedAction(ActionWithDirection):
             #item_for_attack = self._get_ready_ranged_items()[0]  # Get the bow used for the attack
 
             # Most landed arrows can be recovered from the battlefield.
-            if random.random() < ARROW_HIT_RECOVERY_CHANCE:
+            if allow_projectile_drop and random.random() < ARROW_HIT_RECOVERY_CHANCE:
                 self._drop_projectile_at((target.x, target.y), projectile_item)
 
             if target is self.engine.player:
@@ -1469,11 +1768,17 @@ class RangedAction(ActionWithDirection):
                     self.engine.animation_queue.append(gpu_stack.CRTBleedAnim())
                 
         else:
-            self.engine.message_log.add_message(
-                f"{attack_desc}, but does no damage.", attack_color
-            )
-            # Arrow bounced off armor/blocked - drops to ground
-            self._drop_projectile_at((target.x, target.y), projectile_item)
+            if was_fully_resisted:
+                self.engine.message_log.add_message(
+                    f"{attack_desc}, but the attack is completely resisted!", color.light_blue
+                )
+            else:
+                self.engine.message_log.add_message(
+                    f"{attack_desc}, but does no damage.", attack_color
+                )
+            # Arrow bounced off armor/blocked - drops to ground unless innate.
+            if allow_projectile_drop:
+                self._drop_projectile_at((target.x, target.y), projectile_item)
 
         # Grant trait XP for ranged combat
         if final_damage > 0:
@@ -1569,19 +1874,41 @@ class MeleeAction(ActionWithDirection):
 
         return weapon, (weapon_verb or "attacks")
 
-    def _compute_damage_profile(self, target: Actor, hit_part, damage_modifier: float, equipped_weapons: list) -> tuple[int, int, list, profsys.ProficiencyResult]:
+    def _compute_damage_profile(self, target: Actor, hit_part, damage_modifier: float, equipped_weapons: list) -> tuple[int, int, bool, list, profsys.ProficiencyResult]:
         armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name) if hit_part and target.equipment else []
-
-        strength_multiplier = 1.0 + (trait_delta(_get_trait_level(self.entity, "strength")) * STRENGTH_MELEE_DAMAGE_PER_LEVEL)
         weapon_profile = _weapon_proficiency_profile(self.entity, equipped_weapons)
-        damage_multiplier = damage_modifier * strength_multiplier * weapon_profile.damage_multiplier
-        final_damage, armor_defense = target.fighter.mitigate_incoming_damage(
-            self.entity.fighter.power,
-            damage_multiplier=damage_multiplier,
-            targeted_part=hit_part,
+        
+        # Get damage type from weapon (default to bludgeoning for unarmed)
+        weapon_damage_type = DamageType.BLUDGEONING
+        if equipped_weapons:
+            if self.engine.debug:
+                print(f"[WEAPON DEBUG] All equipped weapons: {[w.name for w in equipped_weapons]}")
+                print(f"[WEAPON DEBUG] Weapon tags: {[(w.name, getattr(w, 'tags', [])) for w in equipped_weapons]}")
+            # Filter out non-weapons (like torches) - prefer items with "weapon" tag
+            actual_weapons = [w for w in equipped_weapons if "weapon" in getattr(w, "tags", [])]
+            if self.engine.debug:
+                print(f"[WEAPON DEBUG] Filtered weapons: {[w.name for w in actual_weapons]}")
+            weapon = actual_weapons[0] if actual_weapons else equipped_weapons[0]
+            if self.engine.debug:
+                print(f"[WEAPON DEBUG] Selected weapon: {weapon.name}")
+                print(f"[WEAPON DEBUG] Weapon damage_type: {getattr(weapon, 'damage_type', 'NO ATTRIBUTE')}")
+            weapon_damage_type = getattr(weapon, 'damage_type', DamageType.BLUDGEONING)
+            if self.engine.debug:
+                print(f"[WEAPON DEBUG] Final damage_type: {weapon_damage_type}")
+        
+        final_damage, armor_defense, was_fully_resisted = calculate_damage(
+            attacker=self.entity,
+            target=target,
+            base_damage=self.entity.fighter.power,
+            attack_type="melee",
+            damage_type=weapon_damage_type,
+            damage_modifier=damage_modifier,
+            hit_part=hit_part,
+            proficiency_profile=weapon_profile,
             armor_tags=armor_tags,
         )
-        return final_damage, armor_defense, armor_tags, weapon_profile
+        
+        return final_damage, armor_defense, was_fully_resisted, armor_tags, weapon_profile
 
     def _compute_hit_success(self, target: Actor, weapon_profile: profsys.ProficiencyResult) -> bool:
         if self.tile_rel_pos:
@@ -1733,7 +2060,7 @@ class MeleeAction(ActionWithDirection):
 
         hit_part, self.target_part, damage_modifier = _resolve_hit_part(target, self.target_part)
         equipped_weapons: list = _collect_equipped_weapons(self.entity)
-        final_damage, armor_defense, armor_tags, weapon_profile = self._compute_damage_profile(
+        final_damage, armor_defense, was_fully_resisted, armor_tags, weapon_profile = self._compute_damage_profile(
             target,
             hit_part,
             damage_modifier,
@@ -1781,6 +2108,9 @@ class MeleeAction(ActionWithDirection):
 
         # --- Outcome messages and damage ---
         if not hit_success:
+            # Get a nearby tile for the missed attack
+            miss_x, miss_y = get_adjacent_miss_position(target.x, target.y, self.engine.game_map)
+            
             msg = (f"{attack_desc}, but {target.name} dodges!" if dodge_success
                    else f"{attack_desc}, but misses!")
             if dodge_success:
@@ -1788,8 +2118,21 @@ class MeleeAction(ActionWithDirection):
                     gpu_stack.DodgeParticle(dodge_origin,
                                             character=target.char,
                                             direction=dodge_dir))
-            self.engine.animation_queue.append(gpu_stack.SlashParticle((target.x, target.y), enchanted=False, angle=slash_angle, type="miss"))
+            
+            # Show the attack hitting the miss position instead
+            self.engine.animation_queue.append(gpu_stack.SlashParticle((miss_x, miss_y), enchanted=False, angle=slash_angle, type="miss"))
             self.engine.message_log.add_message(msg, color.teal if dodge_success else color.dark_gray)
+            
+            # Check for collateral targets at the miss position
+            collateral_target = self.engine.game_map.get_actor_at_location(miss_x, miss_y)
+            if collateral_target and collateral_target != self.entity and collateral_target != target:
+                # Calculate reduced damage for collateral hit (50% of original)
+                collateral_damage = max(1, final_damage // 2)
+                collateral_target.fighter.take_damage(collateral_damage)
+                self.engine.message_log.add_message(
+                    f"The attack struck {collateral_target.name} instead for {collateral_damage} damage!",
+                    color.orange
+                )
 
         elif final_damage > 0:
             part_damage = self._apply_hit_outcome(
@@ -1803,9 +2146,14 @@ class MeleeAction(ActionWithDirection):
                 slash_angle=slash_angle,
             )
         else:
-            self.engine.message_log.add_message(
-                f"{attack_desc}, but does no damage.", attack_color
-            )
+            if was_fully_resisted:
+                self.engine.message_log.add_message(
+                    f"{attack_desc}, but the attack is completely resisted!", color.light_blue
+                )
+            else:
+                self.engine.message_log.add_message(
+                    f"{attack_desc}, but does no damage.", attack_color
+                )
 
         self._award_melee_xp(target, equipped_weapons, part_damage, armor_defense, hit_part)
 
@@ -2013,17 +2361,22 @@ class ThrowItem(ItemAction):
             # Inflict damage on part
             if targeted_part and random_part:
                 target.fighter.take_damage(damage, targeted_part=targeted_part)
-                self.engine.message_log.add_message(f"You throw the {self.item.name} and hit {target.name}'s {random_part.name} for {damage} damage!", color.orange)
+                shown_name = identify_system.get_display_name(self.engine.player, self.item)
+                self.engine.message_log.add_message(f"You throw the {shown_name} and hit {target.name}'s {random_part.name} for {damage} damage!", color.orange)
             else:
                 target.fighter.take_damage(damage)
-                self.engine.message_log.add_message(f"You throw the {self.item.name} and hit {target.name} for {damage} damage!", color.orange)
+                shown_name = identify_system.get_display_name(self.engine.player, self.item)
+                self.engine.message_log.add_message(f"You throw the {shown_name} and hit {target.name} for {damage} damage!", color.orange)
 
     def perform(self) -> None:
         _break_invisibility(self.entity)
         # Remove item from inventory
         if self.entity.equipment.item_is_equipped(self.item):
             self.entity.equipment.toggle_equip(self.item)
+        if self.item._is_cursed() and self.entity.equipment.item_is_equipped(self.item):
+            return
 
+        sounds.play_throw_sound()
         # Also check if contained liquid
         if self.item.liquid_type:
             x = self.target_xy[0]
@@ -2033,7 +2386,8 @@ class ThrowItem(ItemAction):
 
         if self.item.tags and "fragile" in self.item.tags:
             # Handle fragile item breakage
-            self.engine.message_log.add_message(f"You throw the {self.item.name}, and it shatters on impact!", color.purple)
+            shown_name = identify_system.get_display_name(self.engine.player, self.item)
+            self.engine.message_log.add_message(f"You throw the {shown_name}, and it shatters on impact!", color.purple)
             sounds.play_glass_break_sound()
             # Delete item
             self.entity.inventory.delete(self.item)

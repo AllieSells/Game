@@ -71,6 +71,10 @@ _KNOWN_ORIGIN_PERKS = {
     "bonus_saturation",
 }
 
+_KNOWN_ABILITIES = {
+    "Charge",
+}
+
 
 def _get_valid_traits() -> Set[str]:
     """Load valid trait names from Level.TRAITS for validation."""
@@ -149,6 +153,16 @@ def _validate_origin_perks(data: dict) -> None:
                     f"'{origin.get('id')}'. Known perks: {sorted(_KNOWN_ORIGIN_PERKS)}"
                 )
 
+def _validate_ability(data: dict) -> None:
+    """Warn about unknown origin abilities so data is safe"""
+    for prof in data.get("professions", []):
+        ability_name = prof.get("active_ability", "")
+        if ability_name:
+            if ability_name not in _KNOWN_ABILITIES:
+                print(
+                    f"[chargen] WARNING: Unknown active ability '{ability_name}' in profession "
+                    f"'{prof.get('id')}'. Known abilities: {sorted(_KNOWN_ABILITIES)}"
+                )
 
 def _load_data() -> dict:
     with open(_CHARGEN_JSON, encoding="utf-8") as fh:
@@ -161,6 +175,8 @@ def _load_data() -> dict:
     _validate_starting_spells(data)
     # Validate optional origin gameplay perks.
     _validate_origin_perks(data)
+    # Validate active abilities
+    _validate_ability(data)
     return data
 
 
@@ -345,6 +361,7 @@ class CharacterCreationHandler(PopupEventHandler):
             "starting_items": list(prof.get("starting_items", []) or []),
             "origin_tags": list(origin.get("tags", []) or []),
             "profession_tags": list(prof.get("tags", []) or []),
+            "active_ability": prof.get("active_ability", ""),
         }
 
 
@@ -1056,6 +1073,9 @@ class CharacterCreationHandler(PopupEventHandler):
         _give_starting_spells(setup.get("starting_spells", []), p)
         # Origin perks are separate from profession and shape initial run state.
         _apply_origin_perks(setup.get("origin_perks", {}), p)
+        # Apply profession active abilities
+        _apply_active_ability(setup.get("active_ability"), p)
+
 
         prof = self._selected_profession()
         self._run_hook(prof.get("python_hook"), p, prof)
@@ -1063,6 +1083,7 @@ class CharacterCreationHandler(PopupEventHandler):
         # Origin flavor hook
         origin = self._selected_origin()
         self._run_hook(origin.get("python_hook"), p, origin)
+
 
         # Sync mana pool from finalized arcana level.
         # Keep the early-game curve gentle so life-path choices don't over-spike starts.
@@ -1179,6 +1200,24 @@ def _give_starting_spells(spell_names: list, player) -> None:
             player.known_spells.append(spell_cls())
         except Exception as e:
             print(f"[chargen] failed to grant starting spell {spell_name!r}: {e}")
+
+
+def _apply_active_ability(ability_ref: Optional[str], player) -> None:
+    """Apply a profession's active ability by ref."""
+    if not ability_ref:
+        return
+
+    import components.ability as a
+    ability_cls = getattr(a, ability_ref, None)
+    if ability_cls is None:
+        print(f"[chargen] unknown active ability ref: {ability_ref!r}")
+        return
+    try:
+        ability = ability_cls()
+        if hasattr(player, "active_ability"):
+            player.active_ability = ability
+    except Exception as e:
+        print(f"[chargen] failed to apply active ability {ability_ref!r}: {e}")
 
 
 def _apply_origin_perks(origin_perks: dict, player) -> None:

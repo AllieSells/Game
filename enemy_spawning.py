@@ -31,12 +31,13 @@ import copy
 import json
 import os
 import random
-from typing import Callable, List, NamedTuple, Optional
+from typing import Callable, List, NamedTuple, Optional, Tuple
 
 from entity import Actor
 import entity_factories
 
-_SPAWN_TABLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "json", "spawn_tables.json")
+_ENEMY_SPAWN_TABLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "json", "spawn_tables.json")
+_TRAP_SPAWN_TABLE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "json", "trap_spawn_tables.json")
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +62,7 @@ class EnemySpawner:
 
     def __init__(self) -> None:
         self._enemy_entries: List[EnemyEntry] = []
+        self._trap_entries: List[EnemyEntry] = []
         self._register_defaults()
 
     # ------------------------------------------------------------------
@@ -98,7 +100,7 @@ class EnemySpawner:
 
     def _register_defaults(self) -> None:
         """Load spawn table from JSON."""
-        with open(_SPAWN_TABLE_PATH, "r") as f:
+        with open(_ENEMY_SPAWN_TABLE_PATH, "r") as f:
             enemy_data = json.load(f)
         for entry in enemy_data:
             factory_obj = getattr(entity_factories, entry["factory"])
@@ -109,6 +111,20 @@ class EnemySpawner:
                 threat=entry["threat"],
                 rank_cap=entry["rank_cap"],
                 weight=entry["weight"],
+            )
+        with open(_TRAP_SPAWN_TABLE_PATH, "r") as f:
+            trap_data = json.load(f)
+        for entry in trap_data:
+            factory_obj = getattr(entity_factories, entry["factory"])
+            self._trap_entries.append(
+                EnemyEntry(
+                    factory=lambda obj=factory_obj: copy.deepcopy(obj),
+                    biomes=entry["biome"],  # Can be string or list
+                    threat=entry["threat"],
+                    rank_cap=entry["rank_cap"],
+                    weight=entry["weight"],
+                    scale_traits=entry.get("scale_traits", []),  # Traps may not scale traits
+                )
             )
 
     # ------------------------------------------------------------------
@@ -127,9 +143,36 @@ class EnemySpawner:
         
         return max(0.5, base_budget + floor_scaling + variance)
 
+    def get_trap_budget(self, floor: int, biome: str) -> float:
+        """Calculate trap budget for this floor and biome."""
+        base_budget = 1.0
+        floor_scaling = floor * 0.5
+        biome_multiplier = 1.0
+        if biome.__contains__("ruins"):
+            biome_multiplier = 1.3
+        elif biome.__contains__("caverns"):
+            biome_multiplier = 0.2
+        elif biome.__contains__("dungeon"):
+            biome_multiplier = 2.0
+
+        variance = random.uniform(-0.5, 1.0)
+        return max(0.3, (base_budget + floor_scaling + variance) * biome_multiplier)
     # ------------------------------------------------------------------
     # Enemy selection with budget
     # ------------------------------------------------------------------
+
+    def _get_available_traps(self, floor: int, biome: str) -> List[tuple[EnemyEntry, float]]:
+        """ Get all available traps for this biome"""
+        available = []
+        
+        for entry in self._trap_entries:
+            # Check biome match
+            if "any" not in entry.biomes and biome not in entry.biomes:
+                continue
+            
+            available.append((entry, entry.weight))
+        
+        return available
 
     def _get_available_enemies(self, floor: int, biome: str) -> List[tuple[EnemyEntry, float]]:
         """
@@ -152,12 +195,15 @@ class EnemySpawner:
     # Spawning with budget and rank caps
     # ------------------------------------------------------------------
 
+
+
     def spawn_enemies(
         self,
         floor: int,
         biome: str = "any",
         budget: Optional[float] = None,
-    ) -> List[Actor]:
+        trap_budget: Optional[float] = None,
+    ) -> Tuple[List[Actor], List[Actor]]:
         """
         Spawn enemies using budget system with spawn chance.
         
@@ -169,17 +215,21 @@ class EnemySpawner:
         enemy_count_roll = random.randint(0, max_enemies)
         
         if enemy_count_roll == 0:
-            return []  # Empty room
+            return [], []  # Empty room (no enemies, no traps)
         
         if budget is None:
             budget = self.get_encounter_budget(floor)
+        if trap_budget is None:
+            trap_budget = self.get_trap_budget(floor, biome)
         
         # Cap budget based on rolled count to prevent over-spawning
         # If roll says "2 enemies", don't spawn 5
         budget = min(budget, enemy_count_roll * 2.5)  # ~2.5 threat per expected enemy
+        trap_budget = min(trap_budget, enemy_count_roll * 1.5)  # ~1.5 trap threat per expected enemy
         
         # Spawn individual enemies with budget
         enemies = self._spawn_with_budget(floor, biome, budget)
+        traps = self._spawn_traps_with_budget(floor, biome, trap_budget)
         
         # Debug output
         if enemies:
@@ -188,7 +238,44 @@ class EnemySpawner:
             count_strs = [f"{name} x{count}" for name, count in enemy_counts.items()]
             print(f"[GEN] Floor {floor}: Enemies spawned - {', '.join(count_strs)} (Budget: {budget:.1f})")
         #print(f"[GEN] Floor {floor}: Total enemies spawned - {len(enemies)} (Budget: {budget:.1f})")
-        return enemies
+        return enemies, traps
+
+    def _spawn_traps_with_budget(
+        self,
+        floor: int,
+        biome: str,
+        budget: float,
+    ) -> List[Actor]:
+        """
+        Fill budget by selecting traps with rank caps.
+        """
+        available = self._get_available_traps(floor, biome)
+        if not available:
+            return []
+        spawned = []
+        rank_counts = {}  # Track count of each trap type
+        remaining_budget = budget
+        max_attempts = 30  # Prevent infinite loops
+        attempt = 0
+        while remaining_budget > 0.4 and attempt < max_attempts:
+            attempt += 1
+            affordable = []
+            for entry, weight in available:
+                if entry.threat <= remaining_budget:
+                    current_count = rank_counts.get(entry.factory, 0)
+                    if current_count < entry.rank_cap:
+                        threat_preference = weight * (entry.threat ** 1.5)
+                        affordable.append((entry, threat_preference))
+            if not affordable:
+                break
+            entries, weights = zip(*affordable)
+            chosen_entry = random.choices(entries, weights=weights, k=1)[0]
+            trap = chosen_entry.factory()
+            spawned.append(trap)
+            remaining_budget -= chosen_entry.threat
+            rank_counts[chosen_entry.factory] = rank_counts.get(chosen_entry.factory, 0) + 1
+        return spawned
+
 
     def _spawn_with_budget(
         self,
@@ -358,7 +445,9 @@ def get_enemies_for_floor(
     
     Note: 'count' parameter is ignored - budget system determines enemy count.
     """
-    return enemy_spawner.spawn_enemies(floor, biome, budget)
+    enemies, traps = enemy_spawner.spawn_enemies(floor, biome, budget)
+    return enemies, traps
+
 
 
 def get_enemy_count_for_floor(floor: int) -> int:

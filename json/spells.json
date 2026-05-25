@@ -65,6 +65,24 @@
 			"school": "divination",
 			"description": "Gain insight into distant places",
 			"color": [0, 255, 255]
+		},
+		{
+			"name": "Mirror Image",
+			"school": "illusion",
+			"description": "Create an illusory duplicate of yourself",
+			"color": [192, 192, 192]
+		},
+		{
+			"name": "Mage Armor",
+			"school": "abjuration",
+			"description": "Don a suit of magical armor for protection",
+			"color": [128, 128, 128]
+		},
+		{
+			"name": "Remove Curse",
+			"school": "abjuration",
+			"description": "Sever a connection to a curse",
+			"color": [128, 0, 128]
 		}
 	]
 }

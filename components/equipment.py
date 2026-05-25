@@ -6,6 +6,7 @@ from components.base_component import BaseComponent
 from equipment_types import EquipmentType
 import color
 import proficiency_system as profsys
+import identify as identify_system
 
 if TYPE_CHECKING:
     from entity import Actor, Item
@@ -176,6 +177,19 @@ class Equipment(BaseComponent):
                 item in self.grasped_items.values() or
                 item in self.body_part_coverage.values())
 
+    def _is_cursed_item(self, item: Item) -> bool:
+        """Return True when item has a CURSED enchantment marker."""
+        try:
+            for ench in (getattr(item, "enchantments", None) or []):
+                if str(getattr(ench, "name", "")).upper() == "CURSED":
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _cursed_lock_message(self, item: Item) -> str:
+        return f"The {item.name} clings to you!"
+
     def unequip_message(self, item_name: str) -> None:
         self.parent.gamemap.engine.message_log.add_message(
             f"You remove the {item_name}."
@@ -217,11 +231,8 @@ class Equipment(BaseComponent):
         if current_item is None:
             return
 
-        if add_message:
-            self.unequip_message(current_item.name)
-        
-        # The actual unequip logic is handled by unequip_item() method
-        self.unequip_item(current_item, add_message=False)
+        # Delegate to centralized logic so cursed lock/message behavior stays consistent.
+        self.unequip_item(current_item, add_message=add_message)
 
     def toggle_equip(self, equippable_item: Item, add_message: bool = True) -> None:
         """Toggle equipping an item using the new modular system."""
@@ -253,7 +264,6 @@ class Equipment(BaseComponent):
         
         eq_type = item.equippable.equipment_type
         eq_type_name = eq_type.name
-        item_tags = {tag.lower() for tag in getattr(item, "tags", [])}
         is_back_slot_item = eq_type_name == "BACKPACK"
         is_ring = eq_type_name == "RING"
 
@@ -269,12 +279,32 @@ class Equipment(BaseComponent):
                     self.equipped_items[ring_2_key] = item
                 else:
                     # Both slots full, unequip the first one and equip to first slot
+                    if self._is_cursed_item(self.equipped_items[ring_1_key]):
+                        if add_message:
+                            self.parent.gamemap.engine.message_log.add_message(
+                                self._cursed_lock_message(self.equipped_items[ring_1_key]),
+                                color.purple,
+                            )
+                        return
                     self.unequip_item(self.equipped_items[ring_1_key], add_message=False)
                     self.equipped_items[ring_1_key] = item
+                
+                # Initialize cooldown so ring doesn't apply effect immediately on first turn
+                if hasattr(item, "equippable") and item.equippable:
+                    cooldown = getattr(item.equippable, "effect_cooldown", 0)
+                    if cooldown > 0:
+                        item.effect_cooldown_remaining = cooldown
             else:
                 # Back-slot item (quiver)
                 existing = self.equipped_items.get(eq_type_name)
                 if existing and existing != item:
+                    if self._is_cursed_item(existing):
+                        if add_message:
+                            self.parent.gamemap.engine.message_log.add_message(
+                                self._cursed_lock_message(existing),
+                                color.purple,
+                            )
+                        return
                     self.unequip_item(existing, add_message)
                 self.equipped_items[eq_type_name] = item
             
@@ -284,6 +314,11 @@ class Equipment(BaseComponent):
             try:
                 import sprite_manager
                 sprite_manager.refresh_actor_sprite(self.parent)
+            except Exception:
+                pass
+
+            try:
+                identify_system.force_identify_item(self.parent, item)
             except Exception:
                 pass
             return
@@ -323,6 +358,13 @@ class Equipment(BaseComponent):
             # Unequip all conflicting items
             for conflicting_item in conflicting_items:
                 if conflicting_item != item:  # Don't unequip the item we're trying to equip
+                    if self._is_cursed_item(conflicting_item):
+                        if add_message:
+                            self.parent.gamemap.engine.message_log.add_message(
+                                self._cursed_lock_message(conflicting_item),
+                                color.purple,
+                            )
+                        return
                     self.unequip_item(conflicting_item, add_message)
         
         # Update general equipment tracking
@@ -384,8 +426,31 @@ class Equipment(BaseComponent):
         except Exception:
             pass
 
+        # Cursed/hidden modifiers should reveal themselves when worn.
+        try:
+            identify_system.force_identify_item(self.parent, item)
+        except Exception:
+            pass
+
     def unequip_item(self, item: Item, add_message: bool = True) -> None:
         """Unequip an item using the modular system."""
+        if not item.equippable:
+            return
+
+        if self._is_cursed_item(item):
+            if add_message:
+                try:
+                    self.parent.gamemap.engine.message_log.add_message(
+                        f"The {item.name} clings to you!",
+                        color.purple,
+                    )
+                except Exception:
+                    pass
+            return
+        self._perform_unequip(item, add_message)
+
+    def _perform_unequip(self, item: Item, add_message: bool = True) -> None:
+        """Remove an equipped item from all tracking maps and refresh visuals."""
         if not item.equippable:
             return
         
@@ -409,6 +474,10 @@ class Equipment(BaseComponent):
             sprite_manager.refresh_actor_sprite(self.parent)
         except Exception:
             pass
+
+    def force_unequip_item(self, item: Item, add_message: bool = True) -> None:
+        """Unequip an item even if it is cursed (used by explicit curse-breaking effects)."""
+        self._perform_unequip(item, add_message)
 
     def is_item_equipped(self, item: Item) -> bool:
         """Check if an item is currently equipped (optimized)."""
@@ -521,6 +590,11 @@ class Equipment(BaseComponent):
         except Exception:
             pass
 
+        try:
+            identify_system.force_identify_item(self.parent, item)
+        except Exception:
+            pass
+
     def unequip_from_specific_hand(self, hand_name: str, add_message: bool = True) -> None:
         """Directly unequip item from a specific hand.
         If the item has equip_all_matching, unequips from ALL matching parts instead."""
@@ -534,6 +608,17 @@ class Equipment(BaseComponent):
             item_to_unequip = self.body_part_coverage[hand_name]
         
         if item_to_unequip:
+            if self._is_cursed_item(item_to_unequip):
+                if add_message:
+                    try:
+                        self.parent.gamemap.engine.message_log.add_message(
+                            f"The {item_to_unequip.name} clings to you!",
+                            color.purple,
+                        )
+                    except Exception:
+                        pass
+                return
+
             # If equip_all_matching, delegate to unequip_item which clears all coverage at once
             if getattr(item_to_unequip.equippable, 'equip_all_matching', False):
                 self.unequip_item(item_to_unequip, add_message)

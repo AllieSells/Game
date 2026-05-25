@@ -5,6 +5,74 @@ CAN_BE_MOSSY = {
     "top_right",
 }
 import sprite_manager
+
+def icify_wall_tile(tile):
+    # Merge allowable wall types with ice texture
+    if tile["direction"] not in CAN_BE_MOSSY:
+        return tile
+    # Copy the tile to avoid mutating the original
+    new_tile = tile.copy()
+    for variant in ("dark", "light"):
+        ch = tile[variant]["ch"]
+        if isinstance(ch, str):
+            base_cp = ord(ch)
+        else:
+            base_cp = int(ch)
+        ice_cp = 0xE11E
+        # compose_sprite returns a character
+        if tile["direction"] == "horizontal":
+            x_offset = 2
+            ice_cp = 0xE11F
+        elif tile["direction"] == "t_down":
+            x_offset = 2
+        elif tile["direction"] == "top_left":
+            x_offset = 4
+        elif tile["direction"] == "top_right":
+            x_offset = 0
+        # compose_sprite returns a character
+        new_ch = sprite_manager.compose_sprite([base_cp, ice_cp], x_offset=x_offset, y_offset=0, layer_tints=[None, (225, 255, 255)])
+        # Match the type of the original field
+        if isinstance(ch, str):
+            new_tile[variant]["ch"] = new_ch
+        else:
+            new_tile[variant]["ch"] = ord(new_ch)
+    return new_tile
+
+def icify_floor_tile(tile):
+    """Composite an icy overlay onto a floor tile."""
+    # Copy the tile to avoid mutating the original
+    new_tile = tile.copy()
+    ice_tint = (225, 255, 255)  # Light blue tint for ice
+    
+    for variant in ("dark", "light"):
+        ch = tile[variant]["ch"]
+        if isinstance(ch, str):
+            base_cp = ord(ch)
+        else:
+            base_cp = int(ch)
+        
+        # Composite with ice overlay sprite (same as walls use)
+        ice_cp = 0xE11E
+        new_ch = sprite_manager.compose_sprite(
+            [base_cp, base_cp], 
+            x_offset=0, 
+            y_offset=0, 
+            layer_tints=[None, ice_tint]
+        )
+        
+        # Match the type of the original field
+        if isinstance(ch, str):
+            new_tile[variant]["ch"] = new_ch
+        else:
+            new_tile[variant]["ch"] = ord(new_ch)
+    
+    # Update name to indicate it's icy
+    original_name = str(tile["name"])
+    if "Icy" not in original_name and "Ice" not in original_name:
+        new_tile["name"] = f"Icy {original_name}"
+    
+    return new_tile
+
 def mossify_wall_tile(tile):
     # Merge allowable wall types with moss texture
     if tile["direction"] not in CAN_BE_MOSSY:
@@ -142,6 +210,16 @@ def random_mossy_floor_tile():
         transparent=True,
         dark=(composed, (255, 255, 255), (25, 25, 25)),
         light=(composed, (255, 255, 255), (80, 80, 80)),
+    )
+
+def random_icy_floor_tile():
+    floor_cp = random.choice(range(0xE1E0, 0xE1E7))
+    return new_tile(
+        name="Icy Floor",
+        walkable=True,
+        transparent=True,
+        dark=(floor_cp, (210, 255, 255), (20, 20, 20)),
+        light=(floor_cp, (210, 255, 255), (60, 60, 60)),
     )
 
 

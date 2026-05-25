@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from typing import List, Dict, TYPE_CHECKING
-from collections import defaultdict
 
 from components.base_component import BaseComponent
+import identify as identify_system
 
 if TYPE_CHECKING:
     from entity import Actor, Item
@@ -90,93 +90,48 @@ class Inventory(BaseComponent):
         if not hasattr(self, 'item_slots') or self.item_slots is None:
             self.item_slots = []
 
-        # Get current display groups (one representative per stack)
-        groups    = self.get_display_groups()
-        valid_ids = {id(g['item']) for g in groups}
+        # Each item now occupies its own slot; no display grouping/stacking.
+        valid_ids = {id(item) for item in self.items}
 
         # Clear stale slots
         for i, s in enumerate(self.item_slots):
             if s is not None and id(s) not in valid_ids:
                 self.item_slots[i] = None
 
-        # Assign unslotted groups — extend the list if no free slot exists
+        # Assign unslotted items — extend the list if no free slot exists.
         slotted = {id(s) for s in self.item_slots if s is not None}
-        for g in groups:
-            if id(g['item']) not in slotted:
+        for item in self.items:
+            if id(item) not in slotted:
                 # Find first None slot
                 placed = False
                 for i in range(len(self.item_slots)):
                     if self.item_slots[i] is None:
-                        self.item_slots[i] = g['item']
-                        slotted.add(id(g['item']))
+                        self.item_slots[i] = item
+                        slotted.add(id(item))
                         placed = True
                         break
                 if not placed:
                     # No free slot — append a new one
-                    self.item_slots.append(g['item'])
-                    slotted.add(id(g['item']))
+                    self.item_slots.append(item)
+                    slotted.add(id(item))
     
     def get_display_groups(self) -> List[Dict]:
-        """Group identical items for display purposes with quantities."""
-        item_groups = defaultdict(list)
-        
-        # Group items by their display key (name + basic properties)
-        for item in self.items:
-            key = self._get_item_display_key(item)
-            item_groups[key].append(item)
-        
-        # Convert to display format
-        display_groups = []
-        for items in item_groups.values():
-            representative_item = items[0]
-            quantity = len(items)
-            display_name = representative_item.name
-            if quantity > 1:
-                display_name = f"{representative_item.name} (x{quantity})"
-            
-            display_groups.append({
-                'item': representative_item,
-                'items': items,  # All items in this group
-                'quantity': quantity,
-                'display_name': display_name
-            })
-        
-        return display_groups
-    
-    def _get_item_display_key(self, item: "Item") -> str:
-        """Generate a key for grouping identical items in display."""
-        # Check if item has equippable component
-        if hasattr(item, 'equippable') and item.equippable:
-            # Allow projectiles (arrows, bolts, etc.) to stack
-            if hasattr(item.equippable, 'equipment_type'):
-                eq_type = item.equippable.equipment_type
-                # Import here to avoid circular imports
-                try:
-                    from equipment_types import EquipmentType
-                    if eq_type == EquipmentType.PROJECTILE:
-                        # Projectiles can stack by name
-                        return item.name
-                except ImportError:
-                    pass
-            
-            # Other equippables (weapons, armor) shouldn't stack due to durability/enchantments
-            return f"{item.name}_{id(item)}"
-        
-        # Items with different burn durations shouldn't stack
-        if hasattr(item, 'burn_duration') and item.burn_duration is not None:
-            return f"{item.name}_burn_{item.burn_duration}"
-        
-        # Items with different liquid amounts shouldn't stack
-        if hasattr(item, 'liquid_amount') and item.liquid_amount is not None:
-            return f"{item.name}_liquid_{item.liquid_amount}"
-        
-        # Default grouping by name for stackable items
-        return item.name
+        """Return one display entry per concrete inventory item."""
+        return [
+            {
+                'item': item,
+                'items': [item],
+                'quantity': 1,
+                'display_name': item.name,
+            }
+            for item in self.items
+        ]
 
     def delete(self, item: Item) -> None:
         """Permanently removes an item from the inventory without dropping it on the map."""
         try:
             self.items.remove(item)
+            identify_system.cancel_identification_for_item(self.parent, item, engine=self.engine, quiet=True)
         except ValueError:
             pass
 
@@ -186,6 +141,7 @@ class Inventory(BaseComponent):
         """
         try:
             self.items.remove(item)
+            identify_system.cancel_identification_for_item(self.parent, item, engine=self.engine, quiet=True)
         except ValueError:
             return
 
@@ -195,7 +151,8 @@ class Inventory(BaseComponent):
         except Exception:
             pass
 
-        self.engine.message_log.add_message(f"You dropped the {item.name}.")
+        shown_name = identify_system.get_display_name(self.engine.player, item)
+        self.engine.message_log.add_message(f"You dropped the {shown_name}.")
 
     def transfer_to(self, dest, item: "Item") -> bool:
         """Atomically transfer item from this inventory to dest (Inventory or Container-like).
@@ -214,6 +171,7 @@ class Inventory(BaseComponent):
         # Remove from source and add to dest with proper parent updates
         try:
             self.items.remove(item)
+            identify_system.cancel_identification_for_item(self.parent, item, engine=self.engine, quiet=True)
         except ValueError:
             return False
 

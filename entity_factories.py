@@ -1,7 +1,10 @@
-from components.ai import DarkHostileEnemy, Friendly, HostileEnemy, BaseAI, StatueAI, FollowerAI, AnimalAI, HostileCasterAI, PhasingAI, RetreatingPhasingAI, SplittingEnemyAI
+from components.ai import (DarkHostileEnemy, Friendly, HostileEnemy, BaseAI, 
+                           StatueAI, FollowerAI, AnimalAI, HostileCasterAI, PhasingAI, 
+                           RetreatingPhasingAI, SplittingEnemyAI, NoneAI, DragonHeadAI,
+                           RangedEnemyAI)
 from components import equippable
 from components.equipment import Equipment
-from components.fighter import Fighter
+from components.fighter import Fighter, Receiver
 from components.inventory import Inventory
 from components import consumable
 from components.spells import InflictWoundsSpell
@@ -18,6 +21,7 @@ import liquid_system
 import color
 import random
 import colorsys
+from components.damage_types import DamageType
 
 
 def hue_shift(rgb_color):
@@ -121,13 +125,31 @@ poison_potion = Item(
     tags = ["potion", "poison", "glass", "container", "fragile"],
     liquid_type=liquid_system.LiquidType.POISON,
     liquid_amount=5,
-    weight=0.5
+    weight=0.5,
+    unknown_name="Pale Green Potion",
+    identification_level=3,
 )
 
+fire_resistance_potion = Item(
+    char=chr(0xE0B8),
+    value = 15,
+    name = "Fire Resistance Potion",
+    consumable = consumable.FireResistanceConsumable(duration=50),
+    description = "A medium vial filled with an orange liquid.",
+    equip_sound=sounds.play_equip_glass_sound,
+    unequip_sound=sounds.play_unequip_glass_sound,
+    pickup_sound=sounds.pick_up_glass_sound,
+    drop_sound=sounds.drop_glass_sound,
+    rarity_color=color.rare,
+    tags = ["potion", "fire resistance", "glass", "container", "fragile"],
+    weight=0.5,
+    unknown_name="Orange Potion",
+    identification_level=3,
+)
 
 lesser_health_potion = Item(
     char=chr(0xE0B0),
-    color=(247, 143, 143),
+    color=(255, 255, 255),
     value=10,
     name="Lesser Health Potion",
     consumable=consumable.HealingConsumables(amount=8),
@@ -140,11 +162,13 @@ lesser_health_potion = Item(
     tags = ["potion", "health", "glass", "container", "fragile", "lesser"],
     liquid_type=liquid_system.LiquidType.HEALTHPOTION,
     liquid_amount=8,
-    weight=0.5
+    weight=0.5,
+    unknown_name="Light Red Potion",
+    identification_level=1,
 )
 health_potion = Item(
     char=chr(0xE0B1),
-    color=(242, 135, 135),
+    color=(255, 255, 255),
     value=15,
     name="Health Potion",
     consumable=consumable.HealingConsumables(amount=20),
@@ -157,7 +181,9 @@ health_potion = Item(
     tags = ["potion", "health", "glass", "container", "fragile"],
     liquid_type=liquid_system.LiquidType.HEALTHPOTION,
     liquid_amount=15,
-    weight=0.75
+    weight=0.75,
+    unknown_name="Light Red Potion",
+    identification_level=3,
 )
 
 dungeon_key = Item(
@@ -209,7 +235,8 @@ torch = Item(
     verb_participial="smashing",
     rarity_color=color.common,
     tags = ["torch", "light", "wood", "fire"],
-    weight = 1.0
+    weight = 1.0,
+    damage_type=DamageType.FIRE
 )
 
 # Weapons
@@ -230,7 +257,8 @@ dagger = Item(
     rarity_color=color.common,
     tags = ["dagger", "weapon", "blade", "metal", "light weapon"],
     weight=1.0,
-    equip_sprite_cp=0xE0A0
+    equip_sprite_cp=0xE0A0,
+    damage_type= DamageType.PIERCING
 )
 
 mythril_dagger = Item(
@@ -251,7 +279,8 @@ mythril_dagger = Item(
     rarity_color=color.rare,
     tags = ["mythril dagger", "dagger", "weapon", "blade", "metal", "light weapon"],
     weight=1.0,
-    equip_sprite_cp=0xE0A8
+    equip_sprite_cp=0xE0A8,
+    damage_type=DamageType.PIERCING
 )
 
 shortsword = Item(
@@ -272,7 +301,8 @@ shortsword = Item(
     verb_participial="slashing",
     rarity_color=color.common,
     tags = ["shortsword", "sword", "weapon", "blade", "metal"],
-    weight=2.0
+    weight=2.0,
+    damage_type=DamageType.SLASHING
 )
 
 longsword = Item(
@@ -292,7 +322,8 @@ longsword = Item(
     verb_participial="slashing",
     rarity_color=color.uncommon,
     tags = ["longsword", "sword", "weapon", "blade", "metal", "heavy weapon"],
-    weight=4.0
+    weight=4.0,
+    damage_type=DamageType.SLASHING
 )
 
 
@@ -315,7 +346,8 @@ bow = Item(
     verb_participial="shooting",
     rarity_color=color.common,
     tags = ["bow", "weapon", "ranged", "wood"],
-    weight=2.0
+    weight=2.0,
+    damage_type=DamageType.BLUDGEONING
 )
 
 arrow = Item(
@@ -335,7 +367,8 @@ arrow = Item(
     verb_participial="shooting",
     rarity_color=color.common,
     tags = ["arrow", "ammunition", "ammo", "ranged", "wood"],
-    weight=0.05
+    weight=0.05,
+    damage_type=DamageType.PIERCING
 )
 
 steel_arrow = Item(
@@ -355,7 +388,8 @@ steel_arrow = Item(
     verb_participial="shooting",
     rarity_color=color.uncommon,
     tags = ["steel arrow", "arrow", "ammunition", "ammo", "ranged", "metal"],
-    weight=0.1
+    weight=0.1,
+    damage_type=DamageType.PIERCING
 )
 
 
@@ -524,7 +558,7 @@ apprentice_robe = Item(
     pickup_sound=sounds.play_equip_leather_sound,
     drop_sound=sounds.play_unequip_leather_sound,
     rarity_color=color.uncommon,
-    tags = ["robe", "armor", "body armor", "light armor"],
+    tags = ["robe", "light armor"],
     weight=3.0,
     equip_sprite_cp=0xE089
 )
@@ -541,7 +575,7 @@ scholar_robe = Item(
     pickup_sound=sounds.play_equip_leather_sound,
     drop_sound=sounds.play_unequip_leather_sound,
     rarity_color=color.rare,
-    tags = ["robe", "armor", "body armor", "light armor"],
+    tags = ["robe", "light armor"],
     weight=4.0,
     equip_sprite_cp=0xE08A
 )
@@ -558,7 +592,7 @@ master_robe = Item(
     pickup_sound=sounds.play_equip_leather_sound,
     drop_sound=sounds.play_unequip_leather_sound,
     rarity_color=color.legendary,
-    tags = ["robe", "armor", "body armor", "light armor"],
+    tags = ["robe", "light armor"],
     weight=5.0,
     equip_sprite_cp=0xE08B
 )
@@ -632,6 +666,31 @@ test_ring = Item(
 # FUNCTIONS
 # =====================================================
 
+def create_illusion(source: Actor) -> Actor:
+    illusion = copy.deepcopy(source)
+    if illusion.is_player:
+        illusion.name = f"Image of {source.name}"
+        illusion.color = (0, 230, 230)
+    
+    # Make it NOT the player so enemies can target it
+    illusion.is_player = False
+    illusion.is_decoy = True  # Flag for enemy AI to recognize as decoy
+    
+    # Create new components and set their parent
+    illusion.fighter = Fighter(hp=1, base_defense=0, base_power=0, leave_corpse=False, can_bleed=False)
+    illusion.fighter.parent = illusion
+
+    illusion.ai = FollowerAI(illusion, target=source)
+    illusion.ai.parent = illusion
+    
+    illusion.body_parts = BodyParts(AnatomyType.SIMPLE, max_hp = 1)
+    illusion.body_parts.parent = illusion
+
+    illusion.blocks_movement = False  # Player can walk through illusions
+    
+    return illusion
+
+
 def get_scroll(spell_name: str) -> Item:
     import sprite_manager
     key = str(spell_name or "").strip().lower()
@@ -663,11 +722,24 @@ def get_scroll(spell_name: str) -> Item:
     return pass_scroll
 
 
-darkvision_scroll = get_scroll("darkvision")
-confusion_scroll = get_scroll("confusion")
-fireball_scroll = get_scroll("fireball")
-lightning_scroll = get_scroll("lightning")
+# Lazy getters for scrolls - these create fresh instances on demand
+def get_darkvision_scroll() -> Item:
+    return get_scroll("darkvision")
 
+def get_confusion_scroll() -> Item:
+    return get_scroll("confusion")
+
+def get_fireball_scroll() -> Item:
+    return get_scroll("fireball")
+
+def get_lightning_scroll() -> Item:
+    return get_scroll("lightning")
+
+# For backward compatibility - these are now callables
+darkvision_scroll = get_darkvision_scroll
+confusion_scroll = get_confusion_scroll
+fireball_scroll = get_fireball_scroll
+lightning_scroll = get_lightning_scroll
 
 
 def get_ring(
@@ -683,32 +755,41 @@ def get_ring(
             default is selected per effect.
         duration: Optional effect duration. If None, a default is used.
     """
-    possible_effects = [effect.InvisibilityEffect, effect.DarkvisionEffect, effect.LightEffect]
+    possible_effects = [effect.InvisibilityEffect, effect.DarkvisionEffect, effect.LightEffect, effect.FireResistanceEffect]
     effect_cls = effect_type or random.choice(possible_effects)
 
     default_durations = {
         effect.InvisibilityEffect: 6,
         effect.DarkvisionEffect: 20,
+        effect.FireResistanceEffect: 20,
     }
     default_cooldowns = {
         effect.InvisibilityEffect: 18,  # Keeps stealth strong but not permanent.
         effect.DarkvisionEffect: 0,
+        effect.FireResistanceEffect: 20,
+    }
+    names = {
+        effect.InvisibilityEffect: "Invisibility",
+        effect.DarkvisionEffect: "Darkvision",
+        effect.LightEffect: "Light",
+        effect.FireResistanceEffect: "Fire Resistance",
     }
 
     effect_duration = default_durations.get(effect_cls, 10) if duration is None else int(duration)
     effect_cooldown = default_cooldowns.get(effect_cls, 0) if cooldown is None else max(0, int(cooldown))
+    ring_name = names.get(effect_cls, effect_cls.__name__.replace("Effect", ""))
 
     return Item(
         char=chr(0xE0AF),
         color=(color.sprite_sheet),
-        name=f"Ring of {effect_cls.__name__.replace('Effect', '')}",
+        name=f"Ring of {ring_name}",
         equippable=equippable.Ring(
             effect=effect_cls,
             effect_cooldown=effect_cooldown,
             effect_duration=effect_duration,
         ),
         description=(
-            f"A ring that periodically grants {effect_cls.__name__.replace('Effect', '')}. "
+            f"A ring that periodically grants {ring_name}. "
             f"Cooldown: {effect_cooldown} turns."
         ),
         value=120,
@@ -828,7 +909,7 @@ def generate_spellbook() -> Item:
 
     spell_entry = random.choice(spell_entries)
     spell_name = spell_entry["name"]
-    #spell_name = "Clairvoyance" # Debug setter
+    #spell_name = "Fireball" # Debug setter
     
     # After changing spell_name, look up the correct entry for that spell
     spell_entry = next((e for e in spell_entries if e["name"].lower() == spell_name.lower()), spell_entry)
@@ -849,6 +930,7 @@ def generate_spellbook() -> Item:
         unequip_sound=sounds.play_unequip_paper_sound,
         rarity_color=color.uncommon,
         tags = ["spellbook", "consumable", "paper", spell_name],
+        weight=0.5
     )
     pass_book = copy.deepcopy(_item)
     return pass_book
@@ -1045,6 +1127,8 @@ player = Actor(
     preferred_dodge_direction="north",  # Tendency to dodge towards the north (for flavor)
 )
 
+
+
 giant_spider = Actor(
     char=chr(0xE032),
     color=(color.sprite_sheet),
@@ -1062,6 +1146,11 @@ giant_spider = Actor(
     verb_past="bit",
     verb_participial="biting",
     dodge_chance=0.10,  # 10% chance to dodge attacks
+    damage_resistances=[
+        (DamageType.POISON, 0.0),
+        (DamageType.FIRE, 2.0),
+        (DamageType.PSYCHIC, 0.0)
+    ],
     equipment_table={
         "meat": {
             get_meat("Spider", 10): 100,
@@ -1129,6 +1218,23 @@ gelatinous_cube = Actor(
     equipment_table={},
 )
 
+goblin_archer = Actor(
+    char=chr(0xE04A),
+    color=(color.sprite_sheet),
+    name = "Goblin Archer",
+    ai_cls=RangedEnemyAI,
+    equipment=Equipment(),
+    fighter=Fighter(hp=10, base_defense=0, base_power=6),
+    inventory=Inventory(capacity=0),
+    level=copy.deepcopy(basic_entity_levelling),
+    speed=110,
+    body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
+    verb_base="shoot",
+    verb_present="shoots",
+    verb_past="shot",
+    verb_participial="shooting",
+    dodge_chance=0.10,
+)
 
 goblin = Actor(
     char=chr(0xE031),
@@ -1185,6 +1291,8 @@ goblin = Actor(
     }
 )
 
+
+
 naga = Actor(
     char=chr(0xE037),
     color=(hue_shift(color.sprite_sheet)),
@@ -1201,6 +1309,9 @@ naga = Actor(
     verb_past="struck",
     verb_participial="striking",
     dodge_chance=0.25,
+    damage_resistances=[
+        (DamageType.POISON, 0.0),
+    ],
     equipment_table={
         "potion": {
             get_random_potion(): 15,
@@ -1291,8 +1402,81 @@ phase_spider = Actor(
     verb_past="bit",
     verb_participial="biting",
     dodge_chance=0.10,
-    equipment_table=None
+    equipment_table=None,
+    damage_resistances=[
+        (DamageType.POISON, 0.0),
+    ]
 )
+
+# =====================================================
+# MULTI-PART BOSS - Stone Colossus
+# =====================================================
+
+def create_dragon(gamemap, x: int, y: int) -> Actor:
+    dragon = Actor(
+        char=chr(0xE049),
+        color=(color.sprite_sheet),
+        name="Dragon",
+        description="A powerful and magical creature.",
+        ai_cls=HostileEnemy,
+        equipment=Equipment(),
+        fighter=Fighter(hp=200, base_defense=5, base_power=20),
+        inventory=Inventory(capacity=0),
+        level=copy.deepcopy(basic_entity_levelling),
+        speed=100,  # Slow but powerful
+        body_parts=BodyParts(AnatomyType.DRAGON, max_hp=200),
+        verb_base="slash",
+        verb_present="slashes",
+        verb_past="slashed",
+        verb_participial="slashing",
+        dodge_chance=0.0,  # Too large to dodge
+        base_hit_chance=1.2,  # High accuracy due to massive attacks
+        evasion=0.1,  # Easy to hit due to size
+        damage_resistances=[
+            (DamageType.PHYSICAL, 0.5),  # 50% physical resistance
+            (DamageType.FIRE, 0.0),     # Immune to fire
+        ]
+    )
+    
+    # Spawn the main entity (legs at ground level)
+    dragon.x = x
+    dragon.y = y
+    dragon.parent = gamemap
+    gamemap.entities.add(dragon)
+    
+    # Create the top part (head/upper body)
+    top_part = Actor(
+        char=chr(0xE048),
+        color=(color.sprite_sheet),
+        name="Dragon",
+        description="A powerful and magical creature",
+        ai_cls=DragonHeadAI,  # Head can cast spells independently
+        equipment=Equipment(),
+        fighter=Fighter(hp=200, base_defense=5, base_power=20, leave_corpse=False, can_bleed=False),
+        inventory=Inventory(capacity=0),
+        level=None,
+        speed=100,
+        body_parts=None,
+        dodge_chance=0.0,
+        mana=100,  # Give head mana to cast spells
+        mana_max=100,
+    )
+    
+    # Link the fighter components so damage to either part affects the same HP pool
+    top_part.fighter = dragon.fighter
+    
+    # Spawn the top part
+    top_part.x = x
+    top_part.y = y - 1  # One tile above the legs
+    top_part.parent = gamemap
+    gamemap.entities.add(top_part)
+    
+    # Link the parts together
+    dragon.child_parts.append(top_part)
+    top_part.parent_entity = dragon
+    
+    return dragon
+
 
 lunatic_mage = Actor(
     char=chr(0xE040),
@@ -1313,13 +1497,16 @@ lunatic_mage = Actor(
     dodge_chance=0.10,
     equipment_table={
         "tome": {
-            generate_spellbook(): 30,
+            generate_spellbook: 30,  # Callable - will generate fresh tome each spawn
             None: 70
         }
     },
     known_spells=[InflictWoundsSpell()],
     mana=20,
     mana_max=20,
+    damage_resistances=[
+        (DamageType.PSYCHIC, 0.0),
+    ]
     
 )
 lunatic_mage.level.traits["arcana"]["level"] = 3
@@ -1344,6 +1531,12 @@ animated_armor = Actor(
     verb_participial="slashing",
     dodge_chance=0.10,
     equipment_table= None,
+    damage_resistances=[
+        (DamageType.PHYSICAL, 0.5),
+        (DamageType.FIRE, 0.0),
+        (DamageType.POISON, 0.0),
+        (DamageType.PSYCHIC, 0.0),
+    ]
 )
 
 rat = Actor(
@@ -1400,6 +1593,19 @@ chest = Actor(
     fighter=None,
     inventory=Inventory(capacity=0),
     level=Level(xp_given=0),
+)
+
+oil_barrel = Actor(
+    char=chr(0xE046),
+    color=(color.sprite_sheet),
+    name="Oil Barrel",
+    description="A barrel filled with flammable oil.",
+    ai_cls=NoneAI,
+    equipment=None,
+    fighter=Receiver(hp=3, base_defense=0, base_power=0, can_bleed=False, leave_corpse=False),
+    inventory=Inventory(capacity=0),
+    level=Level(xp_given=0),
+    body_parts=BodyParts(AnatomyType.OBJECT, max_hp=3),
 )
 
 altar = Actor(
@@ -1535,7 +1741,8 @@ RARE_POOL = [
     LootEntry(plate_helmet,            10),
     LootEntry(plate_armor,             10),
     LootEntry(scholar_robe,            10),
-    LootEntry(lambda: get_ring(),      20),
+    LootEntry(lambda: get_ring(),      10),
+    LootEntry(fire_resistance_potion,  10),
 ]
 
 LEGENDARY_POOL = [

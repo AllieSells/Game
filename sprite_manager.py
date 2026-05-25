@@ -44,6 +44,364 @@ _deferred_mode: bool = False
 _deferred_tiles: list = []       # List of (cp, pixels_uint8) to flush on main thread
 _deferred_pixel_store: dict = {} # cp -> pixels_uint8: CPU-side store so get_tile works during deferred mode
 
+# --- Normal-map state ---
+# Explicit average normals loaded from extras normal sheet, keyed by codepoint.
+_avg_normal_by_cp: dict[int, tuple[float, float, float]] = {}
+# Cache of lazily-derived average normals from albedo when no explicit normal exists.
+_derived_avg_normal_cache: dict[int, tuple[float, float, float]] = {}
+# Per-codepoint per-pixel normal field cache:
+#   value = (normals_f32[H,W,3], alpha_f32[H,W])
+_normal_field_by_cp: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+# Per-codepoint albedo alpha mask cache used for lighting coverage.
+_albedo_alpha_by_cp: dict[int, np.ndarray] = {}
+
+# --- Emissive and Specular material state ---
+# Per-codepoint emissive RGB data: value = emissive_f32[H,W,3]
+_emissive_by_cp: dict[int, np.ndarray] = {}
+# Per-codepoint specular RGB data: value = specular_f32[H,W,3]
+_specular_by_cp: dict[int, np.ndarray] = {}
+# Per-codepoint normal detail mask: value = detail_f32[H,W]
+_normal_detail_by_cp: dict[int, np.ndarray] = {}
+# Per-codepoint specular mask: value = mask_f32[H,W]
+_specular_mask_by_cp: dict[int, np.ndarray] = {}
+
+
+def _normalize_vec3(x: float, y: float, z: float) -> tuple[float, float, float]:
+    mag = float(np.sqrt(x * x + y * y + z * z))
+    if mag <= 1e-6:
+        return (0.0, 0.0, 1.0)
+    inv = 1.0 / mag
+    return (x * inv, y * inv, z * inv)
+
+
+def _derive_avg_normal_from_pixels(tile_pixels: np.ndarray) -> tuple[float, float, float]:
+    """Estimate one average normal from RGBA pixels when no authored normal is available."""
+    try:
+        rgba = tile_pixels.astype(np.float32) / 255.0
+        alpha = rgba[..., 3]
+        if float(np.max(alpha)) <= 1e-4:
+            return (0.0, 0.0, 1.0)
+
+        rgb = rgba[..., :3]
+        luma = rgb[..., 0] * 0.299 + rgb[..., 1] * 0.587 + rgb[..., 2] * 0.114
+        # Blend alpha and luma so fully opaque glyphs still produce some shape.
+        height = np.clip(alpha * 0.7 + luma * 0.3, 0.0, 1.0)
+
+        # Simple Sobel-like gradient using shifts.
+        gx = (
+            np.roll(height, -1, axis=1) - np.roll(height, 1, axis=1)
+            + 0.5 * (np.roll(np.roll(height, -1, axis=0), -1, axis=1) - np.roll(np.roll(height, -1, axis=0), 1, axis=1))
+            + 0.5 * (np.roll(np.roll(height, 1, axis=0), -1, axis=1) - np.roll(np.roll(height, 1, axis=0), 1, axis=1))
+        )
+        gy = (
+            np.roll(height, -1, axis=0) - np.roll(height, 1, axis=0)
+            + 0.5 * (np.roll(np.roll(height, -1, axis=0), -1, axis=1) - np.roll(np.roll(height, 1, axis=0), -1, axis=1))
+            + 0.5 * (np.roll(np.roll(height, -1, axis=0), 1, axis=1) - np.roll(np.roll(height, 1, axis=0), 1, axis=1))
+        )
+
+        strength = 2.2
+        nx = -gx * strength
+        ny = -gy * strength
+        nz = np.ones_like(nx)
+
+        mag = np.sqrt(nx * nx + ny * ny + nz * nz)
+        mag = np.where(mag > 1e-6, mag, 1.0)
+        nx = nx / mag
+        ny = ny / mag
+        nz = nz / mag
+
+        w = np.clip(alpha, 0.0, 1.0)
+        wsum = float(np.sum(w))
+        if wsum <= 1e-6:
+            return (0.0, 0.0, 1.0)
+
+        ax = float(np.sum(nx * w) / wsum)
+        ay = float(np.sum(ny * w) / wsum)
+        az = float(np.sum(nz * w) / wsum)
+        return _normalize_vec3(ax, ay, az)
+    except Exception:
+        return (0.0, 0.0, 1.0)
+
+
+def _derive_normal_field_from_pixels(tile_pixels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Estimate per-pixel normals from RGBA pixels (fallback for missing authored normals)."""
+    rgba = tile_pixels.astype(np.float32) / 255.0
+    alpha = np.clip(rgba[..., 3], 0.0, 1.0)
+    rgb = rgba[..., :3]
+    luma = rgb[..., 0] * 0.299 + rgb[..., 1] * 0.587 + rgb[..., 2] * 0.114
+    height = np.clip(alpha * 0.7 + luma * 0.3, 0.0, 1.0)
+
+    gx = (
+        np.roll(height, -1, axis=1) - np.roll(height, 1, axis=1)
+        + 0.5 * (np.roll(np.roll(height, -1, axis=0), -1, axis=1) - np.roll(np.roll(height, -1, axis=0), 1, axis=1))
+        + 0.5 * (np.roll(np.roll(height, 1, axis=0), -1, axis=1) - np.roll(np.roll(height, 1, axis=0), 1, axis=1))
+    )
+    gy = (
+        np.roll(height, -1, axis=0) - np.roll(height, 1, axis=0)
+        + 0.5 * (np.roll(np.roll(height, -1, axis=0), -1, axis=1) - np.roll(np.roll(height, 1, axis=0), -1, axis=1))
+        + 0.5 * (np.roll(np.roll(height, -1, axis=0), 1, axis=1) - np.roll(np.roll(height, 1, axis=0), 1, axis=1))
+    )
+
+    strength = 2.2
+    nx = -gx * strength
+    ny = -gy * strength
+    nz = np.ones_like(nx, dtype=np.float32)
+    mag = np.sqrt(nx * nx + ny * ny + nz * nz)
+    mag = np.where(mag > 1e-6, mag, 1.0)
+
+    normals = np.empty((tile_pixels.shape[0], tile_pixels.shape[1], 3), dtype=np.float32)
+    normals[..., 0] = nx / mag
+    normals[..., 1] = ny / mag
+    normals[..., 2] = nz / mag
+    return normals, alpha.astype(np.float32)
+
+
+def _decode_normal_field_from_normal_pixels(normal_pixels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Decode authored tangent-space normal RGBA into normalized XYZ + alpha."""
+    n = normal_pixels.astype(np.float32) / 255.0
+    nx = n[..., 0] * 2.0 - 1.0
+    ny = n[..., 1] * 2.0 - 1.0
+    nz = n[..., 2] * 2.0 - 1.0
+    mag = np.sqrt(nx * nx + ny * ny + nz * nz)
+    mag = np.where(mag > 1e-6, mag, 1.0)
+
+    normals = np.empty((normal_pixels.shape[0], normal_pixels.shape[1], 3), dtype=np.float32)
+    normals[..., 0] = nx / mag
+    normals[..., 1] = ny / mag
+    normals[..., 2] = nz / mag
+    alpha = np.clip(n[..., 3], 0.0, 1.0).astype(np.float32)
+    return normals, alpha
+
+
+def _register_normal_field(cp: int, normals: np.ndarray, alpha: np.ndarray) -> None:
+    _normal_field_by_cp[int(cp)] = (normals.astype(np.float32), alpha.astype(np.float32))
+
+
+def _register_albedo_alpha(cp: int, tile_pixels: np.ndarray) -> None:
+    _albedo_alpha_by_cp[int(cp)] = np.clip(tile_pixels[..., 3].astype(np.float32) / 255.0, 0.0, 1.0)
+
+
+def _decode_emissive_from_pixels(emissive_pixels: np.ndarray) -> np.ndarray:
+    """Decode emissive RGB data from RGBA pixels."""
+    e = emissive_pixels.astype(np.float32) / 255.0
+    return np.clip(e[..., :3], 0.0, 1.0)
+
+
+def _register_emissive(cp: int, emissive_pixels: np.ndarray) -> None:
+    """Register emissive data for a codepoint."""
+    emissive_data = _decode_emissive_from_pixels(emissive_pixels)
+    # Only register if there's actual emission (not pure black)
+    if np.any(emissive_data > 1e-4):
+        _emissive_by_cp[int(cp)] = emissive_data
+        # Debug: print first few emissive tiles
+        if len(_emissive_by_cp) <= 5:
+            max_val = np.max(emissive_data)
+            print(f"[DEBUG] Registered emissive for cp 0x{cp:04X}, max value: {max_val:.4f}")
+    # If pure black, don't register anything (saves memory and makes debugging clearer)
+
+
+def _decode_specular_from_pixels(specular_pixels: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Decode specular RGB, normal detail (from alpha), and specular mask.
+    
+    Returns:
+        - specular RGB (H, W, 3): The specular color/tint
+        - normal_detail (H, W): Binary mask from alpha channel (detail flag)
+        - specular_mask (H, W): Luminance-based specular strength mask
+    """
+    s = specular_pixels.astype(np.float32) / 255.0
+    specular_rgb = np.clip(s[..., :3], 0.0, 1.0)
+    
+    # Use alpha channel as normal detail flag (>0.5 = has detail)
+    normal_detail = np.clip(s[..., 3], 0.0, 1.0)
+    
+    # Compute specular mask from luminance of RGB
+    specular_mask = np.clip(
+        specular_rgb[..., 0] * 0.299 + 
+        specular_rgb[..., 1] * 0.587 + 
+        specular_rgb[..., 2] * 0.114,
+        0.0, 1.0
+    )
+    
+    return specular_rgb, normal_detail, specular_mask
+
+
+def _register_specular(cp: int, specular_pixels: np.ndarray) -> None:
+    """Register specular data for a codepoint."""
+    specular_rgb, normal_detail, specular_mask = _decode_specular_from_pixels(specular_pixels)
+    _specular_by_cp[int(cp)] = specular_rgb
+    _normal_detail_by_cp[int(cp)] = normal_detail
+    _specular_mask_by_cp[int(cp)] = specular_mask
+
+
+def get_albedo_alpha_mask(cp: int) -> np.ndarray:
+    """Return per-pixel sprite alpha mask from the glyph albedo tile."""
+    cp_i = int(cp)
+    cached = _albedo_alpha_by_cp.get(cp_i)
+    if cached is not None:
+        return cached
+    try:
+        tile = _get_tile(cp_i)
+        alpha = np.clip(tile[..., 3].astype(np.float32) / 255.0, 0.0, 1.0)
+    except Exception:
+        alpha = np.ones((TILE_H, TILE_W), dtype=np.float32)
+    _albedo_alpha_by_cp[cp_i] = alpha
+    return alpha
+
+
+def get_normal_field(cp: int) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-pixel normal field (XYZ) and alpha mask for a codepoint."""
+    cp_i = int(cp)
+    cached = _normal_field_by_cp.get(cp_i)
+    if cached is not None:
+        return cached
+    try:
+        derived = _derive_normal_field_from_pixels(_get_tile(cp_i))
+    except Exception:
+        # Last-resort flat normal.
+        tile = _get_tile(cp_i)
+        h, w = tile.shape[:2]
+        normals = np.zeros((h, w, 3), dtype=np.float32)
+        normals[..., 2] = 1.0
+        alpha = np.ones((h, w), dtype=np.float32)
+        derived = (normals, alpha)
+    _normal_field_by_cp[cp_i] = derived
+    return derived
+
+
+def get_packed_material(cp: int, scale: int = 1, out_h: int | None = None, out_w: int | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return all material channels for a codepoint, resized to exact output dimensions.
+    
+    Args:
+        cp: The codepoint to fetch materials for
+        scale: Downsampling factor (1 = full resolution, 2 = half, etc.)
+        out_h: Exact output height in pixels (overrides scale calculation)
+        out_w: Exact output width in pixels (overrides scale calculation)
+    
+    Returns:
+        Tuple of 6 numpy arrays (all float32):
+        - normals (H, W, 3): XYZ tangent-space normals
+        - alpha (H, W): Opacity mask
+        - emission (H, W, 3): RGB emissive glow
+        - specular (H, W, 3): RGB specular tint
+        - normal_detail (H, W): Normal detail flag mask
+        - specular_mask (H, W): Specular strength mask
+    """
+    cp_i = int(cp)
+    scale = max(1, int(scale))
+    
+    # Get base normal and alpha
+    normals, alpha = get_normal_field(cp_i)
+    
+    # Get emissive (default to black if not available)
+    emission = _emissive_by_cp.get(cp_i)
+    if emission is None:
+        h, w = normals.shape[:2]
+        emission = np.zeros((h, w, 3), dtype=np.float32)
+    else:
+        # Debug: Check if we're returning non-zero emission
+        max_e = float(np.max(emission))
+        if max_e > 0.01 and cp_i < 0xE010:  # First few tiles only
+            print(f"[DEBUG] get_packed_material cp 0x{cp_i:04X} returning emission max={max_e:.4f}")
+    
+    # Get specular data (default to zeros if not available)
+    specular = _specular_by_cp.get(cp_i)
+    normal_detail = _normal_detail_by_cp.get(cp_i)
+    specular_mask = _specular_mask_by_cp.get(cp_i)
+    
+    if specular is None:
+        h, w = normals.shape[:2]
+        specular = np.zeros((h, w, 3), dtype=np.float32)
+        normal_detail = np.zeros((h, w), dtype=np.float32)
+        specular_mask = np.zeros((h, w), dtype=np.float32)
+    
+    # Determine target dimensions
+    if out_h is not None and out_w is not None:
+        new_h = max(1, int(out_h))
+        new_w = max(1, int(out_w))
+    else:
+        h, w = normals.shape[:2]
+        new_h = max(1, h // scale)
+        new_w = max(1, w // scale)
+    
+    # Resize if needed
+    h, w = normals.shape[:2]
+    if h != new_h or w != new_w:
+        # Downsample using simple indexing (nearest neighbor for speed)
+        y_idx = np.minimum((np.arange(new_h, dtype=np.int32) * h) // max(1, new_h), h - 1)
+        x_idx = np.minimum((np.arange(new_w, dtype=np.int32) * w) // max(1, new_w), w - 1)
+        
+        normals = normals[y_idx[:, None], x_idx[None, :], :]
+        alpha = alpha[y_idx[:, None], x_idx[None, :]]
+        emission = emission[y_idx[:, None], x_idx[None, :], :]
+        specular = specular[y_idx[:, None], x_idx[None, :], :]
+        normal_detail = normal_detail[y_idx[:, None], x_idx[None, :]]
+        specular_mask = specular_mask[y_idx[:, None], x_idx[None, :]]
+    
+    return normals, alpha, emission, specular, normal_detail, specular_mask
+
+
+def _register_avg_normal_from_normal_pixels(cp: int, normal_pixels: np.ndarray) -> None:
+    """Decode authored tangent-space normal pixels and store their average vector."""
+    try:
+        normals, alpha = _decode_normal_field_from_normal_pixels(normal_pixels)
+        nx = normals[..., 0]
+        ny = normals[..., 1]
+        nz = normals[..., 2]
+        w = np.clip(alpha, 0.0, 1.0)
+        wsum = float(np.sum(w))
+        if wsum <= 1e-6:
+            _avg_normal_by_cp[cp] = (0.0, 0.0, 1.0)
+            _register_normal_field(cp, normals, alpha)
+        else:
+            ax = float(np.sum(nx * w) / wsum)
+            ay = float(np.sum(ny * w) / wsum)
+            az = float(np.sum(nz * w) / wsum)
+            _avg_normal_by_cp[cp] = _normalize_vec3(ax, ay, az)
+            _register_normal_field(cp, normals, alpha)
+        _derived_avg_normal_cache.pop(cp, None)
+    except Exception:
+        _avg_normal_by_cp[cp] = (0.0, 0.0, 1.0)
+        _derived_avg_normal_cache.pop(cp, None)
+
+
+def _register_avg_normal_from_albedo_pixels(cp: int, tile_pixels: np.ndarray) -> None:
+    normals, alpha = _derive_normal_field_from_pixels(tile_pixels)
+    w = np.clip(alpha, 0.0, 1.0)
+    wsum = float(np.sum(w))
+    if wsum <= 1e-6:
+        avg = (0.0, 0.0, 1.0)
+    else:
+        ax = float(np.sum(normals[..., 0] * w) / wsum)
+        ay = float(np.sum(normals[..., 1] * w) / wsum)
+        az = float(np.sum(normals[..., 2] * w) / wsum)
+        avg = _normalize_vec3(ax, ay, az)
+    _avg_normal_by_cp[cp] = avg
+    _register_normal_field(cp, normals, alpha)
+    _derived_avg_normal_cache.pop(cp, None)
+
+
+def get_average_normal(cp: int) -> tuple[float, float, float]:
+    """Return average normal vector for a glyph codepoint.
+
+    Prefers authored normals loaded from RP/extras_normals.png. Falls back to
+    a cheap albedo-derived estimate for codepoints without authored normals.
+    """
+    cp_i = int(cp)
+    authored = _avg_normal_by_cp.get(cp_i)
+    if authored is not None:
+        return authored
+
+    cached = _derived_avg_normal_cache.get(cp_i)
+    if cached is not None:
+        return cached
+
+    try:
+        derived = _derive_avg_normal_from_pixels(_get_tile(cp_i))
+    except Exception:
+        derived = (0.0, 0.0, 1.0)
+    _derived_avg_normal_cache[cp_i] = derived
+    return derived
+
 
 def set_deferred_mode(enabled: bool) -> None:
     """Enable/disable deferred GPU tile uploads. Call set_deferred_mode(True) before
@@ -70,11 +428,25 @@ def flush_deferred_tiles() -> None:
     _deferred_pixel_store.clear()
 
 
+def get_loaded_tileset():
+    """Return the tileset currently loaded into sprite_manager, if any."""
+    return _tileset
+
+
+def get_loaded_tile_size() -> tuple[int, int]:
+    """Return the active tileset tile size as (width, height)."""
+    if _tileset is not None:
+        return int(_tileset.tile_width), int(_tileset.tile_height)
+    return TILE_W, TILE_H
+
+
 def reset_sprite_cache() -> None:
     """Clear all runtime sprite cache state and reset composite allocation."""
     global _composite_next, _composite_cache, _composite_free_list, _entity_tile_free_list
     global _puddle_pos_slot, _tile_puddle_pos_slot, _puddle_sprite_cache
     global _entity_tile_cache, _entity_tile_prev_slots
+    global _avg_normal_by_cp, _derived_avg_normal_cache, _normal_field_by_cp, _albedo_alpha_by_cp
+    global _emissive_by_cp, _specular_by_cp, _normal_detail_by_cp, _specular_mask_by_cp
 
     _composite_cache.clear()
     _composite_free_list.clear()
@@ -86,7 +458,50 @@ def reset_sprite_cache() -> None:
     _entity_tile_prev_slots.clear()
     _deferred_tiles.clear()
     _deferred_pixel_store.clear()
+    _avg_normal_by_cp.clear()
+    _derived_avg_normal_cache.clear()
+    _normal_field_by_cp.clear()
+    _albedo_alpha_by_cp.clear()
+    _emissive_by_cp.clear()
+    _specular_by_cp.clear()
+    _normal_detail_by_cp.clear()
+    _specular_mask_by_cp.clear()
     _composite_next = COMPOSITE_START_CP
+
+
+def invalidate_cache(cp: int) -> None:
+    """Invalidate all cached material data for a specific codepoint.
+    
+    Use this when reloading materials (normals, emissive, specular) to ensure
+    stale cached data is cleared before new data is loaded.
+    """
+    cp_i = int(cp)
+    _normal_field_by_cp.pop(cp_i, None)
+    _albedo_alpha_by_cp.pop(cp_i, None)
+    _avg_normal_by_cp.pop(cp_i, None)
+    _derived_avg_normal_cache.pop(cp_i, None)
+    _emissive_by_cp.pop(cp_i, None)
+    _specular_by_cp.pop(cp_i, None)
+    _normal_detail_by_cp.pop(cp_i, None)
+    _specular_mask_by_cp.pop(cp_i, None)
+
+
+def _release_composite_slot(cp: int) -> None:
+    """Return a composite codepoint to the free pool and clear its cached material data.
+
+    Must be used instead of a bare ``_composite_free_list.append(cp)`` whenever
+    a slot is being freed, so that any subsequent re-user of the same codepoint
+    does not inherit stale normal/albedo data from the previous owner.
+    """
+    _composite_free_list.append(cp)
+    _normal_field_by_cp.pop(cp, None)
+    _albedo_alpha_by_cp.pop(cp, None)
+    _avg_normal_by_cp.pop(cp, None)
+    _derived_avg_normal_cache.pop(cp, None)
+    _emissive_by_cp.pop(cp, None)
+    _specular_by_cp.pop(cp, None)
+    _normal_detail_by_cp.pop(cp, None)
+    _specular_mask_by_cp.pop(cp, None)
 
 
 def _get_tile(cp: int) -> np.ndarray:
@@ -195,11 +610,14 @@ def _scale_overlay_tile(tile_pixels: np.ndarray, scale: float) -> np.ndarray:
     return canvas
 
 
-def load_extras(tileset, path: str = "RP/extras.png") -> int:
+def load_extras(tileset, path: str = "RP/extras.png", normals_path: str | None = None, emissive_path: str | None = None, specular_path: str | None = None) -> int:
     """Load every tile from the extras sheet into the tileset.
 
     Returns the number of tiles registered.
     Silently skips if the file doesn't exist yet.
+    
+    NOTE: This function invalidates cached normals/materials for the codepoint
+    range being reloaded to ensure updated normal maps are properly loaded.
     """
     if not os.path.exists(path):
         return 0
@@ -214,6 +632,70 @@ def load_extras(tileset, path: str = "RP/extras.png") -> int:
     img_w, img_h = img.size
     cols = img_w // TILE_W
     rows = img_h // TILE_H
+
+    # Auto-detect material map paths if not provided
+    root, ext = os.path.splitext(path)
+    if normals_path is None:
+        normals_path = f"{root}_normals{ext}"
+    if emissive_path is None:
+        emissive_path = f"{root}_emissive{ext}"
+    if specular_path is None:
+        specular_path = f"{root}_specular{ext}"
+    
+    # IMPORTANT: Clear cached materials for codepoints we're about to reload
+    # This ensures updated normal/emissive/specular maps are properly loaded
+    total_tiles = rows * cols
+    for i in range(total_tiles):
+        cp = EXTRAS_START_CP + i
+        invalidate_cache(cp)
+    
+    print(f"[sprite_manager] Cleared material cache for {total_tiles} codepoints before reload.")
+
+    # Load normal map
+    normal_img = None
+    if normals_path and os.path.exists(normals_path):
+        try:
+            normal_img = Image.open(normals_path).convert("RGBA")
+        except Exception:
+            normal_img = None
+
+    # Load emissive map
+    emissive_img = None
+    if emissive_path and os.path.exists(emissive_path):
+        try:
+            emissive_img = Image.open(emissive_path).convert("RGBA")
+        except Exception:
+            emissive_img = None
+
+    # Load specular map
+    specular_img = None
+    if specular_path and os.path.exists(specular_path):
+        try:
+            specular_img = Image.open(specular_path).convert("RGBA")
+        except Exception:
+            specular_img = None
+
+    ncols = cols
+    nrows = rows
+    if normal_img is not None:
+        nimg_w, nimg_h = normal_img.size
+        ncols = nimg_w // TILE_W
+        nrows = nimg_h // TILE_H
+
+    ecols = cols
+    erows = rows
+    if emissive_img is not None:
+        eimg_w, eimg_h = emissive_img.size
+        ecols = eimg_w // TILE_W
+        erows = eimg_h // TILE_H
+
+    scols = cols
+    srows = rows
+    if specular_img is not None:
+        simg_w, simg_h = specular_img.size
+        scols = simg_w // TILE_W
+        srows = simg_h // TILE_H
+
     count = 0
     for row in range(rows):
         for col in range(cols):
@@ -221,14 +703,69 @@ def load_extras(tileset, path: str = "RP/extras.png") -> int:
             top    = row * TILE_H
             right  = left + TILE_W
             bottom = top  + TILE_H
+            
+            # Load albedo/base texture
             tile_pixels = np.array(img.crop((left, top, right, bottom)), dtype=np.uint8)
             cp = EXTRAS_START_CP + count
             tileset.set_tile(cp, tile_pixels)
+            _register_albedo_alpha(cp, tile_pixels)
+            
+            # Load normals
+            if normal_img is not None and row < nrows and col < ncols:
+                normal_pixels = np.array(normal_img.crop((left, top, right, bottom)), dtype=np.uint8)
+                _register_avg_normal_from_normal_pixels(cp, normal_pixels)
+            else:
+                _register_avg_normal_from_albedo_pixels(cp, tile_pixels)
+            
+            # Load emissive
+            if emissive_img is not None and row < erows and col < ecols:
+                emissive_pixels = np.array(emissive_img.crop((left, top, right, bottom)), dtype=np.uint8)
+                _register_emissive(cp, emissive_pixels)
+                # Debug: Check first tile
+                if count == 0:
+                    min_val = np.min(emissive_pixels[..., :3])
+                    max_val = np.max(emissive_pixels[..., :3])
+                    print(f"[DEBUG] First emissive tile (cp 0x{cp:04X}): RGB range [{min_val}, {max_val}]")
+            
+            # Load specular
+            if specular_img is not None and row < srows and col < scols:
+                specular_pixels = np.array(specular_img.crop((left, top, right, bottom)), dtype=np.uint8)
+                _register_specular(cp, specular_pixels)
+            
             count += 1
+    
     global _tileset
     _tileset = tileset  # store for use by compose_sprite / refresh_actor_sprite
-    print(f"[sprite_manager] Loaded {count} extra tiles from '{path}' (0xE000 – 0x{EXTRAS_START_CP + count - 1:04X}).")
+    
+    # Build status message
+    materials_loaded = []
+    if normal_img is not None:
+        materials_loaded.append(f"normals='{normals_path}'")
+    if emissive_img is not None:
+        materials_loaded.append(f"emissive='{emissive_path}'")
+    if specular_img is not None:
+        materials_loaded.append(f"specular='{specular_path}'")
+    
+    if materials_loaded:
+        materials_str = ", ".join(materials_loaded)
+        print(f"[sprite_manager] Loaded {count} extras from '{path}' with {materials_str} (0xE000 – 0x{EXTRAS_START_CP + count - 1:04X}).")
+    else:
+        print(f"[sprite_manager] Loaded {count} extras from '{path}' (no material maps found, using derived normals).")
+    
     return count
+
+
+def reload_materials(tileset, path: str = "RP/extras.png", normals_path: str | None = None, emissive_path: str | None = None, specular_path: str | None = None) -> int:
+    """Force reload all materials from the extras sheet.
+    
+    This is a convenience wrapper around load_extras() that explicitly clears all
+    caches before reloading. Use this when normal maps, emissive maps, or specular
+    maps have been moved or updated and you need to ensure the new versions are loaded.
+    
+    Returns the number of tiles reloaded.
+    """
+    print("[sprite_manager] Force reloading materials...")
+    return load_extras(tileset, path, normals_path, emissive_path, specular_path)
 
 
 def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_offset: int = 0, y_offset: int = 0, x_crop: int = 0, y_crop: int = 0, top_first_layer: bool = True, layer_tints: list | None = None) -> str:
@@ -329,6 +866,86 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
                 base[..., 3] = np.maximum(base[..., 3], overlay[..., 3])
 
         result = base.astype(np.uint8)
+        
+        # Composite material channels (emissive, specular, normals) from source layers
+        # Use same layer order and alpha blending as albedo composition
+        h, w = result.shape[:2]
+        composed_emission = np.zeros((h, w, 3), dtype=np.float32)
+        composed_specular = np.zeros((h, w, 3), dtype=np.float32)
+        composed_normal_detail = np.zeros((h, w), dtype=np.float32)
+        composed_specular_mask = np.zeros((h, w), dtype=np.float32)
+        composed_normals = np.zeros((h, w, 3), dtype=np.float32)
+        composed_normals[..., 2] = 1.0  # Default flat normal
+        
+        # Composite materials in the same order as the albedo layers
+        if top_first_layer:
+            material_order = layer_codepoints
+        else:
+            material_order = list(layer_codepoints[1:]) + [layer_codepoints[0]]
+        
+        for layer_cp in material_order:
+            # Get material data for this layer
+            layer_emission = _emissive_by_cp.get(layer_cp)
+            layer_specular = _specular_by_cp.get(layer_cp)
+            layer_normal_detail = _normal_detail_by_cp.get(layer_cp)
+            layer_specular_mask = _specular_mask_by_cp.get(layer_cp)
+            
+            # Get normal field (might not be cached yet)
+            layer_normal_tuple = _normal_field_by_cp.get(layer_cp)
+            if layer_normal_tuple is not None:
+                layer_normals, _ = layer_normal_tuple
+            else:
+                layer_normals = None
+            
+            # Get alpha for blending
+            layer_pixels = _get_tile(layer_cp).astype(np.float32)
+            
+            # Resize all material data to match output size if needed
+            lh, lw = layer_pixels.shape[:2]
+            if lh != h or lw != w:
+                # Simple nearest-neighbor resize for materials
+                y_idx = np.minimum((np.arange(h, dtype=np.int32) * lh) // max(1, h), lh - 1)
+                x_idx = np.minimum((np.arange(w, dtype=np.int32) * lw) // max(1, w), lw - 1)
+                
+                layer_pixels = layer_pixels[y_idx[:, None], x_idx[None, :], :]
+                if layer_emission is not None:
+                    layer_emission = layer_emission[y_idx[:, None], x_idx[None, :], :]
+                if layer_specular is not None:
+                    layer_specular = layer_specular[y_idx[:, None], x_idx[None, :], :]
+                if layer_normal_detail is not None:
+                    layer_normal_detail = layer_normal_detail[y_idx[:, None], x_idx[None, :]]
+                if layer_specular_mask is not None:
+                    layer_specular_mask = layer_specular_mask[y_idx[:, None], x_idx[None, :]]
+                if layer_normals is not None:
+                    layer_normals = layer_normals[y_idx[:, None], x_idx[None, :], :]
+            
+            layer_alpha_3d = (layer_pixels[..., 3:4] / 255.0).clip(0.0, 1.0)  # Keep (H, W, 1) for broadcasting
+            layer_alpha_2d = layer_alpha_3d[..., 0]  # (H, W) for 2D arrays
+            
+            # Blend emissive (additive for glows)
+            if layer_emission is not None:
+                composed_emission += layer_emission * layer_alpha_3d
+            
+            # Blend specular (overlay with alpha)
+            if layer_specular is not None:
+                composed_specular = layer_specular * layer_alpha_3d + composed_specular * (1.0 - layer_alpha_3d)
+            
+            # Blend masks (max for flags)
+            if layer_normal_detail is not None:
+                composed_normal_detail = np.maximum(composed_normal_detail, layer_normal_detail * layer_alpha_2d)
+            if layer_specular_mask is not None:
+                composed_specular_mask = np.maximum(composed_specular_mask, layer_specular_mask * layer_alpha_2d)
+            
+            # Blend normals (weighted average)
+            if layer_normals is not None:
+                # Weight by alpha and accumulate
+                composed_normals = layer_normals * layer_alpha_3d + composed_normals * (1.0 - layer_alpha_3d)
+        
+        # Normalize the composed normal
+        mag = np.sqrt(np.sum(composed_normals * composed_normals, axis=2, keepdims=True))
+        mag = np.where(mag > 1e-6, mag, 1.0)
+        composed_normals = composed_normals / mag
+        
         # Reuse a previously freed slot before consuming a new codepoint.
         if _composite_free_list:
             cp = _composite_free_list.pop()
@@ -340,6 +957,19 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
             _deferred_tiles.append((cp, result))
         else:
             _tileset.set_tile(cp, result)
+        
+        # Register all material data for the composite
+        _register_albedo_alpha(cp, result)
+        _register_normal_field(cp, composed_normals, result[..., 3].astype(np.float32) / 255.0)
+        
+        # Only register non-zero material data to save memory
+        if np.any(composed_emission > 1e-4):
+            _emissive_by_cp[cp] = composed_emission.clip(0.0, 1.0)
+        if np.any(composed_specular > 1e-4) or np.any(composed_specular_mask > 1e-4):
+            _specular_by_cp[cp] = composed_specular.clip(0.0, 1.0)
+            _normal_detail_by_cp[cp] = composed_normal_detail.clip(0.0, 1.0)
+            _specular_mask_by_cp[cp] = composed_specular_mask.clip(0.0, 1.0)
+        
         _composite_cache[key] = cp
         return chr(cp)
     except Exception as e:
@@ -576,6 +1206,8 @@ def get_puddle_sprite(
             if _tileset is None:
                 raise RuntimeError("[sprite_manager] get_puddle_sprite called before tileset is loaded.")
             _tileset.set_tile(existing_cp, pixels)
+        _register_albedo_alpha(existing_cp, pixels)
+        _register_avg_normal_from_albedo_pixels(existing_cp, pixels)
         # Evict any compose_sprite cache entries whose pixel inputs included
         # this puddle codepoint — they are now stale.
         # Guard: compose_dungeon_water stores keys like ('_dw', ...) where k[0] is
@@ -583,7 +1215,7 @@ def get_puddle_sprite(
         stale = [k for k, v in _composite_cache.items()
                  if isinstance(k[0], tuple) and existing_cp in k[0]]
         for k in stale:
-            _composite_free_list.append(_composite_cache.pop(k))
+            _release_composite_slot(_composite_cache.pop(k))
         # Drop all previous puddle cache entries for this position — their
         # pixels are now stale (GPU slot was overwritten).  Without this,
         # a later config that happens to match an old key returns early with
@@ -617,6 +1249,8 @@ def get_puddle_sprite(
         if _tileset is None:
             raise RuntimeError("[sprite_manager] get_puddle_sprite called before tileset is loaded.")
         _tileset.set_tile(cp, pixels)
+    _register_albedo_alpha(cp, pixels)
+    _register_avg_normal_from_albedo_pixels(cp, pixels)
 
     return chr(cp)
 
@@ -659,15 +1293,17 @@ def compose_puddle_tile(tile_x: int, tile_y: int, orig_cp: int, puddle_cp: int) 
             _deferred_tiles.append((new_cp, result))
         else:
             _tileset.set_tile(new_cp, result)
+        _register_albedo_alpha(new_cp, result)
+        _register_avg_normal_from_albedo_pixels(new_cp, result)
 
         # Return the old slot to the free list for immediate reuse.
-        _composite_free_list.append(existing_cp)
+        _release_composite_slot(existing_cp)
 
         # Evict entity/item composites built on the OLD codepoint.
         stale = [k for k, v in _composite_cache.items()
                  if isinstance(k[0], tuple) and existing_cp in k[0]]
         for k in stale:
-            _composite_free_list.append(_composite_cache.pop(k))
+            _release_composite_slot(_composite_cache.pop(k))
 
         _tile_puddle_pos_slot[pos_key] = new_cp
         return chr(new_cp)
@@ -684,6 +1320,8 @@ def compose_puddle_tile(tile_x: int, tile_y: int, orig_cp: int, puddle_cp: int) 
         _deferred_tiles.append((cp, result))
     else:
         _tileset.set_tile(cp, result)
+    _register_albedo_alpha(cp, result)
+    _register_avg_normal_from_albedo_pixels(cp, result)
     return chr(cp)
 
 
@@ -705,12 +1343,12 @@ def release_puddle_slots(tile_x: int, tile_y: int) -> None:
         stale = [k for k, v in _composite_cache.items()
                  if isinstance(k[0], tuple) and puddle_cp in k[0]]
         for k in stale:
-            _composite_free_list.append(_composite_cache.pop(k))
+            _release_composite_slot(_composite_cache.pop(k))
         stale_p = [k for k, v in _puddle_sprite_cache.items() if v == puddle_cp]
         for k in stale_p:
             del _puddle_sprite_cache[k]
         # The puddle sprite slot itself is now unused — return it for reuse.
-        _composite_free_list.append(puddle_cp)
+        _release_composite_slot(puddle_cp)
 
     tile_puddle_cp = _tile_puddle_pos_slot.pop(pos_key, None)
     if tile_puddle_cp is not None:
@@ -718,8 +1356,8 @@ def release_puddle_slots(tile_x: int, tile_y: int) -> None:
         stale = [k for k, v in _composite_cache.items()
                  if isinstance(k[0], tuple) and tile_puddle_cp in k[0]]
         for k in stale:
-            _composite_free_list.append(_composite_cache.pop(k))
-        _composite_free_list.append(tile_puddle_cp)
+            _release_composite_slot(_composite_cache.pop(k))
+        _release_composite_slot(tile_puddle_cp)
 
 
 # ---------------------------------------------------------------------------
@@ -778,6 +1416,36 @@ def compose_entity_tile(tile_cp: int, entity_cp: int, entity_tint) -> str:
         base[..., 3] = np.maximum(base[..., 3], overlay[..., 3])
         result = base.astype(np.uint8)
 
+        # Blend source average normals by entity alpha coverage so entity normals
+        # dominate opaque sprite regions while floor normal still contributes.
+        try:
+            coverage = float(np.mean(alpha))
+        except Exception:
+            coverage = 0.0
+        tile_n = get_average_normal(tile_cp)
+        ent_n = get_average_normal(entity_cp)
+        mix_n = _normalize_vec3(
+            tile_n[0] * (1.0 - coverage) + ent_n[0] * coverage,
+            tile_n[1] * (1.0 - coverage) + ent_n[1] * coverage,
+            tile_n[2] * (1.0 - coverage) + ent_n[2] * coverage,
+        )
+
+        tile_nf, tile_a = get_normal_field(tile_cp)
+        ent_nf, ent_a = get_normal_field(entity_cp)
+        # Use entity sprite alpha for mask, with authored normal alpha as multiplier.
+        mask = np.clip(alpha[..., 0] * ent_a, 0.0, 1.0)
+        inv_mask = 1.0 - mask
+        comb = np.empty_like(tile_nf)
+        comb[..., 0] = tile_nf[..., 0] * inv_mask + ent_nf[..., 0] * mask
+        comb[..., 1] = tile_nf[..., 1] * inv_mask + ent_nf[..., 1] * mask
+        comb[..., 2] = tile_nf[..., 2] * inv_mask + ent_nf[..., 2] * mask
+        mag = np.sqrt(comb[..., 0] * comb[..., 0] + comb[..., 1] * comb[..., 1] + comb[..., 2] * comb[..., 2])
+        mag = np.where(mag > 1e-6, mag, 1.0)
+        comb[..., 0] /= mag
+        comb[..., 1] /= mag
+        comb[..., 2] /= mag
+        comb_alpha = np.clip(np.maximum(tile_a * inv_mask, ent_a * mask), 0.0, 1.0)
+
         if _entity_tile_free_list:
             cp = _entity_tile_free_list.pop()
         else:
@@ -789,6 +1457,11 @@ def compose_entity_tile(tile_cp: int, entity_cp: int, entity_tint) -> str:
             _deferred_tiles.append((cp, result))
         else:
             _tileset.set_tile(cp, result)
+
+        _register_albedo_alpha(cp, result)
+        _avg_normal_by_cp[cp] = mix_n
+        _register_normal_field(cp, comb, comb_alpha)
+        _derived_avg_normal_cache.pop(cp, None)
 
         _entity_tile_cache[key] = cp
         return chr(cp)
@@ -951,7 +1624,7 @@ def prune_unused_composites(engine) -> dict:
 
     for key, cp in list(_composite_cache.items()):
         if cp not in live_codepoints:
-            _composite_free_list.append(cp)
+            _release_composite_slot(cp)
             del _composite_cache[key]
             pruned_entries += 1
 

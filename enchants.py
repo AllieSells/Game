@@ -6,20 +6,24 @@ from liquid_system import LiquidSystem, LiquidType
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 
 
+
 class Enchantment(Enum):
     FLAME = auto()
+    CURSED = auto()
 
 
-    def get_enchant_name(self):
+    def get_enchantment_name(self):
         names = {
-            Enchantment.FLAME: "Flaming"
+            Enchantment.FLAME: "Flaming",
+            Enchantment.CURSED: "Cursed"
         }
         return names.get(self, "Unknown")
 
     
     def get_color(self):
         colors = {
-            Enchantment.FLAME: (255, 69, 0)  # Orange-red color for flame
+            Enchantment.FLAME: (255, 69, 0),  # Orange-red color for flame
+            Enchantment.CURSED: (128, 0, 128)  # Purple color for cursed
         }
         return colors.get(self, (255, 255, 255))  # Default to white if not found
     

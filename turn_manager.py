@@ -25,6 +25,7 @@ from balance_config import MANA_REGEN_CHANCE, MANA_REGEN_FRACTION
 from typing import TYPE_CHECKING
 
 import color
+import identify as identify_system
 from liquid_system import LiquidType
 import sounds
 import sprite_manager
@@ -117,6 +118,15 @@ class TurnManager:
         # before their tick/message phase runs.
         self._handle_equipped_ring_effects()
 
+        # Tick active ability cooldowns for all actors once per world tick.
+        for actor in list(self.engine.game_map.actors):
+            ability = getattr(actor, "active_ability", None)
+            if ability is None:
+                continue
+            tick_fn = getattr(ability, "tick_cooldown", None)
+            if callable(tick_fn):
+                tick_fn(1)
+
         # Handle all effects on entities
 
         for actor in list(self.engine.game_map.actors):
@@ -155,6 +165,9 @@ class TurnManager:
         player = self.engine.player
         base_hunger_decrease = 0.05   # hunger drain once saturation is gone
         saturation_decay = 0.25        # saturation consumed per player turn; stew (+100) lasts ~100 turns
+
+        # Identification jobs progress with each completed player turn.
+        identify_system.tick_identification(player, self.engine)
 
         # Drain saturation first (can't go below 0)
         player.saturation = max(0.0, player.saturation - saturation_decay)
@@ -385,7 +398,8 @@ class TurnManager:
                 except Exception:
                     pass
                 sounds.torch_burns_out_sound.play()
-                self.engine.message_log.add_message(f"Your {item.name} burns out.", color.error)
+                shown_name = identify_system.get_display_name(self.engine.player, item)
+                self.engine.message_log.add_message(f"Your {shown_name} burns out.", color.error)
             
         except Exception:
             pass

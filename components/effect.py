@@ -5,6 +5,7 @@ from typing import Optional
 
 import sounds
 import color
+from components.damage_types import DamageType
 
 ColorRGB = tuple[int, int, int]
 Glyph = str | int
@@ -45,6 +46,10 @@ class Effect:
     def get_defense_multiplier(self) -> float:
         """Return a multiplier for damage mitigation based on this effect."""
         return 1.0
+
+    def get_armor_bonus(self) -> int:
+        """Return a flat armor bonus provided by this effect."""
+        return 0
 
 
 def has_effect_name(target, *names: str) -> bool:
@@ -190,11 +195,88 @@ class PoisonEffect(Effect):
         if self.duration is None:
             return False
         self.duration -=1
-        sounds.play_poison_burn_sound()
-        target.fighter.take_damage(self.amount, causes_bleeding=False)
-        return self.duration <= 0
+        sounds._play_burn_sound_at(target.x, target.y, target.gamemap.engine.player, target.gamemap)
         
+        # Apply poison damage with damage type for resistance calculation
+        from components.damage_types import DamageType
+        import actions
+        final_damage = actions.apply_typed_damage(target, self.amount, DamageType.POISON)
+        target.fighter.take_damage(final_damage, causes_bleeding=False)
+        return self.duration <= 0
+
+
+
+## Applied 
+
+class FireResistanceEffect(Effect):
+    def __init__(self, duration: int):
+        super().__init__(
+            name="Fire Resistance",
+            duration=duration,
+            description="Resistant to fire damage.",
+            type="buff",
+            display=EffectDisplay(glyph=chr(0xE02F), fg=(255, 255, 255), label="Fire Resistance"),
+        )
+
+    def tick(self, target):
+        if self.duration is None:
+            return False
+        self.duration -= 1
+
+        if self.duration > 0:
+            # Add fire resistance to target's effect_resistances for damage calculations
+            if hasattr(target, 'effect_resistances'):
+                target.effect_resistances.append((DamageType.FIRE, 0.0))
+
+        elif self.duration == 0:
+            # Remove fire resistance when effect expires
+            if hasattr(target, 'effect_resistances'):
+                target.effect_resistances = [
+                    (dtype, value) for dtype, value in target.effect_resistances
+                    if dtype != DamageType.FIRE
+                ]
+        return self.duration <= 0
+
+
+
 ## Magic effects
+
+
+class MageArmorEffect(Effect):
+    """Provides a flat armor bonus"""
+    def __init__(self, duration: int, armor_bonus: int = 3):
+        super().__init__(
+            name="Mage Armor",
+            duration=duration,
+            description=f"A suit of magical armor surrounds you, granting +{armor_bonus} armor.",
+            type="buff",
+            display=EffectDisplay(glyph=chr(0xE02E), fg=(255, 255, 255), label="Mage Armor"),
+        )
+        self.armor_bonus = armor_bonus
+
+    def tick(self, target):
+        if self.duration is None:
+            return False
+
+        # Terminate early if player has armor equipped
+        if target.equipment:
+            equipped_items = (
+                set(target.equipment.equipped_items.values()))
+            for item in equipped_items:
+                if item and hasattr(item, 'tags'):
+                    item_tags = set(getattr(item, 'tags', []) or [])
+                    if "armor" in item_tags:
+                        target.gamemap.engine.message_log.add_message(
+                            "Your mage armor fades as your physical armor takes precedence.", color.yellow)
+                        return True  # End effect immediately if player is wearing armor
+        
+        print(f"[EFFECT] Mage Armor ticking down on {target.name}, duration remaining: {self.duration}")
+        self.duration -= 1
+        return self.duration <= 0
+
+    def get_armor_bonus(self) -> int:
+        """Return flat armor bonus provided by this effect."""
+        return self.armor_bonus
 
 class SleepEffect(Effect):
     """Skip all turns until effect ends, or takes damage."""
@@ -316,7 +398,7 @@ class DarkvisionEffect(Effect):
             return ("Darkness once again engulfs you...", color.purple)
         
 class BurningEffect(Effect):
-    """Simple designator class. Does no damage."""
+    """Fire damage over time effect."""
 
     def __init__(self, amount: int, duration: int):
         super().__init__(
@@ -332,8 +414,13 @@ class BurningEffect(Effect):
         if self.duration is None:
             return False
         self.duration -= 1
-        sounds.play_poison_burn_sound()
-        target.fighter.take_damage(self.amount, causes_bleeding=False)
+        sounds._play_burn_sound_at(target.x, target.y, target.gamemap.engine.player, target.gamemap)
+        
+        # Apply fire damage with damage type for resistance calculation
+        from components.damage_types import DamageType
+        import actions
+        final_damage = actions.apply_typed_damage(target, self.amount, DamageType.FIRE)
+        target.fighter.take_damage(final_damage, causes_bleeding=False)
         return self.duration <= 0
 
 
@@ -388,6 +475,49 @@ class SlimyEffect(Effect):
             display=EffectDisplay(glyph="\u223f", fg=(255, 255, 255), label="Slimy"),
         )
 
+class ExpiryEffect(Effect):
+    """Marks expiration timer for an entity"""
+
+    def __init__(self, duration: int):
+        super().__init__(
+            name="Expiring",
+            duration=duration,
+            description="You shouldn't be seeing this!",
+            type="status",
+            display=EffectDisplay(glyph=chr(0xE02E), fg=(255, 255, 255), label="Expiring"),
+        )
+
+    def tick(self, target):
+        if self.duration is None:
+            return None
+        self.duration -= 1
+        if self.duration <= 0:
+            print(f"[EFFECT] {target.name} expiring!")
+            
+            # Remove from creator's clone list if this is a decoy/illusion
+            if getattr(target, 'is_decoy', False):
+                # Get the creator from the AI's target (illusions follow their creator)
+                creator = None
+                if hasattr(target, 'ai') and hasattr(target.ai, 'target'):
+                    creator = target.ai.target
+                
+                # Remove from creator's clone tracking list
+                if creator and hasattr(creator, 'entity_clones'):
+                    try:
+                        creator.entity_clones.remove(target)
+                    except (ValueError, KeyError):
+                        pass  # Already removed or not in list
+            
+            # Remove from game map
+            gm = getattr(target, "gamemap", None)
+            if gm is not None:
+                try:
+                    gm.entities.remove(target)
+                except (KeyError, ValueError):
+                    gm.entities.discard(target)
+            target.ai = None
+        
+        return None
 
 # ============================================================================
 # DEBUG CONSOLE EFFECT REGISTRY
@@ -428,6 +558,10 @@ def get_effect_by_name(effect_name: str, duration: int = 100) -> Optional[Effect
         "slimy": lambda d: SlimyEffect(duration=d),
         "bloody": lambda d: BloodyEffect(duration=d),
         "light": lambda d: LightEffect(duration=d),
+        "mage_armor": lambda d: MageArmorEffect(duration=d),
+        "expiring": lambda d: ExpiryEffect(duration=d),
+        "ironskin": lambda d: IronskinEffect(duration=d),
+        "fire_resistance": lambda d: FireResistanceEffect(duration=d),
     }
     
     if name in registry:
@@ -441,5 +575,5 @@ def list_available_effects() -> list[str]:
     return sorted([
         "sleep", "darkvision", "invisibility", "ironskin", "burning", "poison",
         "tired", "darkness", "healing", "saturated", "hungry", "starving",
-        "wet", "oily", "slimy", "bloody", "light"
+        "wet", "oily", "slimy", "bloody", "light", "mage armor", "expiring", "fire_resistance"
     ])

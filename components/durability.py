@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import color
 from components.base_component import BaseComponent
+import identify as identify_system
 
 if TYPE_CHECKING:
     from entity import Item
@@ -75,7 +76,8 @@ class Durability(BaseComponent):
                 pass
 
             # Message the player
-            engine.message_log.add_message(f"Your {item.name} breaks.", color.red)
+            shown_name = identify_system.get_display_name(engine.player, item)
+            engine.message_log.add_message(f"Your {shown_name} breaks.", color.red)
 
             # Remove durability attribute so future calls won't re-run breaking logic
             try:

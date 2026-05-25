@@ -586,21 +586,35 @@ class LoopingSound:
 _settings_cache: dict = {}
 _settings_cache_time: float = 0.0
 _SETTINGS_CACHE_TTL: float = 2.0  # Refresh settings at most every 2 seconds
+_settings_cache_mtime: float = -1.0
 
 def load_settings():
     """Load settings from JSON file (cached for up to 2 seconds)."""
-    global _settings_cache, _settings_cache_time
+    global _settings_cache, _settings_cache_time, _settings_cache_mtime
     now = time.monotonic()
-    if _settings_cache and (now - _settings_cache_time) < _SETTINGS_CACHE_TTL:
-        return _settings_cache
+    settings_path = get_data_path("json/settings.json")
+
     try:
-        with open("settings.json", 'r') as f:
+        current_mtime = os.path.getmtime(settings_path)
+    except OSError:
+        current_mtime = -1.0
+
+    if (
+        _settings_cache
+        and (now - _settings_cache_time) < _SETTINGS_CACHE_TTL
+        and current_mtime == _settings_cache_mtime
+    ):
+        return _settings_cache
+
+    try:
+        with open(settings_path, 'r') as f:
             content = f.read()
             # Remove JSON comments
             lines = [line for line in content.split('\n') if not line.strip().startswith('//')]
             clean_content = '\n'.join(lines)
             _settings_cache = json.loads(clean_content)
             _settings_cache_time = now
+            _settings_cache_mtime = current_mtime
             return _settings_cache
     except (FileNotFoundError, json.JSONDecodeError):
         return {"fullscreen": False, "audio": 50, "graphics": "high"}
@@ -1013,6 +1027,13 @@ def play_attack_sound_weapon_to_no_armor():
     play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.25))
 
 
+def play_dragon_breath_sound():
+    dragon_breath_sounds = [
+        Sound("RP/sfx/spells/dragon_breath/dragon_breath1.mp3")]
+
+    sound = random.choice(dragon_breath_sounds)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.75)
+
 def play_attack_sound_weapon_to_armor():
     attack_sounds = [
         Sound("RP/sfx/hit_weapon_armor/hit1.wav"),
@@ -1046,6 +1067,16 @@ def drop_leather_sound():
 # Acid sounds
 def play_poison_burn_sound():
     play_sound_with_pitch_variation(Sound("RP/sfx/materials/acid/burn1.mp3"), pitch_range=(0.8, 1.5), volume=0.5)
+
+def _play_burn_sound_at(x, y, player, game_map):
+    from animations import HeardDoorAnimation
+    dx = x - player.x
+    dy = y - player.y
+    sound_func = play_poison_burn_sound
+    if (dx * dx + dy * dy) ** 0.5 <= 10 and not game_map.visible[x, y]:
+        game_map.engine.animation_queue.append(HeardDoorAnimation((x, y), player))
+    play_positional_sound(sound_func, x, y, player, game_map, muffled_cutoff=800)
+
 
 # Glass equip
 def play_equip_glass_sound():
@@ -1229,6 +1260,14 @@ AMBIENT_TYPES = {
         proximity_threshold=999,
         base_volume=0.2
     ),
+    'boss_music': AmbientSoundType(
+        name='boss_music',
+        sound_file='RP/sfx/loops/boss/boss1.wav',
+        entity_names=[None],
+        map_type=None,
+        proximity_threshold=999,
+        base_volume=0.3
+    ),
 }
 
 class AmbientSoundManager:
@@ -1342,7 +1381,7 @@ class AmbientSoundManager:
         """Update all ambient sounds based on player proximity."""
         # Check each ambient type (excluding music which is manually controlled)
         for ambient_type in AMBIENT_TYPES:
-            if ambient_type in ['menu', 'dungeon_music', 'menu_music']:  # Skip manually controlled
+            if ambient_type in ['menu', 'dungeon_music', 'menu_music', 'boss_music']:  # Skip manually controlled
                 continue
                 
             config = AMBIENT_TYPES[ambient_type]
@@ -1712,6 +1751,13 @@ def play_muffled_sound(sound_func, cutoff=800):
         ]
         sound = random.choice(liquid_walk_sounds)
         sound.set_volume(0.4)  # Match original volume
+
+    elif sound_func.__name__ == 'play_poison_burn_sound':
+        burn_sounds = [
+            Sound("RP/sfx/materials/acid/burn1.mp3")
+        ]
+        sound = random.choice(burn_sounds)
+        sound.set_volume(1.0)
         
     elif sound_func.__name__ == 'play_walk_sound':
         # 30% chance to not play a sound for variety (same as original)
@@ -1937,14 +1983,20 @@ def start_menu_music():
         _menu_music_active = True
         start_ambient_sound('menu_music')
 
+def start_boss_music():
+    """Start boss battle music."""
+    stop_all_music()
+    start_ambient_sound('boss_music')
+
 def stop_all_music():
     """Stop all music."""
     stop_ambient_sound('dungeon_music')
     stop_ambient_sound('menu_music')
+    stop_ambient_sound('boss_music')
 
 def set_music_volume(volume: float):
     """Set music volume."""
-    for music_type in ["dungeon_music", "menu_music"]:
+    for music_type in ["dungeon_music", "menu_music", "boss_music"]:
         if music_type in AMBIENT_TYPES:
             AMBIENT_TYPES[music_type].base_volume = .3
             # FOR FUTURE USE: max(0.0, min(1.0, volume))

@@ -64,6 +64,9 @@ class BodyPartType(Enum):
     ANTENNA = auto()
     MANDIBLES = auto()
 
+    # Inanimate objects
+    STRUCTURE = auto()
+
 
 class AnatomyType(Enum):
     """Different creature anatomy layouts."""
@@ -75,6 +78,8 @@ class AnatomyType(Enum):
     BIRD = auto()
     ORB = auto()
     SIMPLE = auto()  # Basic creatures
+    OBJECT = auto()  
+    DRAGON = auto()
 
 
 @dataclass
@@ -170,9 +175,80 @@ class BodyParts(BaseComponent):
             self._create_snake_anatomy()
         elif anatomy_type == AnatomyType.ORB:
             self._create_orb_anatomy()
+        elif anatomy_type == AnatomyType.OBJECT:
+            self._create_object_anatomy()
+        elif anatomy_type == AnatomyType.DRAGON:
+            self._create_dragon_anatomy()
         else:  # SIMPLE
             self._create_simple_anatomy()
 
+    def _create_dragon_anatomy(self) -> None:
+        parent_max_hp = self.max_hp
+        self.body_parts = {
+            BodyPartType.HEAD: BodyPart(
+                BodyPartType.HEAD, "head", .4, max_hp=int(0.4 * parent_max_hp), is_vital=True,
+                tags={"head", "armor", "cranium"}
+            ),
+            BodyPartType.TORSO: BodyPart(
+                BodyPartType.TORSO, "torso", 1.0, max_hp=int(1.0 * parent_max_hp), is_vital=True,
+                tags={"torso", "armor", "core"}
+            ),
+            BodyPartType.WINGS: BodyPart(
+                BodyPartType.WINGS, "wings", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
+                tags={"wings", "locomotion"}
+            ),
+            BodyPartType.TAIL: BodyPart(
+                BodyPartType.TAIL, "tail", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
+                tags={"tail", "armor"}
+            ),
+            BodyPartType.LEFT_LEG: BodyPart(
+                BodyPartType.LEFT_LEG, "left leg", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "left_leg", "lower_limbs"}
+            ),
+            BodyPartType.RIGHT_LEG: BodyPart(
+                BodyPartType.RIGHT_LEG, "right leg", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "right_leg", "lower_limbs"}
+            ),
+            BodyPartType.LEFT_ARM: BodyPart(
+                BodyPartType.LEFT_ARM, "left arm", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"arm", "armor", "left", "left_arm", "upper_limbs"}
+            ),
+            BodyPartType.RIGHT_ARM: BodyPart(
+                BodyPartType.RIGHT_ARM, "right arm", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"arm", "armor", "right", "right_arm", "upper_limbs"}
+            ),
+            BodyPartType.LEFT_HAND: BodyPart(
+                BodyPartType.LEFT_HAND, "left hand", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True, can_grasp=True,
+                tags={"hand", "grasp", "manipulate", "hold", "use", "left", "left_hand", "upper_limbs"}
+            ),
+            BodyPartType.RIGHT_HAND: BodyPart(
+                BodyPartType.RIGHT_HAND, "right hand", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True, can_grasp=True,
+                tags={"hand", "grasp", "manipulate", "hold", "use", "right", "right_hand", "upper_limbs"}
+            ),
+            BodyPartType.LEFT_FOOT: BodyPart(
+                BodyPartType.LEFT_FOOT, "left foot", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True,
+                tags={"foot", "locomotion", "left", "left_foot", "lower_limbs"}
+            ),
+            BodyPartType.RIGHT_FOOT: BodyPart(
+                BodyPartType.RIGHT_FOOT, "right foot", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True,
+                tags={"foot", "locomotion", "right", "right_foot", "lower_limbs"}
+            ),
+            BodyPartType.TAIL: BodyPart(
+                BodyPartType.TAIL, "tail", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
+                tags={"tail"}
+            )
+        }
+
+    def _create_object_anatomy(self) -> None:
+        """'Anatomy' for objects"""
+        parent_max_hp = self.max_hp
+        self.body_parts = {
+            BodyPartType.STRUCTURE: BodyPart(
+                BodyPartType.STRUCTURE, "structure", 1.0, max_hp=parent_max_hp, is_vital=True, protection=1,
+                tags={"structure"}
+            )
+
+        }
     def _create_orb_anatomy(self) -> None:
         """Create orb anatomy (for floating orbs, slimes, etc.)."""
         parent_max_hp = self.max_hp

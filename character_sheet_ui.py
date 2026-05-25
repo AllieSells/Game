@@ -297,7 +297,7 @@ class CharacterScreen(PopupEventHandler):
                 indicator = "▼" if is_expanded else "►"
                 
                 # Draw category header
-                console.print(x=x, y=current_line, string=f"{indicator} {category['name']}", 
+                console.print(x=x, y=current_line, string=f"{indicator}{category['name']}", 
                              fg=color.fantasy_text)
                 
                 # If this category has a main trait, show its stats on the same line

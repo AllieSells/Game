@@ -6,7 +6,7 @@ from typing import List, Tuple, Optional, TYPE_CHECKING
 import numpy as np
 import tcod
 
-from actions import Action, MeleeAction, BumpAction, MovementAction, WaitAction
+from actions import Action, MeleeAction, BumpAction, MovementAction, WaitAction, RangedAction
 
 import color
 import sounds
@@ -100,8 +100,7 @@ class BaseAI(Action):
 
 
     def perform(self) -> None:
-        raise NotImplementedError(
-        )
+        pass
 
     def swim(self):
         from render_functions import SwimmingAnimation
@@ -115,6 +114,28 @@ class BaseAI(Action):
             self.movement_counter = 0
             return True
         return False
+    
+    def select_target(self) -> "Actor":
+        """Select best target, preferring nearby decoys over the player.
+        
+        Returns the player by default, but if there are visible decoys/illusions
+        that are closer or equally close, target them instead.
+        """
+        target = self.engine.player
+        
+        # Check for nearby illusions/decoys
+        for actor in self.engine.game_map.actors:
+            if actor != self.entity and getattr(actor, 'is_decoy', False):
+                if self.can_see_actor(actor) and actor.is_alive:
+                    # Calculate distances
+                    decoy_distance = max(abs(actor.x - self.entity.x), abs(actor.y - self.entity.y))
+                    player_distance = max(abs(target.x - self.entity.x), abs(target.y - self.entity.y))
+                    # Prefer decoy if it's closer or same distance (50% chance for variety)
+                    if decoy_distance < player_distance or (decoy_distance == player_distance and random.random() < 0.5):
+                        target = actor
+                        break
+        
+        return target
     
     def get_path_to(self, dest_x: int, dest_y: int) -> List[Tuple[int, int]]:
         
@@ -368,7 +389,9 @@ class HostileEnemy(BaseAI):
             self.home_x = self.entity.x
             self.home_y = self.entity.y
         
-        target = self.engine.player
+        # Select target (player or nearby decoy/illusion)
+        target = self.select_target()
+        
         dx = target.x - self.entity.x
         dy = target.y - self.entity.y
         distance = max(abs(dx), abs(dy))
@@ -555,7 +578,8 @@ class PhasingAI(HostileEnemy):
             self.home_x = self.entity.x
             self.home_y = self.entity.y
         
-        target = self.engine.player
+        # Select target (player or nearby decoy/illusion)
+        target = self.select_target()
         dx = target.x - self.entity.x
         dy = target.y - self.entity.y
         distance = max(abs(dx), abs(dy))
@@ -729,7 +753,8 @@ class RetreatingPhasingAI(PhasingAI):
             self.home_x = self.entity.x
             self.home_y = self.entity.y
         
-        target = self.engine.player
+        # Select target (player or nearby decoy/illusion)
+        target = self.select_target()
         dx = target.x - self.entity.x
         dy = target.y - self.entity.y
         distance = max(abs(dx), abs(dy))
@@ -850,7 +875,8 @@ class HostileCasterAI(HostileEnemy):
         if self.cast_cooldown > 0:
             self.cast_cooldown -= 1
 
-        target = self.engine.player
+        # Select target (player or nearby decoy/illusion)
+        target = self.select_target()
         dx = target.x - self.entity.x
         dy = target.y - self.entity.y
         distance = max(abs(dx), abs(dy))
@@ -983,7 +1009,8 @@ class DarkHostileEnemy(BaseAI):
         self.path: List[Tuple[int, int]] = []
     
     def perform(self) -> None:
-        target = self.engine.player
+        # Select target (player or nearby decoy/illusion)
+        target = self.select_target()
         dx = target.x - self.entity.x
         dy = target.y - self.entity.y
         distance = max(abs(dx), abs(dy))
@@ -1154,12 +1181,22 @@ class FollowerAI(BaseAI):
             else:
                 # Path to the walkable neighbour of the target closest to us
                 gm = self.entity.gamemap
+                
+                # Helper to check if tile has another illusion on it
+                def has_other_illusion(x, y):
+                    for actor in gm.actors:
+                        if actor != self.entity and actor.x == x and actor.y == y:
+                            if getattr(actor, 'is_decoy', False):
+                                return True
+                    return False
+                
                 adj_tiles = [
                     (tx + dx, ty + dy)
                     for dx in range(-1, 2) for dy in range(-1, 2)
                     if (dx, dy) != (0, 0)
                     and gm.in_bounds(tx + dx, ty + dy)
                     and gm.tiles[tx + dx, ty + dy]['walkable']
+                    and not has_other_illusion(tx + dx, ty + dy)  # Don't path into other illusions
                 ]
                 if adj_tiles:
                     goal = min(adj_tiles, key=lambda p: abs(p[0] - ex) + abs(p[1] - ey))
@@ -1169,12 +1206,26 @@ class FollowerAI(BaseAI):
 
         if self.path:
             dest_x, dest_y = self.path.pop(0)
+            
+            # Check if destination now has another illusion
+            for actor in self.entity.gamemap.actors:
+                if actor != self.entity and actor.x == dest_x and actor.y == dest_y:
+                    if getattr(actor, 'is_decoy', False):
+                        self.path = []  # Clear path if another illusion is there
+                        return WaitAction(self.entity).perform()
+            
             return MovementAction(
                 self.entity, dest_x - self.entity.x, dest_y - self.entity.y,
             ).perform()
 
         return WaitAction(self.entity).perform()
 
+
+class NoneAI(BaseAI):
+    """Used for environmental objects"""
+    def perform(self) -> None:
+        pass # Do nothing
+    
 
 
 class AnimalAI(BaseAI):
@@ -1320,3 +1371,124 @@ class StatueAI(BaseAI):
                     _lf.write(traceback.format_exc())
             except Exception:
                 pass
+
+class RangedEnemyAI(HostileEnemy):
+    """Hostile enemy that prefers to fire projectiles from a distance rather than melee."""
+    def __init__(self, entity: Actor):
+        super().__init__(entity)
+        self.type = "RangedEnemyAI"
+        self.ranged_cooldown = 0
+        self.ranged_cooldown_turns = 3
+
+    def perform(self) -> None:
+        """Fire projectiles at player when in range, melee if player gets too close, and otherwise chase."""
+        if self.ranged_cooldown > 0:
+            self.ranged_cooldown -= 1
+
+        target = self.select_target()
+        dx = target.x - self.entity.x
+        dy = target.y - self.entity.y
+        distance = (dx * dx + dy * dy) ** 0.5
+
+        if self.can_see_actor(target):
+            if distance <= 1:
+                # Player is adjacent - use melee attack
+                return MeleeAction(self.entity, dx, dy).perform()
+            elif distance <= 5 and self.ranged_cooldown == 0:
+                # Player is in mid-range and we can shoot - fire projectile
+                self.ranged_cooldown = self.ranged_cooldown_turns
+                return RangedAction(self.entity, dx, dy).perform(innate=True, break_chance = True)
+            
+        # Keep distance from melee range when possible.
+        if distance <= 5:
+            step_x = 0 if dx == 0 else (-1 if dx > 0 else 1)
+            step_y = 0 if dy == 0 else (-1 if dy > 0 else 1)
+            new_x = self.entity.x + step_x
+            new_y = self.entity.y + step_y
+            gm = self.entity.gamemap
+            if (
+                gm.in_bounds(new_x, new_y)
+                and gm.tiles["walkable"][new_x, new_y]
+                and not gm.get_blocking_entity_at_location(new_x, new_y)
+            ):
+                return MovementAction(self.entity, step_x, step_y).perform()
+            return WaitAction(self.entity).perform()
+
+
+        # Default to chasing behavior when we can't shoot
+        return super().perform()
+
+
+class DragonHeadAI(BaseAI):
+    """AI for dragon head that periodically casts dragon's breath.
+    
+    This AI is attached to the top part of a multi-tile dragon boss.
+    It doesn't move (the parent entity handles movement), but it can
+    independently cast spells when the player is in range.
+    """
+    
+    def __init__(self, entity: "Actor"):
+        super().__init__(entity)
+        self.cast_cooldown = 0
+        self.cast_cooldown_max = 4  # Cast every 4 turns
+        self.type = "DragonHeadAI"
+    
+    def perform(self) -> None:
+        """Cast dragon's breath periodically when player is in sight."""
+        # Don't move - parent entity handles positioning
+        
+        # Decrement cooldown
+        if self.cast_cooldown > 0:
+            self.cast_cooldown -= 1
+            return WaitAction(self.entity).perform()
+        
+        # Check if we can see the player
+        target = self.engine.player
+        if not self.can_see_actor(target, radius=8):
+            return WaitAction(self.entity).perform()
+        
+        # Check if we have the spell and enough mana
+        from components.spells import DragonsBreathSpell
+        spell = DragonsBreathSpell()
+        
+        # Ensure entity has mana (give infinite mana to boss if not set)
+        if not hasattr(self.entity, 'mana') or self.entity.mana < spell.mana_cost:
+            self.entity.mana = 100
+            self.entity.mana_max = 100
+        
+        # Cast dragon's breath at player - this is an innate ability, so activate directly
+        # without proficiency checks
+        try:
+            from actions import Action
+            
+            # Create a simple action wrapper to provide context for spell activation
+            class InnateSpellAction(Action):
+                def __init__(self, entity, spell, target_xy):
+                    super().__init__(entity)
+                    self.spell = spell
+                    self.target_xy = target_xy
+                
+                @property
+                def target_actor(self):
+                    return self.engine.game_map.get_actor_at_location(*self.target_xy)
+            
+            # Target the player's position
+            target_xy = (target.x, target.y)
+            
+            # Create action and activate spell directly (bypassing proficiency checks)
+            action = InnateSpellAction(self.entity, spell, target_xy)
+            
+            # Spend mana
+            self.entity.mana -= spell.mana_cost
+            
+            # Activate the spell directly (innate ability - no fizzle chance)
+            spell.activate(action, _range = 10)
+            
+            # Reset cooldown after casting
+            self.cast_cooldown = self.cast_cooldown_max
+            
+            return WaitAction(self.entity).perform()
+        except Exception:
+            # If casting fails for any reason, reset cooldown and wait
+            self.cast_cooldown = 2
+            return WaitAction(self.entity).perform()

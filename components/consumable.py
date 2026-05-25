@@ -32,6 +32,9 @@ from components.spells import (
     TeleportSpell,
     InvisibilitySpell,
     IronskinSpell,
+    MirrorImageSpell,
+    MageArmorSpell,
+    RemoveCurseSpell,
 )
 
 if TYPE_CHECKING:
@@ -39,6 +42,7 @@ if TYPE_CHECKING:
 
 import sounds
 
+# Spell registry (tome)
 
 _SPELL_CLASS_BY_NAME = {
     "Teleport": TeleportSpell,
@@ -51,7 +55,10 @@ _SPELL_CLASS_BY_NAME = {
     "Invisibility": InvisibilitySpell,
     "Ironskin": IronskinSpell,
     "Sleep": SleepSpell,
-    "Clairvoyance": ClairvoyanceSpell
+    "Clairvoyance": ClairvoyanceSpell,
+    "Mirror Image": MirrorImageSpell,
+    "Mage Armor": MageArmorSpell,
+    "Remove Curse": RemoveCurseSpell,
 }
 
 _SPELL_BOOK_CACHE = None
@@ -205,6 +212,14 @@ class ConfusionConsumable(Consumable):
         if target is consumer:
             raise Impossible("You cannot confuse yourself!")
         
+        # Check if target is immune to psychic effects (confusion is psychic)
+        from components.damage_types import DamageType
+        if actions.is_immune_to_damage_type(target, DamageType.PSYCHIC):
+            self.engine.message_log.add_message(
+                f"The {target.name} is immune to psychic effects!", color.impossible
+            )
+            raise Impossible(f"The {target.name} is immune!")
+        
         self.engine.message_log.add_message(
             f"You have confused the {target.name}!", color.status_effect_applied
         )
@@ -246,6 +261,21 @@ class HealingConsumables(Consumable):
             self.consume()
         else:
             raise Impossible("Your health is already full.")
+        
+class FireResistanceConsumable(Consumable):
+    def __init__(self, duration: int):
+        self.duration = duration
+
+    def activate(self, action: actions.ItemAction) -> None:
+        consumer = action.entity
+        from components.effect import FireResistanceEffect
+        fire_resistance = FireResistanceEffect(duration=self.duration)
+        consumer.add_effect(fire_resistance)
+        self.engine.message_log.add_message(
+            "You feel resistant to fire!", color.orange
+        )
+        sounds.play_quaff_sound()
+        self.consume()
 
 class SpellbookConsumable(Consumable):
     def __init__(self, unlock_name: str):
@@ -280,7 +310,7 @@ class SpellbookConsumable(Consumable):
         )
 
         if not base_spell_known:
-            required_skill = getattr(self.parent, "identification_skill", "arcana")
+            required_skill = getattr(self.parent, "school", "arcana")
             required_level = int(getattr(self.parent, "identification_level", 0) or 0)
             current_level = int(consumer.level.traits.get(required_skill, {}).get("level", 1) or 1)
 
@@ -351,12 +381,32 @@ class LightningConsumable(Consumable):
             path = list(tcod.los.bresenham((consumer.x, consumer.y), (target.x, target.y)).tolist())
 
             self.engine.animation_queue.append(LightningAnimation(path))
-
-            self.engine.message_log.add_message(
-                f"A lightning bolt strikes the {target.name} for {self.damage} damage!"
-            )
             
-            target.fighter.take_damage(self.damage)
+            # Use centralized damage calculation for consumable items
+            from components.damage_types import DamageType
+            final_damage, _, was_fully_resisted = actions.calculate_damage(
+                attacker=consumer,
+                target=target,
+                base_damage=self.damage,
+                attack_type="spell",
+                damage_type=DamageType.NONE,
+                damage_modifier=1.0,
+                hit_part=None,
+                proficiency_profile=None,
+                armor_tags=None,
+            )
+
+            if was_fully_resisted:
+                self.engine.message_log.add_message(
+                    f"A lightning bolt strikes the {target.name}, but the attack is completely resisted!",
+                    color.light_blue
+                )
+            else:
+                self.engine.message_log.add_message(
+                    f"A lightning bolt strikes the {target.name} for {final_damage} damage!"
+                )
+            
+            target.fighter.take_damage(final_damage)
             self.consume()
             sounds.lightning_sound.play()
         else:
@@ -387,10 +437,30 @@ class FireballConsumable(Consumable):
         targets_hit = False
         for actor in self.engine.game_map.actors:
             if actor.distance(*target_xy) <= self.radius:
-                self.engine.message_log.add_message(
-                    f"The {actor.name} is engulfed in an explosion, taking {self.damage} damage!"
+                # Use centralized damage calculation for consumable items
+                from components.damage_types import DamageType
+                final_damage, _, was_fully_resisted = actions.calculate_damage(
+                    attacker=action.entity,
+                    target=actor,
+                    base_damage=self.damage,
+                    attack_type="spell",
+                    damage_type=DamageType.FIRE,
+                    damage_modifier=1.0,
+                    hit_part=None,
+                    proficiency_profile=None,
+                    armor_tags=None,
                 )
-                actor.fighter.take_damage(self.damage)
+                
+                if was_fully_resisted:
+                    self.engine.message_log.add_message(
+                        f"The {actor.name} completely resists the flames!",
+                        color.light_blue
+                    )
+                else:
+                    self.engine.message_log.add_message(
+                        f"The {actor.name} is engulfed in an explosion, taking {final_damage} damage!"
+                    )
+                actor.fighter.take_damage(final_damage)
                 targets_hit = True
 
         if not targets_hit:

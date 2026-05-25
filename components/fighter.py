@@ -77,6 +77,44 @@ class Fighter(BaseComponent):
     def die(self) -> None:
         sounds.play_death_sound()
         
+        # If this is a multi-part entity (parent), destroy all child parts
+        if hasattr(self.parent, 'child_parts') and self.parent.child_parts:
+            for part in list(self.parent.child_parts):
+                try:
+                    if part and hasattr(part, 'gamemap'):
+                        gm = part.gamemap
+                        if hasattr(gm, "entities") and part in gm.entities:
+                            gm.entities.discard(part)
+                except Exception:
+                    pass
+            self.parent.child_parts.clear()
+        
+        # If this is a child part, die immediately without corpse/loot 
+        # (only the main entity should leave a corpse)
+        if hasattr(self.parent, 'parent_entity') and self.parent.parent_entity:
+            try:
+                gm = self.parent.gamemap
+                if hasattr(gm, "entities") and self.parent in gm.entities:
+                    gm.entities.discard(self.parent)
+            except Exception:
+                pass
+            self.parent.ai = None
+            return
+        
+        # Cleanup: Remove from creator's clone list if this is a decoy/illusion
+        if getattr(self.parent, 'is_decoy', False):
+            # Get the creator from the AI's target (illusions follow their creator)
+            creator = None
+            if hasattr(self.parent, 'ai') and hasattr(self.parent.ai, 'target'):
+                creator = self.parent.ai.target
+            
+            # Remove from creator's clone tracking list
+            if creator and hasattr(creator, 'entity_clones'):
+                try:
+                    creator.entity_clones.remove(self.parent)
+                except (ValueError, KeyError):
+                    pass  # Already removed or not in list
+        
         if self.engine.player is self.parent:
             death_message = ""
             death_message_color = color.player_die
@@ -96,10 +134,12 @@ class Fighter(BaseComponent):
                 if hasattr(gm, "entities") and self.parent in gm.entities:
                     try:
                         gm.entities.remove(self.parent)
-                    except Exception:
+                    except Exception as e:
+                        self.engine.debug_log(f"ERROR: Failed to remove {self.parent.name} from gamemap entities on death: {e}", handler=self.__class__.__name__, event="DeathCleanup")
                         try:
                             gm.entities.discard(self.parent)
-                        except Exception:
+                        except Exception as e:
+                            self.engine.debug_log(f"ERROR: Failed to discard {self.parent.name} from gamemap entities on death: {e}", handler=self.__class__.__name__, event="DeathCleanup")
                             pass
             except Exception:
                 pass
@@ -274,9 +314,6 @@ class Fighter(BaseComponent):
         finally:
             self._retaliating = False
 
-        
-        
-
     def take_damage(self, amount: int, targeted_part=None, causes_bleeding: bool = True) -> None:
         # The Guide is invulnerable — retaliate against the player instead
         if getattr(self.parent, 'type', None) == 'Guide':
@@ -380,6 +417,8 @@ class Fighter(BaseComponent):
             for effect in self.parent.effects:
                 if hasattr(effect, 'get_defense_multiplier'):
                     defense_multiplier *= effect.get_defense_multiplier()
+                if hasattr(effect, 'get_armor_bonus'):
+                    base_defense += effect.get_armor_bonus()
 
 
         # Combine for total defense
@@ -479,3 +518,24 @@ class Fighter(BaseComponent):
                     parts_healed = True
         return parts_healed
 
+class Receiver(Fighter):
+    """Entities that recieve damage ie traps and hazards"""
+    def die(self) -> None:
+        """Overwrite die method"""
+        gm = self.parent.gamemap
+        if hasattr(gm, "entities") and self.parent in gm.entities:
+            try:
+                gm.entities.remove(self.parent)
+            except Exception as e:
+                self.engine.debug_log(f"ERROR: Failed to remove {self.parent.name} from gamemap entities on death: {e}", handler=self.__class__.__name__, event="DeathCleanup")
+                try:
+                    gm.entities.discard(self.parent)
+                except Exception as e:
+                    self.engine.debug_log(f"ERROR: Failed to discard {self.parent.name} from gamemap entities on death: {e}", handler=self.__class__.__name__, event="DeathCleanup")
+                    pass
+
+        # Check if oil barrel
+        if self.parent.name == "Oil Barrel":
+            from liquid_system import LiquidType
+            self.parent.gamemap.liquid_system.create_splash(self.parent.x, self.parent.y, LiquidType.FIRE, radius=3, max_depth=5)
+            sounds.play_explosion_sound()

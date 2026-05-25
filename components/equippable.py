@@ -84,7 +84,10 @@ class Equippable(BaseComponent):
                 target_effects.append(effect_instance)
 
         if self.effect_cooldown > 0:
-            item.effect_cooldown_remaining = self.effect_cooldown
+            # Set cooldown to include both the effect duration and the actual cooldown period
+            # so there's a gap after the effect expires before reapplication
+            effect_duration = int(getattr(effect_instance, "duration", 0) or 0)
+            item.effect_cooldown_remaining = self.effect_cooldown + effect_duration
 
     def _build_effect_instance(self):
         """Return a fresh effect instance from configured effect template/class/callable."""
@@ -215,7 +218,7 @@ class ScholarRobe(Equippable):
 
 class MasterRobe(Equippable):
     def __init__(self) -> None:
-        super().__init__(equipment_type=EquipmentType.ARMOR, defense_bonus=3, required_tags={"torso"}, equip_all_matching=True, mana_regen=0.25)
+        super().__init__(equipment_type=EquipmentType.ARMOR, defense_bonus=3, required_tags={"torso"}, equip_all_matching=True, mana_regen=0.2)
 
 
 class devtool(Equippable):

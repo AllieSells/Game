@@ -37,9 +37,10 @@ class Level(BaseComponent):
               'enchantment',
               'evocation',
               'illusion',
-                'necromancy',
-                'transmutation'
-
+              'necromancy',
+              'transmutation',
+              'intellect',
+              'identification',
                 
               ]
     
@@ -50,7 +51,8 @@ class Level(BaseComponent):
         'strength': ['agility', 'vigor'],
         'armor': ['light armor', 'medium armor', 'heavy armor', 'shields'],
         'blades': ['daggers', 'swords'],
-        'arcana': ['abjuration', 'conjuration', 'divination', 'enchantment', 'evocation', 'illusion', 'necromancy', 'transmutation']
+        'arcana': ['abjuration', 'conjuration', 'divination', 'enchantment', 'evocation', 'illusion', 'necromancy', 'transmutation'],
+        'intellect': ['identification']
     }
     
     # (Optional) Trait abbreviations for compact display in UI
@@ -75,7 +77,9 @@ class Level(BaseComponent):
         'evocation': 'EVO',
         'illusion': 'ILL',
         'necromancy': 'NEC',
-        'transmutation': 'TRN'
+        'transmutation': 'TRN',
+        'intellect': 'INT',
+        'identification': 'ID'
     }
     
     # Special non-trait stats to include

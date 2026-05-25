@@ -17,7 +17,8 @@
     "tags": [
       "labor",
       "martial"
-    ]
+    ],
+    "active_ability": "Charge"
   },
   {
     "id": "hunter",

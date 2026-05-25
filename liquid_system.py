@@ -91,8 +91,8 @@ class LiquidType(Enum):
             LiquidType.OIL: 0.02,     # 2% per turn (lasts ~50 turns)
             LiquidType.SLIME: 0.01,   # 1% per turn (lasts ~100 turns)
             LiquidType.HEALTHPOTION: 0.1,  # 10% per turn (lasts ~10 turns)
-            LiquidType.POISON: 0.33,  # 33% per turn (lasts ~3 turns)
-            LiquidType.FIRE: 0.33  # 50% per turn (lasts ~2 turns)
+            LiquidType.POISON: 0.1,  # 10% per turn (lasts ~10 turns)
+            LiquidType.FIRE: 0.05  # 5% per turn (lasts ~20 turns)
         }
         return chances.get(self, 0.001)
 
@@ -331,6 +331,27 @@ class LiquidSystem:
     # Inert types (BLOOD, WATER, OIL, SLIME) skip the costly entity-coating scan.
     _HAZARDOUS_LIQUIDS = frozenset({LiquidType.FIRE, LiquidType.POISON, LiquidType.HEALTHPOTION})
 
+    def create_spray(self, start_x: int, start_y: int, direction: Tuple[int, int], liquid_type: LiquidType
+                        , length: int = 5) -> None:
+        """Create a directional spray pattern from a starting point."""
+        coat_entities = liquid_type in self._HAZARDOUS_LIQUIDS
+        dx, dy = direction
+        # omit the starting tile to avoid coating the source of the spray (e.g., player or monster)
+        for i in range(1, length):
+            x, y = start_x + dx * i, start_y + dy * i
+            if not self.game_map.in_bounds(x, y):
+                break
+            self.add_liquid(x, y, liquid_type, depth=1)
+            if random.random() < 0.3:  # Random splatter around main spray line
+                splatter_x = x + random.randint(-1, 1)
+                splatter_y = y + random.randint(-1, 1)
+                if self.game_map.in_bounds(splatter_x, splatter_y):
+                    self.add_liquid(splatter_x, splatter_y, liquid_type, depth=1)
+            # Only scan/coat entities for liquids that can harm or heal them
+            if coat_entities:
+                self._coat_entities_in_splash(x, y, liquid_type, distance=0, radius=1)
+
+
     def create_splash(self, center_x: int, center_y: int, liquid_type: LiquidType, 
                      radius: int = 2, max_depth: int = 2) -> None:
         """Create a splash pattern around a center point."""
@@ -460,38 +481,77 @@ class LiquidSystem:
         is_healing = damage < 0
         actual_damage = abs(damage)
         
+        # Determine damage type for resistances
+        from components.damage_types import DamageType
+        import actions
+        
+        damage_type_map = {
+            LiquidType.FIRE: DamageType.FIRE,
+            LiquidType.POISON: DamageType.POISON,
+        }
+        
+        # Check if target is immune to this damage type
+        liquid_damage_type = damage_type_map.get(liquid_type, DamageType.NONE)
+        if not is_healing and liquid_damage_type != DamageType.NONE:
+            if hasattr(target, 'damage_resistances') and target.damage_resistances:
+                for res_type, res_value in target.damage_resistances:
+                    if res_type == liquid_damage_type and res_value == 0.0:
+                        return  # Immune, skip all effects and messages
+        
         # Apply damage/healing
         if is_healing:
             target.fighter.heal(actual_damage)
             effect_verb = "heals"
             effect_type = "healing"
+            final_damage = actual_damage  # Track final amount for message
         else:
             effect_verb = "burns" if liquid_type == LiquidType.POISON or liquid_type == LiquidType.FIRE else "affects"
             effect_type = "damage"
-            target.fighter.take_damage(actual_damage)
-            if liquid_type in {LiquidType.FIRE, LiquidType.POISON}:
-                effect = BurningEffect(amount=actual_damage, duration=1) if liquid_type == LiquidType.FIRE else PoisonEffect(amount=actual_damage, duration=5)
-                # Refresh existing status of the same class instead of stacking duplicates.
+            
+            # Apply typed damage for resistances
+            liquid_damage_type = damage_type_map.get(liquid_type, DamageType.NONE)
+            final_damage = actions.apply_typed_damage(target, actual_damage, liquid_damage_type)
+            
+            # If fully resisted, don't show message or apply effects
+            if final_damage == 0:
+                return
+            
+            # For fire and poison, apply via effect (shows indicator + deals damage over time)
+            if liquid_type == LiquidType.FIRE:
+                effect = BurningEffect(amount=final_damage, duration=1)
                 if hasattr(self.game_map.engine, "add_or_refresh_effect"):
                     self.game_map.engine.add_or_refresh_effect(target, effect)
                 else:
                     has_same_effect = any(isinstance(existing, effect.__class__) for existing in getattr(target, "effects", []))
                     if not has_same_effect:
                         target.effects.append(effect)
-            self.game_map.engine.debug_log(f"Applied {liquid_type.name} effect to {target.name} for {actual_damage} damage.", handler=type(self).__name__, event="combat")
-        # Generate appropriate message
+            elif liquid_type == LiquidType.POISON:
+                effect = PoisonEffect(amount=final_damage, duration=5)
+                if hasattr(self.game_map.engine, "add_or_refresh_effect"):
+                    self.game_map.engine.add_or_refresh_effect(target, effect)
+                else:
+                    has_same_effect = any(isinstance(existing, effect.__class__) for existing in getattr(target, "effects", []))
+                    if not has_same_effect:
+                        target.effects.append(effect)
+            else:
+                # Other liquids: apply immediate damage
+                causes_bleeding = True
+                target.fighter.take_damage(final_damage, causes_bleeding=causes_bleeding)
+            
+            self.game_map.engine.debug_log(f"Applied {liquid_type.name} effect to {target.name} for {final_damage} damage.", handler=type(self).__name__, event="combat")
+        
+        # Generate appropriate message (only if damage/healing occurred)
         liquid_name = liquid_type.get_display_name().capitalize()
         if affected_body_part:
-            message = f"The {liquid_name.lower()} on your {affected_body_part.name} {effect_verb} you for {actual_damage} {effect_type}!"
+            message = f"The {liquid_name.lower()} on your {affected_body_part.name} {effect_verb} you for {final_damage} {effect_type}!"
         else:
-            message = f"You take {actual_damage} {liquid_name} {effect_type}!"
+            message = f"You take {final_damage} {liquid_name} {effect_type}!"
         
         # Play appropriate sound
         if liquid_type == LiquidType.POISON and not is_healing:
-            sounds.play_poison_burn_sound()
+            sounds._play_burn_sound_at(target.x, target.y, self.game_map.engine.player, self.game_map) 
         if liquid_type == LiquidType.FIRE and not is_healing:
-            sounds.play_poison_burn_sound()  # Reusing poison burn sound for fire for now
-
+            sounds._play_burn_sound_at(target.x, target.y, self.game_map.engine.player, self.game_map)
         
         # Show message for player
         if target == self.game_map.engine.player:

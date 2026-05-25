@@ -3,7 +3,8 @@
 Sections
 --------
   1.  IMPORTS & SHARED UTILITIES
-  2.  GPU PARTICLE PHYSICS CLASSES   — DripParticle, SmokeCloudParticle, EmberParticle
+    2.  GPU PARTICLE PHYSICS CLASSES   — DripParticle, SmokeCloudParticle, EmberParticle,
+                                                                             DustParticle
   3.  CRT SETUP HELPERS              — generate_scanlines_texture, create_vignette_texture,
                                        create_glare_texture
   4.  DEGAUSS ANIMATION CLASS        — DegaussAnimation (degauss / teleport modes)
@@ -101,6 +102,48 @@ class LightShaftParticles:
 
     def tick(self, console, game_map) -> None:
         pass  # perpetual; no countdown
+
+
+class DustParticle:
+    """Physics state for a slow ambient dust mote.
+
+    Spawned by Engine ambient particle ticking on visible tiles that pass the
+    current dust gate. Rendered by GPUStack._dust_render as a drifting mote.
+    """
+
+    def __init__(self, position: tuple):
+        x, y = position
+        self.source_pos = (int(x), int(y))
+        self.origin_x = float(x)
+        self.origin_y = float(y)
+        self.fx = float(x) + random.uniform(-0.42, 0.42)
+        self.fy = float(y) + random.uniform(-0.08, 0.42)
+        self.vx = random.uniform(-0.006, 0.006)
+        self.vy = random.uniform(-0.014, -0.005)
+        self.frames = random.randint(80, 150)
+        self.total_frames = self.frames
+        self.render_priority = 2
+        self.size = random.uniform(0.7, 1.7)
+        self.twinkle_phase = random.uniform(0.0, math.tau)
+        self.color = random.choice(
+            (
+                (150, 140, 126),
+                (164, 154, 138),
+                (178, 168, 152),
+            )
+        )
+
+    def tick(self, console, game_map) -> None:
+        if self.frames <= 0:
+            return
+        age_ticks = self.total_frames - self.frames
+        self.fx += self.vx + math.sin(age_ticks * 0.07 + self.twinkle_phase) * 0.0018
+        self.fy += self.vy
+        self.vx = max(-0.02, min(0.02, self.vx + random.uniform(-0.0012, 0.0012)))
+        if self.fy < self.origin_y - 0.8:
+            self.fy = self.origin_y - 0.8
+            self.vy = random.uniform(-0.003, 0.0)
+        self.frames -= 1
 
 class RevealParticle:
     """Sparkles along a path or at a point"""
@@ -311,7 +354,7 @@ class BurningParticle:
     Rendered in the bloom pass by GPUStack._burn_render.
     """
 
-    def __init__(self, position: tuple, entity):
+    def __init__(self, position: tuple, entity: object = None):
         x, y = position
         # Random horizontal spread across the tile, spawn in lower half
         self.fx = float(x) + random.uniform(-0.42, 0.42)
@@ -325,17 +368,24 @@ class BurningParticle:
         self.render_priority = 2
 
     def tick(self, console, game_map) -> None:
-        if not hasattr(self.entity, 'body_parts') or not self.entity.body_parts:
-            self.frames -= 1 
+        # Handle tile-based fire (entity is None) or entities without body parts
+        if not self.entity or not hasattr(self.entity, 'body_parts') or not self.entity.body_parts:
+            self.fx += self.vx
+            self.fy += self.vy
+            # Cap rise at 1 tile above spawn
+            if self.fy < self.origin_y - 1.0:
+                self.fy = self.origin_y - 1.0
+                self.vy = 0.0
+            self.frames -= 1
             return
 
+        # Handle entity-based fire (burning entity body parts)
         from liquid_system import LiquidType
         has_fire_coating = any(
             part.coating == LiquidType.FIRE
             for part in self.entity.body_parts.body_parts.values()
         )
         if not has_fire_coating:
-            #print("EXPIRE")
             self.frames -= 1
             return
 
@@ -1771,6 +1821,7 @@ class GPUStack:
         self.gpu_anim_registry.append(self._gpu_crtbleed_render)      # bloom
         self.gpu_anim_registry.append(self._gpu_smoke_render)         # bloom
         self.gpu_anim_registry.append(self._light_shaft_render)       # bloom
+        self.gpu_anim_registry.append(self._dust_render)              # ambient
         self.gpu_anim_registry.append(self._slash_render)            # bloom
         self.gpu_anim_registry.append(self._gpu_drip_render)  # bloom ? (exact color)
         self.gpu_anim_registry.append(self._heal_render)  # bloom ? (exact color)
@@ -1787,12 +1838,14 @@ class GPUStack:
     # ------------------------------------------------------------------
 
     def update_frame_dims(self, window_w: int, window_h: int,
-                          base_tile_w: float, base_tile_h: float) -> None:
+                          base_tile_w: float, base_tile_h: float,
+                          game_zoom: float = 4.0) -> None:
         """Call once per frame before any render methods."""
         self.window_w    = window_w
         self.window_h    = window_h
         self.base_tile_w = base_tile_w
         self.base_tile_h = base_tile_h
+        self.game_zoom   = game_zoom
 
     # ------------------------------------------------------------------
     # 5a — Bloom render target management
@@ -2003,6 +2056,21 @@ class GPUStack:
         if intensity < 6:
             return False
 
+        # CRT bleed is a screen-space indicator, not world-space. Since the game
+        # animation layer is composited with camera world offsets, compensate here
+        # so the effect remains fixed on screen.
+        off_x = 0
+        off_y = 0
+        try:
+            tile_px_w = float(self.base_tile_w) * float(self.game_zoom)
+            tile_px_h = float(self.base_tile_h) * float(self.game_zoom)
+            cam_off_x, cam_off_y = active_engine.get_camera_render_offset_px(tile_px_w, tile_px_h)
+            off_x = -int(cam_off_x)
+            off_y = -int(cam_off_y)
+        except Exception:
+            off_x = 0
+            off_y = 0
+
         # Smooth gradient: many thin strips from each edge, cubic falloff
         STEPS     = 20
         max_depth = gh * 0.07          # 7% of viewport height from each edge
@@ -2017,10 +2085,10 @@ class GPUStack:
                     break                                         # remaining strips will also be < 3
                 offset = i * step_size
                 renderer.draw_color = (intensity, int(intensity * 0.05), 0, alpha)
-                renderer.fill_rect((0.0,               float(offset),              gw,        step_size))  # top
-                renderer.fill_rect((0.0,               gh - offset - step_size,    gw,        step_size))  # bottom
-                renderer.fill_rect((float(offset),     0.0,                        step_size, gh))         # left
-                renderer.fill_rect((gw - offset - step_size, 0.0,                 step_size, gh))         # right
+                renderer.fill_rect((0.0 + off_x,               float(offset) + off_y,              gw,        step_size))  # top
+                renderer.fill_rect((0.0 + off_x,               gh - offset - step_size + off_y,    gw,        step_size))  # bottom
+                renderer.fill_rect((float(offset) + off_x,     0.0 + off_y,                        step_size, gh))         # left
+                renderer.fill_rect((gw - offset - step_size + off_x, 0.0 + off_y,                 step_size, gh))         # right
             drew = True
         return drew
 
@@ -2033,8 +2101,8 @@ class GPUStack:
                   if isinstance(a, EmberParticle) and a.frames > 0]
         if not embers:
             return False
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         sz        = 1
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
@@ -2081,8 +2149,8 @@ class GPUStack:
         if not particles:
             return False
 
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
         game_map = active_engine.game_map
@@ -2193,8 +2261,8 @@ class GPUStack:
         if not particles:
             return False
 
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
         game_map = active_engine.game_map
@@ -2341,8 +2409,8 @@ class GPUStack:
         if not jagged_lines:
             return False
 
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
         game_map  = active_engine.game_map
@@ -2419,8 +2487,8 @@ class GPUStack:
         if not projectiles:
             return False
 
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height
         )
@@ -2519,8 +2587,8 @@ class GPUStack:
         if not rays:
             return False
 
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
         game_map  = active_engine.game_map
@@ -2610,8 +2678,8 @@ class GPUStack:
         if not sleeps:
             return False
 
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
         game_map = active_engine.game_map
@@ -2677,8 +2745,8 @@ class GPUStack:
         if not heals:
             return False
 
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
         game_map  = active_engine.game_map
@@ -2738,8 +2806,8 @@ class GPUStack:
         if not nums:
             return False
 
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
         game_map  = active_engine.game_map
@@ -2818,8 +2886,8 @@ class GPUStack:
         if not burns:
             return False
 
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
         game_map  = active_engine.game_map
@@ -2889,8 +2957,8 @@ class GPUStack:
         if not dodges:
             return False
 
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         hw        = int(tile_px_w * 0.5)
         hh        = int(tile_px_h * 0.5)
         renderer  = self.renderer
@@ -2983,8 +3051,8 @@ class GPUStack:
         if not slashes:
             return False
         
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         renderer  = self.renderer
         game_map  = active_engine.game_map
 
@@ -3113,8 +3181,8 @@ class GPUStack:
         SPREAD    = .75    # extra half-tiles of width gained over the shaft length
         BASE_INT  = 0.3   # peak brightness (0–1); bloom amplifies this further
 
-        tile_px_w  = self.base_tile_w * 2.0
-        tile_px_h  = self.base_tile_h * 2.0
+        tile_px_w  = self.base_tile_w * self.game_zoom
+        tile_px_h  = self.base_tile_h * self.game_zoom
         renderer   = self.renderer
         game_map   = active_engine.game_map
         origin_x, origin_y = active_engine.get_camera_origin(
@@ -3172,6 +3240,75 @@ class GPUStack:
                 drew = True
         return drew
 
+    def _dust_render(self, active_engine) -> bool:
+        """Draw faint drifting dust motes into _gal_src.
+
+        Dust is intentionally subtle: tiny warm-gray specks with a soft fade
+        envelope so they read as atmospheric particulate rather than magic.
+        """
+        motes = [a for a in active_engine.animation_queue
+                 if isinstance(a, DustParticle) and a.frames > 0]
+        if not motes:
+            return False
+
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
+        origin_x, origin_y = active_engine.get_camera_origin(
+            self.game_view_width, self.game_view_height)
+        game_map = active_engine.game_map
+        renderer = self.renderer
+        drew = False
+
+        with renderer.set_render_target(self._gal_src):
+            for mote in motes:
+                sx_tile = int(mote.source_pos[0])
+                sy_tile = int(mote.source_pos[1])
+                if not game_map.in_bounds(sx_tile, sy_tile):
+                    continue
+                if not game_map.visible[sx_tile, sy_tile]:
+                    continue
+
+                scr_x = mote.fx - origin_x
+                scr_y = mote.fy - origin_y
+                if not (-0.5 <= scr_x < self.game_view_width + 0.5 and
+                        -0.5 <= scr_y < self.game_view_height + 0.5):
+                    continue
+
+                px = int(scr_x * tile_px_w + tile_px_w * 0.5)
+                py = int(scr_y * tile_px_h + tile_px_h * 0.5)
+                sz = max(1, int(round(mote.size)))
+                if not (sz <= px < self._gal_w - sz and sz <= py < self._gal_h - sz):
+                    continue
+
+                age = 1.0 - (mote.frames / float(max(1, mote.total_frames)))
+                if age < 0.15:
+                    fade = age / 0.15
+                elif age > 0.82:
+                    fade = max(0.0, (1.0 - age) / 0.18)
+                else:
+                    fade = 1.0
+                if fade <= 0.0:
+                    continue
+
+                twinkle = 0.60 + 0.40 * math.sin(age * 8.5 + mote.twinkle_phase)
+                alpha = int(62 * fade * twinkle)
+                if alpha < 5:
+                    continue
+
+                r, g, b = mote.color
+                renderer.draw_color = (r, g, b, alpha)
+                renderer.fill_rect((float(px - sz * 0.5), float(py - sz * 0.5),
+                                    float(sz), float(sz)))
+
+                halo_alpha = alpha // 2
+                if halo_alpha > 4:
+                    renderer.draw_color = (min(255, r + 10), min(255, g + 10), min(255, b + 10), halo_alpha)
+                    renderer.fill_rect((float(px - sz), float(py - sz),
+                                        float(sz * 2), float(sz * 2)))
+                drew = True
+
+        return drew
+
 
     def _gpu_smoke_render(self, active_engine) -> bool:
         """Draw SmokeCloudParticle sprite frames into _gal_src (bloom pass)."""
@@ -3179,8 +3316,8 @@ class GPUStack:
                   if isinstance(a, SmokeCloudParticle) and a.frames > 0]
         if not smokes:
             return False
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         renderer  = self.renderer
 
         # Lazy-load animated smoke sprite sheet
@@ -3245,8 +3382,8 @@ class GPUStack:
                  if isinstance(a, DripParticle) and a.frames > 0]
         if not drips:
             return False
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         sz        = 1
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
@@ -3294,8 +3431,8 @@ class GPUStack:
         if not particles:
             return False
 
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
         game_map = active_engine.game_map
@@ -3427,8 +3564,8 @@ class GPUStack:
         if not particles:
             return False
 
-        tile_px_w = self.base_tile_w * 2.0
-        tile_px_h = self.base_tile_h * 2.0
+        tile_px_w = self.base_tile_w * self.game_zoom
+        tile_px_h = self.base_tile_h * self.game_zoom
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
         game_map = active_engine.game_map
@@ -3516,7 +3653,14 @@ class GPUStack:
     # 5e — Animation pass runner
     # ------------------------------------------------------------------
 
-    def run_gpu_anim_passes(self, active_engine, gw: int, gh: int) -> None:
+    def run_gpu_anim_passes(
+        self,
+        active_engine,
+        gw: int,
+        gh: int,
+        dest_offset_x: int = 0,
+        dest_offset_y: int = 0,
+    ) -> None:
         """Run all registered GPU animation passes, composited to the game area.
 
         Bloom pipeline    — clear → draw → Kawase blur → halo + sharp ADD composite.
@@ -3573,11 +3717,11 @@ class GPUStack:
                     renderer.clip_rect = (0, 0, gw, gh)
                     src.blend_mode = tcod.sdl.render.BlendMode.ADD
                     src.alpha_mod  = self._ember_bloom_intensity
-                    renderer.copy(src, dest=(0, 0, gw, gh))
+                    renderer.copy(src, dest=(int(dest_offset_x), int(dest_offset_y), gw, gh))
                     self._gal_src.blend_mode = tcod.sdl.render.BlendMode.ADD
                     self._gal_src.alpha_mod  = 255
                     self._gal_src.color_mod  = (255, 255, 255)
-                    renderer.copy(self._gal_src, dest=(0, 0, gw, gh))
+                    renderer.copy(self._gal_src, dest=(int(dest_offset_x), int(dest_offset_y), gw, gh))
                 finally:
                     renderer.clip_rect = None
 
@@ -3594,7 +3738,7 @@ class GPUStack:
                     self._gal_src.blend_mode = tcod.sdl.render.BlendMode.BLEND
                     self._gal_src.alpha_mod  = 255
                     self._gal_src.color_mod  = (255, 255, 255)
-                    renderer.copy(self._gal_src, dest=(0, 0, gw, gh))
+                    renderer.copy(self._gal_src, dest=(int(dest_offset_x), int(dest_offset_y), gw, gh))
                 finally:
                     renderer.clip_rect = None
 
@@ -3901,8 +4045,15 @@ class GPUStack:
     # 5g — Lightmap
     # ------------------------------------------------------------------
 
-    def apply_lightmap(self, active_engine, game_dest_w: int, game_dest_h: int,
-                       game_console) -> None:
+    def apply_lightmap(
+        self,
+        active_engine,
+        game_dest_w: int,
+        game_dest_h: int,
+        game_console,
+        dest_offset_x: int = 0,
+        dest_offset_y: int = 0,
+    ) -> None:
         """Blit the per-tile lightmap over the game area (MOD blend).
 
         Call immediately after game tiles and BEFORE any UI overlays so
@@ -3922,4 +4073,4 @@ class GPUStack:
             self._lightmap_tex.update(lm_np)
         self._lightmap_tex.blend_mode = tcod.sdl.render.BlendMode.MOD
         self.renderer.copy(self._lightmap_tex,
-                           dest=(0, 0, int(game_dest_w), int(game_dest_h)))
+                           dest=(int(dest_offset_x), int(dest_offset_y), int(game_dest_w), int(game_dest_h)))

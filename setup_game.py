@@ -21,6 +21,16 @@ import hashlib
 import sys
 import os
 import time
+import numpy as np
+
+
+_gpu_menu_background_enabled = False
+
+
+def set_gpu_menu_background_enabled(enabled: bool) -> None:
+    """Enable/disable CPU tile background painting for menu handlers."""
+    global _gpu_menu_background_enabled
+    _gpu_menu_background_enabled = bool(enabled)
 
 
 def get_data_path(filename):
@@ -54,28 +64,52 @@ def get_save_path(filename=""):
         return save_dir
 
 
+def draw_full_tile_background(console: tcod.console.Console, frame) -> None:
+    """Render an RGB frame as full tile graphics on the console background."""
+    if _gpu_menu_background_enabled:
+        return
+
+    if frame is None:
+        return
+
+    src_h, src_w = frame.shape[:2]
+    dst_h, dst_w = console.height, console.width
+    if src_h <= 0 or src_w <= 0 or dst_h <= 0 or dst_w <= 0:
+        return
+
+    # Nearest-neighbor sample from source frame to tile grid.
+    if src_h != dst_h or src_w != dst_w:
+        y_idx = (np.arange(dst_h, dtype=np.intp) * src_h) // dst_h
+        x_idx = (np.arange(dst_w, dtype=np.intp) * src_w) // dst_w
+        frame = frame[y_idx[:, None], x_idx[None, :]]
+
+    frame = frame.astype(np.uint8, copy=False)
+
+    # Defensive axis handling for console layouts.
+    if console.bg.shape[:2] == (dst_h, dst_w):
+        console.bg[:, :] = frame
+        console.ch[:, :] = ord(" ")
+    else:
+        console.bg[:, :] = np.transpose(frame, (1, 0, 2))
+        console.ch[:, :] = ord(" ")
+
+
 # Simple animated background
 class SimpleAnimatedBackground:
-    def __init__(self, frame_pattern="RP/background/frame_{:03d}.png", frame_count=240, fps=20):
+    def __init__(self, frame_pattern="RP/background/{:04d}.png", frame_count=250, fps=20, start_index=1):
         self.frames = []
         self.current_frame = 0
         self.frame_time = 1.0 / fps
         self.last_update = time.time()
         
         # Load frames
-        for i in range(frame_count):
+        for i in range(start_index, start_index + frame_count):
             frame_path = frame_pattern.format(i)
             try:
                 frame = tcod.image.load(get_data_path(frame_path))[:, :, :3]
                 self.frames.append(frame)
             except Exception:
-                # Try alternative delay pattern
-                alt_path = frame_pattern.replace("0.03s", "0.06s").format(i)
-                try:
-                    frame = tcod.image.load(get_data_path(alt_path))[:, :, :3]
-                    self.frames.append(frame)
-                except Exception:
-                    break
+                break
         
         with open(get_data_path('logs/log.txt'), 'a') as log_file:
             log_file.write(f"Loaded {len(self.frames)} frames for animated background.\n")
@@ -237,7 +271,6 @@ def tutorial_game(game_seed = None, seed_string = None) -> Engine:
 
     import sprite_manager as _sm
     _sm.reset_sprite_cache()
-    entity_factories.refresh_scroll_prototype_sprites()
 
     player = copy.deepcopy(entity_factories.player)
     player.level.current_xp = 0
@@ -294,7 +327,6 @@ def new_debug_game(game_seed: Optional[int] = None, seed_string: Optional[str] =
 
     import sprite_manager as _sm
     _sm.reset_sprite_cache()
-    entity_factories.refresh_scroll_prototype_sprites()
     
     player = copy.deepcopy(entity_factories.player)
     
@@ -408,7 +440,6 @@ def load_game(filename: str) -> Engine:
 
     import sprite_manager
     sprite_manager.reset_sprite_cache()
-    entity_factories.refresh_scroll_prototype_sprites()
     _rehydrate_loaded_sprite_state(engine)
     return engine
 
@@ -509,11 +540,6 @@ def _rehydrate_loaded_sprite_state(engine: Engine) -> None:
                     except Exception:
                         pass
 
-            try:
-                entity_factories.refresh_scroll_item_sprite(entity)
-            except Exception:
-                pass
-
         # Regenerate liquid composites from serialized coating data.
         try:
             liquid_system = getattr(game_map, "liquid_system", None)
@@ -613,7 +639,7 @@ class LoadingScreen(input_handlers.BaseEventHandler):
             # Use animated background
             current_bg = animated_bg.get_current_frame()
             if current_bg is not None:
-                console.draw_semigraphics(current_bg, 0, 0)
+                draw_full_tile_background(console, current_bg)
             
             # Calculate window dimensions and position
             window_width = 60
@@ -805,6 +831,7 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
         self.save_files = get_available_saves()
         self.selected_option = 0
         self.hovered_option = -1
+        self._save_list_token = tuple((n, f, int(m)) for n, f, m in self.save_files)
 
         # Cached layout for mouse interaction (updated each render).
         self._window_x = 0
@@ -819,10 +846,154 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
             self.no_saves = True
         else:
             self.no_saves = False
+
+    def get_visual_state_token(self):
+        """Return a stable token for cacheable menu visuals."""
+        return (
+            self.no_saves,
+            self.selected_option,
+            self.hovered_option,
+            self._save_list_token,
+        )
+
+    def get_static_visual_state_token(self):
+        """Return token for static layer invalidation only."""
+        return (self.no_saves, self._save_list_token)
+
+    def get_dynamic_visual_state_token(self):
+        """Return token for dynamic selection/hover overlay."""
+        return (self.selected_option, self.hovered_option)
+
+    def _layout(self, console: tcod.console.Console) -> tuple[int, int, int, int, int]:
+        """Shared layout geometry for static/dynamic split rendering."""
+        window_width = 60
+        window_height = min(20, len(self.save_files) + 8) if not self.no_saves else 12
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height) // 2
+        visible_saves = min(10, len(self.save_files)) if not self.no_saves else 0
+        return x, y, window_width, window_height, visible_saves
+
+    def get_dynamic_region_tiles(self, console: tcod.console.Console) -> tuple[int, int, int, int]:
+        """Return the tile rect occupied by hover/selection rows."""
+        x, y, window_width, _window_height, visible_saves = self._layout(console)
+        if self.no_saves or visible_saves <= 0:
+            return (0, 0, 0, 0)
+        return (x + 1, y + 3, window_width - 2, visible_saves)
+
+    def render_static_menu_layer(self, console: tcod.console.Console) -> None:
+        """Draw static menu layer (frame, labels, and neutral save list)."""
+        x, y, window_width, window_height, visible_saves = self._layout(console)
+
+        # Cache current layout for mouse hit-testing.
+        self._window_x = x
+        self._window_y = y
+        self._window_width = window_width
+        self._window_height = window_height
+
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Load Saved Game")
+
+        if self.no_saves:
+            console.print(
+                x + (window_width // 2),
+                y + 5,
+                "No saved games found.",
+                fg=color.fantasy_text,
+                bg=color.parchment_bg,
+                alignment=tcod.CENTER,
+            )
+            console.print(
+                x + (window_width // 2),
+                y + 7,
+                "[Esc] Back to Main Menu",
+                fg=color.light_gray,
+                bg=color.parchment_bg,
+                alignment=tcod.CENTER,
+            )
+            return
+
+        menu_start_y = y + 3
+        self._menu_start_y = menu_start_y
+        self._visible_saves = visible_saves
+
+        for i in range(visible_saves):
+            save_index = i
+            if save_index >= len(self.save_files):
+                break
+
+            display_name, _filename, mtime = self.save_files[save_index]
+            option_y = menu_start_y + i
+            bg_color = (45, 35, 25)
+            fg_color = color.fantasy_text
+
+            date_str = time.strftime("%m/%d/%y %H:%M", time.localtime(mtime))
+            save_text = f"{display_name} ({date_str})"
+            max_text_len = window_width - 8
+            if len(save_text) > max_text_len:
+                save_text = save_text[:max_text_len - 3] + "..."
+
+            for dx in range(window_width - 2):
+                console.print(x + 1 + dx, option_y, " ", bg=bg_color)
+
+            console.print(
+                x + 2,
+                option_y,
+                f"  {save_text}",
+                fg=fg_color,
+                bg=bg_color,
+            )
+
+        instructions_y = y + window_height - 2
+        console.print(
+            x + (window_width // 2),
+            instructions_y,
+            "[LMB] Load  [RMB] Context [Esc] Back",
+            fg=color.light_gray,
+            bg=color.parchment_bg,
+            alignment=tcod.CENTER,
+        )
+
+    def render_dynamic_menu_region(self, console: tcod.console.Console) -> None:
+        """Draw only the dynamic hover/selection rows into a region console."""
+        if self.no_saves:
+            return
+
+        visible_saves = min(console.height, len(self.save_files))
+        row_w = console.width
+        for i in range(visible_saves):
+            display_name, _filename, mtime = self.save_files[i]
+            is_selected = i == self.selected_option
+            is_hovered = i == self.hovered_option and not is_selected
+
+            if not (is_selected or is_hovered):
+                continue
+
+            bg_color = (80, 60, 30) if is_selected else (60, 45, 22)
+            fg_color = color.gold_accent if is_selected else color.white
+            marker = "> " if is_selected else "~ "
+            marker2 = " <" if is_selected else " ~"
+
+            date_str = time.strftime("%m/%d/%y %H:%M", time.localtime(mtime))
+            save_text = f"{display_name} ({date_str})"
+            max_text_len = max(1, row_w - 7)
+            if len(save_text) > max_text_len:
+                save_text = save_text[:max_text_len - 3] + "..."
+
+            for dx in range(row_w):
+                console.print(dx, i, " ", bg=bg_color)
+
+            console.print(
+                1,
+                i,
+                f"{marker}{save_text}{marker2}",
+                fg=fg_color,
+                bg=bg_color,
+            )
     
     def refresh_saves(self):
         """Refresh the save file list."""
         self.save_files = get_available_saves()
+        self._save_list_token = tuple((n, f, int(m)) for n, f, m in self.save_files)
         if not self.save_files:
             self.no_saves = True
             self.selected_option = 0
@@ -852,7 +1023,7 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
         """Render the save game selection menu."""
         current_bg = animated_bg.get_current_frame()
         if current_bg is not None:
-            console.draw_semigraphics(current_bg, 0, 0)
+            draw_full_tile_background(console, current_bg)
         
         # Calculate window dimensions
         window_width = 60
@@ -939,7 +1110,7 @@ class SaveGameMenu(input_handlers.BaseEventHandler):
             console.print(
                 x + (window_width // 2),
                 instructions_y,
-                "[LMB] Load  [RMB] Context  [↑↓] Navigate  [Del] Delete  [Esc] Back",
+                "[LMB] Load  [RMB] Context [Esc] Back",
                 fg=color.light_gray,
                 bg=color.parchment_bg,
                 alignment=tcod.CENTER,
@@ -1385,27 +1556,124 @@ class MainMenu(input_handlers.BaseEventHandler):
             sounds.start_menu_ambience()
             sounds.start_menu_music()
         self.menu_start_y = 0
+        self.menu_start_x = 0
+        self.menu_width = 0
         self.menu_x = 0 
+
+    def get_visual_state_token(self):
+        """Return a stable token for cacheable menu visuals."""
+        return self.selected_option
+
+    def get_static_visual_state_token(self):
+        """Return token for static layer invalidation only."""
+        return tuple(text for text, _ in self.menu_options)
+
+    def get_dynamic_visual_state_token(self):
+        """Return token for dynamic selection overlay."""
+        return self.selected_option
+
+    def _layout(self, console: tcod.console.Console) -> tuple[int, int, int, int]:
+        window_width = 37
+        # 1 row top padding + option rows (stride 2) + 1 row bottom padding.
+        window_height = (len(self.menu_options) - 1) * 2 + 3
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height) // 2 - 2
+        return x, y, window_width, window_height
+
+    def get_dynamic_region_tiles(self, console: tcod.console.Console) -> tuple[int, int, int, int]:
+        """Return the tile rect occupied by selectable option rows."""
+        x, y, window_width, _window_height = self._layout(console)
+        region_y = y + 1
+        region_h = (len(self.menu_options) - 1) * 2 + 1
+        return (x + 1, region_y, window_width - 2, region_h)
+
+    def render_static_menu_layer(self, console: tcod.console.Console) -> None:
+        """Draw static menu layer (window chrome, title, fixed labels)."""
+        x, y, window_width, window_height = self._layout(console)
+        self.menu_width = window_width
+
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, title_fg=(182, 255, 245))
+
+        self.menu_start_y = y + 1
+        self.menu_start_x = x + (window_width // 2)
+
+        # Neutral option text baseline; dynamic layer draws highlight state on top.
+        for i, (option_text, _) in enumerate(self.menu_options):
+            option_y = (self.menu_start_y + i * 2)
+            full_text = f"  {option_text}  ".center(window_width - 4)
+            for dx in range(window_width - 2):
+                console.print(x + 1 + dx, option_y, " ", bg=(45, 35, 25))
+            console.print(
+                x + (window_width // 2),
+                option_y,
+                full_text.strip(),
+                fg=color.fantasy_text,
+                bg=(45, 35, 25),
+                alignment=tcod.CENTER,
+            )
+
+        footer_y = y + window_height - 3
+        console.print(
+            x + (window_width // 2) + 38,
+            footer_y + 20,
+            "loxen",
+            fg=color.gold_accent,
+            bg=None,
+            alignment=tcod.CENTER,
+        )
+        console.print(
+            x + (window_width // 2) + 28,
+            footer_y + 21,
+            "2026 - Early Beta",
+            fg=color.gold_accent,
+            bg=None,
+            alignment=tcod.CENTER,
+        )
+    def render_dynamic_menu_region(self, console: tcod.console.Console) -> None:
+        """Draw only highlighted/selected option rows into a region console."""
+        row_w = console.width
+        for i, (option_text, _action) in enumerate(self.menu_options):
+            is_selected = i == self.selected_option
+            if not is_selected:
+                continue
+
+            option_y = i * 2
+            bg_color = (80, 60, 30)
+            fg_color = color.gold_accent
+            marker = "> "
+            marker2 = " <"
+            full_text = f"{marker}{option_text}{marker2}".center(max(1, row_w - 2)).strip()
+
+            for dx in range(row_w):
+                console.print(dx, option_y, " ", bg=bg_color)
+
+            console.print(
+                row_w // 2,
+                option_y,
+                full_text,
+                fg=fg_color,
+                bg=bg_color,
+                alignment=tcod.CENTER,
+            )
 
     def on_render(self, console: tcod.console.Console) -> None:
         """Render the main menu with parchment styling and arrow key selection."""
         current_bg = animated_bg.get_current_frame()
         if current_bg is not None:
-            console.draw_semigraphics(current_bg, 0, 0) 
+            draw_full_tile_background(console, current_bg)
 
-        # Calculate menu window dimensions and position
-        window_width = 45
-        window_height = 16
-        x = (console.width - window_width) // 2
-        y = (console.height - window_height) // 2 - 2
+        x, y, window_width, window_height = self._layout(console)
+        self.menu_width = window_width
 
         # Draw parchment background and ornate border
         MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
-        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Dungeons of \u00c6rrok: The Divine Stone", title_fg=(182, 255, 245))
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, title_fg=(182, 255, 245))
 
         # Draw menu options with selection highlighting
         # Set menu_start_y here so it can be used for mouse hover calculations in ev_mousemotion
-        self.menu_start_y = y + 3
+        self.menu_start_y = y + 1
+        self.menu_start_x = x + (window_width // 2)
         for i, (option_text, _) in enumerate(self.menu_options):
             is_selected = i == self.selected_option
             bg_color = (80, 60, 30) if is_selected else (45, 35, 25)
@@ -1416,9 +1684,6 @@ class MainMenu(input_handlers.BaseEventHandler):
             # Draw option with background
             option_y = self.menu_start_y + i * 2
             full_text = f"{marker}{option_text}{marker2}".center(window_width - 4)
-            
-            # Set menu_start_x for mouse hover calculations
-            self.menu_start_x = x + (window_width // 2)
 
             # Draw background for the entire line
             for dx in range(window_width - 2):
@@ -1455,23 +1720,15 @@ class MainMenu(input_handlers.BaseEventHandler):
             alignment=tcod.CENTER,
         )
 
-        # Draw instructions outside the window
-        instructions_y = y + window_height + 1
-        console.print(
-            console.width // 2,
-            instructions_y,
-            "[\u2191\u2193] Navigate  [Space] Select  [Esc] Quit",
-            fg=color.fantasy_text,
-            alignment=tcod.CENTER,
-        )
     def ev_mousemotion(self, event: tcod.event.MouseMotion) -> Optional[input_handlers.BaseEventHandler]:
         """Allow mouse hover to change selection."""
-        # Calculate menu window dimensions and position
-        window_width = 40
+        # Match hitbox width to menu layout width.
+        window_width = self.menu_width or 37
         mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
         
         if (self.menu_start_x - window_width // 2 <= mouse_x <= self.menu_start_x + window_width // 2 and
-            self.menu_start_y <= mouse_y < self.menu_start_y + len(self.menu_options) * 2):
+            self.menu_start_y <= mouse_y <= self.menu_start_y + (len(self.menu_options) - 1) * 2 and
+            (mouse_y - self.menu_start_y) % 2 == 0):
             # Calculate which option is hovered
             hovered_option = (mouse_y - self.menu_start_y) // 2
             if 0 <= hovered_option < len(self.menu_options):

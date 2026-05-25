@@ -6,6 +6,17 @@
     "configurations": [
 
         {
+            "name": "Quick Launch (F5)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/quick_launch.py",
+            "console": "integratedTerminal",
+            "autoReload": {
+                "enable": true
+            }
+        },
+
+        {
             "name": "Run main.py",
             "type": "python",
             "request": "launch",

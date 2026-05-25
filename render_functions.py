@@ -9,6 +9,7 @@ import color
 import text_utils
 import time
 import sprite_manager
+import identify as identify_system
 
 # Try to import animation helpers if they exist; fall back gracefully.
 try:
@@ -213,6 +214,15 @@ def render_debug_overlay(console: Console, fps: float, player_pos: Tuple[int, in
     console.print(render_x, render_y + 3, f"FPS: {fps:.1f}", fg=(255, 255, 255))
     console.print(render_x, render_y + 4, f"Frame Time: {frame_time_ms:.2f}ms", fg=(255, 255, 255))
     console.print(render_x, render_y + 5, f"Mouse Pos: ({engine.mouse_x}, {engine.mouse_y})", fg=(255, 255, 255))
+    try:
+        ctw = float(getattr(engine, "base_tile_w", 1.0) or 1.0)
+        cth = float(getattr(engine, "base_tile_h", 1.0) or 1.0)
+        cam_off_x, cam_off_y = engine.get_camera_render_offset_px(ctw, cth)
+        console.print(render_x, render_y + 10, f"CamTile: ({int(getattr(engine, 'camera_tile_x', 0))}, {int(getattr(engine, 'camera_tile_y', 0))})", fg=(200, 255, 200))
+        console.print(render_x, render_y + 11, f"CamRender: ({float(getattr(engine, 'camera_render_x', 0.0)):.2f}, {float(getattr(engine, 'camera_render_y', 0.0)):.2f})", fg=(200, 255, 200))
+        console.print(render_x, render_y + 12, f"CamOffsetPx: ({cam_off_x}, {cam_off_y})", fg=(200, 255, 200))
+    except Exception:
+        pass
 
     # Composite slot usage (helps track blood-tile sprite-slot exhaustion)
     try:
@@ -223,6 +233,35 @@ def render_debug_overlay(console: Console, fps: float, player_pos: Tuple[int, in
         console.print(render_x, render_y + 9, f"ComposeCache: {_slot_info['compose_cache_entries']}  PuddleCache: {_slot_info['puddle_sprite_cache_entries']}", fg=(200, 200, 80))
     except Exception:
         pass
+
+    # Material inspector at mouse position
+    try:
+        import sprite_manager as _sm
+        import numpy as np
+        mx, my = int(engine.mouse_x), int(engine.mouse_y)
+        if engine.game_map.in_bounds(mx, my):
+            tile = engine.game_map.tiles[mx, my]
+            cp = int(tile['graphic'])
+            
+            # Get material data
+            get_packed = getattr(_sm, "get_packed_material", None)
+            if get_packed:
+                normals, alpha, emission, specular, normal_detail, specular_mask = get_packed(cp, scale=1, out_h=10, out_w=10)
+                
+                # Compute statistics
+                emissive_mean = float(np.mean(emission)) if emission is not None else 0.0
+                emissive_max = float(np.max(emission)) if emission is not None else 0.0
+                specular_mean = float(np.mean(specular)) if specular is not None else 0.0
+                specular_max = float(np.max(specular)) if specular is not None else 0.0
+                normal_detail_mean = float(np.mean(normal_detail)) if normal_detail is not None else 0.0
+                
+                # Display material data
+                console.print(render_x, render_y + 14, f"=== MATERIAL @ ({mx},{my}) cp=0x{cp:04X} ===", fg=(255, 255, 100))
+                console.print(render_x, render_y + 15, f"Emissive: mean={emissive_mean:.3f} max={emissive_max:.3f}", fg=(255, 200, 100))
+                console.print(render_x, render_y + 16, f"Specular: mean={specular_mean:.3f} max={specular_max:.3f}", fg=(200, 200, 255))
+                console.print(render_x, render_y + 17, f"NormalDetail: mean={normal_detail_mean:.3f}", fg=(150, 255, 150))
+    except Exception as e:
+        console.print(render_x, render_y + 14, f"Material error: {str(e)[:40]}", fg=(255, 50, 50))
 
     # (Lag chart rendered separately by render_lag_profiler when F1 is active.)
 
@@ -587,7 +626,7 @@ def render_combat_stats(
     
     for item in equipped_items:
         if item and hasattr(item, "equippable") and item.equippable:
-            weapon_name = item.name
+            weapon_name = identify_system.get_display_name(player, item)
             break
     
     weapon_text = f"Weapon: {weapon_name[:15]}"  # Truncate long names
@@ -706,7 +745,7 @@ def render_status_hover_panel(console: 'Console', mouse_ui_x: int, mouse_ui_y: i
         try:
             display = hovered_effect.get_display() if hasattr(hovered_effect, "get_display") else None
             duration = getattr(hovered_effect, "duration", None)
-            turns_text = "indefinite" if duration is None else f"{duration}t"
+            turns_text = "indefinite" if duration is None else f"{int(duration)}t"
             title = ((getattr(display, "label", None) if display else None) or getattr(hovered_effect, "name", "Unknown")) + (f" ({turns_text})")
             lines.append(title)
             desc = getattr(hovered_effect, "description", "") or "No description."
@@ -1310,14 +1349,17 @@ def render_names_at_mouse_location(
 def render_equipment(
         console: 'Console', x: int, y: int, engine: 'Engine'
 ) -> None:
-    armor_name = engine.player.equipment.equipped_items.get('ARMOR').name if engine.player.equipment.equipped_items.get('ARMOR') else "None"
+    armor_item = engine.player.equipment.equipped_items.get('ARMOR')
+    armor_name = identify_system.get_display_name(engine.player, armor_item) if armor_item else "None"
     # Get grasped items (weapons, shields, etc.)
     grasped_names = []
     for item in engine.player.equipment.grasped_items.values():
-        grasped_names.append(item.name)
+        if item:
+            grasped_names.append(identify_system.get_display_name(engine.player, item))
     held_items = ", ".join(grasped_names) if grasped_names else "None"
     
-    backpack_name = engine.player.equipment.equipped_items.get('BACKPACK').name if engine.player.equipment.equipped_items.get('BACKPACK') else "None"
+    backpack_item = engine.player.equipment.equipped_items.get('BACKPACK')
+    backpack_name = identify_system.get_display_name(engine.player, backpack_item) if backpack_item else "None"
     console.print(x=x, y=y, string="Equipment:")
     console.print(x=x, y=y+1, string=f"Body: {armor_name}")
     console.print(x=x, y=y+2, string=f"Back: {backpack_name}")

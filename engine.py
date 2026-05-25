@@ -5,6 +5,7 @@ import pickle
 import traceback
 from typing import TYPE_CHECKING, Optional
 import os
+import math
 import numpy as np
 from tcod.console import Console
 from tcod.map import compute_fov
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 
 import time
 from animations import FireFlicker, BonefireFlicker, FlameAnimation
-from gpu_stack import SmokeCloudParticle, EmberParticle, DripParticle, LightShaftParticles, BurningParticle, SleepingParticle
+from gpu_stack import SmokeCloudParticle, EmberParticle, DripParticle, LightShaftParticles, BurningParticle, SleepingParticle, DustParticle
 import sprite_manager
 import tcod.noise
 
@@ -60,6 +61,15 @@ class Engine:
         # Initialize turn manager for centralized turn processing
         self.turn_manager = None  # Will be set after import to avoid circular imports
         self.tick_count = 0
+        self._ambient_particle_tick = 0
+        self._ambient_particle_interval = 2
+        self._ambient_particle_caps = {
+            "dust_tile": 3,
+            "dust_global": 120,
+        }
+        self._ambient_particle_gates = {
+            "dust": None,
+        }
         
         # Damage indicator system
         self.damage_indicator_timer = 0
@@ -120,6 +130,14 @@ class Engine:
             "frame_count": 0,
         }
 
+        # Camera smoothing state (camera-only interpolation).
+        self.camera_tile_x = 0
+        self.camera_tile_y = 0
+        self.camera_render_x = 0.0
+        self.camera_render_y = 0.0
+        self.camera_smoothing = 0.25
+        self._camera_initialized = False
+
     def profile_external_ms(self, section: str, elapsed_ms: float) -> None:
         """Queue a profiling sample (milliseconds) from non-tick systems.
 
@@ -177,12 +195,13 @@ class Engine:
             pass
 
     def get_camera_origin(self, view_width: int, view_height: int) -> tuple[int, int]:
-        """Return the top-left world tile of the current viewport."""
+        """Return the top-left world tile of the current viewport, centering the player."""
         if not self.game_map or not self.player:
             return 0, 0
 
         max_x = max(0, self.game_map.width - view_width)
         max_y = max(0, self.game_map.height - view_height)
+        # Center player in viewport
         origin_x = min(max(0, self.player.x - view_width // 2), max_x)
         origin_y = min(max(0, self.player.y - view_height // 2), max_y)
         return origin_x, origin_y
@@ -202,8 +221,27 @@ class Engine:
             return None
 
         origin_x, origin_y = self.get_camera_origin(view_width, view_height)
-        world_x = origin_x + int(x)
-        world_y = origin_y + int(y)
+        x_f = float(x)
+        y_f = float(y)
+
+        # Keep input mapping aligned with camera-smoothed world render offset.
+        tile_px_w = float(getattr(self, "base_tile_w", 0.0) or 0.0)
+        tile_px_h = float(getattr(self, "base_tile_h", 0.0) or 0.0)
+        zoom = float(getattr(self, "game_zoom", 1.0) or 1.0)
+        if tile_px_w > 0.0 and tile_px_h > 0.0 and zoom > 0.0:
+            cam_off_x, cam_off_y = self.get_camera_render_offset_px(tile_px_w * zoom, tile_px_h * zoom)
+            x_f -= float(cam_off_x) / (tile_px_w * zoom)
+            y_f -= float(cam_off_y) / (tile_px_h * zoom)
+
+        # Convert to nearest tile so interaction remains accurate while camera eases.
+        # Half-away-from-zero avoids banker's rounding jitter at .5 boundaries.
+        screen_x_i = int(x_f + 0.5) if x_f >= 0.0 else int(x_f - 0.5)
+        screen_y_i = int(y_f + 0.5) if y_f >= 0.0 else int(y_f - 0.5)
+        screen_x = min(max(screen_x_i, 0), max(0, int(view_width) - 1))
+        screen_y = min(max(screen_y_i, 0), max(0, int(view_height) - 1))
+
+        world_x = origin_x + screen_x
+        world_y = origin_y + screen_y
         if self.game_map.in_bounds(world_x, world_y):
             return world_x, world_y
         return None
@@ -241,6 +279,55 @@ class Engine:
         os.makedirs("logs", exist_ok=True)
         with open(log_path, "a") as log_file:
             log_file.write(f" {time.ctime()}: Handler: {handler}, Event: {event}, Message: {message}\n")
+
+    def update_camera_interpolation(
+        self,
+        tile_px_w: float,
+        tile_px_h: float,
+        view_width: int,
+        view_height: int,
+    ) -> None:
+        """Smooth camera render position while keeping world updates tile-snapped."""
+        if not self.player:
+            self._camera_initialized = False
+            return
+
+        origin_x, origin_y = self.get_camera_origin(int(view_width), int(view_height))
+        self.camera_tile_x = int(origin_x)
+        self.camera_tile_y = int(origin_y)
+
+        target_x = float(self.camera_tile_x) * float(tile_px_w)
+        target_y = float(self.camera_tile_y) * float(tile_px_h)
+
+        if not self._camera_initialized:
+            self.camera_render_x = target_x
+            self.camera_render_y = target_y
+            self._camera_initialized = True
+            return
+
+        smoothing = float(getattr(self, "camera_smoothing", 0.16) or 0.16)
+        if getattr(self, "auto_move_path", None):
+            smoothing = max(smoothing, 0.24)
+        smoothing = min(max(smoothing, 0.0), 1.0)
+        self.camera_render_x += (target_x - self.camera_render_x) * smoothing
+        self.camera_render_y += (target_y - self.camera_render_y) * smoothing
+
+        if abs(target_x - self.camera_render_x) < 0.01:
+            self.camera_render_x = target_x
+        if abs(target_y - self.camera_render_y) < 0.01:
+            self.camera_render_y = target_y
+
+    def get_camera_render_offset_px(self, tile_px_w: float, tile_px_h: float) -> tuple[int, int]:
+        """Return rounded pixel offset to apply to the rendered world texture."""
+        target_x = float(self.camera_tile_x) * float(tile_px_w)
+        target_y = float(self.camera_tile_y) * float(tile_px_h)
+        dx = target_x - self.camera_render_x
+        dy = target_y - self.camera_render_y
+        # Use deterministic half-away-from-zero rounding to avoid frame-to-frame
+        # wobble from Python's banker's rounding at +/-0.5.
+        off_x = int(dx + 0.5) if dx >= 0.0 else int(dx - 0.5)
+        off_y = int(dy + 0.5) if dy >= 0.0 else int(dy - 0.5)
+        return off_x, off_y
 
     def _effect_list(self, target) -> list:
         effects = getattr(target, "effects", None)
@@ -477,6 +564,23 @@ class Engine:
         
         _section_start = time.perf_counter()
         try:
+            # Build particle count cache once per frame to avoid O(n*m) lookups
+            tile_fire_counts, entity_fire_counts, position_ember_counts, position_drip_counts, position_dust_counts = self._build_particle_count_cache()
+
+            self._tick_ambient_particles(position_dust_counts)
+            
+            # Get liquid system - check for fire coatings on tiles (outside entity loop)
+            for coating in self.game_map.liquid_system.coatings.values():
+                if coating.liquid_type == LiquidType.FIRE:
+                    pos = coating.get_pos()
+                    # Count existing tile-based fire particles at this position
+                    FIRE_CAP = 36
+                    current_fires = tile_fire_counts.get(pos, 0)
+                    # Spawn multiple particles per tick (like entities do)
+                    if current_fires < FIRE_CAP:
+                        for _ in range(random.randint(3, 5)):
+                            self.animation_queue.append(BurningParticle(pos, None))
+            
             for entity in list(self.game_map.entities):
                 # Update corpse sprite based on whether it still has loot
                 if getattr(entity, 'type', None) == 'Dead' and hasattr(entity, 'container') and entity.container:
@@ -504,13 +608,6 @@ class Engine:
                                 traceback.print_exc()
                                 pass
                 
-                # Get liquid system - check for fire coatings on tiles
-                for coating in self.game_map.liquid_system.coatings.values():
-                    if coating.liquid_type == LiquidType.FIRE:
-                        pos = coating.get_pos()
-                        if not any(isinstance(a, FlameAnimation) and a.position == pos for a in self.animation_queue):
-                            self.animation_queue.append(FlameAnimation(pos))
-                        
                 # Check entities for fire coatings on body parts
                 if hasattr(entity, 'body_parts') and entity.body_parts:
                     # Check if this entity has fire coating on any body part
@@ -522,12 +619,8 @@ class Engine:
                     if has_fire_coating:
                         # Spawn a burst of flame sparks each turn, capped so the
                         # queue doesn't grow unbounded for long-burning entities.
-                        FIRE_CAP = 18
-                        current_fires = sum(
-                            1 for a in self.animation_queue
-                            if isinstance(a, BurningParticle)
-                            and getattr(a, 'entity', None) is entity
-                        )
+                        FIRE_CAP = 36
+                        current_fires = entity_fire_counts.get(entity, 0)
                         if current_fires < FIRE_CAP:
                             for _ in range(random.randint(3, 5)):
                                 self.animation_queue.append(
@@ -541,12 +634,7 @@ class Engine:
                         ]
                         if drip_coatings:
                             drip_cap = 3
-                            current_drips = sum(
-                                1 for a in self.animation_queue
-                                if isinstance(a, DripParticle)
-                                and int(round(a.fx)) == entity.x
-                                and int(round(a.fy)) == entity.y
-                            )
+                            current_drips = position_drip_counts.get((entity.x, entity.y), 0)
                             if current_drips < drip_cap and random.random() < 0.15:
                                 coating = drip_coatings[0]
                                 drip_color = (180, 20, 20) if coating == LiquidType.BLOOD else (80, 140, 220)
@@ -582,12 +670,7 @@ class Engine:
                             ember_chance = 0.20 if is_bonfire else 0.10
                             ember_cap = 8 if is_bonfire else 4
                             if random.random() < ember_chance:
-                                current_embers = sum(
-                                    1 for a in self.animation_queue
-                                    if isinstance(a, EmberParticle)
-                                    and int(round(a.fx)) == entity.x
-                                    and int(round(a.fy)) == entity.y
-                                )
+                                current_embers = position_ember_counts.get(pos, 0)
                                 if current_embers < ember_cap:
                                     self.animation_queue.append(EmberParticle(pos))
                         except Exception:
@@ -661,6 +744,103 @@ class Engine:
 
         _frame_samples_ms["total"] = (time.perf_counter() - _frame_start) * 1000.0
         self._finalize_frame_profile(_frame_samples_ms)
+    
+    def _build_particle_count_cache(self):
+        """Build a cache of particle counts by position and entity to avoid O(n*m) lookups.
+        
+        Returns:
+            tuple: (tile_fire_counts, entity_fire_counts, position_ember_counts, position_drip_counts, position_dust_counts)
+                - tile_fire_counts: dict mapping (x, y) -> count of tile-based BurningParticles
+                - entity_fire_counts: dict mapping entity -> count of entity-based BurningParticles  
+                - position_ember_counts: dict mapping (x, y) -> count of EmberParticles
+                - position_drip_counts: dict mapping (x, y) -> count of DripParticles
+                - position_dust_counts: dict mapping source tile -> count of DustParticles
+        """
+        tile_fire_counts = {}
+        entity_fire_counts = {}
+        position_ember_counts = {}
+        position_drip_counts = {}
+        position_dust_counts = {}
+        
+        for anim in self.animation_queue:
+            if isinstance(anim, BurningParticle):
+                entity = getattr(anim, 'entity', None)
+                if entity is None:
+                    # Tile-based fire particle
+                    pos = (int(round(anim.fx)), int(round(anim.fy)))
+                    tile_fire_counts[pos] = tile_fire_counts.get(pos, 0) + 1
+                else:
+                    # Entity-based fire particle
+                    entity_fire_counts[entity] = entity_fire_counts.get(entity, 0) + 1
+            elif isinstance(anim, EmberParticle):
+                pos = (int(round(anim.fx)), int(round(anim.fy)))
+                position_ember_counts[pos] = position_ember_counts.get(pos, 0) + 1
+            elif isinstance(anim, DripParticle):
+                pos = (int(round(anim.fx)), int(round(anim.fy)))
+                position_drip_counts[pos] = position_drip_counts.get(pos, 0) + 1
+            elif isinstance(anim, DustParticle):
+                pos = getattr(anim, 'source_pos', (int(round(anim.fx)), int(round(anim.fy))))
+                position_dust_counts[pos] = position_dust_counts.get(pos, 0) + 1
+        
+        return tile_fire_counts, entity_fire_counts, position_ember_counts, position_drip_counts, position_dust_counts
+
+    def _tick_ambient_particles(self, position_dust_counts: dict[tuple[int, int], int]) -> None:
+        """Spawn ambient particles on a fixed cadence with per-tile and global caps."""
+        if not self.animations_enabled or not hasattr(self, 'game_map'):
+            return
+
+        self._ambient_particle_tick += 1
+        if self._ambient_particle_tick % self._ambient_particle_interval != 0:
+            return
+
+        dust_global_cap = int(self._ambient_particle_caps.get("dust_global", 0))
+        if sum(position_dust_counts.values()) >= dust_global_cap:
+            return
+
+        visible_tiles = np.argwhere(self.game_map.visible)
+        if len(visible_tiles) == 0:
+            return
+
+        sample_count = min(len(visible_tiles), 96)
+        sampled_indices = random.sample(range(len(visible_tiles)), sample_count)
+        tile_cap = int(self._ambient_particle_caps.get("dust_tile", 0))
+
+        for idx in sampled_indices:
+            x_raw, y_raw = visible_tiles[idx]
+            x, y = int(x_raw), int(y_raw)
+            pos = (x, y)
+            if position_dust_counts.get(pos, 0) >= tile_cap:
+                continue
+            if not self._is_dust_ambient_tile(x, y):
+                continue
+
+            spawn_chance = 0.32
+            if random.random() >= spawn_chance:
+                continue
+
+            self.animation_queue.append(DustParticle(pos))
+            position_dust_counts[pos] = position_dust_counts.get(pos, 0) + 1
+            if sum(position_dust_counts.values()) >= dust_global_cap:
+                break
+
+    def _is_dust_ambient_tile(self, x: int, y: int) -> bool:
+        if not self.game_map.in_bounds(x, y):
+            return False
+
+        tile = self.game_map.tiles[x, y]
+        if not bool(tile["walkable"]) or not bool(tile["transparent"]):
+            return False
+        if tile["name"] == "Water":
+            return False
+
+        return self._passes_ambient_particle_gate("dust", x, y)
+
+    def _passes_ambient_particle_gate(self, particle_key: str, x: int, y: int) -> bool:
+        """Return True when the tile passes the configured future gate for a particle type."""
+        gate = self._ambient_particle_gates.get(particle_key)
+        if gate is None:
+            return True
+        return bool(gate(self, x, y))
 
     def process_animations(self):
         if not self.animation_queue:

@@ -14,6 +14,7 @@ os.environ["SDL_HINT_RENDER_DRIVER"] = "D3D11"
 os.environ["SDL_RENDER_SCALE_QUALITY"] = "1"  #  filtering when tiles are scaled
 import warnings
 import sys
+import hashlib
 
 from PIL import Image
 import numpy as np
@@ -112,7 +113,11 @@ except Exception as e:
 
 # Load extra overlay sprites from RP/extras.png into PUA codepoints (U+E000+).
 import sprite_manager
-sprite_manager.load_extras(tileset, get_data_path("RP/extras.png"))
+sprite_manager.load_extras(
+    tileset,
+    get_data_path("RP/extras.png"),
+    normals_path=get_data_path("RP/extras_normals.png"),
+)
 
 
 # Create window immediately
@@ -170,9 +175,15 @@ glare_tex = create_glare_texture(renderer)
 
 game_width = 80
 game_height = 40
-game_view_width = game_width // 2
-game_view_height = game_height // 2
 
+# ZOOM CONTROL: Change this value to adjust game zoom level
+game_zoom = 2.5  # Zoom level for game view rendering
+
+# Dynamically calculate viewport size based on zoom
+# Reserve ~11 rows for HUD at bottom of screen
+hud_reserved_rows = 11
+game_view_width = int(screen_width / game_zoom)
+game_view_height = int((screen_height - hud_reserved_rows) / game_zoom)
 
 game_console = tcod.console.Console(game_view_width, game_view_height, order="F")
 ui_console = tcod.console.Console(screen_width, screen_height, order="F")
@@ -246,6 +257,15 @@ def render_console_with_transparency(console: tcod.console.Console) -> np.ndarra
 
     return pixels
 
+
+def get_console_signature(console: tcod.console.Console) -> bytes:
+    """Return a stable digest for ch/fg/bg so UI textures can be upload-cached."""
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(console.ch.tobytes(order="C"))
+    digest.update(console.fg.tobytes(order="C"))
+    digest.update(console.bg.tobytes(order="C"))
+    return digest.digest()
+
 def get_ui_mouse_tile(position: tuple[float, float], window_w: float, window_h: float) -> tuple[int, int]:
     """Return UI-layer tile coordinates for the base 80x50 layout."""
     pixel_x, pixel_y = position
@@ -263,11 +283,72 @@ def get_game_screen_tile(position: tuple[float, float], window_w: float, window_
     base_tile_w = window_w / screen_width
     base_tile_h = window_h / screen_height
 
-    tile_x = int(pixel_x / (base_tile_w * 2))
-    tile_y = int(pixel_y / (base_tile_h * 2))
+    tile_x = int(pixel_x / (base_tile_w * game_zoom))
+    tile_y = int(pixel_y / (base_tile_h * game_zoom))
     tile_x = max(0, min(game_view_width - 1, tile_x))
     tile_y = max(0, min(game_view_height - 1, tile_y))
     return tile_x, tile_y
+
+
+class GPUMenuBackgroundAnimation:
+    """Preload and play a fullscreen menu animation directly as GPU textures."""
+
+    def __init__(
+        self,
+        renderer,
+        get_data_path_fn,
+        frame_pattern: str = "RP/background/{:04d}.png",
+        frame_count: int = 250,
+        fps: int = 24,
+        start_index: int = 1,
+    ) -> None:
+        self.renderer = renderer
+        self.frames = []
+        self.current_frame = 0
+        self.frame_time = 1.0 / max(1, fps)
+        self.last_update = time.time()
+        self.frame_w = 0
+        self.frame_h = 0
+
+        for i in range(start_index, start_index + frame_count):
+            frame_rel_path = frame_pattern.format(i)
+            frame_abs_path = get_data_path_fn(frame_rel_path)
+            if not os.path.isfile(frame_abs_path):
+                break
+            try:
+                img = Image.open(frame_abs_path).convert("RGBA")
+                px = np.array(img, dtype=np.uint8)
+                tex = renderer.upload_texture(px)
+                tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                self.frames.append(tex)
+                if self.frame_w == 0 or self.frame_h == 0:
+                    self.frame_h, self.frame_w = px.shape[:2]
+            except Exception as exc:
+                print(f"Menu background frame load failed ({frame_rel_path}): {exc}")
+                break
+
+    @property
+    def available(self) -> bool:
+        return bool(self.frames)
+
+    def _step(self) -> None:
+        if len(self.frames) <= 1:
+            return
+        now = time.time()
+        elapsed = now - self.last_update
+        if elapsed < self.frame_time:
+            return
+        steps = int(elapsed / self.frame_time)
+        self.current_frame = (self.current_frame + steps) % len(self.frames)
+        self.last_update += steps * self.frame_time
+
+    def draw(self, window_w: int, window_h: int) -> bool:
+        if not self.frames:
+            return False
+        self._step()
+        # Stretch-fill mode: no letterbox and no cropping.
+        self.renderer.copy(self.frames[self.current_frame], dest=(0, 0, window_w, window_h))
+        return True
 
 boot_str = []
 def show_loading_screen(context, console, status: str) -> None:
@@ -283,7 +364,7 @@ def show_loading_screen(context, console, status: str) -> None:
     base_tile_h = window_h / screen_height
     
     # Update GPU frame dimensions so barrel distortion works correctly
-    gpu.update_frame_dims(window_w, window_h, base_tile_w, base_tile_h)
+    gpu.update_frame_dims(window_w, window_h, base_tile_w, base_tile_h, game_zoom)
     
     # Render to scene_tex for CRT processing
     gpu.ensure_bloom_targets(window_w, window_h)
@@ -455,27 +536,39 @@ def main() -> None:
     previous_has_game_view = False
     transition_frame_counter = 0
     transition_cooldown_frames = 0
+    quick_start = os.environ.get("DOA_QUICK_START", "0") == "1"
     # Continue with actual loading operations
-    show_loading_screen(context, ui_console, "A:\\SYSTEM.DAT loaded OK")
+    if not quick_start:
+        show_loading_screen(context, ui_console, "A:\\SYSTEM.DAT loaded OK")
     settings = load_settings()
     setting_fullscreen = settings.get("fullscreen", False)
     reload_crt_settings()
-    time.sleep(0.3)
-    show_loading_screen(context, ui_console, "A:\\MENU.EXE found. Launching...")
-    handler: input_handlers.BaseEventHandler = setup_game.MainMenu()
-    time.sleep(0.3)
+    if not quick_start:
+        time.sleep(0.3)
+        show_loading_screen(context, ui_console, "A:\\MENU.EXE found. Launching...")
+        handler: input_handlers.BaseEventHandler = setup_game.MainMenu()
+        time.sleep(0.3)
+    else:
+        engine = setup_game.new_game()
+        handler = input_handlers.MainGameEventHandler(engine)
+        sounds.stop_menu_ambience()
+        sounds.stop_all_music()
+        sounds.start_dungeon_music()
     
-    show_loading_screen(context, ui_console, "Allocating memory blocks...")
+    if not quick_start:
+        show_loading_screen(context, ui_console, "Allocating memory blocks...")
     # Update context title
     context.sdl_window.title = "DoA: Dungeons of Ærrok"
-    time.sleep(0.3)
+    if not quick_start:
+        time.sleep(0.3)
     # Set initial fullscreen state based on settings
     window = context.sdl_window
     if window and setting_fullscreen:
         window.fullscreen = True
         print("DEBUG: Set initial fullscreen mode from settings")
 
-    show_loading_screen(context, ui_console, "Ready. Type A:\\GAME to play.")
+    if not quick_start:
+        show_loading_screen(context, ui_console, "Ready. Type A:\\GAME to play.")
     str = (f"Finished loading in {time.time() - initial_time:.2f} seconds")
     print(str)
     with open(get_data_path('logs/log.txt'), 'a') as log_file:
@@ -483,7 +576,8 @@ def main() -> None:
         log_file.write(f"Settings loaded: {settings}\n")
         log_file.write(f"=========================================================================================================================================================================================================================\n")
     # Brief pause to show completion
-    time.sleep(0.3)
+    if not quick_start:
+        time.sleep(0.3)
     
     # Load custom cursors after tcod context is fully initialized
     cursor_point = Image.open(get_data_path("RP/cursors/cursor_point.png")).convert("RGBA")
@@ -587,6 +681,19 @@ def main() -> None:
     overlay_hints_tex     = None   # BLEND-mode GPU texture for hints row
     overlay_hints_dest    = None   # screen dest rect for hints row
     cached_overlay_handler = None
+    menu_ui_tex = None
+    menu_ui_signature = None
+    menu_ui_cached_handler = None
+    menu_ui_cached_token = None
+    menu_static_tex = None
+    menu_static_handler = None
+    menu_static_token = None
+    menu_static_console = None
+    menu_dynamic_console = None
+    menu_dynamic_tex = None
+    menu_dynamic_token = None
+    menu_dynamic_handler = None
+    menu_dynamic_region = (0, 0, 0, 0)
     # Inspect-overlay (F3 / LookHandler) cached UI texture --- rebuilt only when
     # mouse_location changes so render_ui_overlay() isn't called every frame.
     inspect_ui_tex          = None  # BLEND-mode GPU texture of last UI render
@@ -650,6 +757,16 @@ def main() -> None:
     )
     gpu.start_wobble()
     gpu.start_channel_overlay("menu")
+
+    menu_bg_anim = GPUMenuBackgroundAnimation(
+        renderer=renderer,
+        get_data_path_fn=get_data_path,
+        frame_pattern="RP/background/{:04d}.png",
+        frame_count=250,
+        fps=24,
+        start_index=1,
+    )
+    setup_game.set_gpu_menu_background_enabled(menu_bg_anim.available)
 
     try:
         last_frame = time.time()
@@ -962,8 +1079,8 @@ def main() -> None:
             # Always use context.sdl_window.size for window and mouse mapping
             base_tile_w = window_w / screen_width
             base_tile_h = window_h / screen_height
-            game_dest_w = game_view_width * base_tile_w * 2
-            game_dest_h = game_view_height * base_tile_h * 2
+            game_dest_w = game_view_width * base_tile_w * game_zoom
+            game_dest_h = game_view_height * base_tile_h * game_zoom
             hud_top_row = game_height - 1
             hud_rows = screen_height - hud_top_row
             hud_source_y = hud_top_row * tileset.tile_height
@@ -974,6 +1091,10 @@ def main() -> None:
             if active_engine is not None:
                 active_engine.base_tile_w = base_tile_w
                 active_engine.base_tile_h = base_tile_h
+                active_engine.game_zoom = game_zoom
+
+            world_offset_x = 0
+            world_offset_y = 0
 
             if main_game_view:
                 game_console.clear()
@@ -982,8 +1103,22 @@ def main() -> None:
             if has_game_view and needs_live_game_frame and not map_overlay_view:
                 active_engine.render_game(game_console)
 
+            if has_game_view and active_engine is not None:
+                # Update camera smoothing after gameplay state changes this frame
+                # (including auto-move), so camera motion tracks current player state.
+                active_engine.update_camera_interpolation(
+                    base_tile_w * game_zoom,
+                    base_tile_h * game_zoom,
+                    game_view_width,
+                    game_view_height,
+                )
+                world_offset_x, world_offset_y = active_engine.get_camera_render_offset_px(
+                    base_tile_w * game_zoom,
+                    base_tile_h * game_zoom,
+                )
+
             # --- Update gpu object with current frame dimensions ---
-            gpu.update_frame_dims(window_w, window_h, base_tile_w, base_tile_h)
+            gpu.update_frame_dims(window_w, window_h, base_tile_w, base_tile_h, game_zoom)
             gpu.crt_force_fast_path = _crt_force_fast_path
 
             # --- Begin scene rendering to off-screen target for GPU bloom ---
@@ -995,7 +1130,14 @@ def main() -> None:
             def _apply_lightmap():
                 if _crt_force_fast_path or not has_game_view:
                     return
-                gpu.apply_lightmap(active_engine, game_dest_w, game_dest_h, game_console)
+                gpu.apply_lightmap(
+                    active_engine,
+                    game_dest_w,
+                    game_dest_h,
+                    game_console,
+                    dest_offset_x=world_offset_x,
+                    dest_offset_y=world_offset_y,
+                )
 
             if fast_main_view:
                 # Clear inspect cache when returning to normal gameplay
@@ -1005,13 +1147,19 @@ def main() -> None:
                 _prev_inspect_overlay = False
                 renderer.clear()
                 game_tex = game_console_renderer.render(game_console)
-                renderer.copy(game_tex, dest=(0, 0, int(game_dest_w), int(game_dest_h)))
+                renderer.copy(game_tex, dest=(int(world_offset_x), int(world_offset_y), int(game_dest_w), int(game_dest_h)))
                 _apply_lightmap()
 
                 # GPU game-layer animations drawn into scene_tex so they sit UNDER CRT effects
                 if not _crt_force_fast_path and active_engine is not None and (gpu.gpu_anim_registry or gpu.gpu_anim_nobloom_registry):
                     gpu.ensure_gpu_anim_layer(game_dest_w, game_dest_h)
-                    gpu.run_gpu_anim_passes(active_engine, game_dest_w, game_dest_h)
+                    gpu.run_gpu_anim_passes(
+                        active_engine,
+                        game_dest_w,
+                        game_dest_h,
+                        dest_offset_x=world_offset_x,
+                        dest_offset_y=world_offset_y,
+                    )
 
                 if getattr(active_engine, "debug", False):
                     cached_overlay_handler = None
@@ -1162,13 +1310,19 @@ def main() -> None:
                 else:
                     handler.on_render(console=game_console)
                 game_tex = game_console_renderer.render(game_console)
-                renderer.copy(game_tex, dest=(0, 0, int(game_dest_w), int(game_dest_h)))
+                renderer.copy(game_tex, dest=(int(world_offset_x), int(world_offset_y), int(game_dest_w), int(game_dest_h)))
                 _apply_lightmap()
 
                 # GPU game-layer animations (same pass as fast_main_view)
                 if not _crt_force_fast_path and active_engine is not None and (gpu.gpu_anim_registry or gpu.gpu_anim_nobloom_registry):
                     gpu.ensure_gpu_anim_layer(game_dest_w, game_dest_h)
-                    gpu.run_gpu_anim_passes(active_engine, game_dest_w, game_dest_h)
+                    gpu.run_gpu_anim_passes(
+                        active_engine,
+                        game_dest_w,
+                        game_dest_h,
+                        dest_offset_x=world_offset_x,
+                        dest_offset_y=world_offset_y,
+                    )
 
                 # ── Animated targeting cursor (BLEND sprite over game view) ───────────
                 # Drawn after lightmap so it's always at full brightness regardless of
@@ -1189,10 +1343,10 @@ def main() -> None:
                                 _map_cursor_tex.update(_cpx_c)
                             _map_cursor_last_cp = _ccp
                         _cs_x, _cs_y = _cpos
-                        _ctw = base_tile_w * 2  # game tiles are rendered at 2× scale
-                        _cth = base_tile_h * 2
+                        _ctw = base_tile_w * game_zoom  # game tiles are rendered at current zoom scale
+                        _cth = base_tile_h * game_zoom
                         renderer.copy(_map_cursor_tex, dest=(
-                            int(_cs_x * _ctw), int(_cs_y * _cth),
+                            int(_cs_x * _ctw) + int(world_offset_x), int(_cs_y * _cth) + int(world_offset_y),
                             int(_ctw), int(_cth),
                         ))
                     except Exception as _cursor_err:
@@ -1295,7 +1449,7 @@ def main() -> None:
                 renderer.clear()
                 if needs_live_game_frame:
                     game_tex = game_console_renderer.render(game_console)
-                renderer.copy(game_tex, dest=(0, 0, int(game_dest_w), int(game_dest_h)))
+                renderer.copy(game_tex, dest=(int(world_offset_x), int(world_offset_y), int(game_dest_w), int(game_dest_h)))
                 _apply_lightmap()
 
                 # Dim the game underneath the overlay
@@ -1454,7 +1608,16 @@ def main() -> None:
                 #           The main body PNG is never rendered — it is black and cannot
                 #           be tinted, so the white per-part mask PNGs handle all body art.
                 def _render_eq_panel(_eq_px):
-                    _alt = inventory_ui._ALT_DAMAGE_VIEW
+                    _alt = bool(getattr(_inv_grid_handler, '_alt_damage_view', False))
+                    _eq_body_nudge_tiles = float(getattr(inventory_ui, "_EQ_BODY_NUDGE_X_TILES", 0.0))
+                    _eq_body_nudge_px_legacy = int(getattr(inventory_ui, "_EQ_BODY_NUDGE_X_PX", 0))
+                    _eq_body_nudge_x = int(round(_eq_body_nudge_tiles * base_tile_w)) + _eq_body_nudge_px_legacy
+                    _eq_body_px = (
+                        _eq_px[0] + _eq_body_nudge_x,
+                        _eq_px[1],
+                        _eq_px[2],
+                        _eq_px[3],
+                    )
                     # Build damage map once
                     _bp_dmg: dict = {}
                     try:
@@ -1500,7 +1663,7 @@ def main() -> None:
                             else:
                                 _bptex.color_mod = (80, 220, 100) if bright else (40, 45, 65)
                                 _bptex.alpha_mod = 220 if bright else 110
-                            renderer.copy(_bptex, dest=_eq_px)
+                            renderer.copy(_bptex, dest=_eq_body_px)
                     renderer.copy(_eq_bg_tex, dest=_eq_px)
                     if _body_part_texes:
                         _draw_body_diagram(bright=False)   # always behind slots
@@ -1566,6 +1729,18 @@ def main() -> None:
                     # at the default 1280×800 resolution, giving clean 2× readable characters.
                     _inv_tex = inv_console_renderer.render(_scaled_inv_src._inv_console)
                     renderer.copy(_inv_tex, dest=(0, 0, window_w, window_h))
+                    
+                    # ── Tooltip overlay (stat breakdown) ──────────────────────────────────────
+                    if getattr(_scaled_inv_src, '_tooltip_visible', False):
+                        _tooltip_tex = inv_console_renderer.render(_scaled_inv_src._tooltip_console)
+                        _tooltip_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                        _ttx = _scaled_inv_src._tooltip_screen_x * base_tile_w
+                        _tty = _scaled_inv_src._tooltip_screen_y * base_tile_h
+                        _ttw = _scaled_inv_src._tooltip_console.width * base_tile_w
+                        _tth = _scaled_inv_src._tooltip_console.height * base_tile_h
+                        renderer.copy(_tooltip_tex, dest=(_ttx, _tty, _ttw, _tth))
+                        _tooltip_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
+                    
                     # If a context menu is floating on top (handler != _scaled_inv_src),
                     # draw it via the BLEND path so it appears over the inventory.
                     if not _is_scaled_inv and overlay_popup_tex is not None and overlay_popup_dest is not None:
@@ -1640,6 +1815,18 @@ def main() -> None:
                 renderer.copy(_ov_tex,
                               source=(0, int(hud_source_y), int(_ui_tex_w), int(hud_source_h)),
                               dest=(0, int(window_h - hud_dest_h), window_w, int(hud_dest_h)))
+
+                # ── Tooltip overlay (stat breakdown) - RENDERED LAST ON TOP OF EVERYTHING ──
+                if (_inv_grid_handler is not None
+                        and getattr(_inv_grid_handler, '_tooltip_visible', False)):
+                    _tooltip_tex = inv_console_renderer.render(_inv_grid_handler._tooltip_console)
+                    _tooltip_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                    _ttx = _inv_grid_handler._tooltip_screen_x * base_tile_w
+                    _tty = _inv_grid_handler._tooltip_screen_y * base_tile_h
+                    _ttw = _inv_grid_handler._tooltip_console.width * base_tile_w
+                    _tth = _inv_grid_handler._tooltip_console.height * base_tile_h
+                    renderer.copy(_tooltip_tex, dest=(_ttx, _tty, _ttw, _tth))
+                    _tooltip_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
             else:
                 # Clear inspect cache when in main-menu / no-game-view path
                 if _prev_inspect_overlay:
@@ -1650,11 +1837,119 @@ def main() -> None:
                 _prev_inspect_overlay = False
                 cached_overlay_handler = None
                 overlay_dirty = True
-                ui_console.clear()
-                handler.on_render(console=ui_console)
                 renderer.clear()
-                ui_tex = ui_console_renderer.render(ui_console)
-                renderer.copy(ui_tex, dest=(0, 0, window_w, window_h))
+                if menu_bg_anim.available:
+                    menu_bg_anim.draw(window_w, window_h)
+
+                    static_layer_fn = getattr(handler, "render_static_menu_layer", None)
+                    dynamic_region_fn = getattr(handler, "get_dynamic_region_tiles", None)
+                    dynamic_layer_fn = getattr(handler, "render_dynamic_menu_region", None)
+
+                    if callable(static_layer_fn) and callable(dynamic_layer_fn):
+                        static_token_fn = getattr(handler, "get_static_visual_state_token", None)
+                        dynamic_token_fn = getattr(handler, "get_dynamic_visual_state_token", None)
+
+                        static_token = static_token_fn() if callable(static_token_fn) else type(handler).__name__
+                        if (
+                            menu_static_tex is None
+                            or menu_static_handler is not handler
+                            or menu_static_token != static_token
+                        ):
+                            if (
+                                menu_static_console is None
+                                or menu_static_console.width != screen_width
+                                or menu_static_console.height != screen_height
+                            ):
+                                menu_static_console = tcod.console.Console(screen_width, screen_height, order="F")
+                            menu_static_console.clear()
+                            static_layer_fn(menu_static_console)
+                            _static_pixels = render_console_with_transparency(menu_static_console)
+                            menu_static_tex = renderer.upload_texture(_static_pixels)
+                            menu_static_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                            menu_static_handler = handler
+                            menu_static_token = static_token
+
+                        renderer.copy(menu_static_tex, dest=(0, 0, window_w, window_h))
+
+                        rx, ry, rw, rh = dynamic_region_fn(ui_console) if callable(dynamic_region_fn) else (0, 0, 0, 0)
+                        if rw > 0 and rh > 0:
+                            dynamic_token = dynamic_token_fn() if callable(dynamic_token_fn) else None
+                            if (
+                                menu_dynamic_console is None
+                                or menu_dynamic_console.width != rw
+                                or menu_dynamic_console.height != rh
+                            ):
+                                menu_dynamic_console = tcod.console.Console(rw, rh, order="F")
+                                menu_dynamic_region = (rx, ry, rw, rh)
+                                menu_dynamic_token = None
+
+                            if (
+                                menu_dynamic_tex is None
+                                or menu_dynamic_handler is not handler
+                                or menu_dynamic_region != (rx, ry, rw, rh)
+                                or menu_dynamic_token != dynamic_token
+                            ):
+                                menu_dynamic_console.clear()
+                                dynamic_layer_fn(menu_dynamic_console)
+                                _dynamic_pixels = render_console_with_transparency(menu_dynamic_console)
+                                menu_dynamic_tex = renderer.upload_texture(_dynamic_pixels)
+                                menu_dynamic_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                                menu_dynamic_token = dynamic_token
+                                menu_dynamic_handler = handler
+                                menu_dynamic_region = (rx, ry, rw, rh)
+
+                            renderer.copy(
+                                menu_dynamic_tex,
+                                dest=(
+                                    int(rx * base_tile_w),
+                                    int(ry * base_tile_h),
+                                    int(rw * base_tile_w),
+                                    int(rh * base_tile_h),
+                                ),
+                            )
+
+                        ui_tex = None
+                    else:
+                        token_fn = getattr(handler, "get_visual_state_token", None)
+                        _render_menu_ui = True
+                        if callable(token_fn):
+                            _token = token_fn()
+                            if (
+                                menu_ui_tex is not None
+                                and menu_ui_cached_handler is handler
+                                and menu_ui_cached_token == _token
+                            ):
+                                _render_menu_ui = False
+                        else:
+                            _token = None
+
+                        if _render_menu_ui:
+                            ui_console.clear()
+                            handler.on_render(console=ui_console)
+                            if callable(token_fn):
+                                _ui_pixels = render_console_with_transparency(ui_console)
+                                menu_ui_tex = renderer.upload_texture(_ui_pixels)
+                                menu_ui_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                                menu_ui_cached_handler = handler
+                                menu_ui_cached_token = _token
+                                menu_ui_signature = None
+                            else:
+                                _menu_sig = get_console_signature(ui_console)
+                                if menu_ui_tex is None or _menu_sig != menu_ui_signature:
+                                    _ui_pixels = render_console_with_transparency(ui_console)
+                                    menu_ui_tex = renderer.upload_texture(_ui_pixels)
+                                    menu_ui_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                                    menu_ui_signature = _menu_sig
+                                menu_ui_cached_handler = None
+                                menu_ui_cached_token = None
+
+                        ui_tex = menu_ui_tex
+                else:
+                    ui_console.clear()
+                    handler.on_render(console=ui_console)
+                    ui_tex = ui_console_renderer.render(ui_console)
+                if ui_tex is not None:
+                    renderer.copy(ui_tex, dest=(0, 0, window_w, window_h))
 
             # --- End scene rendering: restore default target, apply global CRT post-process ---
             #_rlog("restore_render_target")
@@ -1843,7 +2138,10 @@ def main() -> None:
                                 if world_tile is not None and active_engine is not None:
                                     active_engine.mouse_x, active_engine.mouse_y = world_tile
                                 elif active_engine is not None:
-                                    active_engine.mouse_x, active_engine.mouse_y = ui_tile
+                                    # Keep last world-space mouse tile while easing;
+                                    # do not warp to UI-space coordinates.
+                                    if ui_tile[1] >= hud_top_row:
+                                        active_engine.mouse_x, active_engine.mouse_y = ui_tile
                             elif isinstance(handler, input_handlers.SelectIndexHandler):
                                 if world_tile is None and active_engine is not None:
                                     world_tile = active_engine.screen_to_world(

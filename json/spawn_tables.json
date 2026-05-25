@@ -24,6 +24,14 @@
     "scale_traits": ["strength", "agility", "blades"]
   },
   {
+    "factory": "goblin_archer",
+    "biome": "any",
+    "threat": 2.5,
+    "rank_cap": 4,
+    "weight": 100,
+    "scale_traits": ["agility"]
+  },
+  {
     "factory": "troll",
     "biome": "any",
     "threat": 5.0,

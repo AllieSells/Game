@@ -44,6 +44,7 @@ def _spawnable(dungeon: GameMap, x: int, y: int) -> bool:
         return False
     return True
 
+# Item spawn chances - uses callable factories for dynamic generation
 item_chances = {
     0: {
         entity_factories.lesser_health_potion: 35,
@@ -58,7 +59,6 @@ item_chances = {
     },
     6: {
         entity_factories.fireball_scroll: 25,
-        #entity_factories.chain_mail: 15,
     },
 }
 
@@ -111,8 +111,16 @@ def get_entities_at_random(
     chosen_entities = random.choices(
         entities, weights = entity_weighted_chance_values, k=number_of_entities
     )
-
-    return chosen_entities
+    
+    # If entity is callable (factory), call it to get instance; otherwise deepcopy
+    result = []
+    for entity in chosen_entities:
+        if callable(entity):
+            result.append(entity())
+        else:
+            result.append(copy.deepcopy(entity))
+    
+    return result
 
 
 class CavernRoom:
@@ -176,12 +184,52 @@ class RectangularRoom:
             and self.y2 >= other.y1
         )
     
+def _find_valid_stair_tile_in_room(dungeon: GameMap, room: RectangularRoom, avoid_positions: set = None) -> Optional[Tuple[int, int]]:
+    """Find a valid tile for stair placement within a room.
+    
+    A valid tile must be:
+    - Inside the room (not on walls)
+    - Walkable floor
+    - Not water, foliage, or mossy floor
+    - Not occupied by an entity
+    - At least 2 tiles from room edges (to avoid water edge composition issues)
+    """
+    if avoid_positions is None:
+        avoid_positions = set()
+    
+    candidates = []
+    # Search inner area of room, staying away from edges
+    for x in range(room.x1 + 2, max(room.x1 + 3, room.x2 - 1)):
+        for y in range(room.y1 + 2, max(room.y1 + 3, room.y2 - 1)):
+            if (x, y) in avoid_positions:
+                continue
+            
+            tile = dungeon.tiles[x, y]
+            if not tile["walkable"]:
+                continue
+            
+            tile_name = str(tile["name"])
+            if tile_name in {"Water", "Foliage", "Mossy Floor", "<purple>Down Stairs</purple>", "<purple>Up Stairs</purple>"}:
+                continue
+            
+            # Check for entities
+            if any(e.x == x and e.y == y for e in dungeon.entities):
+                continue
+            
+            candidates.append((x, y))
+    
+    if candidates:
+        # Return a random candidate to avoid predictable placement
+        return random.choice(candidates)
+    
+    return None
+
 def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int, biome: str = "any") -> None:
     # Don't re-seed here as it breaks dungeon generation flow
     # The main generation seed is set at the start of generate_dungeon
     
     # Use budget-based enemy spawning system (count determined by budget)
-    monsters = get_enemies_for_floor(floor_number, biome=biome)
+    monsters, traps = get_enemies_for_floor(floor_number, biome=biome)
     
     number_of_items = random.randint(
         0, get_max_value_for_floor(max_items_by_floor, floor_number)
@@ -222,6 +270,14 @@ def place_entities(room: RectangularRoom, dungeon: GameMap, floor_number: int, b
                 break
 
     for entity in monsters:
+        for _ in range(10):
+            x = random.randint(room.x1+1, room.x2-1)
+            y = random.randint(room.y1+1, room.y2-1)
+            if _spawnable(dungeon, x, y):
+                entity.spawn(dungeon, x, y)
+                break
+
+    for entity in traps:
         for _ in range(10):
             x = random.randint(room.x1+1, room.x2-1)
             y = random.randint(room.y1+1, room.y2-1)
@@ -889,7 +945,7 @@ def place_entities_cave(floor_tiles: List[Tuple[int, int]], dungeon: GameMap, fl
         floor_tiles = random.sample(floor_tiles, max_rooms)
 
     # Use budget-based enemy spawning system
-    monsters = get_enemies_for_floor(floor_number, biome=biome)
+    monsters, traps = get_enemies_for_floor(floor_number, biome=biome)
 
     shuffled = list(floor_tiles)
     random.shuffle(shuffled)
@@ -899,6 +955,11 @@ def place_entities_cave(floor_tiles: List[Tuple[int, int]], dungeon: GameMap, fl
         for x, y in shuffled:
             if _spawnable(dungeon, x, y):
                 entity.spawn(dungeon, x, y)
+                break
+    for trap in traps:
+        for x, y in shuffled:
+            if _spawnable(dungeon, x, y):
+                trap.spawn(dungeon, x, y)
                 break
 
     # Maybe place a chest (30% chance per section)
@@ -1072,6 +1133,35 @@ def join_caverns(dungeon: GameMap, width: int, height: int) -> None:
                     ds.union(npt, (_wx, _wy))
             pt = npt
 
+def generate_boss_room(
+        map_width: int,
+        map_height: int,
+        engine: Engine,
+) -> GameMap:
+    _placer = engine.player
+
+    # Generate a boss room with a large chamber
+    boss_room = GameMap(engine, map_width, map_height, entities=[engine.player], type="dungeon", name="Boss Room")
+    room = RectangularRoom(x=map_width//2 - 10, y=map_height//2 - 5, width=20, height=10)
+    for x in range(room.x1, room.x2 + 1):
+        for y in range(room.y1, room.y2 + 1):
+            if x == room.x1 or x == room.x2 or y == room.y1 or y == room.y2:
+                boss_room.tiles[x, y] = tile_types.random_wall_tile()
+            else:
+                boss_room.tiles[x, y] = tile_types.random_floor_tile()
+    boss_room.upstairs_location = (room.x1 + 2, (room.y1 + room.y2) // 2)
+    boss_room.tiles[boss_room.upstairs_location[0], boss_room.upstairs_location[1]] = tile_types.up_stairs
+    _placer.place(*boss_room.upstairs_location, boss_room)
+    apply_wall_merging(boss_room)
+    # Spawn multi-part dragon boss (2 tiles tall) - head at player level, legs below
+    entity_factories.create_dragon(boss_room, room.x2 - 3, (room.y1 + room.y2) // 2)
+    
+    # Start boss music
+    import sounds
+    sounds.start_boss_music()
+    
+    return boss_room
+
 
 def generate_first_floor(
         map_width: int,
@@ -1178,9 +1268,15 @@ def generate_dungeon(
     vegetation = noise_vals[2]
     weirdness = noise_vals[3]
 
+    if temperature < -2.0:
+        vegetation = -10
+
     # Determine if should generate rooms, caves, or mixed
     # Inbetween -2,2 gives ruins 
 
+    if _floor == 11:
+        return generate_boss_room(map_width, map_height, engine)
+        
 
     # Generates new map
     dungeon = GameMap(engine, map_width, map_height, entities=[_placer], type="dungeon", name="Dungeon")
@@ -1260,39 +1356,31 @@ def generate_dungeon(
                 ]
                 place_entities_cave(_section_tiles, dungeon, _floor, max_rooms, dungeon.biome)
 
-        # Place stairs toward a corner of the map (far from player start)
-        stair_candidates = [
-            (map_width * 3 // 4, map_height * 3 // 4),
-            (map_width // 4,     map_height * 3 // 4),
-            (map_width * 3 // 4, map_height // 4),
-            (map_width // 4,     map_height // 4),
-        ]
-        max_search_radius = max(map_width, map_height) // 3  # Limit search to reasonable distance
-        for candidate_idx, (_sx0, _sy0) in enumerate(stair_candidates):
-            for _r in range(max_search_radius):
-                _stair_placed = False
-                for _dx in range(-_r, _r + 1):
-                    for _dy in range(-_r, _r + 1):
-                        if abs(_dx) != _r and abs(_dy) != _r:
-                            continue
-                        _sx, _sy = _sx0 + _dx, _sy0 + _dy
-                        if (2 <= _sx < map_width - 2 and 2 <= _sy < map_height - 2
-                                and dungeon.tiles[_sx, _sy]["walkable"]
-                                and str(dungeon.tiles[_sx, _sy]["name"]) not in {"Water", "Foliage"}):
-                            dungeon.tiles[_sx, _sy] = tile_types.down_stairs
-                            dungeon.downstairs_location = (_sx, _sy)
-                            print(f"[GEN] Cave stairs placed at {(_sx, _sy)} from corner candidate {candidate_idx} (radius {_r})")
-                            _stair_placed = True
-                            break
-                    if _stair_placed:
-                        break
-                if _stair_placed:
-                    break
-            if dungeon.downstairs_location != (0, 0):
-                break
+        # Place down stairs in caves - find accessible location far from player
+        # Collect all valid walkable tiles that are reasonably far from player
+        _min_distance = min(map_width, map_height) // 4
+        _stair_candidates = []
+        for _sx in range(3, map_width - 3):
+            for _sy in range(3, map_height - 3):
+                if not dungeon.tiles[_sx, _sy]["walkable"]:
+                    continue
+                if str(dungeon.tiles[_sx, _sy]["name"]) in {"Water", "Foliage"}:
+                    continue
+                # Check distance from player
+                _dist = ((abs(_sx - _placer.x) ** 2 + abs(_sy - _placer.y) ** 2) ** 0.5)
+                if _dist >= _min_distance:
+                    _stair_candidates.append((_sx, _sy, _dist))
         
-        if dungeon.downstairs_location == (0, 0):
-            print(f"[GEN] WARNING: Could not place cave stairs from any corner, will rely on safety pass")
+        if _stair_candidates:
+            # Sort by distance and pick one from the farthest quartile
+            _stair_candidates.sort(key=lambda c: c[2], reverse=True)
+            _far_candidates = _stair_candidates[:max(1, len(_stair_candidates) // 4)]
+            _sx, _sy, _ = random.choice(_far_candidates)
+            dungeon.tiles[_sx, _sy] = tile_types.down_stairs
+            dungeon.downstairs_location = (_sx, _sy)
+            print(f"[GEN] Cave down stairs placed at {(_sx, _sy)}, distance from player: {_}")
+        else:
+            print("[GEN] WARNING: Could not place cave down stairs, will rely on safety pass")
 
         # Place up stairs at player start for cavern-only floors
         if erosion > 2.0:
@@ -1360,11 +1448,31 @@ def generate_dungeon(
             # Place entities in non-first rooms
             if len(rooms) > 1:  # Skip first room for entity placement  
                 place_entities(new_room, dungeon, _floor, dungeon.biome)
-  
-    # Record room-based stair positions — written to the map AFTER water pools so
-    # water can never overwrite them.
-    _room_downstairs_pos = rooms[-1].center if rooms else None
-    _room_upstairs_pos   = rooms[0].center  if rooms else None
+    
+    # Place stairs in rooms IMMEDIATELY after room generation, BEFORE water pools/foliage.
+    # This ensures water and foliage generation can avoid stair locations.
+    if rooms:
+        # Place down stairs in last room (dungeon exit)
+        avoid_tiles = set()
+        for room in reversed(rooms):  # Try rooms from last to first
+            down_pos = _find_valid_stair_tile_in_room(dungeon, room, avoid_tiles)
+            if down_pos:
+                dungeon.tiles[down_pos] = tile_types.down_stairs
+                dungeon.downstairs_location = down_pos
+                print(f"[GEN] Down stairs placed at {down_pos} in room")
+                avoid_tiles.add(down_pos)
+                break
+        else:
+            print("[GEN] WARNING: Could not place down stairs in any room")
+        
+        # Place up stairs in first room (dungeon entrance)
+        up_pos = _find_valid_stair_tile_in_room(dungeon, rooms[0], avoid_tiles)
+        if up_pos:
+            dungeon.tiles[up_pos] = tile_types.up_stairs
+            dungeon.upstairs_location = up_pos
+            print(f"[GEN] Up stairs placed at {up_pos} in first room")
+        else:
+            print("[GEN] WARNING: Could not place up stairs in first room")
 
 
 
@@ -1410,8 +1518,7 @@ def generate_dungeon(
     print("[GEN] apply_wall_merging start")
     apply_wall_merging(dungeon)
     print("[GEN] apply_wall_merging done")
-    if vegetation > 0:
-        # Mossification
+    if vegetation > 0:# Mossification
         print(f" Moss val: {(vegetation/4)**2}")
         for x in range(dungeon.width):
             for y in range(dungeon.height):
@@ -1451,7 +1558,7 @@ def generate_dungeon(
         return tiles
 
     if 0 == 0:#-4 < temperature < 4:
-        water_pool_count = random.randint(10, 10)
+        water_pool_count = random.randint(1, 10)
         print(f"Generating {water_pool_count} water pools with noise temperature value: {temperature}")
         for _ in range(water_pool_count):
             base_radius = random.uniform(2.0, 4.5)
@@ -1462,30 +1569,16 @@ def generate_dungeon(
             pool_tiles = _noise_pool_tiles(start_x, start_y, base_radius, noise_amp, pool_seed)
             # Only overwrite walkable tiles so pools don't erase walls
             for x, y in pool_tiles:
-                # Never let water pools overwrite staircase tiles.
+                # Never let water pools overwrite staircase tiles (already placed).
                 if dungeon.tiles[x, y]["walkable"] and str(dungeon.tiles[x, y]["name"]) not in {
                     "<purple>Down Stairs</purple>",
                     "<purple>Up Stairs</purple>",
                 }:
                     dungeon.tiles[x, y] = tile_types.water
     print("[GEN] water pools done")
+    # Note: Stairs are already placed immediately after room generation, so no stamping needed here.
 
-    # Stamp stair tiles after water pools so they are always on dry floor.
-    if _room_downstairs_pos is not None:
-        dungeon.tiles[_room_downstairs_pos] = tile_types.down_stairs
-        dungeon.downstairs_location = _room_downstairs_pos
-    if _room_upstairs_pos is not None:
-        dungeon.tiles[_room_upstairs_pos] = tile_types.up_stairs
-        dungeon.upstairs_location = _room_upstairs_pos
-
-    # Build composited water animation frames (floor-edge bitmask compositing).
-    # Must run while the tileset is available (deferred mode is active during
-    # background gen, so sprites are queued and flushed on the main thread).
-    import sprite_manager as _sm_procgen
-    _sm_procgen.build_dungeon_water_anim(dungeon)
-
-    # Foliage post processing (must run BEFORE water edge overlay so foliage
-    # fg colours don't tint the water composites)
+    # Foliage post processing (must happen before water animation build)
     if vegetation > 0:
         for x in range(dungeon.width):
             for y in range(dungeon.height):
@@ -1494,6 +1587,32 @@ def generate_dungeon(
                     if tile["name"] not in ["<purple>Down Stairs</purple>", "<purple>Up Stairs</purple>"]:
                         dungeon.tiles[x, y] = tile_types.generate_foliage_tile()
     print("[GEN] foliage done")
+    
+    # Ice-ification (applied AFTER water and foliage so they get tinted too, but BEFORE water animation build)
+    if temperature < -2.0:
+        print(f"[GEN] Ice-ification start, val: {(abs(temperature)/4)**2}")
+        for x in range(dungeon.width):
+            for y in range(dungeon.height):
+                # Make sure is not water 
+                tile = dungeon.tiles[x, y]
+                if tile["name"] == "Water":
+                    continue
+                if not tile["walkable"] and not tile["interactable"]:
+                    dungeon.tiles[x, y] = tile_types.icify_wall_tile(tile)
+                elif tile["walkable"]:
+                    if tile["name"] not in ["<purple>Down Stairs</purple>", "<purple>Up Stairs</purple>"]:
+                        dungeon.tiles[x, y] = tile_types.icify_floor_tile(tile)
+        print("[GEN] ice-ification done")
+        dungeon.biome = "frozen"
+        dungeon.biome_str = "Frozen " + dungeon.biome_str
+        vegetation = 0  # No moss or foliage in frozen biome
+
+    # Build composited water animation frames AFTER ice-ification so icy floor tints are preserved
+    # Must run while the tileset is available (deferred mode is active during
+    # background gen, so sprites are queued and flushed on the main thread).
+    sprite_manager.build_dungeon_water_anim(dungeon)
+    print("[GEN] water animation build done")
+
     if vegetation > 4:
         dungeon.biome = "lush"
         dungeon.biome_str = "Lush " + dungeon.biome_str
@@ -1561,7 +1680,7 @@ def generate_dungeon(
             # Last-resort fallback: place at player tile to avoid missing stairs entirely.
             dungeon.tiles[_placer.x, _placer.y] = tile_types.down_stairs
             dungeon.downstairs_location = (_placer.x, _placer.y)
-            print(f"[GEN] No valid stair locations found, placing at player spawn")
+            print("[GEN] No valid stair locations found, placing at player spawn")
 
     print("[GEN] generate_dungeon complete")
     return dungeon

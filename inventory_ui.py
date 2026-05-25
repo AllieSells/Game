@@ -33,7 +33,11 @@ import tcod.event
 import color
 import sounds
 import actions
+import identify as identify_system
 import tile_ids
+import balance_config
+import proficiency_system as profsys
+import text_utils
 
 from input_handlers import PopupEventHandler, ItemContextMenu, CONFIRM_KEYS
 from equipment_types import EquipmentType
@@ -44,14 +48,14 @@ if TYPE_CHECKING:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layout — 60×36 chrome console blitted at (10,7) into 80×50; 5×9 grid
+# Layout — 55×36 chrome console blitted at (12,7) into 80×50; 5×9 grid
 # console GPU-rendered at 3× over the item area → 48×48 px item tiles.
 # ─────────────────────────────────────────────────────────────────────────────
-_C_W = 60   # chrome panel width
+_C_W = 55   # chrome panel width
 _C_H = 36   # chrome panel height
 
 # Where the panel sits on the 80×50 main console (centred)
-_INV_BLIT_X: int = (80 - _C_W) // 2   # = 10
+_INV_BLIT_X: int = (80 - _C_W) // 2   # = 12
 _INV_BLIT_Y: int = (50 - _C_H) // 2   # = 7
 
 # Inventory grid — separate 5×9 console rendered at 3× (48×48 px per item)
@@ -65,22 +69,32 @@ _GRID_ROWS    = 9    # grid rows     (9 × 3 = 27 panel rows, fills rows 3–29)
 _DIV_X       = 22   # vertical divider column in chrome panel
 _EQ_X        = 23   # left edge of equipment panel (body diagram area)
 
-# Equipment body diagram — GPU-rendered at 3× in its own eq_grid_console (12×9 cells).
-# 12 cols × 3 = 36 tiles wide; 9 rows × 3 = 27 tiles tall → same height as the inv grid.
-_EQ_GRID_COLS  = 11
+# Equipment body diagram — GPU-rendered at 3× in its own eq_grid_console.
+# Width is derived from panel width so it never overlaps the right border.
+# (For _C_W=55 this becomes 10 cols; for _C_W=58 this becomes 11 cols.)
+_EQ_GRID_COLS  = (_C_W - _EQ_X - 1) // _GRID_SCALE
 _EQ_GRID_ROWS  = 9
+_EQ_BASE_GRID_COLS = 11
+# Fine alignment tweak for body-diagram art relative to slot boxes.
+# Use tile-relative units so alignment stays consistent at different window sizes.
+# Positive values move the body diagram to the right.
+# 1.0 = one UI tile width, 0.5 = half tile.
+_EQ_BODY_NUDGE_X_TILES = 1.375
+# Optional legacy pixel nudge (kept for compatibility; prefer _TILES above).
+_EQ_BODY_NUDGE_X_PX = 0
 # Origin in 80×50 tile coords (no centering — fills the full grid-row band)
-_EQ_GRID_ORI_X: int = _INV_BLIT_X + _EQ_X                   # = 33
+_EQ_GRID_ORI_X: int = _INV_BLIT_X + _EQ_X                   # = 35
 _EQ_GRID_ORI_Y: int = _INV_BLIT_Y + _GRID_ROW_ORI            # = 10
 # Slot grid positions (col, row) in eq_grid — viewer's POV.
-# 12 wide × 9 tall grid; slots arranged as a body silhouette:
+# The layout needs at least 10 columns (max slot column index is 9).
+# Slots are arranged as a body silhouette:
 #   row 0 : Head
 #   row 1 : R.Arm  Torso  L.Arm
 #   row 3 : R.Hand        L.Hand   Back
 #   row 4/5 : Ring 1 / Ring 2 (right side)
 #   row 6 : R.Leg         L.Leg
 #   row 8 : R.Foot        L.Foot
-_EQ_SLOT_GRID_POS: List[Tuple[int, int]] = [
+_EQ_SLOT_BASE_POS: List[Tuple[int, int]] = [
     (7, 3),  # 0: R.Hand  — R4 col 7
     (3, 3),  # 1: L.Hand  — R4 col 3
     (5, 0),  # 2: Head    — R1 col 5
@@ -94,6 +108,13 @@ _EQ_SLOT_GRID_POS: List[Tuple[int, int]] = [
     (2, 6),  # 10: Back   — R7 col 2
     (9, 4),  # 11: Ring 1 — right side
     (9, 5),  # 12: Ring 2 — right side
+]
+
+# Recenter slot map when the equipment grid width changes from the original
+# 11-column layout, keeping slots visually aligned with the body diagram art.
+_EQ_SLOT_X_SHIFT = int(round((_EQ_GRID_COLS - _EQ_BASE_GRID_COLS) / 2))
+_EQ_SLOT_GRID_POS: List[Tuple[int, int]] = [
+    (_x + _EQ_SLOT_X_SHIFT, _y) for _x, _y in _EQ_SLOT_BASE_POS
 ]
 _EQ_GRID_HIT: dict = {pos: i for i, pos in enumerate(_EQ_SLOT_GRID_POS)}
 
@@ -120,9 +141,6 @@ _INFO_SEP_Y = 30    # separator row above info strip
 _INFO_Y     = 31    # first info content row
 #  rows 31-34 = info lines; row 35 = bottom frame edge
 
-# Persistent alt damage-view toggle — retained across inventory opens.
-_ALT_DAMAGE_VIEW: bool = False
-
 # ── Colour palette ───────────────────────────────────────────────────────────
 # Background layers
 _BG           = (25, 18, 12)   # outer background — above BLEND >16 threshold so chrome is opaque
@@ -147,8 +165,11 @@ _SLOT_LABEL   = (180, 140, 70)  # equipment slot names
 _SLOT_EMPTY_V = ( 60,  48, 22)  # placeholder text for empty slot
 _HINT_FG      = ( 80,  62, 30)  # bottom hint text
 _INFO_NAME    = (230, 200, 110) # item name in info strip
-_INFO_STAT    = (170, 145,  90) # stat text in info strip
-
+_INFO_STAT    = color.gray # stat text in info strip
+_INFO_DESC    = (200, 180, 120) # description text in info strip
+_ID_PCT_LOW   = (255, 190, 90)  # early identify progress
+_ID_PCT_MID   = (120, 220, 150) # mid identify progress
+_ID_PCT_HIGH  = (90, 200, 255)  # near-complete identify progress
 
 # Equipment slots: (label, list of EquipmentType that can fill the slot)
 _EQ_SLOTS: List[Tuple[str, List[EquipmentType]]] = [
@@ -172,6 +193,35 @@ _EQ_SLOTS: List[Tuple[str, List[EquipmentType]]] = [
 
 def _clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v))
+
+
+def _identify_progress_fg(percent: float) -> Tuple[int, int, int]:
+    """Return a readable color for identify progress overlays.
+
+    Uses warm -> cool progression and avoids near-white text that can bloom
+    against bright item sprites.
+    """
+    if percent < 40.0:
+        return _ID_PCT_LOW
+    if percent < 80.0:
+        return _ID_PCT_MID
+    return _ID_PCT_HIGH
+
+
+def _darken_identifying_fg(rgb: Tuple[int, int, int]) -> Tuple[int, int, int]:
+    """Darken glyph color for items currently being identified.
+
+    Keeps the item visible but reduces bloom/brightness so overlaid text remains
+    readable on bright sprites.
+    """
+    return tuple(max(18, int(v * 0.55)) for v in rgb)
+
+
+def _should_show_enchant_label(actor: object, item: object) -> bool:
+    """Return True when enchantment labels should be visible to this actor."""
+    if not identify_system.is_identifiable(item):
+        return True
+    return identify_system.is_identified(actor, item)
 
 
 class InventoryGridUI(PopupEventHandler):
@@ -204,6 +254,13 @@ class InventoryGridUI(PopupEventHandler):
         self._eq_qty_console = tcod.console.Console(_EQ_GRID_COLS * _GRID_SCALE, _EQ_GRID_ROWS * _GRID_SCALE, order="F")
         # Drag ghost: 1×1 console GPU-rendered at 3× (48×48 px) at cursor position.
         self._drag_console = tcod.console.Console(1, 1, order="F")
+        
+        # Tooltip console: renders stat breakdown as GPU overlay
+        self._tooltip_console = tcod.console.Console(22, 10, order="F")
+        self._tooltip_visible = False
+        self._tooltip_screen_x = 0
+        self._tooltip_screen_y = 0
+        self._tooltip_title = "Breakdown"
 
         # Category tabs (short names — all four fit: All+Eq+Use+Misc = 15 chars)
         self._categories = [
@@ -232,6 +289,10 @@ class InventoryGridUI(PopupEventHandler):
         # Tab-hit-test regions (rebuilt each render)
         self._tab_regions: List[Tuple[int, int, int]] = []  # [(x0, x1, cat_i), ...]
 
+        # Per-handler damage overlay mode (Alt toggle). Avoid global state so
+        # multiple handlers/sessions do not leak this setting across instances.
+        self._alt_damage_view: bool = False
+
         # Panel bounds for GPU-direct copy (covers only the panel, game visible outside).
         self._set_popup_bounds(_INV_BLIT_X, _INV_BLIT_Y, _C_W, _C_H)
 
@@ -241,7 +302,7 @@ class InventoryGridUI(PopupEventHandler):
 
     @staticmethod
     def _to_inv(tx: int, ty: int) -> Tuple[int, int]:
-        """Map an 80×50 event tile coord to the 60×36 panel space."""
+        """Map an 80×50 event tile coord to the 58×36 panel space."""
         return tx - _INV_BLIT_X, ty - _INV_BLIT_Y
 
     def _hit_inv_cell(self, tx: int, ty: int) -> Optional[Tuple[int, int]]:
@@ -550,7 +611,7 @@ class InventoryGridUI(PopupEventHandler):
         c.tiles_rgb["ch"][_hx1:_hx2, _hy1:_hy2] = ord(" ")
         # Equipment body diagram hole (right panel, rows 5–19 in chrome)
         _ehx1 = _EQ_X
-        _ehx2 = _EQ_X + _EQ_GRID_COLS * _GRID_SCALE   # = 59 (stops before right border)
+        _ehx2 = _EQ_X + _EQ_GRID_COLS * _GRID_SCALE
         _ehy1 = _EQ_GRID_ORI_Y - _INV_BLIT_Y           # = 5 (chrome row)
         _ehy2 = _ehy1 + _EQ_GRID_ROWS * _GRID_SCALE    # = 20
         c.tiles_rgb["bg"][_ehx1:_ehx2, _ehy1:_ehy2] = 0
@@ -586,10 +647,12 @@ class InventoryGridUI(PopupEventHandler):
 
                 if is_filled:
                     item_ch   = getattr(item, "char", "?")
-                    item_col  = getattr(item, "color", (200, 180, 100))
-                    rar_col   = getattr(item, "rarity_color", cell_bg)
+                    item_col  = identify_system.get_display_color(self.engine.player, item)
+                    rar_col   = identify_system.get_display_rarity_color(self.engine.player, item)
                     tinted_bg = tuple(min(255, int(b * 75 // 100 + r * 25 // 100))
                                       for b, r in zip(cell_bg, rar_col))
+                    if identify_system.get_progress(self.engine.player, item):
+                        item_col = _darken_identifying_fg(item_col)
                     if is_drag_src:
                         item_col = tuple(max(0, v - 80) for v in item_col)
                     gc.print(col, row, item_ch, fg=item_col, bg=tinted_bg)
@@ -637,11 +700,23 @@ class InventoryGridUI(PopupEventHandler):
                     gc.print(px, py, f"x{qty}", fg=(255, 230, 120), bg=(0, 0, 0))
                 # Enchantment level — bottom-right, cyan
                 enc = getattr(item, 'enchantment_level', 0)
-                if enc and enc > 0:
+                if enc and enc > 0 and _should_show_enchant_label(self.engine.player, item):
                     import roman as _roman
                     enc_label = f"+{_roman.toRoman(enc)}".rjust(_GRID_SCALE)
                     gc.print(px, py + _GRID_SCALE - 1, enc_label,
                              fg=(120, 200, 255), bg=(0, 0, 0))
+                progress = identify_system.get_progress(self.engine.player, item)
+                if progress:
+                    pct_label = f"{int(progress['percent'])}%"
+                    if len(pct_label) > _GRID_SCALE:
+                        pct_label = "99%"
+                    gc.print(
+                        px + max(0, _GRID_SCALE - len(pct_label)),
+                        py + (_GRID_SCALE // 2),
+                        pct_label,
+                        fg=_identify_progress_fg(float(progress.get('percent', 0.0))),
+                        bg=(0, 0, 0),
+                    )
 
     @property
     def _eq_grid_dest_tiles(self) -> Tuple[int, int, int, int]:
@@ -664,7 +739,7 @@ class InventoryGridUI(PopupEventHandler):
             if item is None:
                 continue
             enc = getattr(item, 'enchantment_level', 0)
-            if not enc or enc <= 0:
+            if not enc or enc <= 0 or not _should_show_enchant_label(self.engine.player, item):
                 continue
             import roman as _roman
             col, row  = _EQ_SLOT_GRID_POS[i]
@@ -673,6 +748,98 @@ class InventoryGridUI(PopupEventHandler):
             enc_label = f"+{_roman.toRoman(enc)}".rjust(_GRID_SCALE)
             gc.print(px, py + _GRID_SCALE - 1, enc_label,
                      fg=(120, 200, 255), bg=(0, 0, 0))
+
+        # ── Equipment totals at bottom of equipment grid ─────────────────────
+        player = self.engine.player
+        if hasattr(player, 'fighter') and player.fighter:
+            # ── ATK + strike chance summary ──────────────────────────────────
+            equipped_weapons = []
+            ranged_weapons = []
+            weapon_tags = set()
+            weapon_profile = None
+
+            if hasattr(player, 'equipment') and player.equipment:
+                all_equipped = list(player.equipment.grasped_items.values()) + list(player.equipment.body_part_coverage.values())
+                for item in all_equipped:
+                    if not (item and hasattr(item, 'equippable') and item.equippable):
+                        continue
+                    eq_type = getattr(item.equippable, 'equipment_type', None)
+                    eq_name = getattr(eq_type, 'name', '') if eq_type is not None else ''
+                    item_tags = {str(t).lower() for t in getattr(item, 'tags', [])}
+
+                    if eq_name in {'WEAPON', 'RANGED'}:
+                        equipped_weapons.append(item)
+                        weapon_tags.update(getattr(item, 'tags', []))
+
+                    if eq_name == 'RANGED' or 'bow' in item_tags or 'ranged' in item_tags:
+                        ranged_weapons.append(item)
+
+                weapon_profile = profsys.weapon_profile(player, weapon_tags) if weapon_tags else None
+            
+            # Use calculate_damage to get the actual attack breakdown
+            # For display, we show damage against a hypothetical 0-defense target
+            base_power = player.fighter.base_power
+            equipment_power = player.fighter.power_bonus
+            
+            # Get stat multiplier
+            strength_level = 1
+            if hasattr(player, 'level') and hasattr(player.level, 'traits'):
+                strength_level = player.level.traits.get("strength", {}).get("level", 1)
+            agility_level = 1
+            if hasattr(player, 'level') and hasattr(player.level, 'traits'):
+                agility_level = player.level.traits.get("agility", {}).get("level", 1)
+            strength_delta = balance_config.trait_delta(strength_level)
+            strength_mult = 1.0 + (strength_delta * balance_config.STRENGTH_MELEE_DAMAGE_PER_LEVEL)
+            
+            # Get proficiency multiplier
+            weapon_prof_mult = weapon_profile.damage_multiplier if weapon_profile else 1.0
+
+            # Compute UI strike chance against an average target (agility baseline).
+            is_ranged_loadout = len(ranged_weapons) > 0
+            active_weapon = ranged_weapons[0] if is_ranged_loadout else (equipped_weapons[0] if equipped_weapons else None)
+            if is_ranged_loadout:
+                base_hit_chance = float(balance_config.RANGED_BASE_HIT)
+            else:
+                base_hit_chance = float(balance_config.MELEE_BASE_HIT)
+
+            if active_weapon and getattr(active_weapon, 'equippable', None):
+                weapon_base_hit = getattr(active_weapon.equippable, 'base_hit_chance', None)
+                if weapon_base_hit is not None:
+                    base_hit_chance = float(weapon_base_hit)
+
+            agility_mod = max(
+                -balance_config.AGILITY_HIT_BONUS_CAP,
+                min(
+                    balance_config.AGILITY_HIT_BONUS_CAP,
+                    (agility_level - 1) * balance_config.AGILITY_HIT_BONUS_PER_LEVEL,
+                ),
+            )
+            accuracy_mult = weapon_profile.accuracy_multiplier if weapon_profile else 1.0
+            hit_chance = (base_hit_chance + agility_mod) * accuracy_mult
+            hit_chance = max(balance_config.MIN_HIT_CHANCE, min(balance_config.MAX_HIT_CHANCE, hit_chance))
+            strike_percent = int(round(hit_chance * 100))
+            
+            # Calculate total attack (base + equipment) * multipliers
+            total_base = base_power + equipment_power
+            total_attack = int(total_base * strength_mult * weapon_prof_mult)
+            
+            # Store comprehensive ATK breakdown for tooltip
+            self._stat_breakdown_atk = [
+                ("Base Power", f"{base_power}"),
+                ("Equipment", f"+{equipment_power}"),
+                ("Strength", f"x{strength_mult:.2f}"),
+                ("Proficiency", f"x{weapon_prof_mult:.2f}"),
+                ("Strike %", f"{strike_percent}%"),
+            ]
+            
+            # Position at bottom of the equipment grid overlay (row 24-25 of 27 total)
+            totals_y = 24
+            attack_text = f"Atk: {total_attack}"
+            
+            # Store stat positions for hover detection (in _eq_qty_console coords)
+            self._stat_atk_region = (1, totals_y, len(attack_text), 1)
+            
+            gc.print(1, totals_y, attack_text, fg=(255, 200, 100), bg=(0, 0, 0))
 
     def _fill_eq_grid_console(self) -> None:
         """Fill _eq_grid_console (12×5) with body-diagram slot icons at 3× scale.
@@ -709,7 +876,7 @@ class InventoryGridUI(PopupEventHandler):
             elif is_drag_src:
                 cell_bg = _CELL_DRAG
             elif item is not None:
-                rar_col = getattr(item, "rarity_color", _CELL_FILLED)
+                rar_col = identify_system.get_display_rarity_color(self.engine.player, item)
                 cell_bg = tuple(min(255, b * 75 // 100 + r * 25 // 100)
                                 for b, r in zip(_CELL_FILLED, rar_col))
             else:
@@ -717,7 +884,7 @@ class InventoryGridUI(PopupEventHandler):
 
             if item and not is_drag_src:
                 glyph     = getattr(item, "char", "?")
-                glyph_col = getattr(item, "color", (200, 180, 100))
+                glyph_col = identify_system.get_display_color(self.engine.player, item)
                 gc.print(col, row, glyph, fg=glyph_col, bg=cell_bg)
             else:
                 dot_col = (20, 14, 6) if is_drag_src else _SLOT_EMPTY_V
@@ -733,17 +900,30 @@ class InventoryGridUI(PopupEventHandler):
             slot_label = _EQ_SLOTS[self._sel_eq][0]
             item = self._get_eq_item(self._sel_eq)
 
+        # Damage-view mode replaces regular item/description content with
+        # body-part status details for equipment slots.
+        if self._alt_damage_view:
+            if slot_label is None:
+                c.print(2, _INFO_Y + 1,
+                        "Damage view on  |  Hover equipment slots",
+                        fg=_HINT_FG, bg=_BG)
+                return
+
+            _dmg_text, _dmg_col = self._get_slot_damage_info(self._sel_eq)
+            if _dmg_text:
+                c.print(2, _INFO_Y, _dmg_text, fg=_dmg_col, bg=_BG)
+            else:
+                c.print(2, _INFO_Y, "No tracked body-part damage",
+                        fg=_HINT_FG, bg=_BG)
+            return
+
         if item is None:
             if slot_label is not None:
-                # Show empty slot info + body part damage
-                c.print(2, _INFO_Y, f"[{slot_label}]: empty",
+                c.print(2, _INFO_Y, f"[{slot_label}]: Empty",
                         fg=_SLOT_EMPTY_V, bg=_BG)
-                _dmg_text, _dmg_col = self._get_slot_damage_info(self._sel_eq)
-                if _dmg_text:
-                    c.print(2, _INFO_Y + 1, _dmg_text, fg=_dmg_col, bg=_BG)
-                else:
-                    c.print(2, _INFO_Y + 1, "Drag an item here to equip it",
-                            fg=_HINT_FG, bg=_BG)
+                c.print(2, _INFO_Y + 1,
+                        "Hover slot for defense  |  Drag item here to equip",
+                        fg=_HINT_FG, bg=_BG)
             else:
                 c.print(2, _INFO_Y + 1,
                         "RClick: context  |  Esc: close",
@@ -752,9 +932,10 @@ class InventoryGridUI(PopupEventHandler):
 
         # Name (prefix with slot label when viewing from equipment diagram)
         prefix = f"[{slot_label}] " if slot_label else ""
-        name = (prefix + item.name)[:(_C_W - 4)]
+        shown_name = identify_system.get_display_name(self.engine.player, item)
+        name = (prefix + shown_name)[:(_C_W - 4)]
         c.print(2, _INFO_Y, name,
-                fg=getattr(item, "rarity_color", (220, 190, 120)), bg=_BG)
+            fg=identify_system.get_display_rarity_color(self.engine.player, item), bg=_BG)
 
         # One-line stat summary
         parts: list[str] = []
@@ -767,21 +948,41 @@ class InventoryGridUI(PopupEventHandler):
                 parts.append(f"Pwr:{eq.power_bonus:+}")
             if getattr(eq, "defense_bonus", 0):
                 parts.append(f"Def:{eq.defense_bonus:+}")
-            is_e = self.engine.player.equipment.item_is_equipped(item)
-            parts.append("Equipped" if is_e else "Not Equipped")
-        elif getattr(item, "consumable", None):
-            parts.append("Consumable — Space/RClick to use")
-        else:
-            parts.append("Miscellaneous")
+            #is_e = self.engine.player.equipment.item_is_equipped(item)
+            #parts.append("Equipped" if is_e else "Not Equipped")
+        #elif getattr(item, "consumable", None):
+            #parts.append("Consumable — Space/RClick to use")
+        #else:
+            #parts.append("Miscellaneous")
 
         stat_str = "  ".join(parts)[:(_C_W - 4)]
         c.print(2, _INFO_Y + 1, stat_str, fg=_INFO_STAT, bg=_BG)
 
-        # Body-part damage (only shown for equipment slots)
-        if slot_label is not None:
-            _dmg_text, _dmg_col = self._get_slot_damage_info(self._sel_eq)
-            if _dmg_text:
-                c.print(2, _INFO_Y + 2, _dmg_text, fg=_dmg_col, bg=_BG)
+        desc_y = _INFO_Y + 2
+        max_desc_lines = 2
+
+        # Get description
+        desc = identify_system.get_display_description(self.engine.player, item)
+        if desc:
+            # Wrap description to fit within the info strip width
+            max_desc_width = _C_W - 4
+            wrapped_desc = text_utils.wrap_colored_text_to_strings(
+                desc,
+                max_desc_width,
+                default_color=_INFO_DESC,
+            )
+            for i, line in enumerate(wrapped_desc):
+                if i >= max_desc_lines:  # Keep the strip compact.
+                    break
+                text_utils.print_colored_markup(
+                    c,
+                    2,
+                    desc_y + i,
+                    line,
+                    default_color=_INFO_DESC,
+                )
+
+        # In normal mode, keep body-part health out of the info strip.
 
     def _get_slot_damage_info(self, slot_i: int):
         """Return (text, colour) for body-part damage at eq slot index, or ('', None)."""
@@ -809,9 +1010,185 @@ class InventoryGridUI(PopupEventHandler):
                 (200,  80, 20)  if dmg_ratio > 0.25 else
                 (190,  30, 20)
             )
-            return f"● {part_name.replace('_',' ').title()}: {dmg_text}", colour
+            return f"{part_name.replace('_',' ').title()}: {dmg_text}", colour
         except Exception:
             return '', None
+
+    def _get_slot_defense_data(self, slot_i: int) -> Optional[dict]:
+        """Return per-body-part defense details for a slot, or None if unmapped."""
+        if slot_i < 0 or slot_i >= len(_EQ_SLOT_BODY_PART_NAME):
+            return None
+        part_name = _EQ_SLOT_BODY_PART_NAME[slot_i]
+        if part_name is None:
+            return None
+
+        player = self.engine.player
+        fighter = getattr(player, "fighter", None)
+        if fighter is None:
+            return None
+
+        part_obj = None
+        try:
+            from components.body_parts import BodyPartType as _BPT
+            bp_comp = getattr(getattr(player, 'body_parts', None), 'body_parts', None)
+            if bp_comp:
+                part_obj = bp_comp.get(_BPT[part_name])
+        except Exception:
+            part_obj = None
+
+        base_defense = int(getattr(fighter, "base_defense", 0) or 0)
+        part_prot = int(getattr(part_obj, "protection", 0) or 0)
+
+        effect_armor_bonus = 0
+        defense_multiplier = 1.0
+        for effect in getattr(player, "effects", []):
+            if hasattr(effect, "get_armor_bonus"):
+                effect_armor_bonus += int(effect.get_armor_bonus() or 0)
+            if hasattr(effect, "get_defense_multiplier"):
+                mult = float(effect.get_defense_multiplier() or 1.0)
+                if mult > defense_multiplier:
+                    defense_multiplier = mult
+
+        armor_defense = 0
+        armor_prof_mult = 1.0
+        eq = getattr(player, "equipment", None)
+        if eq and part_obj is not None and hasattr(eq, "get_defense_for_part"):
+            armor_defense = int(eq.get_defense_for_part(part_obj.name) or 0)
+
+        covering_item = None
+        if eq and part_obj is not None:
+            coverage = getattr(eq, "body_part_coverage", None) or {}
+            covering_item = coverage.get(part_obj.name)
+        if covering_item is None:
+            covering_item = self._get_eq_item(slot_i)
+
+        raw_armor_defense = 0
+        if covering_item is not None and getattr(covering_item, "equippable", None):
+            raw_armor_defense = int(getattr(covering_item.equippable, "defense_bonus", 0) or 0)
+            armor_tags = {
+                str(t).lower().strip()
+                for t in getattr(covering_item, "tags", [])
+                if str(t).strip()
+            }
+            if armor_tags:
+                try:
+                    armor_prof_mult = float(profsys.armor_profile(player, armor_tags).defense_bonus_multiplier)
+                except Exception:
+                    armor_prof_mult = 1.0
+
+        # get_defense_for_part already includes proficiency scaling.
+        effective_armor = armor_defense
+
+        subtotal = base_defense + part_prot + effect_armor_bonus
+        total_defense = int((subtotal * defense_multiplier) + effective_armor)
+
+        hp_text = "No HP"
+        if part_obj is not None:
+            cur_hp = int(getattr(part_obj, "current_hp", 0) or 0)
+            max_hp = int(getattr(part_obj, "max_hp", 0) or 0)
+            hp_state = str(getattr(part_obj, "damage_level_text", ""))
+            hp_text = f"HP {cur_hp}/{max_hp} {hp_state}" if max_hp > 0 else hp_state
+
+        rows = []
+        if base_defense != 0:
+            rows.append(("Base Defense", str(base_defense)))
+        if part_prot != 0:
+            rows.append(("Part Prot.", f"+{part_prot}"))
+        if effect_armor_bonus != 0:
+            rows.append(("Effect Bonus", f"+{effect_armor_bonus}"))
+        shown_armor = raw_armor_defense if abs(armor_prof_mult - 1.0) > 0.01 else effective_armor
+        if shown_armor != 0:
+            rows.append(("Armor", f"+{shown_armor}"))
+        if armor_defense > 0 and abs(armor_prof_mult - 1.0) > 0.01:
+            rows.append(("Proficiency", f"x{armor_prof_mult:.2f}"))
+        if defense_multiplier != 1.0:
+            rows.append(("Def. Mult.", f"x{defense_multiplier:.2f}"))
+        rows.append(("Total", str(total_defense)))
+        if part_obj is not None:
+            cur_hp = int(getattr(part_obj, "current_hp", 0) or 0)
+            max_hp = int(getattr(part_obj, "max_hp", 0) or 0)
+            rows.append(("HP", f"{cur_hp}/{max_hp}"))
+
+        return {
+            "part_name": part_name,
+            "total": total_defense,
+            "hp_text": hp_text,
+            "rows": rows,
+        }
+
+    def _resize_tooltip_console(self, title: str, rows: list[tuple[str, str]]) -> None:
+        """Resize tooltip console to fit title and row content."""
+        title_text = str(title or "Breakdown")
+        safe_rows = rows or []
+
+        # Compute the longest rendered line including label, separator, and value.
+        content_width = 0
+        for label, value in safe_rows:
+            line_w = len(str(label)) + 2 + len(str(value))
+            if line_w > content_width:
+                content_width = line_w
+
+        # Frame + side padding, with sensible clamps for the 80x50 UI.
+        inner_w = max(len(title_text) + 2, content_width + 2, 12)
+        width = max(16, min(40, inner_w + 2))
+
+        # Top border, title row area, content rows, and bottom border.
+        # Add one extra rendered line for each internal "Total" separator.
+        separator_rows = sum(
+            1 for i, (label, _value) in enumerate(safe_rows)
+            if i > 0 and str(label).strip().lower() == "total"
+        )
+        height = max(5, min(22, 3 + len(safe_rows) + separator_rows))
+
+        if self._tooltip_console.width != width or self._tooltip_console.height != height:
+            self._tooltip_console = tcod.console.Console(width, height, order="F")
+
+    def _render_tooltip(self) -> None:
+        """Render stat breakdown tooltip to _tooltip_console."""
+        if not hasattr(self, '_tooltip_breakdown'):
+            return
+        
+        tc = self._tooltip_console
+        tc.clear()
+        
+        # Use game color scheme
+        border_color = (120, 90, 40)  # _BORDER_DIM
+        bg_color = (22, 15, 10)  # _PANEL_BG
+        text_color = (180, 140, 70)  # _SLOT_LABEL
+        value_color = (255, 220, 80)  # _TITLE_FG
+        total_label_color = (255, 245, 160)
+        total_value_color = (255, 255, 210)
+        total_sep_color = (120, 95, 45)
+        
+        # Fill background
+        tc.tiles_rgb["bg"][:, :] = bg_color
+        
+        # Draw border
+        w, h = tc.width, tc.height
+        tc.draw_frame(0, 0, w, h, fg=border_color, bg=bg_color)
+        
+        # Title
+        _title = str(getattr(self, "_tooltip_title", "Breakdown") or "Breakdown")
+        tc.print(1, 0, f" {_title} ", fg=value_color, bg=bg_color)
+        
+        # Draw breakdown lines
+        y = 2
+        for i, (label, value) in enumerate(self._tooltip_breakdown):
+            if y >= h - 1:
+                break
+            is_total_row = str(label).strip().lower() == "total"
+            if is_total_row and i > 0 and y < h - 1:
+                # Add a subtle separator so the final total is easier to scan.
+                tc.print(1, y, "-" * max(0, (w - 2)), fg=total_sep_color, bg=bg_color)
+                y += 1
+                if y >= h - 1:
+                    break
+            row_label_color = total_label_color if is_total_row else text_color
+            row_value_color = total_value_color if is_total_row else value_color
+            tc.print(2, y, f"{label}:", fg=row_label_color, bg=bg_color)
+            value_str = str(value)
+            tc.print(w - len(value_str) - 2, y, value_str, fg=row_value_color, bg=bg_color)
+            y += 1
 
     # ─────────────────────────────────────────────────────────────────────────
     # Event handlers
@@ -822,6 +1199,41 @@ class InventoryGridUI(PopupEventHandler):
         tx, ty = int(event.tile.x), int(event.tile.y)
         self._drag_tile  = (tx, ty)
         self._drag_pixel = (int(event.pixel.x), int(event.pixel.y))
+
+        if self._alt_damage_view:
+            self._tooltip_visible = False
+        
+        # Check if hovering over ATK/DEF stats for tooltip
+        # Equipment qty console starts at (_EQ_GRID_ORI_X, _EQ_GRID_ORI_Y) in 80×50 space
+        # and is (_EQ_GRID_COLS * _GRID_SCALE) × (_EQ_GRID_ROWS * _GRID_SCALE) tiles.
+        eq_qty_x = tx - _EQ_GRID_ORI_X
+        eq_qty_y = ty - _EQ_GRID_ORI_Y
+        
+        # Check if within equipment qty console bounds
+        if (not self._alt_damage_view
+                and 0 <= eq_qty_x < (_EQ_GRID_COLS * _GRID_SCALE)
+                and 0 <= eq_qty_y < (_EQ_GRID_ROWS * _GRID_SCALE)):
+            # Check ATK stat hover
+            if hasattr(self, '_stat_atk_region'):
+                sx, sy, sw, sh = self._stat_atk_region
+                if sx <= eq_qty_x < sx + sw and sy <= eq_qty_y < sy + sh:
+                    self._tooltip_visible = True
+                    self._tooltip_breakdown = self._stat_breakdown_atk
+                    self._tooltip_title = "Attack"
+                    self._resize_tooltip_console(self._tooltip_title, self._tooltip_breakdown)
+                    # Position left of cursor, moves horizontally with mouse
+                    tooltip_x = tx - self._tooltip_console.width - 2
+                    tooltip_y = ty - 2
+                    # Clamp to screen bounds only (tooltip renders on top of everything now)
+                    tooltip_x = max(1, min(tooltip_x, 80 - self._tooltip_console.width - 1))
+                    tooltip_y = max(1, min(tooltip_y, 50 - self._tooltip_console.height - 1))
+                    self._tooltip_screen_x = tooltip_x
+                    self._tooltip_screen_y = tooltip_y
+                    self._render_tooltip()
+                    return
+        
+        # Not hovering over stats, hide tooltip
+        self._tooltip_visible = False
 
         # Update hover selection
         cell = self._hit_inv_cell(tx, ty)
@@ -844,6 +1256,22 @@ class InventoryGridUI(PopupEventHandler):
                 self._sel_eq  = slot_i
                 self._sel_inv = -1
                 sounds.play_ui_move_sound()
+            part_def = None if self._alt_damage_view else self._get_slot_defense_data(slot_i)
+            if part_def:
+                self._tooltip_visible = True
+                self._tooltip_breakdown = part_def["rows"]
+                self._tooltip_title = part_def["part_name"].replace("_", " ").title()
+                self._resize_tooltip_console(self._tooltip_title, self._tooltip_breakdown)
+                tooltip_x = _EQ_GRID_ORI_X + (_EQ_GRID_COLS * _GRID_SCALE) + 2
+                # Keep part-defense tooltip off the equipment body/item area.
+                tooltip_y = _INFO_Y
+                tooltip_x = max(1, min(tooltip_x, 80 - self._tooltip_console.width - 1))
+                tooltip_y = max(1, min(tooltip_y, 50 - self._tooltip_console.height - 1))
+                self._tooltip_screen_x = tooltip_x
+                self._tooltip_screen_y = tooltip_y
+                self._render_tooltip()
+            else:
+                self._tooltip_visible = False
             return
 
         # Mouse is not over any interactive cell — clear highlight
@@ -1033,7 +1461,7 @@ class InventoryGridUI(PopupEventHandler):
 
         groups = inv.get_display_groups()
         valid_unequipped = {id(g['item']): g for g in groups
-                            if not eq.item_is_equipped(g['item'])}
+                    if not eq.item_is_equipped(g['item'])}
 
         # Phase 1
         slotted: set = set()
@@ -1043,18 +1471,8 @@ class InventoryGridUI(PopupEventHandler):
             if id(s) in valid_unequipped:
                 slotted.add(id(s))
             else:
-                # Stale entry — try in-place replacement with same display type
-                stale_key = inv._get_item_display_key(s)
-                replacement = None
-                for gid, g in valid_unequipped.items():
-                    if gid not in slotted and inv._get_item_display_key(g['item']) == stale_key:
-                        replacement = g['item']
-                        break
-                if replacement is not None:
-                    inv.item_slots[i] = replacement
-                    slotted.add(id(replacement))
-                else:
-                    inv.item_slots[i] = None
+                # No grouping/stacking fallback: stale entries are simply cleared.
+                inv.item_slots[i] = None
 
         # Phase 2: place unslotted items at first free slot from 0
         for gid, g in valid_unequipped.items():
@@ -1122,12 +1540,11 @@ class InventoryGridUI(PopupEventHandler):
         slots[src_slot], slots[dst_slot] = slots[dst_slot], slots[src_slot]
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[object]:
-        global _ALT_DAMAGE_VIEW
         key = event.sym
 
         # Alt toggles the damage-view overlay (persistent across inventory opens)
         if key in (tcod.event.KeySym.LALT, tcod.event.KeySym.RALT):
-            _ALT_DAMAGE_VIEW = not _ALT_DAMAGE_VIEW
+            self._alt_damage_view = not self._alt_damage_view
             return None
 
         if key == tcod.event.K_ESCAPE:
@@ -1229,15 +1646,78 @@ class InventoryGridUI(PopupEventHandler):
         return None
 
 
+class RemoveCurseEquipmentGridUI(InventoryGridUI):
+    """Remove Curse target picker using the modern inventory+equipment grid UI."""
+
+    def __init__(self, engine: "Engine", caster, spell) -> None:
+        super().__init__(engine)
+        self._caster = caster
+        self._spell = spell
+        self.engine.context_hints = [
+            ("Click/Enter", "Target Equipped Cursed Item"),
+            ("Esc", "Cancel"),
+        ]
+
+        first_cursed = self._find_first_cursed_slot()
+        self._sel_inv = -1
+        self._sel_eq = first_cursed if first_cursed is not None else 0
+
+    def _find_first_cursed_slot(self) -> Optional[int]:
+        for slot_i in range(len(_EQ_SLOTS)):
+            item = self._get_eq_item(slot_i)
+            if item is not None and getattr(item, "_is_cursed", lambda: False)():
+                return slot_i
+        return None
+
+    def _try_remove_curse_on_selected(self) -> Optional[object]:
+        import exceptions
+
+        if self._sel_eq < 0:
+            self.engine.message_log.add_message("Select an equipped cursed item.", color.impossible)
+            return None
+
+        item = self._get_eq_item(self._sel_eq)
+        if item is None:
+            self.engine.message_log.add_message("No item equipped in that slot.", color.impossible)
+            return None
+
+        if not getattr(item, "_is_cursed", lambda: False)():
+            self.engine.message_log.add_message("That item is not cursed.", color.impossible)
+            return None
+
+        try:
+            self.engine.execute_action(
+                actions.RemoveCurseAction(self._caster, self._spell, item),
+                is_player_action=False,
+            )
+        except exceptions.Impossible as exc:
+            self.engine.message_log.add_message(exc.args[0], color.impossible)
+            return None
+        return self.on_exit()
+
+    def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[object]:
+        tx, ty = int(event.tile.x), int(event.tile.y)
+
+        slot_i = self._hit_eq_slot(tx, ty)
+        if slot_i is not None and event.button == tcod.event.BUTTON_LEFT:
+            self._sel_eq = slot_i
+            self._sel_inv = -1
+            return self._try_remove_curse_on_selected()
+
+        return super().ev_mousebuttondown(event)
+
+    def _activate_selected(self) -> Optional[object]:
+        return self._try_remove_curse_on_selected()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Container grid UI — two-panel grid (player inv left, container right)
 # ─────────────────────────────────────────────────────────────────────────────
 #  Col 0      : left border
-#  Cols 1–15  : player inventory grid  (5 cols × 3 scale = 15 panel cols)
-#  Col 16     : vertical divider
-#  Cols 17–31 : container grid         (5 cols × 3 scale = 15 panel cols)
-#  Col 32     : scroll indicator space
-#  Col 33     : right border
+#  Cols 1–21  : player inventory grid  (7 cols × 3 scale = 21 panel cols)
+#  Col 22     : vertical divider
+#  Cols 23–43 : container grid         (7 cols × 3 scale = 21 panel cols)
+#  Col 44     : scroll indicator space
+#  Col 45     : right border
 #  Row 0      : top border + titles
 #  Row 1      : panel hint labels
 #  Row 2      : horizontal separator
@@ -1246,17 +1726,17 @@ class InventoryGridUI(PopupEventHandler):
 #  Rows 31–34 : info strip
 #  Row 35     : bottom border
 
-_CC_W: int           = 34
+_CC_W: int           = 46
 _CC_H: int           = 36
-_CC_BLIT_X: int      = (80 - _CC_W) // 2   # = 23
+_CC_BLIT_X: int      = (80 - _CC_W) // 2   # = 17
 _CC_BLIT_Y: int      = (50 - _CC_H) // 2   # = 7
 _CC_GRID_SCALE: int  = 3
-_CC_GRID_COLS: int   = 5
+_CC_GRID_COLS: int   = 7
 _CC_GRID_ROWS: int   = 9
 _CC_LEFT_ORI: int    = 1    # player grid start col
-_CC_RIGHT_ORI: int   = 17   # container grid start col
+_CC_RIGHT_ORI: int   = 23   # container grid start col
 _CC_GRID_ROW_ORI: int = 3   # both grids' first row
-_CC_DIV_X: int       = 16   # vertical divider col
+_CC_DIV_X: int       = 22   # vertical divider col
 _CC_INFO_SEP_Y: int  = 30   # separator above info strip
 _CC_INFO_Y: int      = 31   # first info content row
 
@@ -1420,17 +1900,8 @@ class ContainerGridUI(PopupEventHandler):
             if id(s) in valid:
                 slotted.add(id(s))
             else:
-                stale_key = inv._get_item_display_key(s)
-                replacement = None
-                for gid, g in valid.items():
-                    if gid not in slotted and inv._get_item_display_key(g['item']) == stale_key:
-                        replacement = g['item']
-                        break
-                if replacement is not None:
-                    inv.item_slots[i] = replacement
-                    slotted.add(id(replacement))
-                else:
-                    inv.item_slots[i] = None
+                # De-stacked inventory: slots track concrete item instances only.
+                inv.item_slots[i] = None
         for gid, g in valid.items():
             rep = g['item']
             if id(rep) in slotted:
@@ -1605,11 +2076,23 @@ class ContainerGridUI(PopupEventHandler):
                     gc.print(px, py, f"x{qty}", fg=(255, 230, 120), bg=(0, 0, 0))
                 # Enchantment level — bottom-right, cyan
                 enc = getattr(item, 'enchantment_level', 0)
-                if enc and enc > 0:
+                if enc and enc > 0 and _should_show_enchant_label(self.engine.player, item):
                     import roman as _roman
                     enc_label = f"+{_roman.toRoman(enc)}".rjust(_CC_GRID_SCALE)
                     gc.print(px, py + _CC_GRID_SCALE - 1, enc_label,
                              fg=(120, 200, 255), bg=(0, 0, 0))
+                progress = identify_system.get_progress(self.engine.player, item)
+                if progress:
+                    pct_label = f"{int(progress['percent'])}%"
+                    if len(pct_label) > _CC_GRID_SCALE:
+                        pct_label = "99%"
+                    gc.print(
+                        px + max(0, _CC_GRID_SCALE - len(pct_label)),
+                        py + (_CC_GRID_SCALE // 2),
+                        pct_label,
+                        fg=_identify_progress_fg(float(progress.get('percent', 0.0))),
+                        bg=(0, 0, 0),
+                    )
 
     def _fill_container_qty_console(self) -> None:
         gc = self._container_qty_console
@@ -1629,7 +2112,7 @@ class ContainerGridUI(PopupEventHandler):
                 if qty > 1:
                     gc.print(px, py, f"x{qty}", fg=(255, 230, 120), bg=(0, 0, 0))
                 enc = getattr(item, 'enchantment_level', 0)
-                if enc and enc > 0:
+                if enc and enc > 0 and _should_show_enchant_label(self.engine.player, item):
                     import roman as _roman
                     enc_label = f"+{_roman.toRoman(enc)}".rjust(_CC_GRID_SCALE)
                     gc.print(px, py + _CC_GRID_SCALE - 1, enc_label,
@@ -1668,10 +2151,12 @@ class ContainerGridUI(PopupEventHandler):
 
                 if is_filled:
                     item_ch      = getattr(item, "char", "?")
-                    item_col     = getattr(item, "color", (200, 180, 100))
-                    rar_col      = getattr(item, "rarity_color", cell_bg)
+                    item_col     = identify_system.get_display_color(self.engine.player, item)
+                    rar_col      = identify_system.get_display_rarity_color(self.engine.player, item)
                     tinted_bg    = tuple(min(255, int(b * 75 // 100 + r * 25 // 100))
                                         for b, r in zip(cell_bg, rar_col))
+                    if src_key == "player" and identify_system.get_progress(self.engine.player, item):
+                        item_col = _darken_identifying_fg(item_col)
                     if is_drag_src:
                         item_col = tuple(max(0, v - 80) for v in item_col)
                     gc.print(col, row, item_ch, fg=item_col, bg=tinted_bg)
@@ -1740,7 +2225,7 @@ class ContainerGridUI(PopupEventHandler):
             c.print(_CC_DIV_X, _CC_GRID_ROW_ORI, "↑", fg=_BORDER_BRIGHT, bg=_BG)
         if self._player_scroll < p_max_s:
             c.print(_CC_DIV_X, _CC_INFO_SEP_Y - 1, "↓", fg=_BORDER_BRIGHT, bg=_BG)
-        _scroll_r = _CC_W - 2   # col 32
+        _scroll_r = _CC_W - 2   # right-side scroll indicator column
         if self._container_scroll > 0:
             c.print(_scroll_r, _CC_GRID_ROW_ORI, "↑", fg=_BORDER_BRIGHT, bg=_BG)
         if self._container_scroll < c_max_s:
@@ -1775,9 +2260,9 @@ class ContainerGridUI(PopupEventHandler):
                     fg=_HINT_FG, bg=_BG)
             return
 
-        name = item.name[:(_CC_W - 4)]
+        name = identify_system.get_display_name(self.engine.player, item)[:(_CC_W - 4)]
         c.print(2, _CC_INFO_Y, name,
-                fg=getattr(item, "rarity_color", (220, 190, 120)), bg=_BG)
+            fg=identify_system.get_display_rarity_color(self.engine.player, item), bg=_BG)
 
         parts: list[str] = []
         if getattr(item, "equippable", None):
@@ -1975,6 +2460,7 @@ class ContainerGridUI(PopupEventHandler):
                 pass
         try:
             self.engine.player.inventory.items.remove(item)
+            identify_system.cancel_identification_for_item(self.engine.player, item, engine=self.engine, quiet=True)
         except ValueError:
             return
         self._clear_from_inv_slots(item)
@@ -1992,9 +2478,10 @@ class ContainerGridUI(PopupEventHandler):
             item.parent = self.container
         except Exception:
             pass
+        shown_name = identify_system.get_display_name(self.engine.player, item)
         c_name = getattr(self.container.parent, "name", "container")
         self.engine.message_log.add_message(
-            f"You place the {item.name} in the {c_name}.")
+            f"You place the {shown_name} in the {c_name}.")
         if hasattr(item, "drop_sound") and item.drop_sound is not None:
             try:
                 item.drop_sound()
@@ -2072,8 +2559,9 @@ class ContainerGridUI(PopupEventHandler):
                             ammo_templates[ammo_type] = _copy.deepcopy(item)
                         except Exception:
                             pass
+                    shown_name = identify_system.get_display_name(self.engine.player, item)
                     self.engine.message_log.add_message(
-                        f"You add {item.name} to your quiver ({current + 1}/{capacity})."
+                        f"You add {shown_name} to your quiver ({current + 1}/{capacity})."
                     )
                     if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
                         try:
@@ -2099,7 +2587,8 @@ class ContainerGridUI(PopupEventHandler):
             item.parent = self.engine.player.inventory
         except Exception:
             pass
-        self.engine.message_log.add_message(f"You take the {item.name}.")
+        shown_name = identify_system.get_display_name(self.engine.player, item)
+        self.engine.message_log.add_message(f"You take the {shown_name}.")
         if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
             try:
                 item.pickup_sound()
@@ -2314,9 +2803,9 @@ class TradeGridUI(ContainerGridUI):
             c.print(2, _CC_INFO_Y + 1, f"Gold: {gold}", fg=gold_fg, bg=_BG)
             return
 
-        name = item.name[:(_CC_W - 4)]
+        name = identify_system.get_display_name(self.engine.player, item)[:(_CC_W - 4)]
         c.print(2, _CC_INFO_Y, name,
-                fg=getattr(item, "rarity_color", (220, 190, 120)), bg=_BG)
+            fg=identify_system.get_display_rarity_color(self.engine.player, item), bg=_BG)
 
         if is_buy:
             price     = int(item.value * self.BUY_MULT)
@@ -2339,6 +2828,7 @@ class TradeGridUI(ContainerGridUI):
         if self.engine.player.equipment.item_is_equipped(item):
             self.engine.player.equipment.unequip_item(item, add_message=True)
         self.engine.player.inventory.items.remove(item)
+        identify_system.cancel_identification_for_item(self.engine.player, item, engine=self.engine, quiet=True)
         self._clear_from_inv_slots(item)
         self.container.items.append(item)
         item.parent = self.container
@@ -2356,15 +2846,17 @@ class TradeGridUI(ContainerGridUI):
         sounds.play_equip_manycoins_sound()
         if hasattr(item, "drop_sound") and item.drop_sound is not None:
             item.drop_sound()
+        shown_name = identify_system.get_display_name(self.engine.player, item)
         self.engine.message_log.add_message(
-            f"You sell the {item.name} for {sell_price}gp.")
+            f"You sell the {shown_name} for {sell_price}gp.")
 
     def _transfer_to_player(self, item: "Item") -> None:
         """Buy item: deduct gold at 150 % value, add item to player inventory."""
         buy_price = int(item.value * self.BUY_MULT)
         if self.engine.player.gold < buy_price:
+            shown_name = identify_system.get_display_name(self.engine.player, item)
             self.engine.message_log.add_message(
-                f"You need {buy_price}gp to buy the {item.name}.",
+                f"You need {buy_price}gp to buy the {shown_name}.",
                 color.error)
             return
         
@@ -2417,8 +2909,9 @@ class TradeGridUI(ContainerGridUI):
                     sounds.play_equip_manycoins_sound()
                     if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
                         item.pickup_sound()
+                    shown_name = identify_system.get_display_name(self.engine.player, item)
                     self.engine.message_log.add_message(
-                        f"You buy {item.name} and add it to your quiver ({current + 1}/{capacity}) for {buy_price}gp."
+                        f"You buy {shown_name} and add it to your quiver ({current + 1}/{capacity}) for {buy_price}gp."
                     )
                     return
         
@@ -2437,8 +2930,9 @@ class TradeGridUI(ContainerGridUI):
         sounds.play_equip_manycoins_sound()
         if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
             item.pickup_sound()
+        shown_name = identify_system.get_display_name(self.engine.player, item)
         self.engine.message_log.add_message(
-            f"You buy the {item.name} for {buy_price}gp.")
+            f"You buy the {shown_name} for {buy_price}gp.")
 
     # ── Override drag: suppress merchant-panel reorder ────────────────────────
 
@@ -2532,15 +3026,15 @@ _COOKING_RECIPES: list = [
 ]
 
 # Layout constants (reuse ContainerGridUI values where identical)
-_CK_W            = _CC_W             # 34  — chrome console width
+_CK_W            = _CC_W             # 46  — chrome console width
 _CK_H            = _CC_H             # 36  — chrome console height
-_CK_BLIT_X       = _CC_BLIT_X        # 23  — blit position in 80×50
+_CK_BLIT_X       = _CC_BLIT_X        # 17  — blit position in 80×50
 _CK_BLIT_Y       = _CC_BLIT_Y        # 7
 _CK_GRID_SCALE   = _CC_GRID_SCALE    # 3   — GPU upscale factor
-_CK_LEFT_COLS    = _CC_GRID_COLS     # 5   — player-inventory grid columns
+_CK_LEFT_COLS    = _CC_GRID_COLS     # 7   — player-inventory grid columns
 _CK_LEFT_ROWS    = _CC_GRID_ROWS     # 9   — player-inventory grid rows
 _CK_LEFT_ORI     = _CC_LEFT_ORI      # 1   — panel col where player grid starts
-_CK_DIV_X        = _CC_DIV_X         # 16  — vertical divider panel col
+_CK_DIV_X        = _CC_DIV_X         # 22  — vertical divider panel col
 # Triangle grid: 3 cols × 6 rows — slot positions (col, row)
 # (0,0)=ingr0   (2,0)=ingr1
 #  gap row 1
@@ -2549,8 +3043,10 @@ _CK_DIV_X        = _CC_DIV_X         # 16  — vertical divider panel col
 #      (1,5)=output
 _CK_SLOT_COLS    = 3
 _CK_SLOT_ROWS    = 6
-# Right-panel area = cols 17-32 (16 wide); 3 cols × 3 scale = 9; centre → start at 20
-_CK_SLOT_ORI     = 20               # cooking grid start col in panel space
+# Right-panel area starts at _CK_DIV_X+1; center 9-wide slot grid there.
+_CK_RIGHT_INNER_X = _CK_DIV_X + 1
+_CK_RIGHT_INNER_W = (_CK_W - 1) - _CK_RIGHT_INNER_X
+_CK_SLOT_ORI     = _CK_RIGHT_INNER_X + (_CK_RIGHT_INNER_W - (_CK_SLOT_COLS * _CK_GRID_SCALE)) // 2
 _CK_SLOT_MAP     = {(0,0):0, (2,0):1, (1,2):2, (1,5):3}  # (col,row)→slot idx
 _CK_GRID_ROW_ORI = _CC_GRID_ROW_ORI  # 3   — first grid row in panel space
 _CK_INFO_SEP_Y   = _CC_INFO_SEP_Y    # 30
@@ -2826,10 +3322,12 @@ class CookingUI(PopupEventHandler):
                 if is_filled:
                     item     = grp["item"]
                     item_ch  = getattr(item, "char", "?")
-                    item_col = getattr(item, "color", (200, 180, 100))
-                    rar_col  = getattr(item, "rarity_color", cell_bg)
+                    item_col = identify_system.get_display_color(self.engine.player, item)
+                    rar_col  = identify_system.get_display_rarity_color(self.engine.player, item)
                     tinted   = tuple(min(255, int(b * 75 // 100 + r * 25 // 100))
                                      for b, r in zip(cell_bg, rar_col))
+                    if identify_system.get_progress(self.engine.player, item):
+                        item_col = _darken_identifying_fg(item_col)
                     if is_drag_s:
                         item_col = tuple(max(0, v - 80) for v in item_col)
                     gc.print(col, row, item_ch, fg=item_col, bg=tinted)
@@ -2856,11 +3354,23 @@ class CookingUI(PopupEventHandler):
                 if qty > 1:
                     gc.print(px, py, f"x{qty}", fg=(255, 230, 120), bg=(0, 0, 0))
                 enc = getattr(grp["item"], "enchantment_level", 0)
-                if enc:
+                if enc and _should_show_enchant_label(self.engine.player, grp["item"]):
                     import roman as _roman
                     gc.print(px, py + _CK_GRID_SCALE - 1,
                              f"+{_roman.toRoman(enc)}".rjust(_CK_GRID_SCALE),
                              fg=(120, 200, 255), bg=(0, 0, 0))
+                progress = identify_system.get_progress(self.engine.player, grp["item"])
+                if progress:
+                    pct_label = f"{int(progress['percent'])}%"
+                    if len(pct_label) > _CK_GRID_SCALE:
+                        pct_label = "99%"
+                    gc.print(
+                        px + max(0, _CK_GRID_SCALE - len(pct_label)),
+                        py + (_CK_GRID_SCALE // 2),
+                        pct_label,
+                        fg=_identify_progress_fg(float(progress.get('percent', 0.0))),
+                        bg=(0, 0, 0),
+                    )
 
     def _fill_cooking_grid(self) -> None:
         gc = self._container_grid_console
@@ -2897,8 +3407,8 @@ class CookingUI(PopupEventHandler):
 
             if item is not None:
                 item_ch  = getattr(item, "char", "?")
-                item_col = getattr(item, "color", (200, 180, 100))
-                rar_col  = getattr(item, "rarity_color", cell_bg)
+                item_col = identify_system.get_display_color(self.engine.player, item)
+                rar_col  = identify_system.get_display_rarity_color(self.engine.player, item)
                 tinted   = tuple(min(255, int(b * 75 // 100 + r2 * 25 // 100))
                                  for b, r2 in zip(cell_bg, rar_col))
                 if is_drag_s:
@@ -2998,8 +3508,8 @@ class CookingUI(PopupEventHandler):
             return
 
         c.print(2, _CK_INFO_Y,
-                item.name[:(_CK_W - 4)],
-                fg=getattr(item, "rarity_color", (220, 190, 120)), bg=_BG)
+            identify_system.get_display_name(self.engine.player, item)[:(_CK_W - 4)],
+                fg=identify_system.get_display_rarity_color(self.engine.player, item), bg=_BG)
 
         parts: list = []
         if getattr(item, "consumable", None):
@@ -3148,6 +3658,7 @@ class CookingUI(PopupEventHandler):
                         except Exception:
                             pass
                 self.engine.player.inventory.items.remove(item)
+                identify_system.cancel_identification_for_item(self.engine.player, item, engine=self.engine, quiet=True)
                 self._cooking_slots[slot_idx] = item
                 item.parent = None
                 self._output_item = None   # invalidate cached result
@@ -3193,6 +3704,7 @@ class CookingUI(PopupEventHandler):
         for i in range(self._N_INPUTS):
             if self._cooking_slots[i] is None:
                 self.engine.player.inventory.items.remove(item)
+                identify_system.cancel_identification_for_item(self.engine.player, item, engine=self.engine, quiet=True)
                 self._cooking_slots[i] = item
                 item.parent      = None
                 self._output_item = None
