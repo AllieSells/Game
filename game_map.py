@@ -172,7 +172,9 @@ class GameMap:
         if light_color is not None:
             _lc = tuple(c / 255.0 if c > 1.0 else float(c) for c in light_color[:3])
 
-        # Fast path: GPU shader handles falloff/shadows; skip all CPU work.
+        # Fast path: GPU shader handles falloff/shadows; skip expensive FOV compute.
+        # Still update tiles["light_level"] without FOV so game-logic consumers
+        # (e.g. Darkness effect check in engine.py) see correct light values.
         if gpu_only:
             self._active_lights.append(
                 {
@@ -184,6 +186,14 @@ class GameMap:
                     "color": _lc,
                 }
             )
+            eff_x = source_x + wobble_dx
+            eff_y = source_y + wobble_dy
+            xs = np.arange(0, self.width)
+            ys = np.arange(0, self.height)
+            r_sq = (xs[:, None] - eff_x) ** 2 + (ys[None, :] - eff_y) ** 2
+            sq_r = float(radius * radius)
+            falloff = np.where(r_sq <= sq_r, np.clip((sq_r - r_sq) / sq_r + di, 0.0, max_intensity), 0.0)
+            self.tiles["light_level"] = np.minimum(1.0, self.tiles["light_level"] + falloff)
             return
 
         try:

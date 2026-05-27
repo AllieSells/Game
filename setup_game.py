@@ -1623,9 +1623,9 @@ class MainMenu(input_handlers.BaseEventHandler):
             alignment=tcod.CENTER,
         )
         console.print(
-            x + (window_width // 2) + 28,
+            x + (window_width // 2) + 32,
             footer_y + 21,
-            "2026 - Early Beta",
+            "Pre-Alpha 0.20.2",
             fg=color.gold_accent,
             bg=None,
             alignment=tcod.CENTER,
@@ -1711,9 +1711,9 @@ class MainMenu(input_handlers.BaseEventHandler):
             alignment=tcod.CENTER,
         )
         console.print(
-            x + (window_width // 2) + 28,
+            x + (window_width // 2) + 32,
             footer_y + 21,
-            "2026 - Early Beta Release",
+            "Pre-Alpha 0.20.2",
             fg=color.gold_accent,
             # No background
             bg=None,

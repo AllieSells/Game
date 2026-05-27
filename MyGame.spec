@@ -29,8 +29,15 @@ hiddenimports = [imp for imp in hiddenimports if imp not in ['inflect', 'typegua
 datas = []
 # PNG files
 datas += [(f, '.') for f in glob.glob(os.path.join(project_folder, '*.png'))]
-# JSON files (loot tables)
+# JSON files at project root
 datas += [(f, '.') for f in glob.glob(os.path.join(project_folder, '*.json'))]
+# JSON files in json/ subfolder
+for root, dirs, files in os.walk(os.path.join(project_folder, 'json')):
+    for file in files:
+        if file.endswith('.json'):
+            file_path = os.path.join(root, file)
+            rel_path = os.path.relpath(file_path, project_folder)
+            datas.append((file_path, os.path.dirname(rel_path)))
 # RP folder (sounds, sprites, etc.) - recursively include all files and subfolders
 for root, dirs, files in os.walk(os.path.join(project_folder, 'RP')):
     for file in files:

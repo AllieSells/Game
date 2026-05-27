@@ -105,7 +105,7 @@ class LightingShaderConfig:
     shadow_max_samples: int = 80  # Maximum ray samples per light
     shadow_threshold: float = 0.015  # Early exit when shadow gets this dark
     shadow_min_distance: float = 0.5  # Don't trace shadows for lights closer than this (tiles)
-    shadow_softness: float = 0.9  # Shadow edge diffusion (0.0=no shadow, 1.0=hard, 0.5=soft)
+    shadow_softness: float = 0.2  # Shadow edge diffusion (0.0=no shadow, 1.0=hard, 0.5=soft)
 
 
 # =============================================================================
