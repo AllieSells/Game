@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile sprite_manager.py)",
+      "Bash(python -m py_compile shader.py)",
+      "Bash(timeout 15 python main.py)"
+    ]
+  }
+}

@@ -92,6 +92,13 @@ class LightingShaderConfig:
     detail_factor_min: float = 0.55  # Darkest areas can darken to 55% of base brightness
     detail_factor_max: float = 1.35  # Brightest areas can brighten to 135% of base brightness
     
+    # Emissive light source parameters
+    emissive_lights_enabled: bool = True   # Whether emissive tiles spawn virtual light sources
+    emissive_light_radius: float = 1.0     # Radius in tiles (default: just the tile itself + immediate neighbours)
+    emissive_light_intensity: float = 0.4  # Peak intensity of emissive-spawned lights
+    emissive_light_min_luma: float = 0.05  # Minimum peak-pixel luma to spawn a light
+    emissive_light_tinted: bool = True     # Tint spawned light by the emissive color
+
     # Shadow ray-tracing parameters
     enable_shadows: bool = True  # Enable/disable ray-traced shadows
     shadow_step_size: float = 0.1  # Ray marching step size in tiles (smaller = smoother)
@@ -728,6 +735,55 @@ class LightingShaderEngine:
         x_idx = np.minimum((np.arange(out_w, dtype=np.int32) * in_w) // max(1, out_w), in_w - 1)
         return src[y_idx[:, None], x_idx[None, :], :]
 
+    def _build_emissive_lights(self, console, origin_x: int, origin_y: int, view_w: int, view_h: int, game_map) -> list[dict]:
+        """Synthesize virtual light sources from visible emissive tiles."""
+        if not self.config.emissive_lights_enabled:
+            return []
+        emissive_map = getattr(sprite_manager, "_emissive_by_cp", None)
+        if emissive_map is None:
+            return []
+        cp_overrides: dict = getattr(sprite_manager, "_emissive_light_config_by_cp", {})
+        visible = getattr(game_map, "visible", None)
+        cfg = self.config
+        lights: list[dict] = []
+        for ty in range(view_h):
+            for tx in range(view_w):
+                if visible is not None and not visible[origin_x + tx, origin_y + ty]:
+                    continue
+                cp = int(console.ch[tx, ty])
+                em = emissive_map.get(cp)
+                if em is None:
+                    continue
+                ov = cp_overrides.get(cp, {})
+                if not ov.get("enabled", True):
+                    continue
+                radius    = float(ov.get("radius",    cfg.emissive_light_radius))
+                intensity = float(ov.get("intensity", cfg.emissive_light_intensity))
+                min_luma  = float(ov.get("min_luma",  cfg.emissive_light_min_luma))
+                tinted    = bool( ov.get("tinted",    cfg.emissive_light_tinted))
+                per_pixel_luma = em[..., 0] * 0.299 + em[..., 1] * 0.587 + em[..., 2] * 0.114
+                peak_luma = float(np.max(per_pixel_luma))
+                if peak_luma < min_luma:
+                    continue
+                light: dict = {
+                    "x": origin_x + tx + 0.5,
+                    "y": origin_y + ty + 0.5,
+                    "radius": radius,
+                    "intensity": float(np.clip(peak_luma * intensity, 0.0, 1.0)),
+                    "is_white": not tinted,
+                }
+                if tinted:
+                    # Brightest pixel's color preserves hue for sparse emissives (eyes, runes)
+                    brightest_idx = int(np.argmax(per_pixel_luma))
+                    flat = em.reshape(-1, em.shape[-1])
+                    br = float(flat[brightest_idx, 0])
+                    bg = float(flat[brightest_idx, 1])
+                    bb = float(flat[brightest_idx, 2])
+                    peak = max(br, bg, bb, 1e-6)
+                    light["color"] = (br / peak, bg / peak, bb / peak)
+                lights.append(light)
+        return lights
+
     def _get_compat_material(self, cp: int, scale: int, out_h: int, out_w: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Return packed material channels with compatibility fallbacks for older sprite_manager builds."""
         get_packed = getattr(sprite_manager, "get_packed_material", None)
@@ -830,8 +886,9 @@ class LightingShaderEngine:
         
         # Early exit optimization: Check if scene has any lights
         active_lights = list(getattr(game_map, "_active_lights", []) or [])
+        # active_lights += self._build_emissive_lights(console, origin_x, origin_y, view_w, view_h, game_map)  # TODO: emissive mini-lights (backburner)
         has_lights = len(active_lights) > 0
-        
+
         # Skip atlas rebuild when visible scene inputs are unchanged.
         # Compare exact arrays (no hash collisions) and avoid per-frame .tobytes() copies.
         # IMPORTANT: console.ch is indexed in screen-space (0..view_w-1, 0..view_h-1).
@@ -886,11 +943,6 @@ class LightingShaderEngine:
             self._gpu_textures['normal_detail_atlas'].write(self._gpu_flipped_normal_detail)
             self._gpu_textures['specular_mask_atlas'].write(self._gpu_flipped_specular_mask)
             self._gpu_textures['transparency_atlas'].write(self._gpu_flipped_transparency)
-            print("EMISSION DEBUG:")
-            print("shape: ", self._gpu_flipped_emission.shape)
-            print("dtype: ", self._gpu_flipped_emission.dtype)
-            print("min/max: ", self._gpu_flipped_emission.min(), self._gpu_flipped_emission.max())
-
         _seg_t = _profile_mark("lm_gpu_atlas", _seg_t)
 
         
@@ -1079,11 +1131,20 @@ class LightingShaderEngine:
         if _SCIPY_AVAILABLE:
             from scipy.ndimage import gaussian_filter, zoom
 
-            # Blur ONLY in TILE space (critical fix)
             blurred = gaussian_filter(visibility_tile, sigma=0.8)
 
-            # Preserve hard visibility (never let blur reduce real vision)
+            # Preserve hard visibility (never let blur darken truly visible tiles)
             blurred = np.maximum(blurred, visibility_tile)
+
+            # Clamp to explored mask — blur must not bleed into unexplored tiles
+            blurred[~explored] = 0.0
+
+            # Explored-but-not-visible tiles must not exceed explored_mod;
+            # without this the blur from a visible neighbour makes walls see-through
+            not_visible_explored = explored & ~visible
+            blurred[not_visible_explored] = np.minimum(
+                blurred[not_visible_explored], self.config.explored_mod
+            )
 
             visibility_tile = blurred
 
@@ -1164,8 +1225,9 @@ class LightingShaderEngine:
         
         # Build light tile mask (EXACTLY matches CPU path)
         active_lights = list(getattr(game_map, "_active_lights", []) or [])
+        # active_lights += self._build_emissive_lights(console, origin_x, origin_y, view_w, view_h, game_map)  # TODO: emissive mini-lights (backburner)
         lit_tile_mask = np.zeros((view_h, view_w), dtype=bool)
-        
+
         # Optimization: Pre-compute light bounds and batch update mask
         for light in active_lights:
             radius = max(1.0, float(light.get("radius", 1.0) or 1.0))
@@ -1286,6 +1348,7 @@ class LightingShaderEngine:
         
         # Build light tile mask
         active_lights = list(getattr(game_map, "_active_lights", []) or [])
+        # active_lights += self._build_emissive_lights(console, origin_x, origin_y, view_w, view_h, game_map)  # TODO: emissive mini-lights (backburner)
         lit_tile_mask = np.zeros((view_h, view_w), dtype=bool)
         for light in active_lights:
             radius = max(1.0, float(light.get("radius", 1.0) or 1.0))
@@ -1516,6 +1579,7 @@ class LightingShaderEngine:
         explored_ratio = np.clip(explored_ratio, 0.0, float(self.config.explored_mod))
 
         active_lights = list(getattr(game_map, "_active_lights", []) or [])
+        # active_lights += self._build_emissive_lights(console, origin_x, origin_y, view_w, view_h, game_map)  # TODO: emissive mini-lights (backburner)
         visible_any = bool(np.any(visible))
 
         tile_x0 = (np.arange(view_w, dtype=np.int32) * tile_w) // scale

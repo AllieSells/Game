@@ -79,6 +79,28 @@ _specular_by_cp: dict[int, np.ndarray] = {}
 _normal_detail_by_cp: dict[int, np.ndarray] = {}
 # Per-codepoint specular mask: value = mask_f32[H,W]
 _specular_mask_by_cp: dict[int, np.ndarray] = {}
+# Per-codepoint emissive light overrides: keys are any subset of
+# {radius, intensity, min_luma, tinted, enabled}. Absent keys fall back to
+# the global LightingShaderConfig values.
+_emissive_light_config_by_cp: dict[int, dict] = {}
+
+
+def set_emissive_light_config(cp: int, **kwargs) -> None:
+    """Set per-codepoint emissive light overrides.
+
+    Supported keys: radius (float), intensity (float), min_luma (float),
+    tinted (bool), enabled (bool).  Call with no kwargs to clear overrides.
+
+    Example — make torch rune cast a warm wide glow:
+        set_emissive_light_config(tile_ids.TORCH_RUNE, radius=3.0, intensity=0.8)
+    Example — disable light emission for a purely decorative glow:
+        set_emissive_light_config(tile_ids.DECO_GLOW, enabled=False)
+    """
+    cp_i = int(cp)
+    if kwargs:
+        _emissive_light_config_by_cp[cp_i] = dict(kwargs)
+    else:
+        _emissive_light_config_by_cp.pop(cp_i, None)
 
 
 def _normalize_vec3(x: float, y: float, z: float) -> tuple[float, float, float]:
@@ -208,11 +230,6 @@ def _register_emissive(cp: int, emissive_pixels: np.ndarray) -> None:
     # Only register if there's actual emission (not pure black)
     if np.any(emissive_data > 1e-4):
         _emissive_by_cp[int(cp)] = emissive_data
-        # Debug: print first few emissive tiles
-        if len(_emissive_by_cp) <= 5:
-            max_val = np.max(emissive_data)
-            #print(f"[DEBUG] Registered emissive for cp 0x{cp:04X}, max value: {max_val:.4f}")
-    # If pure black, don't register anything (saves memory and makes debugging clearer)
 
 
 def _decode_specular_from_pixels(specular_pixels: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -488,14 +505,21 @@ def reset_sprite_cache() -> None:
     _entity_tile_prev_slots.clear()
     _deferred_tiles.clear()
     _deferred_pixel_store.clear()
+    # Only clear derived/composite data — material dicts loaded from disk by load_extras
+    # (_emissive_by_cp, _specular_by_cp, _normal_field_by_cp, etc.) are NOT cleared here
+    # because reset_sprite_cache is called after load_extras and would wipe tileset data.
     _avg_normal_by_cp.clear()
     _derived_avg_normal_cache.clear()
     _normal_field_by_cp.clear()
     _albedo_alpha_by_cp.clear()
-    _emissive_by_cp.clear()
-    _specular_by_cp.clear()
-    _normal_detail_by_cp.clear()
-    _specular_mask_by_cp.clear()
+    # Purge composite-range entries from emissive/specular dicts (runtime-generated).
+    # Base tile entries (loaded by load_extras) are preserved — reset_sprite_cache is
+    # called after load_extras and must not wipe tileset material data.
+    for _cp in range(COMPOSITE_START_CP, _composite_next):
+        _emissive_by_cp.pop(_cp, None)
+        _specular_by_cp.pop(_cp, None)
+        _normal_detail_by_cp.pop(_cp, None)
+        _specular_mask_by_cp.pop(_cp, None)
     _composite_next = COMPOSITE_START_CP
 
 
@@ -1429,6 +1453,12 @@ def begin_render_frame() -> None:
     can be reused immediately without permanently growing the tileset.
     """
     global _entity_tile_cache, _entity_tile_prev_slots
+    # Clear stale emissive/specular data from last frame's slots before recycling them.
+    for _cp in _entity_tile_prev_slots:
+        _emissive_by_cp.pop(_cp, None)
+        _specular_by_cp.pop(_cp, None)
+        _normal_detail_by_cp.pop(_cp, None)
+        _specular_mask_by_cp.pop(_cp, None)
     # Return last frame's slots to the pool.
     _entity_tile_free_list.extend(_entity_tile_prev_slots)
     # Save current frame's slots to free next time.
@@ -1516,6 +1546,46 @@ def compose_entity_tile(tile_cp: int, entity_cp: int, entity_tint) -> str:
         _avg_normal_by_cp[cp] = mix_n
         _register_normal_field(cp, comb, comb_alpha)
         _derived_avg_normal_cache.pop(cp, None)
+
+        # Blend emissive: entity emissive over base using entity alpha mask
+        h_px, w_px = result.shape[:2]
+        alpha2d = alpha[..., 0]  # (H, W) float32 in [0, 1]
+        base_em = _emissive_by_cp.get(tile_cp)
+        ent_em = _emissive_by_cp.get(entity_cp)
+        if base_em is not None or ent_em is not None:
+            if base_em is None:
+                base_em = np.zeros((h_px, w_px, 3), dtype=np.float32)
+            if ent_em is None:
+                ent_em = np.zeros((h_px, w_px, 3), dtype=np.float32)
+            comp_em = ent_em * alpha + base_em * (1.0 - alpha)
+            if np.any(comp_em > 1e-4):
+                _emissive_by_cp[cp] = comp_em
+            else:
+                _emissive_by_cp.pop(cp, None)
+
+        # Blend specular channels: entity over base using entity alpha mask
+        base_spec = _specular_by_cp.get(tile_cp)
+        ent_spec = _specular_by_cp.get(entity_cp)
+        base_nd = _normal_detail_by_cp.get(tile_cp)
+        ent_nd = _normal_detail_by_cp.get(entity_cp)
+        base_sm = _specular_mask_by_cp.get(tile_cp)
+        ent_sm = _specular_mask_by_cp.get(entity_cp)
+        if any(x is not None for x in (base_spec, ent_spec, base_nd, ent_nd, base_sm, ent_sm)):
+            if base_spec is None:
+                base_spec = np.zeros((h_px, w_px, 3), dtype=np.float32)
+            if ent_spec is None:
+                ent_spec = np.zeros((h_px, w_px, 3), dtype=np.float32)
+            if base_nd is None:
+                base_nd = np.zeros((h_px, w_px), dtype=np.float32)
+            if ent_nd is None:
+                ent_nd = np.zeros((h_px, w_px), dtype=np.float32)
+            if base_sm is None:
+                base_sm = np.zeros((h_px, w_px), dtype=np.float32)
+            if ent_sm is None:
+                ent_sm = np.zeros((h_px, w_px), dtype=np.float32)
+            _specular_by_cp[cp] = ent_spec * alpha + base_spec * (1.0 - alpha)
+            _normal_detail_by_cp[cp] = ent_nd * alpha2d + base_nd * (1.0 - alpha2d)
+            _specular_mask_by_cp[cp] = ent_sm * alpha2d + base_sm * (1.0 - alpha2d)
 
         _entity_tile_cache[key] = cp
         return chr(cp)
