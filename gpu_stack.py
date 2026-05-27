@@ -354,11 +354,10 @@ class BurningParticle:
     Rendered in the bloom pass by GPUStack._burn_render.
     """
 
-    def __init__(self, position: tuple, entity: object = None):
+    def __init__(self, position: tuple, entity: object = None, contained: bool = False):
         x, y = position
         # Random horizontal spread across the tile, spawn in lower half
-        self.fx = float(x) + random.uniform(-0.42, 0.42)
-        self.fy = float(y) + random.uniform(0.0, 0.35)
+
         self.origin_y = float(y)          # cap: never rise > 1 tile above this
         self.vx = random.uniform(-0.018, 0.018)   # gentle horizontal wobble
         self.vy = random.uniform(-0.07, -0.035)   # rise upward (negative = up)
@@ -366,12 +365,19 @@ class BurningParticle:
         self.frames = random.randint(10, 22)
         self.total_frames = self.frames
         self.render_priority = 2
+        self.contained = contained
+        self.fx = float(x) + (random.uniform(-0.42, 0.42) if not contained else 0.0)
+        self.fy = float(y) + (random.uniform(0.0, 0.35) if not contained else 0.2)
 
     def tick(self, console, game_map) -> None:
         # Handle tile-based fire (entity is None) or entities without body parts
         if not self.entity or not hasattr(self.entity, 'body_parts') or not self.entity.body_parts:
-            self.fx += self.vx
-            self.fy += self.vy
+            if self.contained:
+                self.fx += self.vx * 2
+                self.fy += self.vy / 2
+            else:
+                self.fx += self.vx
+                self.fy += self.vy
             # Cap rise at 1 tile above spawn
             if self.fy < self.origin_y - 1.0:
                 self.fy = self.origin_y - 1.0
@@ -1811,6 +1817,11 @@ class GPUStack:
         # ---------------------------------------------------------------
         self._lightmap_tex      = None
         self._lightmap_tex_size = (0, 0)
+        # Optional bridge for a future unified ModernGL frame compositor.
+        # When disabled or no composer is registered, the legacy SDL path is used.
+        self.enable_modern_gl_lightmap_unified = False
+        self.modern_gl_lightmap_composer = None
+        self._unified_gl_status_logged = False
 
         # Register the built-in particle passes
         self.gpu_anim_registry.append(self._gpu_ember_render)   
@@ -4064,13 +4075,97 @@ class GPUStack:
         game_map = getattr(active_engine, "game_map", None)
         if game_map is None:
             return
-        lm_np   = game_map.build_lightmap(game_console)
+        import time as _time
+
+        def _emit_unified_status_once() -> None:
+            if self._unified_gl_status_logged:
+                return
+            try:
+                if not self.enable_modern_gl_lightmap_unified:
+                    msg = "UnifiedGL status: disabled by setting"
+                else:
+                    c = self.modern_gl_lightmap_composer
+                    if c is None:
+                        msg = "UnifiedGL status: enabled but no composer attached"
+                    else:
+                        snapshot_fn = getattr(c, "status_snapshot", None)
+                        if callable(snapshot_fn):
+                            s = snapshot_fn()
+                            # Wait until we have meaningful unified-path state.
+                            if not bool(s.get("bridge_adopted", False)) and int(s.get("compose_attempts", 0)) == 0:
+                                return
+                        status_fn = getattr(c, "status_line", None)
+                        if callable(status_fn):
+                            msg = status_fn()
+                        else:
+                            msg = "UnifiedGL status: composer attached (no status provider)"
+                print("[INFO]: " + msg)
+                try:
+                    if hasattr(active_engine, "message_log") and active_engine.message_log is not None:
+                        active_engine.message_log.add_message(msg)
+                except Exception:
+                    pass
+            finally:
+                self._unified_gl_status_logged = True
+
+        _t0 = _time.perf_counter()
+        # Force the shader.py GPU backend here; it will fall back internally
+        # if ModernGL is unavailable.
+        import shader as _shader_mod
+        lighting_engine = _shader_mod.get_lighting_engine(mode="gpu")
+
+        # Unified path hook: render lightmap into shader.py ModernGL target,
+        # then let an external composer blend it without CPU readback.
+        composer = self.modern_gl_lightmap_composer
+        if self.enable_modern_gl_lightmap_unified and callable(composer):
+            try:
+                prepared = True
+                prepare_fn = getattr(composer, "prepare_engine", None)
+                if callable(prepare_fn):
+                    prepared = bool(prepare_fn(lighting_engine))
+
+                if prepared and lighting_engine.render_lightmap_to_gpu_target(game_map, game_console):
+                    composed = bool(composer(
+                        lighting_engine=lighting_engine,
+                        renderer=self.renderer,
+                        dest_offset_x=int(dest_offset_x),
+                        dest_offset_y=int(dest_offset_y),
+                        game_dest_w=int(game_dest_w),
+                        game_dest_h=int(game_dest_h),
+                    ))
+                    if composed:
+                        _emit_unified_status_once()
+                        _t1 = _time.perf_counter()
+                        try:
+                            active_engine.profile_external_ms("lightmap_build", (_t1 - _t0) * 1000.0)
+                            active_engine.profile_external_ms("lightmap_upload", 0.0)
+                            active_engine.profile_external_ms("lightmap_blit", 0.0)
+                        except Exception:
+                            pass
+                        return
+            except Exception:
+                # Fall through to legacy path on any bridge/composer failure.
+                pass
+
+        lm_np = lighting_engine.build_lightmap(game_map, game_console)
+        _t1 = _time.perf_counter()
         lm_size = (lm_np.shape[1], lm_np.shape[0])
         if self._lightmap_tex is None or lm_size != self._lightmap_tex_size:
             self._lightmap_tex      = self.renderer.upload_texture(lm_np)
             self._lightmap_tex_size = lm_size
         else:
             self._lightmap_tex.update(lm_np)
+        _t2 = _time.perf_counter()
         self._lightmap_tex.blend_mode = tcod.sdl.render.BlendMode.MOD
         self.renderer.copy(self._lightmap_tex,
                            dest=(int(dest_offset_x), int(dest_offset_y), int(game_dest_w), int(game_dest_h)))
+        _t3 = _time.perf_counter()
+        _emit_unified_status_once()
+
+        # Feed render-side timings into the F1 lag profiler.
+        try:
+            active_engine.profile_external_ms("lightmap_build", (_t1 - _t0) * 1000.0)
+            active_engine.profile_external_ms("lightmap_upload", (_t2 - _t1) * 1000.0)
+            active_engine.profile_external_ms("lightmap_blit", (_t3 - _t2) * 1000.0)
+        except Exception:
+            pass

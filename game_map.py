@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 # Minimum brightness in complete darkness (0.0 = pure black, 0.2 = 20% floor).
-LIGHT_MIN_BRIGHTNESS: float = 0.1
+LIGHT_MIN_BRIGHTNESS: float = 0.05
 
 # Lightmap multiplier for explored-but-not-currently-visible tiles.
 # Set equal to LIGHT_MIN_BRIGHTNESS so explored areas match the darkest
@@ -155,14 +155,37 @@ class GameMap:
     
     def _add_light_source(self, source_x: int, source_y: int, radius: int, max_intensity: float = 1.0,
                           wobble_dx: float = 0.0, wobble_dy: float = 0.0, di: float = 0.0,
-                          light_color: tuple = None) -> None:
+                          light_color: tuple = None, gpu_only: bool = False) -> None:
         """Add light from a source with distance-based falloff and FOV blocking.
 
         wobble_dx / wobble_dy shift the effective light centre each frame so
         the flame appears to move.  di is an intensity delta (±0.2) that
         brightens or dims the whole cone, both matching the libtcod demo
         torch-flicker formula exactly.
+
+        gpu_only: when True, only registers the light for the GPU shader
+        (skips the expensive CPU FOV + full-map numpy update).  Safe to use
+        when GPU lighting mode is active and tile_level accuracy is not needed.
         """
+        # Normalize light_color to 0-1 floats if provided as 0-255 integers.
+        _lc: tuple | None = None
+        if light_color is not None:
+            _lc = tuple(c / 255.0 if c > 1.0 else float(c) for c in light_color[:3])
+
+        # Fast path: GPU shader handles falloff/shadows; skip all CPU work.
+        if gpu_only:
+            self._active_lights.append(
+                {
+                    "x": float(source_x) + float(wobble_dx),
+                    "y": float(source_y) + float(wobble_dy),
+                    "radius": max(1.0, float(radius)),
+                    "intensity": max(0.0, float(max_intensity) + float(di)),
+                    "is_white": False,
+                    "color": _lc,
+                }
+            )
+            return
+
         try:
             self._active_lights.append(
                 {
@@ -170,7 +193,8 @@ class GameMap:
                     "y": float(source_y) + float(wobble_dy),
                     "radius": max(1.0, float(radius)),
                     "intensity": max(0.0, float(max_intensity) + float(di)),
-                    "is_white": bool(light_color is not None),
+                    "is_white": False,  # False = warm tint; custom colors use color_acc in shader
+                    "color": _lc,
                 }
             )
             from tcod.map import compute_fov
@@ -219,9 +243,11 @@ class GameMap:
                     "y": float(source_y),
                     "radius": max(1.0, float(radius)),
                     "intensity": max(0.0, float(max_intensity)),
-                    "is_white": bool(light_color is not None),
+                    "is_white": False,
+                    "color": _lc,
                 }
             )
+            self._active_lights[-1]["color"] = _lc
             # Fallback: simple distance-based lighting without wobble.
             xs = np.arange(0, self.width)
             ys = np.arange(0, self.height)
@@ -377,11 +403,7 @@ class GameMap:
         visible_mask = self.visible[x_slice, y_slice]
         explored_mask = self.explored[x_slice, y_slice]
         
-        result_tiles = np.full(
-            (view_width, view_height), 
-            tile_types.SHROUD, 
-            dtype=console.tiles_rgb.dtype
-        )
+        result_tiles = self.tiles["light"][x_slice, y_slice].copy()
         
         light_tiles = self.tiles["light"][x_slice, y_slice]
         
@@ -400,7 +422,7 @@ class GameMap:
         if np.any(explored_not_visible):
             result_tiles[explored_not_visible] = light_tiles[explored_not_visible]
         
-        console.tiles_rgb[:] = tile_types.SHROUD
+        #console.tiles_rgb[:] = tile_types.SHROUD
         console.tiles_rgb[0:view_width, 0:view_height] = result_tiles
 
     def build_lightmap(self, console: Console) -> np.ndarray:
@@ -411,19 +433,19 @@ class GameMap:
         gpu_stack.apply_lightmap calls the full three-pass version directly.
         """
         import shader as _shader
-        lm, _, _ = _shader.build_all_lighting_passes(self, console)
+        lm, _, _ = _shader.build_all_lighting_passes(self, console, mode="gpu")
         return lm
 
     def build_specular_map(self, console: Console) -> np.ndarray:
         """Return the ADD-blend specular highlight map from the PBR shader."""
         import shader as _shader
-        _, sp, _ = _shader.build_all_lighting_passes(self, console)
+        _, sp, _ = _shader.build_all_lighting_passes(self, console, mode="gpu")
         return sp
 
     def build_emissive_map(self, console: Console) -> np.ndarray:
         """Return the ADD-blend emissive self-illumination map from the PBR shader."""
         import shader as _shader
-        _, _, em = _shader.build_all_lighting_passes(self, console)
+        _, _, em = _shader.build_all_lighting_passes(self, console, mode="gpu")
         return em
     
     def render(self, console: Console) -> None:
@@ -481,7 +503,10 @@ class GameMap:
                 self._white_light_level[:] = 1.0  # Sunlit = fully white light
 
         if not _sunlit:
+            _gpu_mode = False
             try:
+                import shader as _shader_mod
+                _gpu_mode = getattr(_shader_mod.get_lighting_engine(mode="gpu"), "mode", "cpu") == "gpu"
                 player = self.engine.player
                 # Torch lighting: if player holds a Torch, light radius is 7
                 has_torch = False
@@ -495,7 +520,8 @@ class GameMap:
                     px, py = player.x, player.y
                     wdx, wdy, di = _wobble(0.0)
                     self._add_light_source(px, py, radius=7, max_intensity=1.0,
-                                           wobble_dx=wdx, wobble_dy=wdy, di=di)
+                                           wobble_dx=wdx, wobble_dy=wdy, di=di,
+                                           gpu_only=_gpu_mode)
 
                 # Player always emits a subtle ambient glow so torchless players
                 # can still navigate.  Darkvision replaces this with a larger dim cone.
@@ -505,10 +531,12 @@ class GameMap:
                     for effect in getattr(player, "effects", [])
                 )
                 if has_darkvision:
-                    self._add_light_source(px, py, radius=10, max_intensity=0.25)
+                    self._add_light_source(px, py, radius=10, max_intensity=0.25,
+                                           gpu_only=_gpu_mode)
                 elif not has_torch:
                     # Faint personal glow: just enough to see immediately around the player.
-                    self._add_light_source(px, py, radius=3, max_intensity=0.4)
+                    self._add_light_source(px, py, radius=3, max_intensity=0.4,
+                                           gpu_only=_gpu_mode)
 
                 # Campfire and Bonfire lighting - doesn't affect FOV, only visual lighting
                 try:
@@ -522,7 +550,8 @@ class GameMap:
                                     continue
                                 wdx, wdy, di = 0.0, 0.0, 0.0
                                 self._add_light_source(ex, ey, radius=5, max_intensity=1.0,
-                                                       wobble_dx=wdx, wobble_dy=wdy, di=di)
+                                                       wobble_dx=wdx, wobble_dy=wdy, di=di,
+                                                       gpu_only=_gpu_mode)
                         except Exception as e:
                             print(f"Error processing entity for lighting: {e}")
                     for item in getattr(self, "items", []):
@@ -533,16 +562,50 @@ class GameMap:
                                     continue
                                 wdx, wdy, di = _wobble(cx * 3.7 + cy * 5.3)
                                 self._add_light_source(cx, cy, radius=5, max_intensity=0.8,
-                                                       wobble_dx=wdx, wobble_dy=wdy, di=di)
+                                                       wobble_dx=wdx, wobble_dy=wdy, di=di,
+                                                       gpu_only=_gpu_mode)
                             elif item.name == "Bonfire":
                                 bx, by = item.x, item.y
                                 if not (0 <= bx < self.width and 0 <= by < self.height):
                                     continue
                                 wdx, wdy, di = _wobble(bx * 3.7 + by * 5.3)
                                 self._add_light_source(bx, by, radius=15, max_intensity=1.0,
-                                                       wobble_dx=wdx, wobble_dy=wdy, di=di)
+                                                       wobble_dx=wdx, wobble_dy=wdy, di=di,
+                                                       gpu_only=_gpu_mode)
                         except Exception:
                             continue
+                except Exception:
+                    pass
+
+                # Fire liquid tiles emit orange light with flicker.
+                # Cap at _MAX_FIRE_LIGHTS nearest sources; fire beyond 25 tiles
+                # contributes negligible visible light and isn't worth the GPU cost.
+                try:
+                    from liquid_system import LiquidType as _LT
+                    _FIRE_COLOR = (255, 85, 23)
+                    _MAX_FIRE_LIGHTS = 24
+                    _px, _py = player.x, player.y
+                    _fire_candidates = []
+                    for (fx, fy), _coating in self.liquid_system.coatings.items():
+                        if _coating.liquid_type != _LT.FIRE:
+                            continue
+                        if not (0 <= fx < self.width and 0 <= fy < self.height):
+                            continue
+                        _ddx = fx - _px
+                        _ddy = fy - _py
+                        _dist_sq = _ddx * _ddx + _ddy * _ddy
+                        if _dist_sq > 625:  # > 25 tiles away
+                            continue
+                        _fire_candidates.append((_dist_sq, fx, fy, _coating))
+                    _fire_candidates.sort()
+                    for _, fx, fy, _coating in _fire_candidates[:_MAX_FIRE_LIGHTS]:
+                        _depth = getattr(_coating, "depth", 1)
+                        _radius = 2 + _depth        # depth 1→3, depth 2→4, depth 3→5
+                        _intensity = 0.4 + _depth * 0.15  # 0.55 / 0.7 / 0.85
+                        wdx, wdy, di = _wobble(fx * 3.7 + fy * 5.3)
+                        self._add_light_source(fx, fy, radius=_radius, max_intensity=_intensity,
+                                               wobble_dx=wdx, wobble_dy=wdy, di=di,
+                                               light_color=_FIRE_COLOR, gpu_only=_gpu_mode)
                 except Exception:
                     pass
             except Exception:
@@ -553,7 +616,7 @@ class GameMap:
             window_positions = np.argwhere(self.tiles["name"] == window_name)
             for wx, wy in window_positions:
                 self._add_light_source(int(wx), int(wy), radius=8, max_intensity=50.0,
-                                       light_color=(255, 255, 255))
+                                       light_color=(255, 255, 255), gpu_only=_gpu_mode)
 
         # Render tiles with gradient lighting based on light levels
         self._render_tiles_with_gradient(console)

@@ -233,7 +233,12 @@ class TurnManager:
 
             if should_prune:
                 _prune_start = time.perf_counter()
-                sprite_manager.prune_unused_composites(self.engine)
+                # Fast path for turn-time pruning: scan active runtime state only.
+                # Cached floor maps can regenerate composites when revisited.
+                sprite_manager.prune_unused_composites(
+                    self.engine,
+                    include_cached_world_maps=False,
+                )
                 self._last_prune_turn = self.total_player_moves
                 self.engine.profile_external_ms("sprite_prune", (time.perf_counter() - _prune_start) * 1000.0)
         except Exception:

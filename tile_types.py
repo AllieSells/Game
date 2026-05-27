@@ -155,6 +155,9 @@ def random_floor_char() -> int:
     return ord(random.choice([" ", " ", " ", " ", " ", " ", chr(0xE009), chr(0xE00A), chr(0xE00B), chr(0xE00C)]))
 
 
+
+
+
 def fill_random_grasses() -> np.ndarray:
     # Generates a grass tile - don't re-seed to avoid breaking generation
     
@@ -199,6 +202,17 @@ moss_floor = new_tile(
     dark=(0xE12C, (40, 40, 40), (25, 25, 25)),
     light=(0xE12C, (255, 255, 255), (80, 80, 80)),
 )
+
+def random_statue():
+    statues_cp = random.choice(range(0xE004, 0xE008))
+    return new_tile(
+        name="Statue",
+        walkable=False,
+        transparent=False,
+        dark=(statues_cp, (60, 60, 60), (25, 25, 25)),
+        light=(statues_cp, (255, 255, 255), (80, 80, 80)),
+    )
+
 
 def random_mossy_floor_tile():
     floor_cp = random.choice(range(0xE1E0, 0xE1E7))
@@ -390,8 +404,8 @@ world_border = new_tile(
     walkable=False,
     transparent=False,
     # Different border for worldmap
-    dark=(ord("▓"), (255, 0, 0), (0, 0, 0)),
-    light=(ord("▓"), (255, 0, 0), (255, 0, 0)),
+    dark=(ord("▓"), (0, 0, 0), (0, 0, 0)),
+    light=(ord("▓"), (0, 0, 0), (0, 0, 0)),
 )
 
 

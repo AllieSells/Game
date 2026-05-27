@@ -142,6 +142,7 @@ from gpu_stack import (
     VHSGlitchAnimation,
     VideoModeSwitchAnimation,
 )
+from modern_gl_lightmap_composer import ModernGLLightmapComposer
 import render_boot_screen
 
 # --- Procedural scanlines ---
@@ -227,6 +228,15 @@ gpu.crt_bloom_on     = settings.get("crt_bloom",      True)
 gpu.crt_ca_on        = settings.get("crt_ca",         True)
 gpu.crt_curvature_on = settings.get("crt_curvature",  True)
 gpu.crt_bands        = 116  # smooth curvature
+# Optional unification bridge (default False): when True, GPUStack will attempt
+# a ModernGL lightmap compose callback before falling back to SDL lightmap upload.
+gpu.enable_modern_gl_lightmap_unified = bool(settings.get("modern_gl_lightmap_unified", False))
+_modern_gl_lm_composer = ModernGLLightmapComposer(renderer)
+if gpu.enable_modern_gl_lightmap_unified:
+    gpu.modern_gl_lightmap_composer = _modern_gl_lm_composer
+    _dlog("Unified ModernGL lightmap bridge: enabled (composer attached).")
+else:
+    gpu.modern_gl_lightmap_composer = None
 
 _transparency_idx_cache: dict = {}  # (h, w, tile_h, tile_w) -> (x_idx, y_idx)
 
@@ -710,6 +720,7 @@ def main() -> None:
     # SelectIndexHandler animated cursor — BLEND SDL texture drawn after lightmap.
     _map_cursor_tex     = None  # BLEND-mode GPU texture (32×32 cursor sprite)
     _map_cursor_last_cp = -1    # cursor codepoint currently baked into _map_cursor_tex
+    _lag_profiler_tex   = None  # BLEND-mode texture for F1 profiler overlay
 
     # Precompute texture source sizes for curvature helper
     _game_tex_w = game_console.width * tileset.tile_width
@@ -1139,6 +1150,17 @@ def main() -> None:
                     dest_offset_y=world_offset_y,
                 )
 
+            def _render_game_tex_profiled():
+                _t0 = time.perf_counter()
+                _tex = game_console_renderer.render(game_console)
+                _t1 = time.perf_counter()
+                try:
+                    if active_engine is not None:
+                        active_engine.profile_external_ms("console_render", (_t1 - _t0) * 1000.0)
+                except Exception:
+                    pass
+                return _tex
+
             if fast_main_view:
                 # Clear inspect cache when returning to normal gameplay
                 if _prev_inspect_overlay:
@@ -1146,7 +1168,7 @@ def main() -> None:
                     inspect_ui_cursor_cache = None
                 _prev_inspect_overlay = False
                 renderer.clear()
-                game_tex = game_console_renderer.render(game_console)
+                game_tex = _render_game_tex_profiled()
                 renderer.copy(game_tex, dest=(int(world_offset_x), int(world_offset_y), int(game_dest_w), int(game_dest_h)))
                 _apply_lightmap()
 
@@ -1207,7 +1229,7 @@ def main() -> None:
                             int(debug_console.height * base_tile_h),
                         ),
                     )
-                if getattr(active_engine, "show_lag_profiler", False):
+                if getattr(active_engine, "show_lag_profiler", False) or getattr(active_engine, "show_perf_profiler", False):
                     cached_overlay_handler = None
                     overlay_dirty = True
                     ui_console.clear()
@@ -1234,10 +1256,18 @@ def main() -> None:
                         render_functions.render_gpu_minimap_body(renderer, active_engine, base_tile_w, base_tile_h)
                     render_functions.render_gpu_reset_bar(renderer, handler, window_w, window_h, ui_console_renderer, hud_dest_h)
                     debug_console.clear()
-                    render_functions.render_lag_profiler(debug_console, active_engine)
-                    dbg_tex = debug_console_renderer.render(debug_console)
+                    if getattr(active_engine, "show_perf_profiler", False):
+                        render_functions.render_perf_profiler(debug_console, active_engine)
+                    else:
+                        render_functions.render_lag_profiler(debug_console, active_engine)
+                    _lag_pixels = render_console_with_transparency(debug_console)
+                    if _lag_profiler_tex is None:
+                        _lag_profiler_tex = renderer.upload_texture(_lag_pixels)
+                        _lag_profiler_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                    else:
+                        _lag_profiler_tex.update(_lag_pixels)
                     renderer.copy(
-                        dbg_tex,
+                        _lag_profiler_tex,
                         dest=(
                             0,
                             0,
@@ -1309,7 +1339,7 @@ def main() -> None:
                     handler.render_game_overlay(game_console)
                 else:
                     handler.on_render(console=game_console)
-                game_tex = game_console_renderer.render(game_console)
+                game_tex = _render_game_tex_profiled()
                 renderer.copy(game_tex, dest=(int(world_offset_x), int(world_offset_y), int(game_dest_w), int(game_dest_h)))
                 _apply_lightmap()
 
@@ -1448,7 +1478,7 @@ def main() -> None:
 
                 renderer.clear()
                 if needs_live_game_frame:
-                    game_tex = game_console_renderer.render(game_console)
+                    game_tex = _render_game_tex_profiled()
                 renderer.copy(game_tex, dest=(int(world_offset_x), int(world_offset_y), int(game_dest_w), int(game_dest_h)))
                 _apply_lightmap()
 

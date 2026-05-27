@@ -762,6 +762,13 @@ def play_floppy_seek_sound():
     play_sound_with_pitch_variation(Sound("RP/sfx/boot_read.mp3"), pitch_range=(0.8, 0.9), volume=0.5)
 
 quaff_sound = Sound("RP/sfx/quaff.wav")
+# Pre-loaded burn sound — avoids per-call Sound() construction during effect ticks.
+_burn_sound_preloaded = Sound("RP/sfx/materials/acid/burn1.mp3")
+_explosion_sounds_preloaded = [
+    Sound("RP/sfx/spells/fireball/fireball1.mp3"),
+    Sound("RP/sfx/spells/fireball/fireball2.mp3"),
+]
+_dragon_breath_sound_preloaded = Sound("RP/sfx/spells/dragon_breath/dragon_breath1.mp3")
 
 # Helper functions for global sounds with pitch variation
 def play_quaff_sound():
@@ -902,12 +909,8 @@ level_up_sound = Sound("RP/sfx/level_up.wav")
 torch_burns_out_sound = Sound("RP/sfx/burn_out.wav")
 
 def play_explosion_sound():
-    explosion_sounds = [
-        Sound("RP/sfx/spells/fireball/fireball1.mp3"),
-        Sound("RP/sfx/spells/fireball/fireball2.mp3"),
-    ]
-    sound = random.choice(explosion_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.75)
+    sound = random.choice(_explosion_sounds_preloaded)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.99, 1.01), volume=0.75)
 
 def play_chest_open_sound():
     chest_open_sounds = [
@@ -1028,11 +1031,7 @@ def play_attack_sound_weapon_to_no_armor():
 
 
 def play_dragon_breath_sound():
-    dragon_breath_sounds = [
-        Sound("RP/sfx/spells/dragon_breath/dragon_breath1.mp3")]
-
-    sound = random.choice(dragon_breath_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.75)
+    play_sound_with_pitch_variation(_dragon_breath_sound_preloaded, pitch_range=(0.99, 1.01), volume=0.75)
 
 def play_attack_sound_weapon_to_armor():
     attack_sounds = [
@@ -1066,9 +1065,26 @@ def drop_leather_sound():
     play_sound_with_pitch_variation(Sound("RP/sfx/equip/leather/unequip1.mp3"), pitch_range=(0.8, 1.5), volume=0.25)
 # Acid sounds
 def play_poison_burn_sound():
-    play_sound_with_pitch_variation(Sound("RP/sfx/materials/acid/burn1.mp3"), pitch_range=(0.8, 1.5), volume=0.5)
+    # Use (0.99, 1.01) so abs(pitch-1.0) < 0.02 always triggers the fast path
+    # in play_sound_with_pitch_variation, skipping the expensive signal.resample call.
+    play_sound_with_pitch_variation(_burn_sound_preloaded, pitch_range=(0.99, 1.01), volume=0.5)
+
+# Module-level burn-sound throttle: cap how many burn sounds actually play per
+# second so that rooms with many burning entities don't flood the mixer with
+# concurrent pitch-shifted audio — each call still has a 1-in-3 chance to fire.
+_burn_sound_last_time: float = 0.0
 
 def _play_burn_sound_at(x, y, player, game_map):
+    global _burn_sound_last_time
+    # Skip ~67% of burn sound calls to avoid running sound code per-entity per-turn.
+    if random.random() > 0.33:
+        return
+    import time as _time
+    now = _time.monotonic()
+    if now - _burn_sound_last_time < 0.08:  # Hard cap: no more than ~12 burn sounds/second
+        return
+    _burn_sound_last_time = now
+
     from animations import HeardDoorAnimation
     dx = x - player.x
     dy = y - player.y
@@ -1753,10 +1769,7 @@ def play_muffled_sound(sound_func, cutoff=800):
         sound.set_volume(0.4)  # Match original volume
 
     elif sound_func.__name__ == 'play_poison_burn_sound':
-        burn_sounds = [
-            Sound("RP/sfx/materials/acid/burn1.mp3")
-        ]
-        sound = random.choice(burn_sounds)
+        sound = _burn_sound_preloaded
         sound.set_volume(1.0)
         
     elif sound_func.__name__ == 'play_walk_sound':

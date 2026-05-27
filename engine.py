@@ -121,6 +121,8 @@ class Engine:
 
         # F1 lag profiler overlay toggle (independent of F2 debug mode).
         self.show_lag_profiler = False
+        # F9 performance profiler overlay toggle (CPU/GPU/render breakdown).
+        self.show_perf_profiler = False
 
         # Lightweight frame profiler (used by F1 lag chart).
         self.lag_profiler = {
@@ -143,6 +145,10 @@ class Engine:
 
         Samples are merged into the next tick frame report so F2 shows them in
         the same chart as core engine timings.
+
+        Keep only the latest sample per section until the next tick finalize.
+        This avoids runaway accumulation (e.g. render loop profiling continuing
+        while tick finalization is paused), which can inflate EMA into 10000+ ms.
         """
         try:
             profiler = getattr(self, "lag_profiler", None)
@@ -151,7 +157,7 @@ class Engine:
 
             ms = max(0.0, float(elapsed_ms))
             ext = profiler.setdefault("external_frame_ms", {})
-            ext[section] = float(ext.get(section, 0.0) or 0.0) + ms
+            ext[section] = ms
         except Exception:
             pass
 
@@ -657,7 +663,7 @@ class Engine:
                             smoke_chance = 0.08 if is_bonfire else 0.05
                             if entity.name == "Campfire":
                                 if not any(isinstance(a, FireFlicker) and a.position == pos for a in self.animation_queue):
-                                    self.animation_queue.append(FireFlicker(pos))
+                                    self.animation_queue.append(BurningParticle((entity.x, entity.y), None, contained=True))
                             elif is_bonfire:
                                 if not any(isinstance(a, BonefireFlicker) and a.position == pos for a in self.animation_queue):
                                     self.animation_queue.append(BonefireFlicker(pos))

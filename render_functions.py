@@ -268,17 +268,17 @@ def render_debug_overlay(console: Console, fps: float, player_pos: Tuple[int, in
 
 def render_lag_profiler(console: Console, engine) -> None:
     """Render the F1 lag profiler chart independently of the debug overlay."""
+    console.clear()
     profiler = getattr(engine, "lag_profiler", None)
     if not isinstance(profiler, dict):
         return
     ema_ms = profiler.get("ema_ms", {}) or {}
     last_ms = profiler.get("last_frame_ms", {}) or {}
-    sample_ms = last_ms if isinstance(last_ms, dict) and last_ms else ema_ms
-    total_ms = float(sample_ms.get("total", 0.0) or 0.0)
+    total_ms = float(ema_ms.get("total", 0.0) or 0.0)
 
     chart_x = 0
     chart_y = 0
-    console.print(chart_x, chart_y, "Lag Chart (CPU Tick EMA)", fg=(255, 220, 120))
+    console.print(chart_x, chart_y, "Lag Chart (EMA)", fg=(255, 220, 120))
 
     if total_ms <= 0.0:
         console.print(chart_x, chart_y + 1, "Collecting profiler samples...", fg=(140, 140, 140))
@@ -291,35 +291,200 @@ def render_lag_profiler(console: Console, engine) -> None:
         fg=(180, 220, 255),
     )
 
-    sections = [
-        ("entity_updates", "entities"),
-        ("ai_preturn",     "ai_pre"),
-        ("ai_postturn",    "ai_post"),
-        ("autopath_step",  "ap_step"),
-        ("autopath_scan",  "ap_scan"),
-        ("sprite_prune",   "prune"),
-        ("light_shafts",   "light"),
-        ("grass_waves",    "grass"),
-        ("global_anims",   "globalfx"),
-        ("cleanup",        "cleanup"),
-    ]
-    bar_width = 12
+    label_alias = {
+        "entity_updates": "entities",
+        "light_shafts": "light",
+        "auto_move": "autopath",
+        "grass_waves": "grass",
+        "global_anims": "globalfx",
+        "cleanup": "cleanup",
+        "tutorial": "tutorial",
+    }
+
+    section_items = []
+    for key, value in ema_ms.items():
+        if key == "total":
+            continue
+        ms = float(value or 0.0)
+        if ms > 0.0:
+            section_items.append((key, ms))
+    section_items.sort(key=lambda kv: kv[1], reverse=True)
+    section_sum_ms = sum(ms for _, ms in section_items)
+    denom_ms = max(total_ms, section_sum_ms, 0.001)
+
+    bar_width = 14
     row = chart_y + 2
-    denom = max(0.05, total_ms)
-    for key, label in sections:
-        ms = float(sample_ms.get(key, 0.0) or 0.0)
-        pct = max(0.0, min(999.0, (ms / denom) * 100.0))
+    shown_ms = 0.0
+    max_rows = 8
+    for key, ms in section_items[:max_rows]:
+        shown_ms += ms
+        pct = (ms / denom_ms * 100.0)
         fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
         bar = ("#" * fill) + ("." * (bar_width - fill))
-        ema_val = float(ema_ms.get(key, ms) or ms)
+
         if pct >= 40.0:
             fg = (255, 120, 120)
         elif pct >= 20.0:
             fg = (255, 180, 120)
         else:
             fg = (200, 200, 200)
-        console.print(chart_x, row, f"{label:<8} {ms:5.2f} {pct:4.0f}% {bar} avg:{ema_val:4.1f}", fg=fg)
+
+        label = label_alias.get(key, key)
+        console.print(chart_x, row, f"{label[:12]:<12} {ms:5.2f} {pct:4.0f}% {bar}", fg=fg)
         row += 1
+
+    other_ms = max(0.0, denom_ms - shown_ms)
+    if other_ms > 0.25:
+        pct = (other_ms / denom_ms * 100.0)
+        fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
+        bar = ("#" * fill) + ("." * (bar_width - fill))
+        console.print(chart_x, row, f"{'other':<12} {other_ms:5.2f} {pct:4.0f}% {bar}", fg=(160, 160, 160))
+        row += 1
+
+    last_total = float(last_ms.get("total", 0.0) or 0.0)
+    console.print(chart_x, row, f"Last frame total: {last_total:5.2f} ms", fg=(170, 170, 170))
+    row += 1
+
+    spike_threshold = max(20.0, total_ms * 1.35)
+    if isinstance(last_ms, dict) and last_ms and last_total >= spike_threshold:
+        console.print(chart_x, row, "SPIKE OFFENDERS (LAST):", fg=(255, 180, 120))
+        row += 1
+        offenders = []
+        for key, value in last_ms.items():
+            if key == "total":
+                continue
+            ms = float(value or 0.0)
+            if ms > 0.0:
+                offenders.append((key, ms))
+        offenders.sort(key=lambda kv: kv[1], reverse=True)
+        last_sum_ms = sum(ms for _, ms in offenders)
+        last_denom_ms = max(last_total, last_sum_ms, 0.001)
+
+        for key, ms in offenders[:6]:
+            pct = (ms / last_denom_ms * 100.0)
+            ema_val = float(ema_ms.get(key, 0.0) or 0.0)
+            delta = ms - ema_val
+            if pct >= 30.0:
+                fg = (255, 120, 120)
+            elif pct >= 15.0:
+                fg = (255, 180, 120)
+            else:
+                fg = (200, 200, 200)
+            label = label_alias.get(key, key)
+            console.print(chart_x, row, f"{label[:12]:<12} {ms:5.2f} {pct:4.0f}% d{delta:+5.1f}", fg=fg)
+            row += 1
+
+
+def render_perf_profiler(console: Console, engine) -> None:
+    """Render an F9 performance panel with CPU/GPU/render lag breakdown."""
+    console.clear()
+
+    profiler = getattr(engine, "lag_profiler", None)
+    if not isinstance(profiler, dict):
+        return
+
+    ema_ms = profiler.get("ema_ms", {}) or {}
+    last_ms = profiler.get("last_frame_ms", {}) or {}
+
+    frame_ms = float(getattr(engine, "frame_time_ms", 0.0) or 0.0)
+    cpu_tick_ms = float(ema_ms.get("total", 0.0) or 0.0)
+
+    render_keys = (
+        "console_render",
+        "lightmap_build",
+        "lightmap_upload",
+        "lightmap_blit",
+    )
+    gpu_bound_keys = (
+        "lightmap_build",
+        "lightmap_upload",
+        "lightmap_blit",
+    )
+
+    render_ema_ms = sum(float(ema_ms.get(k, 0.0) or 0.0) for k in render_keys)
+    gpu_ema_ms = sum(float(ema_ms.get(k, 0.0) or 0.0) for k in gpu_bound_keys)
+    est_headroom_ms = max(0.0, frame_ms - max(cpu_tick_ms, render_ema_ms))
+
+    x = 0
+    y = 0
+    console.print(x, y, "Perf Profiler (CPU/GPU/Render)", fg=(255, 220, 120))
+
+    if cpu_tick_ms <= 0.0 and render_ema_ms <= 0.0:
+        console.print(x, y + 1, "Collecting profiler samples...", fg=(140, 140, 140))
+        return
+
+    console.print(x, y + 1, f"Frame (real): {frame_ms:5.2f} ms", fg=(180, 220, 255))
+    console.print(x, y + 2, f"CPU tick EMA : {cpu_tick_ms:5.2f} ms", fg=(220, 220, 220))
+    console.print(x, y + 3, f"Render EMA   : {render_ema_ms:5.2f} ms", fg=(220, 220, 220))
+    console.print(x, y + 4, f"GPU-bound EMA: {gpu_ema_ms:5.2f} ms", fg=(255, 200, 150))
+    console.print(x, y + 5, f"Frame slack  : {est_headroom_ms:5.2f} ms", fg=(170, 170, 170))
+
+    bar_width = 14
+    row = y + 7
+    console.print(x, row, "RENDER BREAKDOWN (EMA):", fg=(255, 180, 120))
+    row += 1
+
+    denom = max(render_ema_ms, 0.001)
+    label_alias = {
+        "console_render": "console",
+        "lightmap_build": "lm_build",
+        "lightmap_upload": "lm_upload",
+        "lightmap_blit": "lm_blit",
+    }
+
+    entries = []
+    for key in render_keys:
+        ms = float(ema_ms.get(key, 0.0) or 0.0)
+        if ms > 0.0:
+            entries.append((key, ms))
+    entries.sort(key=lambda kv: kv[1], reverse=True)
+
+    shown = 0.0
+    for key, ms in entries:
+        shown += ms
+        pct = (ms / denom) * 100.0
+        fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
+        bar = ("#" * fill) + ("." * (bar_width - fill))
+        fg = (255, 120, 120) if pct >= 40.0 else (255, 180, 120) if pct >= 20.0 else (200, 200, 200)
+        label = label_alias.get(key, key)
+        console.print(x, row, f"{label:<12} {ms:5.2f} {pct:4.0f}% {bar}", fg=fg)
+        row += 1
+
+    other = max(0.0, denom - shown)
+    if other > 0.1:
+        pct = (other / denom) * 100.0
+        fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
+        bar = ("#" * fill) + ("." * (bar_width - fill))
+        console.print(x, row, f"{'other':<12} {other:5.2f} {pct:4.0f}% {bar}", fg=(160, 160, 160))
+        row += 1
+
+    last_total = float(last_ms.get("total", 0.0) or 0.0)
+    console.print(x, row, f"Last CPU tick : {last_total:5.2f} ms", fg=(170, 170, 170))
+    row += 1
+
+    spike_threshold = max(20.0, cpu_tick_ms * 1.35)
+    if isinstance(last_ms, dict) and last_ms and last_total >= spike_threshold:
+        console.print(x, row, "SPIKE OFFENDERS (LAST):", fg=(255, 180, 120))
+        row += 1
+        offenders = []
+        for key, value in last_ms.items():
+            if key == "total":
+                continue
+            ms = float(value or 0.0)
+            if ms > 0.0:
+                offenders.append((key, ms))
+        offenders.sort(key=lambda kv: kv[1], reverse=True)
+
+        last_sum_ms = sum(ms for _, ms in offenders)
+        last_denom_ms = max(last_total, last_sum_ms, 0.001)
+        for key, ms in offenders[:6]:
+            pct = (ms / last_denom_ms) * 100.0
+            ema_val = float(ema_ms.get(key, 0.0) or 0.0)
+            delta = ms - ema_val
+            fg = (255, 120, 120) if pct >= 30.0 else (255, 180, 120) if pct >= 15.0 else (200, 200, 200)
+            label = label_alias.get(key, key)
+            console.print(x, row, f"{label[:12]:<12} {ms:5.2f} {pct:4.0f}% d{delta:+5.1f}", fg=fg)
+            row += 1
 
 
 

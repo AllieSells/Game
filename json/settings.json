@@ -2,11 +2,16 @@
     // Display settings
     "fullscreen": false,
     "audio": 50,
+    // Lighting settings
+    "lighting_mode": "gpu",
     // CRT filter settings
-    "crt_scanlines": false,
-    "crt_vignette": false,
+    "crt_scanlines": true,
+    "crt_vignette": true,
     "crt_bloom": true,
-    "crt_ca": false,
-    "crt_curvature": false,
-    "light_flicker": true
+    "crt_ca": true,
+    "crt_curvature": true,
+    "light_flicker": true,
+    // Lighting settings
+    "shadow_softness": 0.2,
+    "modern_gl_lightmap_unified": true
 }

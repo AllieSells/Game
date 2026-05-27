@@ -1142,13 +1142,29 @@ def generate_boss_room(
 
     # Generate a boss room with a large chamber
     boss_room = GameMap(engine, map_width, map_height, entities=[engine.player], type="dungeon", name="Boss Room")
-    room = RectangularRoom(x=map_width//2 - 10, y=map_height//2 - 5, width=20, height=10)
+    room = RectangularRoom(x=map_width//2 - 10, y=map_height//2, width=20, height=10)
     for x in range(room.x1, room.x2 + 1):
         for y in range(room.y1, room.y2 + 1):
             if x == room.x1 or x == room.x2 or y == room.y1 or y == room.y2:
                 boss_room.tiles[x, y] = tile_types.random_wall_tile()
             else:
                 boss_room.tiles[x, y] = tile_types.random_floor_tile()
+
+    # one tile in-set from top/bottom walls, every other tile is a statue
+    for x in range(room.x1 + 1, room.x2):
+        if x % 2 == 0:
+            for y in [room.y1 + 2, room.y2 - 2]:
+                statue = tile_types.random_statue()            
+                tile = boss_room.tiles[x,y]
+                tile_cp = int(tile["light"]["ch"])
+                statue_cp = int(statue["light"]["ch"])
+                sprite = sprite_manager.compose_sprite([tile_cp, statue_cp])
+                composed_cp = ord(sprite)
+                result = statue.copy()
+                result["light"]["ch"] = composed_cp
+                result["dark"]["ch"]  = composed_cp
+                boss_room.tiles[x, y] = result
+
     boss_room.upstairs_location = (room.x1 + 2, (room.y1 + room.y2) // 2)
     boss_room.tiles[boss_room.upstairs_location[0], boss_room.upstairs_location[1]] = tile_types.up_stairs
     _placer.place(*boss_room.upstairs_location, boss_room)
@@ -1585,7 +1601,16 @@ def generate_dungeon(
                 tile = dungeon.tiles[x, y]
                 if tile["walkable"] and random.random() < (2**(vegetation/20)-1) and random.randint(1,3) == 1:
                     if tile["name"] not in ["<purple>Down Stairs</purple>", "<purple>Up Stairs</purple>"]:
-                        dungeon.tiles[x, y] = tile_types.generate_foliage_tile()
+                        foliage = tile_types.generate_foliage_tile()
+                        tile = dungeon.tiles[x,y]
+                        tile_cp = int(tile["light"]["ch"])
+                        foliage_cp = int(foliage["light"]["ch"])
+                        sprite = sprite_manager.compose_sprite([tile_cp, foliage_cp])
+                        composed_cp = ord(sprite)
+                        result = dungeon.tiles[x, y].copy()
+                        result["light"]["ch"] = composed_cp
+                        result["dark"]["ch"]  = composed_cp
+                        dungeon.tiles[x, y] = result
     print("[GEN] foliage done")
     
     # Ice-ification (applied AFTER water and foliage so they get tinted too, but BEFORE water animation build)

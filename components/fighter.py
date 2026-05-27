@@ -355,17 +355,19 @@ class Fighter(BaseComponent):
             if not self.parent.body_parts.is_alive():
                 self.hp = 0
         
-        # Add blood spilling when taking damage (only if causes_bleeding is True)
+        # Add blood spilling when taking damage (only if causes_bleeding is True).
+        # Throttled to 40% of hits and minimum damage of 2 to avoid per-turn
+        # sprite-composition cost when many entities take small periodic damage.
         if self.can_bleed:
-            if (causes_bleeding and hasattr(self.parent, 'gamemap') and 
-                hasattr(self.parent.gamemap, 'liquid_system')):
+            if (causes_bleeding and amount >= 2 and random.random() < 0.4
+                    and hasattr(self.parent, 'gamemap')
+                    and hasattr(self.parent.gamemap, 'liquid_system')):
                 from liquid_system import LiquidType
-                # Create small blood splash for damage
-                blood_amount = min(2, max(1, amount // 4))  # Less blood than melee
+                blood_amount = min(2, max(1, amount // 4))
                 self.parent.gamemap.liquid_system.create_splash(
                     self.parent.x, self.parent.y,
                     LiquidType.BLOOD,
-                    radius=1,  # Small radius
+                    radius=1,
                     max_depth=blood_amount
                 )
         
@@ -423,8 +425,6 @@ class Fighter(BaseComponent):
 
         # Combine for total defense
         total_defense = (base_defense*defense_multiplier) + armor_defense
-
-        print(total_defense)
 
         base_damage = raw_damage - total_defense
         mitigation_multiplier = 1.0

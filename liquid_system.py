@@ -179,11 +179,15 @@ class LiquidCoating:
 
 class LiquidSystem:
     """Manages liquid coatings on the game map."""
-    
+
     def __init__(self, game_map: GameMap):
         self.game_map = game_map
         # Position -> LiquidCoating mapping
         self.coatings: Dict[Tuple[int, int], LiquidCoating] = {}
+        # Batch-update state: when _batch_mode is True, _update_tile_graphics
+        # defers work into _pending_tile_updates instead of running immediately.
+        self._batch_mode: bool = False
+        self._pending_tile_updates: set = set()
 
     def spill_volume(self, x: int, y: int, liquid_type: LiquidType, volume: int) -> None:
         """Spill a volume of liquid at a location, creating a splash pattern."""
@@ -214,8 +218,11 @@ class LiquidSystem:
             # Add to existing coating
             existing = self.coatings[pos]
             if existing.liquid_type == liquid_type:
+                old_depth = existing.depth
                 existing.depth = min(existing.depth + depth, 3)
-                self._update_tile_graphics(x, y, existing)
+                if existing.depth != old_depth:
+                    self._update_tile_graphics(x, y, existing)
+                # depth unchanged (already at max) — no visual update needed
             else:
                 # Replace with new liquid if different type
                 self._restore_original_tile(x, y)
@@ -265,8 +272,33 @@ class LiquidSystem:
             if coating.original_tile is not None:
                 self.game_map.tiles[x, y] = coating.original_tile
     
+    def _begin_batch(self) -> None:
+        """Start batching tile graphic updates. Calls to _update_tile_graphics are deferred."""
+        self._batch_mode = True
+        self._pending_tile_updates = set()
+
+    def _end_batch(self) -> None:
+        """Flush all deferred tile graphic updates, including their neighbours, deduplicated."""
+        self._batch_mode = False
+        # Expand pending set to include neighbours so blob connectivity is correct.
+        to_update = set(self._pending_tile_updates)
+        for x, y in self._pending_tile_updates:
+            for nx, ny in (
+                (x, y - 1), (x, y + 1), (x - 1, y), (x + 1, y),
+                (x - 1, y - 1), (x + 1, y - 1), (x - 1, y + 1), (x + 1, y + 1),
+            ):
+                if (nx, ny) in self.coatings:
+                    to_update.add((nx, ny))
+        self._pending_tile_updates = set()
+        for x, y in to_update:
+            if (x, y) in self.coatings:
+                self._update_tile_graphics(x, y, self.coatings[(x, y)], _refresh_neighbors=False)
+
     def _update_tile_graphics(self, x: int, y: int, coating: LiquidCoating, _refresh_neighbors: bool = True) -> None:
         """Update the tile's graphics to show the liquid coating via procedural sprite compositing."""
+        if self._batch_mode:
+            self._pending_tile_updates.add((x, y))
+            return
         if coating.original_tile is None:
             return
 
@@ -335,50 +367,74 @@ class LiquidSystem:
                         , length: int = 5) -> None:
         """Create a directional spray pattern from a starting point."""
         coat_entities = liquid_type in self._HAZARDOUS_LIQUIDS
+        entity_pos_map = None
+        if coat_entities:
+            entity_pos_map = {}
+            for e in self.game_map.entities:
+                entity_pos_map.setdefault((e.x, e.y), []).append(e)
+
         dx, dy = direction
-        # omit the starting tile to avoid coating the source of the spray (e.g., player or monster)
-        for i in range(1, length):
-            x, y = start_x + dx * i, start_y + dy * i
-            if not self.game_map.in_bounds(x, y):
-                break
-            self.add_liquid(x, y, liquid_type, depth=1)
-            if random.random() < 0.3:  # Random splatter around main spray line
-                splatter_x = x + random.randint(-1, 1)
-                splatter_y = y + random.randint(-1, 1)
-                if self.game_map.in_bounds(splatter_x, splatter_y):
-                    self.add_liquid(splatter_x, splatter_y, liquid_type, depth=1)
-            # Only scan/coat entities for liquids that can harm or heal them
-            if coat_entities:
-                self._coat_entities_in_splash(x, y, liquid_type, distance=0, radius=1)
+        self._begin_batch()
+        try:
+            # omit the starting tile to avoid coating the source of the spray (e.g., player or monster)
+            for i in range(1, length):
+                x, y = start_x + dx * i, start_y + dy * i
+                if not self.game_map.in_bounds(x, y):
+                    break
+                self.add_liquid(x, y, liquid_type, depth=1)
+                if random.random() < 0.3:  # Random splatter around main spray line
+                    splatter_x = x + random.randint(-1, 1)
+                    splatter_y = y + random.randint(-1, 1)
+                    if self.game_map.in_bounds(splatter_x, splatter_y):
+                        self.add_liquid(splatter_x, splatter_y, liquid_type, depth=1)
+                # Only scan/coat entities for liquids that can harm or heal them
+                if coat_entities:
+                    self._coat_entities_in_splash(x, y, liquid_type, distance=0, radius=1, entity_pos_map=entity_pos_map)
+        finally:
+            self._end_batch()
 
 
-    def create_splash(self, center_x: int, center_y: int, liquid_type: LiquidType, 
+    def create_splash(self, center_x: int, center_y: int, liquid_type: LiquidType,
                      radius: int = 2, max_depth: int = 2) -> None:
         """Create a splash pattern around a center point."""
         coat_entities = liquid_type in self._HAZARDOUS_LIQUIDS
-        radius_sq = radius * radius
-        for dx in range(-radius, radius + 1):
-            for dy in range(-radius, radius + 1):
-                dist_sq = dx * dx + dy * dy
-                if dist_sq > radius_sq:
-                    continue
-                x, y = center_x + dx, center_y + dy
-                if not self.game_map.in_bounds(x, y):
-                    continue
-                distance = dist_sq ** 0.5
-                # Deeper liquid closer to center
-                depth = max(1, max_depth - int(distance))
-                if random.random() < 0.8:  # Some randomness
-                    self.add_liquid(x, y, liquid_type, depth)
-                # Only scan/coat entities for liquids that can harm or heal them
-                if coat_entities:
-                    self._coat_entities_in_splash(x, y, liquid_type, distance, radius)
+        # Build position map once instead of O(E) scan per tile.
+        entity_pos_map = None
+        if coat_entities:
+            entity_pos_map = {}
+            for e in self.game_map.entities:
+                entity_pos_map.setdefault((e.x, e.y), []).append(e)
 
-    def _coat_entities_in_splash(self, x: int, y: int, liquid_type: LiquidType, 
-                                distance: float, radius: int) -> None:
+        self._begin_batch()
+        try:
+            radius_sq = radius * radius
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    dist_sq = dx * dx + dy * dy
+                    if dist_sq > radius_sq:
+                        continue
+                    x, y = center_x + dx, center_y + dy
+                    if not self.game_map.in_bounds(x, y):
+                        continue
+                    distance = dist_sq ** 0.5
+                    # Deeper liquid closer to center
+                    depth = max(1, max_depth - int(distance))
+                    if random.random() < 0.8:  # Some randomness
+                        self.add_liquid(x, y, liquid_type, depth)
+                    # Only scan/coat entities for liquids that can harm or heal them
+                    if coat_entities:
+                        self._coat_entities_in_splash(x, y, liquid_type, distance, radius, entity_pos_map)
+        finally:
+            self._end_batch()
+
+    def _coat_entities_in_splash(self, x: int, y: int, liquid_type: LiquidType,
+                                distance: float, radius: int,
+                                entity_pos_map: Optional[dict] = None) -> None:
         """Coat random body parts on entities caught in liquid splash."""
-        # Find entities at this position
-        entities_here = [e for e in self.game_map.entities if e.x == x and e.y == y]
+        if entity_pos_map is not None:
+            entities_here = entity_pos_map.get((x, y), [])
+        else:
+            entities_here = [e for e in self.game_map.entities if e.x == x and e.y == y]
         
         for entity in entities_here:
             if not (hasattr(entity, 'body_parts') and entity.body_parts):
@@ -577,31 +633,38 @@ class LiquidSystem:
     def tick_liquid(self) -> None:
         """Process liquid aging and evaporation."""
         to_remove = []
-        
+        to_refresh: set = set()
+
         for pos, coating in list(self.coatings.items()):
             coating.age += 1
-            
+
             # Use liquid type's built-in evaporation chance
             if random.random() < coating.liquid_type.get_evaporation_chance():
                 coating.depth -= 1
                 if coating.depth <= 0:
                     to_remove.append(pos)
                 else:
-                    # Update graphics for reduced depth
-                    x, y = pos
-                    self._update_tile_graphics(x, y, coating)
-        
+                    to_refresh.add(pos)
+
         for pos in to_remove:
             x, y = pos
             self._restore_original_tile(x, y)
             sprite_manager.release_puddle_slots(x, y)
             del self.coatings[pos]
+            # Collect neighbours instead of updating immediately to avoid
+            # re-updating the same tile when multiple adjacent tiles evaporate.
             for nx, ny in (
                 (x,     y - 1), (x,     y + 1), (x - 1, y    ), (x + 1, y    ),
                 (x - 1, y - 1), (x + 1, y - 1), (x - 1, y + 1), (x + 1, y + 1),
             ):
                 if (nx, ny) in self.coatings:
-                    self._update_tile_graphics(nx, ny, self.coatings[(nx, ny)], _refresh_neighbors=False)
+                    to_refresh.add((nx, ny))
+
+        # Single deduplicated pass over all tiles that need a graphics refresh.
+        for pos in to_refresh:
+            if pos in self.coatings:
+                x, y = pos
+                self._update_tile_graphics(x, y, self.coatings[pos], _refresh_neighbors=False)
 
     def cleanup(self) -> None:
         """Clean up all liquid coatings and restore original tiles."""

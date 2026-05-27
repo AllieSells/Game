@@ -16,6 +16,21 @@ from __future__ import annotations
 import os
 import numpy as np
 
+# Import shader for dirty tracking (lazy import to avoid circular deps)
+_shader_module = None
+
+
+def _get_shader():
+    """Lazy import shader module to notify of sprite changes."""
+    global _shader_module
+    if _shader_module is None:
+        try:
+            import shader
+            _shader_module = shader
+        except ImportError:
+            pass
+    return _shader_module
+
 TILE_W = 32
 TILE_H = 32
 EXTRAS_COLS = 16  # Width of extras.png grid in tiles
@@ -196,7 +211,7 @@ def _register_emissive(cp: int, emissive_pixels: np.ndarray) -> None:
         # Debug: print first few emissive tiles
         if len(_emissive_by_cp) <= 5:
             max_val = np.max(emissive_data)
-            print(f"[DEBUG] Registered emissive for cp 0x{cp:04X}, max value: {max_val:.4f}")
+            #print(f"[DEBUG] Registered emissive for cp 0x{cp:04X}, max value: {max_val:.4f}")
     # If pure black, don't register anything (saves memory and makes debugging clearer)
 
 
@@ -362,6 +377,21 @@ def _register_avg_normal_from_normal_pixels(cp: int, normal_pixels: np.ndarray) 
     except Exception:
         _avg_normal_by_cp[cp] = (0.0, 0.0, 1.0)
         _derived_avg_normal_cache.pop(cp, None)
+
+
+def _register_flat_normals(cp: int, tile_pixels: np.ndarray) -> None:
+    """Register flat normals (0, 0, 1) for liquid surfaces / flat sprites.
+    
+    Use this for puddles, liquid splashes, and other flat surfaces that should
+    not have derived height-based normals.
+    """
+    h, w = tile_pixels.shape[:2]
+    alpha = np.clip(tile_pixels[..., 3].astype(np.float32) / 255.0, 0.0, 1.0)
+    normals = np.zeros((h, w, 3), dtype=np.float32)
+    normals[..., 2] = 1.0  # Flat normal pointing straight up
+    _avg_normal_by_cp[cp] = (0.0, 0.0, 1.0)
+    _register_normal_field(cp, normals, alpha)
+    _derived_avg_normal_cache.pop(cp, None)
 
 
 def _register_avg_normal_from_albedo_pixels(cp: int, tile_pixels: np.ndarray) -> None:
@@ -725,7 +755,7 @@ def load_extras(tileset, path: str = "RP/extras.png", normals_path: str | None =
                 if count == 0:
                     min_val = np.min(emissive_pixels[..., :3])
                     max_val = np.max(emissive_pixels[..., :3])
-                    print(f"[DEBUG] First emissive tile (cp 0x{cp:04X}): RGB range [{min_val}, {max_val}]")
+                    #print(f"[DEBUG] First emissive tile (cp 0x{cp:04X}): RGB range [{min_val}, {max_val}]")
             
             # Load specular
             if specular_img is not None and row < srows and col < scols:
@@ -819,7 +849,8 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
         # First layer (entity) is special: cropped and/or preserved as top if requested.
         first = _get_tile(layer_codepoints[0]).astype(np.float32).copy()
         first = _apply_tint(first, _tint_for(0))
-        if x_crop != 0 or y_crop != 0:
+        first_is_cropped = (x_crop != 0 or y_crop != 0)
+        if first_is_cropped:
             first = _crop_overlay_tile(first, x_crop, y_crop).astype(np.float32)
 
         if top_first_layer:
@@ -883,7 +914,7 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
         else:
             material_order = list(layer_codepoints[1:]) + [layer_codepoints[0]]
         
-        for layer_cp in material_order:
+        for layer_idx, layer_cp in enumerate(material_order):
             # Get material data for this layer
             layer_emission = _emissive_by_cp.get(layer_cp)
             layer_specular = _specular_by_cp.get(layer_cp)
@@ -899,6 +930,23 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
             
             # Get alpha for blending
             layer_pixels = _get_tile(layer_cp).astype(np.float32)
+            
+            # Apply crop to first layer if needed
+            is_first_layer = (layer_cp == layer_codepoints[0])
+            if is_first_layer and first_is_cropped:
+                layer_pixels = _crop_overlay_tile(layer_pixels, x_crop, y_crop).astype(np.float32)
+                if layer_emission is not None:
+                    layer_emission = _crop_overlay_tile(np.concatenate([layer_emission, np.ones((layer_emission.shape[0], layer_emission.shape[1], 1))], axis=2), x_crop, y_crop)[..., :3]
+                if layer_specular is not None:
+                    layer_specular = _crop_overlay_tile(np.concatenate([layer_specular, np.ones((layer_specular.shape[0], layer_specular.shape[1], 1))], axis=2), x_crop, y_crop)[..., :3]
+                if layer_normal_detail is not None:
+                    layer_normal_detail = _crop_overlay_tile(np.stack([layer_normal_detail, layer_normal_detail, layer_normal_detail, np.ones_like(layer_normal_detail)], axis=2), x_crop, y_crop)[..., 0]
+                if layer_specular_mask is not None:
+                    layer_specular_mask = _crop_overlay_tile(np.stack([layer_specular_mask, layer_specular_mask, layer_specular_mask, np.ones_like(layer_specular_mask)], axis=2), x_crop, y_crop)[..., 0]
+                if layer_normals is not None:
+                    # Crop normals to match cropped albedo
+                    layer_normals_rgba = np.concatenate([layer_normals, np.ones((layer_normals.shape[0], layer_normals.shape[1], 1))], axis=2)
+                    layer_normals = _crop_overlay_tile(layer_normals_rgba, x_crop, y_crop)[..., :3]
             
             # Resize all material data to match output size if needed
             lh, lw = layer_pixels.shape[:2]
@@ -971,6 +1019,12 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
             _specular_mask_by_cp[cp] = composed_specular_mask.clip(0.0, 1.0)
         
         _composite_cache[key] = cp
+        
+        # Notify shader engine that this codepoint has new material data
+        shader_mod = _get_shader()
+        if shader_mod:
+            shader_mod.invalidate_material_cache(cp)
+        
         return chr(cp)
     except Exception as e:
         print(f"[sprite_manager] Error composing sprite from layers {[hex(c) for c in layer_codepoints]}: {e}")
@@ -1207,7 +1261,7 @@ def get_puddle_sprite(
                 raise RuntimeError("[sprite_manager] get_puddle_sprite called before tileset is loaded.")
             _tileset.set_tile(existing_cp, pixels)
         _register_albedo_alpha(existing_cp, pixels)
-        _register_avg_normal_from_albedo_pixels(existing_cp, pixels)
+        _register_flat_normals(existing_cp, pixels)  # Puddles are flat liquid surfaces
         # Evict any compose_sprite cache entries whose pixel inputs included
         # this puddle codepoint — they are now stale.
         # Guard: compose_dungeon_water stores keys like ('_dw', ...) where k[0] is
@@ -1250,7 +1304,7 @@ def get_puddle_sprite(
             raise RuntimeError("[sprite_manager] get_puddle_sprite called before tileset is loaded.")
         _tileset.set_tile(cp, pixels)
     _register_albedo_alpha(cp, pixels)
-    _register_avg_normal_from_albedo_pixels(cp, pixels)
+    _register_flat_normals(cp, pixels)  # Puddles are flat liquid surfaces
 
     return chr(cp)
 
@@ -1525,8 +1579,14 @@ def _collect_codepoints_from_value(value, live_codepoints: set[int]) -> None:
             _collect_codepoints_from_value(item, live_codepoints)
 
 
-def collect_live_codepoints(engine) -> set[int]:
-    """Return the set of sprite codepoints still reachable from the loaded engine."""
+def collect_live_codepoints(engine, include_cached_world_maps: bool = True) -> set[int]:
+    """Return sprite codepoints reachable from the loaded engine.
+
+    include_cached_world_maps controls whether maps in game_world stacks/cache
+    are scanned in addition to the active map. Disabling this significantly
+    reduces prune-time spikes; pruned composites can still be regenerated if a
+    cached map is later re-entered.
+    """
     live_codepoints: set[int] = set()
     seen_maps: set[int] = set()
     seen_entities: set[int] = set()
@@ -1596,16 +1656,17 @@ def collect_live_codepoints(engine) -> set[int]:
 
     _add_map(getattr(engine, "game_map", None))
 
-    game_world = getattr(engine, "game_world", None)
-    if game_world is not None:
-        for stack_name in ("up_stack", "down_stack"):
-            for entry in list(getattr(game_world, stack_name, []) or []):
-                if isinstance(entry, tuple) and entry:
-                    _add_map(entry[0])
+    if include_cached_world_maps:
+        game_world = getattr(engine, "game_world", None)
+        if game_world is not None:
+            for stack_name in ("up_stack", "down_stack"):
+                for entry in list(getattr(game_world, stack_name, []) or []):
+                    if isinstance(entry, tuple) and entry:
+                        _add_map(entry[0])
 
-        for cached in (getattr(game_world, "dungeon_cache", {}) or {}).values():
-            if isinstance(cached, tuple) and cached:
-                _add_map(cached[0])
+            for cached in (getattr(game_world, "dungeon_cache", {}) or {}).values():
+                if isinstance(cached, tuple) and cached:
+                    _add_map(cached[0])
 
     animation_queue = getattr(engine, "animation_queue", None)
     if animation_queue is not None:
@@ -1617,9 +1678,12 @@ def collect_live_codepoints(engine) -> set[int]:
     return live_codepoints
 
 
-def prune_unused_composites(engine) -> dict:
-    """Drop composite cache entries that are no longer reachable from *engine*."""
-    live_codepoints = collect_live_codepoints(engine)
+def prune_unused_composites(engine, include_cached_world_maps: bool = True) -> dict:
+    """Drop composite cache entries no longer reachable from *engine*."""
+    live_codepoints = collect_live_codepoints(
+        engine,
+        include_cached_world_maps=include_cached_world_maps,
+    )
     pruned_entries = 0
 
     for key, cp in list(_composite_cache.items()):
@@ -1673,6 +1737,12 @@ def refresh_actor_sprite(actor) -> None:
         actor.char = actor.base_char
     else:
         actor.char = compose_sprite(unique_layers, overlay_scale=overlay_scale)
+    
+    # Mark this actor's tile as dirty for GPU atlas updates
+    if hasattr(actor, 'x') and hasattr(actor, 'y'):
+        shader_mod = _get_shader()
+        if shader_mod:
+            shader_mod.mark_sprite_dirty(actor.x, actor.y)
 
 
 _WATER_FRAME_CPS = [0xE140, 0xE141, 0xE142, 0xE143, 0xE144]

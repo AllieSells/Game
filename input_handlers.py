@@ -5313,7 +5313,15 @@ class MainGameEventHandler(EventHandler):
         # F1 toggles lag profiler overlay
         elif key == tcod.event.K_F1:
             self.engine.show_lag_profiler = not getattr(self.engine, "show_lag_profiler", False)
+            if self.engine.show_lag_profiler:
+                self.engine.show_perf_profiler = False
             self.engine.message_log.add_message("Lag profiler toggled.", color.green)
+        # F9 toggles performance profiler overlay (CPU/GPU/render timings)
+        elif key == tcod.event.K_F9:
+            self.engine.show_perf_profiler = not getattr(self.engine, "show_perf_profiler", False)
+            if self.engine.show_perf_profiler:
+                self.engine.show_lag_profiler = False
+            self.engine.message_log.add_message("Performance profiler toggled.", color.green)
         # F2 toggles debug overlay
         elif key == tcod.event.K_F2:
             self.engine.debug = not self.engine.debug
@@ -5399,7 +5407,14 @@ class MainGameEventHandler(EventHandler):
             #return ThrowSelectionHandler(self.engine)
         elif key == tcod.event.KeySym.F1:
             self.engine.show_lag_profiler = not getattr(self.engine, "show_lag_profiler", False)
+            if self.engine.show_lag_profiler:
+                self.engine.show_perf_profiler = False
             self.engine.message_log.add_message("Lag profiler toggled.", color.green)
+        elif key == tcod.event.KeySym.F9:
+            self.engine.show_perf_profiler = not getattr(self.engine, "show_perf_profiler", False)
+            if self.engine.show_perf_profiler:
+                self.engine.show_lag_profiler = False
+            self.engine.message_log.add_message("Performance profiler toggled.", color.green)
         elif key == tcod.event.KeySym.E:
             # Combined inventory + equipment grid
             from inventory_ui import InventoryGridUI
@@ -6407,22 +6422,34 @@ class EntityDebugHandler(SelectIndexHandler):
         total_ms = float(ema_ms.get("total", 0.0) or 0.0)
         lines.append((f"Frame: {total_ms:5.2f} ms ({(1000.0 / total_ms) if total_ms > 0 else 0.0:5.1f} fps)", color.cyan))
 
-        section_order = [
-            ("entity_updates", "entities"),
-            ("light_shafts", "light"),
-            ("auto_move", "autopath"),
-            ("grass_waves", "grass"),
-            ("global_anims", "globalfx"),
-            ("cleanup", "cleanup"),
-            ("tutorial", "tutorial"),
-        ]
+        # Show the largest contributors dynamically so new/renamed profiler
+        # sections are never hidden by a stale hardcoded list.
+        label_alias = {
+            "entity_updates": "entities",
+            "light_shafts": "light",
+            "auto_move": "autopath",
+            "grass_waves": "grass",
+            "global_anims": "globalfx",
+            "cleanup": "cleanup",
+            "tutorial": "tutorial",
+        }
+        section_items: list[tuple[str, float]] = []
+        for key, value in ema_ms.items():
+            if key == "total":
+                continue
+            ms = float(value or 0.0)
+            if ms > 0.0:
+                section_items.append((key, ms))
+        section_items.sort(key=lambda kv: kv[1], reverse=True)
+        section_sum_ms = sum(ms for _, ms in section_items)
+        denom_ms = max(total_ms, section_sum_ms, 0.001)
 
         bar_width = 14
-        for key, label in section_order:
-            ms = float(ema_ms.get(key, 0.0) or 0.0)
-            if ms <= 0.0:
-                continue
-            pct = (ms / total_ms * 100.0) if total_ms > 0.0 else 0.0
+        shown_ms = 0.0
+        max_rows = 8
+        for key, ms in section_items[:max_rows]:
+            shown_ms += ms
+            pct = (ms / denom_ms * 100.0)
             fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
             bar = ("#" * fill) + ("." * (bar_width - fill))
 
@@ -6433,11 +6460,50 @@ class EntityDebugHandler(SelectIndexHandler):
             else:
                 fg = color.light_gray
 
-            lines.append((f"{label:<8} {ms:5.2f} {pct:4.0f}% {bar}", fg))
+            label = label_alias.get(key, key)
+            lines.append((f"{label[:12]:<12} {ms:5.2f} {pct:4.0f}% {bar}", fg))
+
+        other_ms = max(0.0, denom_ms - shown_ms)
+        if other_ms > 0.25:
+            pct = (other_ms / denom_ms * 100.0)
+            fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
+            bar = ("#" * fill) + ("." * (bar_width - fill))
+            lines.append((f"{'other':<12} {other_ms:5.2f} {pct:4.0f}% {bar}", color.gray))
 
         if last_ms:
             last_total = float(last_ms.get("total", 0.0) or 0.0)
             lines.append((f"Last frame total: {last_total:5.2f} ms", color.gray))
+
+            # During spikes, show top offenders from the most recent frame,
+            # not only EMA averages.
+            spike_threshold = max(20.0, total_ms * 1.35)
+            if last_total >= spike_threshold:
+                lines.append(("SPIKE OFFENDERS (LAST):", color.orange))
+                offenders: list[tuple[str, float]] = []
+                for key, value in last_ms.items():
+                    if key == "total":
+                        continue
+                    ms = float(value or 0.0)
+                    if ms > 0.0:
+                        offenders.append((key, ms))
+                offenders.sort(key=lambda kv: kv[1], reverse=True)
+                last_sum_ms = sum(ms for _, ms in offenders)
+                last_denom_ms = max(last_total, last_sum_ms, 0.001)
+
+                for key, ms in offenders[:6]:
+                    pct = (ms / last_denom_ms * 100.0)
+                    ema_val = float(ema_ms.get(key, 0.0) or 0.0)
+                    delta = ms - ema_val
+
+                    if pct >= 30.0:
+                        fg = color.red
+                    elif pct >= 15.0:
+                        fg = color.orange
+                    else:
+                        fg = color.light_gray
+
+                    label = label_alias.get(key, key)
+                    lines.append((f"{label[:12]:<12} {ms:5.2f} {pct:4.0f}% d{delta:+5.1f}", fg))
 
     def _build_debug_lines(
         self,
@@ -7093,6 +7159,7 @@ UI:
 
 DEBUG:
     F1: Lag Profiler
+    F9: Perf Profiler
     F2: Player Debug
     F3: Entity/Tile Debug
     F5: Material Inspector
@@ -7410,19 +7477,24 @@ class Settings(BaseEventHandler):
                     elif json_key and json_key.startswith("crt_"):
                         self.settings_data[json_key] = (selected_index == 0)  # True for On
             
-            # Write to file with proper JSON format
+            # Write to file with proper JSON format, preserving lighting_mode and other non-UI settings
             with open(self.settings_file, 'w') as f:
                 f.write("{\n")
                 f.write("    // Display settings\n")
                 f.write(f'    "fullscreen": {json.dumps(self.settings_data.get("fullscreen", False))},\n')
                 f.write(f'    "audio": {json.dumps(self.settings_data.get("audio", 50))},\n')
+                f.write("    // Lighting settings\n")
+                f.write(f'    "lighting_mode": {json.dumps(self.settings_data.get("lighting_mode", "gpu"))},\n')
                 f.write("    // CRT filter settings\n")
                 f.write(f'    "crt_scanlines": {json.dumps(self.settings_data.get("crt_scanlines", True))},\n')
                 f.write(f'    "crt_vignette": {json.dumps(self.settings_data.get("crt_vignette", True))},\n')
                 f.write(f'    "crt_bloom": {json.dumps(self.settings_data.get("crt_bloom", True))},\n')
                 f.write(f'    "crt_ca": {json.dumps(self.settings_data.get("crt_ca", True))},\n')
                 f.write(f'    "crt_curvature": {json.dumps(self.settings_data.get("crt_curvature", True))},\n')
-                f.write(f'    "light_flicker": {json.dumps(self.settings_data.get("light_flicker", True))}\n')
+                f.write(f'    "light_flicker": {json.dumps(self.settings_data.get("light_flicker", True))},\n')
+                f.write("    // Lighting settings\n")
+                f.write(f'    "shadow_softness": {json.dumps(self.settings_data.get("shadow_softness", 0.2))},\n')
+                f.write(f'    "modern_gl_lightmap_unified": {json.dumps(self.settings_data.get("modern_gl_lightmap_unified", False))}\n')
                 f.write("}\n")
         except Exception:
             # If saving fails, just continue - don't crash the game
