@@ -1,0 +1,9 @@
+{
+  "starter_chest": [
+    {"item": "torch", "count": 1},
+    {"item": "dagger", "count": 1},
+    {"item": "leather_cap", "count": 1},
+    {"item": "generate_sigil_stone", "count": 1},
+    {"item": "lesser_health_potion", "count": 1}
+  ]
+}

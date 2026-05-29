@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from email.mime import base
 from random import random as random_float
 from typing import TYPE_CHECKING
 
@@ -12,13 +11,15 @@ if TYPE_CHECKING:
     from entity import Actor
 
 import sounds
+import random
+import gpu_stack
 
 
 class Fighter(BaseComponent):
 
     parent: Actor
 
-    def __init__(self, hp: int, base_defense: int, base_power: int, leave_corpse: bool = True):
+    def __init__(self, hp: int, base_defense: int, base_power: int, leave_corpse: bool = True, can_bleed: bool = True):
         self.max_hp = hp
         self._hp = hp
         self.base_defense = base_defense
@@ -26,25 +27,38 @@ class Fighter(BaseComponent):
         # Whether this entity should leave a corpse when it dies.
         # Set to False for ephemeral creatures like Shades.
         self.leave_corpse = leave_corpse
+        self.strength = 1
+        self.dexterity = 1
+        self.constitution = 1
+        self.can_bleed = can_bleed  # By default, entities can bleed unless specified otherwise
+
 
     @property
     def hp(self) -> int:
         return self._hp
     
+    @property
+    def power(self) -> int:
+        return self.base_power + self.power_bonus
+    
+    @property
+    def defense(self) -> int:
+        return self.base_defense
+
+    @power.setter
+    def power(self, value: int) -> None:
+        self.base_power = max(0, value)  # Ensure power doesn't go negative
+    
+    @defense.setter
+    def defense(self, value: int) -> None:
+        self.base_defense = max(0, value)  # Ensure defense doesn't go negative
+    
     @hp.setter
     def hp(self, value: int) -> None:
         self._hp = max(0, min(value, self.max_hp))  # Clamp the value between 0 and max_hp
         if self._hp == 0 and self.parent.ai:
-            print("why not die")
+            self.engine.debug_log(f"{self.parent.name} has 0 HP. Triggering death.", handler=self.__class__.__name__, event="DeathTrigger")
             self.die()
-
-    @property
-    def defense(self) -> int:
-        return self.base_defense + self.defense_bonus
-    
-    @property
-    def power(self) -> int:
-        return self.base_power + self.power_bonus
 
     @property
     def defense_bonus(self) -> int:
@@ -63,22 +77,49 @@ class Fighter(BaseComponent):
     def die(self) -> None:
         sounds.play_death_sound()
         
-        # Create large blood pool when entity dies
-        if hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'liquid_system'):
-            from liquid_system import LiquidType
-            # Create larger blood pool on death
-            self.parent.gamemap.liquid_system.create_splash(
-                self.parent.x, self.parent.y,
-                LiquidType.BLOOD,
-                radius=1,  # Larger radius for death
-                max_depth=1  # Maximum blood depth
-            )
+        # If this is a multi-part entity (parent), destroy all child parts
+        if hasattr(self.parent, 'child_parts') and self.parent.child_parts:
+            for part in list(self.parent.child_parts):
+                try:
+                    if part and hasattr(part, 'gamemap'):
+                        gm = part.gamemap
+                        if hasattr(gm, "entities") and part in gm.entities:
+                            gm.entities.discard(part)
+                except Exception:
+                    pass
+            self.parent.child_parts.clear()
+        
+        # If this is a child part, die immediately without corpse/loot 
+        # (only the main entity should leave a corpse)
+        if hasattr(self.parent, 'parent_entity') and self.parent.parent_entity:
+            try:
+                gm = self.parent.gamemap
+                if hasattr(gm, "entities") and self.parent in gm.entities:
+                    gm.entities.discard(self.parent)
+            except Exception:
+                pass
+            self.parent.ai = None
+            return
+        
+        # Cleanup: Remove from creator's clone list if this is a decoy/illusion
+        if getattr(self.parent, 'is_decoy', False):
+            # Get the creator from the AI's target (illusions follow their creator)
+            creator = None
+            if hasattr(self.parent, 'ai') and hasattr(self.parent.ai, 'target'):
+                creator = self.parent.ai.target
+            
+            # Remove from creator's clone tracking list
+            if creator and hasattr(creator, 'entity_clones'):
+                try:
+                    creator.entity_clones.remove(self.parent)
+                except (ValueError, KeyError):
+                    pass  # Already removed or not in list
         
         if self.engine.player is self.parent:
-            death_message = "YOU DIED IDIOT"
+            death_message = ""
             death_message_color = color.player_die
         else:
-            death_message = f"{self.parent.name} is dead! Not big surpise."
+            death_message = f"The {self.parent.name.lower()} is dead."
             death_message_color = color.enemy_die
         # If configured not to leave a corpse (ephemeral creatures), remove
         # the entity from the map and award XP without creating a corpse.
@@ -93,10 +134,12 @@ class Fighter(BaseComponent):
                 if hasattr(gm, "entities") and self.parent in gm.entities:
                     try:
                         gm.entities.remove(self.parent)
-                    except Exception:
+                    except Exception as e:
+                        self.engine.debug_log(f"ERROR: Failed to remove {self.parent.name} from gamemap entities on death: {e}", handler=self.__class__.__name__, event="DeathCleanup")
                         try:
                             gm.entities.discard(self.parent)
-                        except Exception:
+                        except Exception as e:
+                            self.engine.debug_log(f"ERROR: Failed to discard {self.parent.name} from gamemap entities on death: {e}", handler=self.__class__.__name__, event="DeathCleanup")
                             pass
             except Exception:
                 pass
@@ -111,22 +154,28 @@ class Fighter(BaseComponent):
             except Exception:
                 pass
 
-            try:
-                self.engine.player.level.add_xp(self.parent.level.xp_given)
-            except Exception:
-                pass
+            # Overall XP system phased out - traits provide progression now
+            # try:
+            #     self.engine.player.level.add_xp(self.parent.level.xp_given)
+            # except Exception:
+            #     pass
 
             return
 
         # Default death behavior: leave a corpse
-        self.parent.char = "%"
-        self.parent.color = (191, 0, 0)
+        # Check if inventory has items
+        if self.parent.inventory and self.parent.inventory.items:
+            
+            self.parent.char = random.choice([chr(0xE013), chr(0xE014), chr(0xE015)])
+        else:
+            self.parent.char = random.choice([chr(0xE010), chr(0xE011), chr(0xE012)])
+        self.parent.color = (255, 255, 255)
         self.parent.blocks_movement = False
         self.parent.ai = None
-        import text_utils
-        self.parent.name = text_utils.red(f"This is the lifeless remains of {self.parent.name}")
+        self.parent.name = f"Corpse of {self.parent.name}"
         self.parent.render_order = RenderOrder.CORPSE
         self.parent.type = "Dead"
+        self.can_bleed = False
 
         # Make corpse lootable by creating a container with all their items
         from components.container import Container
@@ -138,7 +187,7 @@ class Fighter(BaseComponent):
             
             # Add all grasped items (weapons, shields, etc.)
             if hasattr(equipment, 'grasped_items'):
-                for item in list(equipment.grasped_items):
+                for item in list(equipment.grasped_items.values()):
                     equipment.unequip_item(item, add_message=False)
                     container.add(item)
             
@@ -203,10 +252,11 @@ class Fighter(BaseComponent):
         except Exception:
             pass
 
-        try:
-            self.engine.player.level.add_xp(self.parent.level.xp_given)
-        except Exception:
-            pass
+        # Overall XP system phased out - traits provide progression now
+        # try:
+        #     self.engine.player.level.add_xp(self.parent.level.xp_given)
+        # except Exception:
+        #     pass
 
     def heal(self, amount: int) -> int:
         if self.hp == self.max_hp:
@@ -221,74 +271,187 @@ class Fighter(BaseComponent):
 
         self.hp = new_hp_value
         
-        # Also heal damaged body parts if entity has them
-        body_parts_healed = self._heal_body_parts(amount)
+        # Also heal damaged body parts if entity has them (use actual amount recovered)
+        body_parts_healed = self._heal_body_parts(amount_recovered)
         
-        # Add body part healing message if any parts were healed
+        # Show particle and message whenever any HP was actually recovered
+        if amount_recovered > 0 and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
+            try:
+                self.parent.gamemap.engine.animation_queue.append(gpu_stack.HealthParticle((self.parent.x, self.parent.y), self.parent))
+            except Exception:
+                pass
         if body_parts_healed and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
             try:
                 self.parent.gamemap.engine.message_log.add_message(
-                    f"Your injuries begin to mend.",
-                    color.health_recovered
+                    "Your injuries begin to mend.",
+                    color.light_green
                 )
-            except:
+            except Exception:
                 pass
 
         return amount_recovered
     
-    def take_damage(self, amount: int, targeted_part=None) -> None:
+    def _guide_retaliate(self) -> None:
+        """Fire a volley of Inflict Wounds spells at the player for daring to attack the Guide."""
+        if getattr(self, '_retaliating', False):
+            return
+        self._retaliating = True
+        try:
+            guide = self.parent
+            try:
+                engine = self.engine
+                player = engine.player
+            except Exception:
+                return
+
+            engine.message_log.add_message(
+                "The Guide regards you with infinite patience... then unleashes divine retribution!",
+                color.dark_purple
+            )
+            from actions import SpellAction
+            from components.spells import FireballSpell
+            engine.execute_action(SpellAction(guide, FireballSpell(), target_xy=(player.x, player.y)), is_player_action=False)
+        finally:
+            self._retaliating = False
+
+    def take_damage(
+        self,
+        amount: int,
+        targeted_part=None,
+        causes_bleeding: bool = True,
+        spawn_damage_number: bool = True,
+    ) -> None:
+        # The Guide is invulnerable — retaliate against the player instead
+        if getattr(self.parent, 'type', None) == 'Guide':
+            self._guide_retaliate()
+            return
+
         # Capture the entity name before it potentially dies/changes
         entity_name = self.parent.name
-        
-        # Always reduce overall HP first
-        self.hp -= amount
-        
-        # If entity has body parts, damage them as well for tactical effects
-        if hasattr(self.parent, 'body_parts') and self.parent.body_parts:
-            if targeted_part:
-                # Target specific body part
-                damaged_part = self.parent.body_parts.damage_specific_part(targeted_part, amount)
-            else:
-                # Damage random part
-                damaged_part = self.parent.body_parts.damage_random_part(amount)
-            
-            # Check if entity dies from body part destruction (in addition to HP loss)
-            if not self.parent.body_parts.is_alive():
-                self.hp = 0  # Force death from vital part destruction
-            
-            # Add detailed damage message for body parts (using original name)
-            if (damaged_part and hasattr(self.parent, 'gamemap') and 
-                hasattr(self.parent.gamemap, 'engine') and self.hp > 0):  # Only show if still alive
-                part_name = damaged_part.name
-                if damaged_part.is_destroyed:
-                    message = f"{entity_name}'s {part_name} is destroyed!"
-                    message_color = color.enemy_die
-                else:
-                    message = f"{entity_name}'s {part_name} is {damaged_part.damage_level_text}!"
-                    message_color = color.health_recovered
 
-                # Check if damaged limb should cause weapon dropping
-                self._check_weapon_drop(damaged_part)
+
+        if (entity_name == "Goblin" or entity_name == "Troll"):
+            if random.random() < 0.1:
+                self.parent.ai.say("hurt")
+
         
-        # Add blood spilling when taking damage
-        if hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'liquid_system'):
-            from liquid_system import LiquidType
-            # Create small blood splash for damage
-            blood_amount = min(2, max(1, amount // 4))  # Less blood than melee
-            self.parent.gamemap.liquid_system.create_splash(
-                self.parent.x, self.parent.y,
-                LiquidType.BLOOD,
-                radius=1,  # Small radius
-                max_depth=blood_amount
-            )
+        if amount <= 0:
+            return
+
+        # Reduce overall HP — body part damage is applied by actions.py before this call
+        self.hp -= amount
+
+        # Any real damage wakes sleeping actors.
+        if amount > 0 and hasattr(self.parent, "effects"):
+            removed_sleep = False
+            remaining_effects = []
+            for effect in self.parent.effects:
+                effect_name = str(getattr(effect, "name", "")).strip().lower()
+                if effect_name == "sleep":
+                    removed_sleep = True
+                    continue
+                remaining_effects.append(effect)
+            self.parent.effects = remaining_effects
+            if removed_sleep and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
+                engine = self.parent.gamemap.engine
+                if self.parent is engine.player:
+                    engine.message_log.add_message("You wake up!", color.light_gray)
+                else:
+                    engine.message_log.add_message(f"{self.parent.name} wakes up!", color.light_gray)
+
+        # If a vital part was destroyed by the caller (actions.py), force death
+        if hasattr(self.parent, 'body_parts') and self.parent.body_parts:
+            if not self.parent.body_parts.is_alive():
+                self.hp = 0
+        
+        # Add blood spilling when taking damage (only if causes_bleeding is True).
+        # Use optimized create_splash for fuller blood pools without the old hitch profile.
+        if self.can_bleed:
+            if (causes_bleeding and amount >= 1 and random.random() < 0.65
+                    and hasattr(self.parent, 'gamemap')
+                    and hasattr(self.parent.gamemap, 'liquid_system')):
+                from liquid_system import LiquidType
+                radius = 1 if amount < 8 else 2
+                max_depth = 2 if amount < 10 else 3
+                fill_chance = 0.9 if amount < 5 else 1.0
+                self.parent.gamemap.liquid_system.create_splash(
+                    self.parent.x,
+                    self.parent.y,
+                    LiquidType.BLOOD,
+                    radius=radius,
+                    max_depth=max_depth,
+                    fill_chance=fill_chance,
+                )
         
         # Trigger damage indicator if this is the player
         if (hasattr(self.parent, 'gamemap') and 
             hasattr(self.parent.gamemap, 'engine') and
             self.parent is self.parent.gamemap.engine.player):
             self.parent.gamemap.engine.trigger_damage_indicator()
+            if spawn_damage_number:
+                try:
+                    self.parent.gamemap.engine.animation_queue.append(
+                        gpu_stack.DamageNumberParticle((self.parent.x, self.parent.y), amount, color=(220, 220, 0))
+                    )
+                except Exception:
+                    pass
+        elif spawn_damage_number and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
+            # Spawn a floating damage number above the hit enemy
+            try:
+                self.parent.gamemap.engine.animation_queue.append(
+                    gpu_stack.DamageNumberParticle((self.parent.x, self.parent.y), amount)
+                )
+            except Exception:
+                pass
+
+    def mitigate_incoming_damage(
+        self,
+        raw_damage: int,
+        damage_multiplier: float = 1.0,
+        targeted_part=None,
+        armor_tags: list[str] | None = None,
+    ) -> tuple[int, int]:
+        """Apply target-side mitigation and return the final damage plus armor defense."""
+        armor_defense = 0
+
+        # Get defense for specific part
+        if targeted_part:
+            base_defense = targeted_part.protection + self.base_defense
+            if self.parent.equipment:
+                armor_defense = self.parent.equipment.get_defense_for_part(targeted_part.name)
+        # Fallback to base defense
+        else:
+            base_defense = self.defense
+
+        # Aggregate mitigation multipliers from effects that apply to this attack
+        defense_multiplier = 1.0
+        if hasattr(self.parent, 'effects'):
+            for effect in self.parent.effects:
+                if hasattr(effect, 'get_defense_multiplier'):
+                    defense_multiplier *= effect.get_defense_multiplier()
+                if hasattr(effect, 'get_armor_bonus'):
+                    base_defense += effect.get_armor_bonus()
+
+
+        # Combine for total defense
+        total_defense = (base_defense*defense_multiplier) + armor_defense
+
+        base_damage = raw_damage - total_defense
+        mitigation_multiplier = 1.0
+
+        if armor_tags:
+            from proficiency_system import armor_profile
+
+            mitigation_multiplier = armor_profile(self.parent, armor_tags).mitigation_multiplier
+
+        
+
+        mitigated_damage = max(0, int(base_damage * damage_multiplier * mitigation_multiplier))
+
+        return mitigated_damage, armor_defense
+        
     
-    def _check_weapon_drop(self, damaged_part) -> None:
+    def _check_weapon_drop(self, damaged_part) -> None: # TODO
         """Drop weapons if grasping limbs are severely wounded."""
         if not damaged_part.can_grasp or not hasattr(self.parent, 'equipment'):
             return
@@ -310,20 +473,15 @@ class Fighter(BaseComponent):
     def _drop_grasped_items(self, damaged_part) -> None:
         """Drop items being grasped by a damaged body part."""
         equipment = self.parent.equipment
-        from components.body_parts import BodyPartType
         
-        # Determine which item to drop based on which hand was damaged
-        item_to_drop = None
+        # Check if the damaged part can actually grasp items
+        if not damaged_part.can_grasp and "grasp" not in damaged_part.tags:
+            return
         
-        # Check if left hand/arm was damaged -> drop offhand (only if it exists)
-        if damaged_part.part_type in (BodyPartType.LEFT_HAND, BodyPartType.LEFT_ARM):
-            item_to_drop = getattr(equipment, 'offhand', None)
-        # Check if right hand/arm was damaged -> drop weapon (only if it exists)
-        elif damaged_part.part_type in (BodyPartType.RIGHT_HAND, BodyPartType.RIGHT_ARM):
-            item_to_drop = getattr(equipment, 'weapon', None)
-        # If damaged part is not a recognized hand/arm, don't drop anything
+        # Find items being held by this specific body part
+        item_to_drop = equipment.grasped_items.get(damaged_part.name)
         
-        # Only proceed if the damaged hand actually has an item
+        # Only proceed if this part actually has an item
         if item_to_drop:
             # Unequip and drop to ground
             equipment.unequip_item(item_to_drop, add_message=False)
@@ -338,35 +496,56 @@ class Fighter(BaseComponent):
             try:
                 self.parent.gamemap.engine.message_log.add_message(
                     f"{self.parent.name} drops {item_to_drop.name} from their {damaged_part.name}!",
-                    color.health_recovered
+                    color.blue
                 )
-            except:
+            except Exception:
                 pass
     
-    def _heal_body_parts(self, amount: int) -> bool:
-        """Heal damaged body parts with healing amount. Returns True if any parts were healed."""
+    def _heal_body_parts(self, amount_recovered: int) -> bool:
+        """Heal damaged body parts so they track the player's overall HP ratio.
+
+        After any heal the player's current/max ratio is used as a floor:
+        body parts can be more damaged than average (from a targeted hit) but
+        cannot be less healthy than the player's overall condition.
+        """
         if not hasattr(self.parent, 'body_parts') or not self.parent.body_parts:
             return False
-        
-        # Get all damaged body parts
-        damaged_parts = self.parent.body_parts.get_damaged_parts()
-        if not damaged_parts:
+        if amount_recovered <= 0:
             return False
-        
-        # Distribute healing among damaged parts
-        # Each part gets a portion of the healing based on how damaged it is
-        total_healing_distributed = 0
+
+        # Overall health ratio after this heal (e.g. 0.67 when at 20/30 HP)
+        player_ratio = (self.hp / self.max_hp) if self.max_hp > 0 else 1.0
+
         parts_healed = False
-        
-        for part in damaged_parts:
-            # Each damaged limb gets 50% of the potion's base healing value
-            part_healing = max(1, int(amount * 0.5))  # 50% of potion value to each limb
-            
-            if part_healing > 0:
-                actual_healing = part.heal(part_healing)
-                if actual_healing > 0:
+        for part in self.parent.body_parts.body_parts.values():
+            if part.current_hp >= part.max_hp:
+                continue
+            # Floor: part should be at least as healthy as the player overall
+            target_hp = round(player_ratio * part.max_hp)
+            if target_hp > part.current_hp:
+                actual = part.heal(target_hp - part.current_hp)
+                if actual > 0:
                     parts_healed = True
-                    total_healing_distributed += actual_healing
-        
         return parts_healed
 
+class Receiver(Fighter):
+    """Entities that recieve damage ie traps and hazards"""
+    def die(self) -> None:
+        """Overwrite die method"""
+        gm = self.parent.gamemap
+        if hasattr(gm, "entities") and self.parent in gm.entities:
+            try:
+                gm.entities.remove(self.parent)
+            except Exception as e:
+                self.engine.debug_log(f"ERROR: Failed to remove {self.parent.name} from gamemap entities on death: {e}", handler=self.__class__.__name__, event="DeathCleanup")
+                try:
+                    gm.entities.discard(self.parent)
+                except Exception as e:
+                    self.engine.debug_log(f"ERROR: Failed to discard {self.parent.name} from gamemap entities on death: {e}", handler=self.__class__.__name__, event="DeathCleanup")
+                    pass
+
+        # Check if oil barrel
+        if self.parent.name == "Oil Barrel":
+            from liquid_system import LiquidType
+            self.parent.gamemap.liquid_system.create_splash(self.parent.x, self.parent.y, LiquidType.FIRE, radius=3, max_depth=5)
+            sounds.play_explosion_sound()

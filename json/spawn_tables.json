@@ -1,0 +1,97 @@
+[
+  {
+    "factory": "rat",
+    "biome": "any",
+    "threat": 0.5,
+    "rank_cap": 6,
+    "weight": 100,
+    "scale_traits": ["agility"]
+  },
+  {
+    "factory": "kobold",
+    "biome": "any",
+    "threat": 1.2,
+    "rank_cap": 5,
+    "weight": 100,
+    "scale_traits": ["agility", "daggers"]
+  },
+  {
+    "factory": "goblin",
+    "biome": "any",
+    "threat": 2.0,
+    "rank_cap": 4,
+    "weight": 100,
+    "scale_traits": ["strength", "agility", "blades"]
+  },
+  {
+    "factory": "goblin_archer",
+    "biome": "any",
+    "threat": 2.5,
+    "rank_cap": 4,
+    "weight": 100,
+    "scale_traits": ["agility"]
+  },
+  {
+    "factory": "troll",
+    "biome": "any",
+    "threat": 5.0,
+    "rank_cap": 2,
+    "weight": 100,
+    "scale_traits": ["strength", "vigor"]
+  },
+  {
+    "factory": "ogre",
+    "biome": "any",
+    "threat": 7.0,
+    "rank_cap": 2,
+    "weight": 100,
+    "scale_traits": ["strength", "vigor", "heavy armor"]
+  },
+  {
+    "factory": "lunatic_mage",
+    "biome": "any",
+    "threat": 4.0,
+    "rank_cap": 2,
+    "weight": 80,
+    "scale_traits": ["arcana", "evocation", "necromancy"]
+  },
+  {
+    "factory": "phase_spider",
+    "biome": "any",
+    "threat": 3.5,
+    "rank_cap": 3,
+    "weight": 60,
+    "scale_traits": ["agility"]
+  },
+  {
+    "factory": "giant_spider",
+    "biome": ["dungeon", "caverns", "ruins", "lush"],
+    "threat": 2.5,
+    "rank_cap": 4,
+    "weight": 100,
+    "scale_traits": ["agility"]
+  },
+  {
+    "factory": "statue",
+    "biome": ["dungeon", "ruins"],
+    "threat": 3.0,
+    "rank_cap": 3,
+    "weight": 75
+  },
+  {
+    "factory": "naga",
+    "biome": ["caverns", "ruins", "lush"],
+    "threat": 5.5,
+    "rank_cap": 2,
+    "weight": 90,
+    "scale_traits": ["strength", "agility", "blades"]
+  },
+  {
+    "factory": "gelatinous_cube",
+    "biome": ["dungeon", "caverns"],
+    "threat": 4.5,
+    "rank_cap": 2,
+    "weight": 70,
+    "scale_traits": ["vigor", "agility"]
+  }
+]

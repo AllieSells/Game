@@ -1,0 +1,88 @@
+{
+	"spells": [
+		{
+			"name": "Teleport",
+			"school": "conjuration",
+			"description": "Distort space around you",
+			"color": [0, 255, 255]
+		},
+		{
+			"name": "Darkvision",
+			"school": "transmutation",
+			"description": "Sight persists in darkness",
+			"color": [128, 0, 128]
+		},
+		{
+			"name": "Poison Spray",
+			"school": "conjuration",
+			"description": "Summon corrosive elements at your will",
+			"color": [0, 255, 0]
+		},
+		{
+			"name": "Fireball",
+			"school": "evocation",
+			"description": "Unleash flames upon your foes",
+			"color": [255, 69, 0]
+		},
+		{
+			"name": "Healing Word",
+			"school": "evocation",
+			"description": "Soothing light mends wounds",
+			"color": [255, 192, 203]
+		},
+		{
+			"name": "Inflict Wounds",
+			"school": "necromancy",
+			"description": "Invoke necrotic forces upon your foes",
+			"color": [139, 0, 0]
+		},
+		{
+			"name": "Light",
+			"school": "evocation",
+			"description": "Illuminate the darkness around you",
+			"color": [255, 255, 224]
+		},
+		{
+			"name": "Invisibility",
+			"school": "illusion",
+			"description": "Conceal yourself from prying eyes",
+			"color": [192, 192, 192]
+		},
+		{
+			"name": "Ironskin",
+			"school": "abjuration",
+			"description": "Harden your skin to resist harm",
+			"color": [128, 128, 128]
+		},
+        {
+            "name": "Sleep",
+            "school": "enchantment",
+            "description": "Lull enemies into a slumber",
+            "color": [50, 0, 255]
+        },
+		{
+			"name": "Clairvoyance",
+			"school": "divination",
+			"description": "Gain insight into distant places",
+			"color": [0, 255, 255]
+		},
+		{
+			"name": "Mirror Image",
+			"school": "illusion",
+			"description": "Create an illusory duplicate of yourself",
+			"color": [192, 192, 192]
+		},
+		{
+			"name": "Mage Armor",
+			"school": "abjuration",
+			"description": "Don a suit of magical armor for protection",
+			"color": [128, 128, 128]
+		},
+		{
+			"name": "Remove Curse",
+			"school": "abjuration",
+			"description": "Sever a connection to a curse",
+			"color": [128, 0, 128]
+		}
+	]
+}

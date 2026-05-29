@@ -1,0 +1,242 @@
+{
+  "origins": [
+    {
+      "id": "noble",
+      "name": "Noble",
+      "description": "Raised among privilege and formal expectations.",
+      "aptitudes": {
+        "swords": 1,
+        "agility": 1
+      },
+      "origin_perks": {
+        "starting_gold": 24
+      },
+      "tags": [
+        "upper_class",
+        "educated"
+      ]
+    },
+    {
+      "id": "apprentice",
+      "name": "Apprentice",
+      "description": "Years under a demanding mentor shaped discipline and focus.",
+      "aptitudes": {
+        "strength": 1,
+        "agility": 1
+      },
+      "origin_perks": {
+        "starting_gold": 16,
+        "bonus_hunger": 15,
+        "bonus_saturation": 8
+      },
+      "tags": [
+        "trained",
+        "working_class"
+      ]
+    },
+    {
+      "id": "urchin",
+      "name": "Urchin",
+      "description": "Street life taught improvisation, caution, and survival instincts.",
+      "aptitudes": {
+        "agility": 1,
+        "daggers": 1
+      },
+      "origin_perks": {
+        "starting_gold": 12,
+        "bonus_hunger": 18
+      },
+      "tags": [
+        "streetwise",
+        "poor"
+      ]
+    },
+    {
+      "id": "mercenary",
+      "name": "Mercenary",
+      "description": "A life of hard contracts and practical violence.",
+      "aptitudes": {
+        "strength": 1,
+        "vigor": 1
+      },
+      "origin_perks": {
+        "starting_gold": 14,
+        "bonus_hp": 1
+      },
+      "tags": [
+        "soldiering",
+        "hardened"
+      ]
+    },
+    {
+      "id": "merchant",
+      "name": "Merchant",
+      "description": "Trade routes and negotiation sharpened wit and patience.",
+      "aptitudes": {
+        "agility": 1,
+        "daggers": 1
+      },
+      "origin_perks": {
+        "starting_gold": 26
+      },
+      "tags": [
+        "trader",
+        "networked"
+      ]
+    }
+  ],
+  "appearance_glyphs": [
+    {
+      "char": "0xE030",
+      "name": "Knight"
+    },
+    {
+      "char": "0xE03B",
+      "name": "Wanderer"
+    },
+    {
+      "char": "0xE032",
+      "name": "Arcanist"
+    },
+    {
+      "char": "0xE033",
+      "name": "Shade"
+    }
+  ],
+  "appearance_colors": [
+    {
+      "rgb": [255, 255, 255],
+      "name": "Silver"
+    },
+    {
+      "rgb": [200, 160, 90],
+      "name": "Amber"
+    },
+    {
+      "rgb": [90, 160, 220],
+      "name": "Azure"
+    },
+    {
+      "rgb": [220, 90, 90],
+      "name": "Crimson"
+    },
+    {
+      "rgb": [90, 220, 90],
+      "name": "Verdant"
+    },
+    {
+      "rgb": [180, 90, 220],
+      "name": "Violet"
+    },
+    {
+      "rgb": [220, 180, 90],
+      "name": "Gold"
+    },
+    {
+      "rgb": [90, 220, 200],
+      "name": "Teal"
+    }
+  ],
+  "items_pool": [
+    {
+      "ref": "dagger",
+      "name": "Dagger",
+      "cost": 1
+    },
+    {
+      "ref": "shortsword",
+      "name": "Shortsword",
+      "cost": 2
+    },
+    {
+      "ref": "longsword",
+      "name": "Longsword",
+      "cost": 3
+    },
+    {
+      "ref": "bow",
+      "name": "Bow",
+      "cost": 2
+    },
+    {
+      "ref": "arrow",
+      "name": "Arrow (x20)",
+      "cost": 1
+    },
+    {
+      "ref": "poison_potion",
+      "name": "Poison Potion",
+      "cost": 1
+    },
+    {
+      "ref": "leather_cap",
+      "name": "Leather Cap",
+      "cost": 1
+    },
+    {
+      "ref": "leather_armor",
+      "name": "Leather Armor",
+      "cost": 2
+    },
+    {
+      "ref": "leather_leggings",
+      "name": "Leather Leggings",
+      "cost": 1
+    },
+    {
+      "ref": "leather_boot",
+      "name": "Leather Boot",
+      "cost": 1
+    },
+    {
+      "ref": "chain_mail_helmet",
+      "name": "Chain Mail Helmet",
+      "cost": 3
+    },
+    {
+      "ref": "chain_mail_armor",
+      "name": "Chain Mail Armor",
+      "cost": 5
+    },
+    {
+      "ref": "chain_mail_leggings",
+      "name": "Chain Mail Leggings",
+      "cost": 3
+    },
+    {
+      "ref": "torch",
+      "name": "Torch",
+      "cost": 1
+    },
+    {
+      "ref": "health_potion",
+      "name": "Health Potion",
+      "cost": 2
+    },
+    {
+      "ref": "lesser_health_potion",
+      "name": "Lesser Health Potion",
+      "cost": 1
+    },
+    {
+      "ref": "darkvision_scroll",
+      "name": "Darkvision Scroll",
+      "cost": 1
+    },
+    {
+      "ref": "fireball_scroll",
+      "name": "Fireball Scroll",
+      "cost": 2
+    },
+    {
+      "ref": "lightning_scroll",
+      "name": "Lightning Scroll",
+      "cost": 2
+    },
+    {
+      "ref": "confusion_scroll",
+      "name": "Confusion Scroll",
+      "cost": 2
+    }
+  ]
+}

@@ -9,9 +9,11 @@ purple = (0xFF, 0x0, 0xFF)
 brown = (0xA0, 0x60, 0x20)
 grey = (0x80, 0x80, 0x80)
 green = (0x0, 0xFF, 0x0)
+dark_green = (0x0, 0x80, 0x0)
 yellow = (0xFF, 0xFF, 0x0)
 cyan = (0x0, 0xFF, 0xFF)
 magenta = (0xFF, 0x0, 0xFF)
+light_purple = (0xFF, 0x80, 0xFF)
 grey = (0x80, 0x80, 0x80)
 gray = grey
 light_gray = (0xC0, 0xC0, 0xC0)
@@ -21,17 +23,25 @@ dark_blue = (0x0, 0x0, 0x80)
 dark_green = (0x0, 0x80, 0x0)
 dark_gray = (0x40, 0x40, 0x40)
 dark_grey = dark_gray
+light_red = (0xFF, 0x80, 0x80)
+light_green = (0x80, 0xFF, 0x80)
+dark_purple = (0x80, 0x0, 0x80)
+light_blue = (0x80, 0x80, 0xFF)
+
+# Entity colors
+sprite_sheet = (255, 255, 255)
 
 
 # rarity colors
 common = gray
-uncommon = green
+uncommon = dark_green
 rare = blue
 epic = purple
 legendary = orange
 coins = (163, 140, 69)
 
-
+shallow_water = (255, 255, 255)
+deep_water = (210, 210, 210)
 player_atk = (0xE0, 0xE0, 0xE0)
 enemy_atk = (0xFF, 0xC0, 0xC0)
 needs_target = (0x3F, 0xFF, 0xFF)
@@ -64,10 +74,15 @@ xp_bar_filled = (6, 100, 255)
 parchment_bg = (45, 35, 25)
 parchment_light = (50, 40, 30) 
 parchment_dark = (40, 30, 22)
+parchment_very_dark = (30, 20, 15)
 bronze_border = (139, 105, 60)
 bronze_text = (160, 120, 70)
 gold_accent = (220, 180, 50)
 fantasy_text = (200, 170, 140)
+selected_bronze = (80, 60, 30)
 
 menu_title = (255, 255, 63)
 menu_text = white
+
+
+poison = (0x40, 0xFF, 0x40)

@@ -3,21 +3,22 @@ ASCII Equipment Interface
 
 A visual equipment interface that shows a body diagram with selectable slots.
 """
-
 from __future__ import annotations
-from typing import Optional, Dict, List, Tuple, TYPE_CHECKING
+from typing import Optional, Dict, List, TYPE_CHECKING
 
 import tcod
 import color
 from equipment_types import EquipmentType
-from input_handlers import AskUserEventHandler
+from input_handlers import AskUserEventHandler, PopupEventHandler, ItemContextMenu
 from render_functions import MenuRenderer
+from tcod.console import Console
 import actions
+import identify as identify_system
 
 if TYPE_CHECKING:
     from engine import Engine
     from entity import Item
-
+import sounds
 
 class EquipmentSlot:
     """Represents a visual equipment slot on the body diagram."""
@@ -33,59 +34,168 @@ class EquipmentSlot:
     
     def get_equipped_item(self, equipment) -> Optional[Item]:
         """Get the item equipped in this slot."""
+        if not equipment:
+            return None
+
+        # Ring slots are backed by explicit keys in equipment.equipped_items.
+        if self.name == "Ring 1":
+            if hasattr(equipment, 'equipped_items'):
+                return equipment.equipped_items.get("RING_1")
+            return None
+        if self.name == "Ring 2":
+            if hasattr(equipment, 'equipped_items'):
+                return equipment.equipped_items.get("RING_2")
+            return None
+            
         for eq_type in self.equipment_types:
-            if eq_type == EquipmentType.WEAPON:
-                # For weapon slots, distinguish between left and right hand strictly
-                if self.name == "L.Hand":
-                    # Left hand ONLY shows offhand slot, nothing else
-                    return equipment.offhand if equipment.offhand else None
-                elif self.name == "R.Hand":
-                    # Right hand ONLY shows main weapon slot
-                    return equipment.weapon
+            if eq_type in [EquipmentType.WEAPON, EquipmentType.SHIELD, EquipmentType.RANGED, EquipmentType.PROJECTILE]:
+                # Handle hand slots for weapons/shields/ranged/projectiles
+                if self.name == "R.Hand":
+                    hand_name = "right hand"
+                elif self.name == "L.Hand": 
+                    hand_name = "left hand"
                 else:
-                    # Generic weapon slot (shouldn't happen with current setup)
-                    return equipment.weapon
-            elif eq_type == EquipmentType.SHIELD:
-                # Shields always go to left hand (offhand)
-                if (equipment.offhand and hasattr(equipment.offhand, 'equippable') and 
-                    hasattr(equipment.offhand.equippable, 'equipment_type') and 
-                    equipment.offhand.equippable.equipment_type == EquipmentType.SHIELD):
-                    if self.name == "L.Hand":
-                        return equipment.offhand
-                return None
-            elif eq_type == EquipmentType.ARMOR:
-                return equipment.armor
-            elif eq_type == EquipmentType.HELMET:
-                return equipment.equipped_items.get("HELMET")
-            elif eq_type == EquipmentType.BOOTS:
-                return equipment.equipped_items.get("BOOTS")
-            elif eq_type == EquipmentType.GAUNTLETS:
-                return equipment.equipped_items.get("GAUNTLETS")
-            elif eq_type == EquipmentType.LEGGINGS:
-                return equipment.equipped_items.get("LEGGINGS")
-            elif eq_type == EquipmentType.BACKPACK:
-                return equipment.backpack
+                    # For other slots that might handle weapons/shields, check all systems
+                    # Check grasped_items first (legacy)
+                    if hasattr(equipment, 'grasped_items'):
+                        for item in equipment.grasped_items.values():
+                            if (item and hasattr(item, 'equippable') and item.equippable and 
+                                item.equippable.equipment_type == eq_type):
+                                return item
+                    # Check body_part_coverage (new system)
+                    if hasattr(equipment, 'body_part_coverage'):
+                        for item in equipment.body_part_coverage.values():
+                            if (item and hasattr(item, 'equippable') and item.equippable and 
+                                item.equippable.equipment_type == eq_type):
+                                return item
+                    return None
+                
+                # Check specific hand in both systems
+                # First check grasped_items (legacy system)
+                if hasattr(equipment, 'grasped_items') and hand_name in equipment.grasped_items:
+                    item = equipment.grasped_items[hand_name]
+                    if (item and hasattr(item, 'equippable') and item.equippable and 
+                        item.equippable.equipment_type == eq_type):
+                        return item
+                
+                # Then check body_part_coverage (new system)
+                if hasattr(equipment, 'body_part_coverage') and hand_name in equipment.body_part_coverage:
+                    item = equipment.body_part_coverage[hand_name]
+                    if (item and hasattr(item, 'equippable') and item.equippable and 
+                        item.equippable.equipment_type == eq_type):
+                        return item
+            else:
+                # Check equipped_items for other equipment types (armor, helmets, etc.)
+                if hasattr(equipment, 'equipped_items'):
+                    # Try both the enum itself and its name as key
+                    equipped_item = equipment.equipped_items.get(eq_type)
+                    if equipped_item:
+                        return equipped_item
+                    equipped_item = equipment.equipped_items.get(eq_type.name)
+                    if equipped_item:
+                        return equipped_item
+                        
+                # Also check body_part_coverage if it exists
+                if hasattr(equipment, 'body_part_coverage'):
+                    for item in equipment.body_part_coverage.values():
+                        if (item and hasattr(item, 'equippable') and item.equippable and 
+                            item.equippable.equipment_type == eq_type):
+                            return item
         return None
 
 
-class EquipmentUI(AskUserEventHandler):
+class EquipmentUI(PopupEventHandler):
     """Simple list-based equipment interface."""
     
     def __init__(self, engine: Engine):
         super().__init__(engine)
+        self.engine.context_hints = [
+            ("\u2191\u2193/WS", "Navigate Slots"),
+            ("\u2190\u2192/AD", "Navigate Items"),
+            ("Space/Click", "Equip"),
+        ]
         self.selected_slot = 0
-        self.selected_item = 0  # For cycling through items
+        self.selected_item = 0  # For cycling through item groups
         self.slots = self._create_equipment_slots()
         
-        # Available items for equipping
-        self.available_items = [item for item in engine.player.inventory.items 
-                              if hasattr(item, 'equippable') and item.equippable]
+        # Available item groups for equipping - use display groups for stacking
+        self.available_item_groups = []
+        self.refresh_item_groups()
     
+    def refresh_item_groups(self) -> None:
+        """Rebuild available_item_groups from the current inventory/equipment state."""
+        self.available_item_groups = []
+
+        # Add item groups from inventory
+        inventory_groups = self.engine.player.inventory.get_display_groups()
+        for group in inventory_groups:
+            if hasattr(group['item'], 'equippable') and group['item'].equippable:
+                self.available_item_groups.append(group)
+
+        # Add equipped items (they might not be in inventory anymore)
+        equipment = self.engine.player.equipment
+        if equipment:
+            # Add items from grasped_items
+            for item in equipment.grasped_items.values():
+                if item and hasattr(item, 'equippable') and item.equippable:
+                    already_present = False
+                    for group in self.available_item_groups:
+                        if item in group['items']:
+                            already_present = True
+                            break
+                    if not already_present:
+                        self.available_item_groups.append({
+                            'item': item,
+                            'items': [item],
+                            'quantity': 1,
+                            'display_name': identify_system.get_display_name(self.engine.player, item)
+                        })
+
+            # Add items from equipped_items
+            for item in equipment.equipped_items.values():
+                if item and hasattr(item, 'equippable') and item.equippable:
+                    already_present = False
+                    for group in self.available_item_groups:
+                        if item in group['items']:
+                            already_present = True
+                            break
+                    if not already_present:
+                        self.available_item_groups.append({
+                            'item': item,
+                            'items': [item],
+                            'quantity': 1,
+                            'display_name': identify_system.get_display_name(self.engine.player, item)
+                        })
+
+            # Add items from body_part_coverage if it exists
+            if hasattr(equipment, 'body_part_coverage'):
+                for item in equipment.body_part_coverage.values():
+                    if item and hasattr(item, 'equippable') and item.equippable:
+                        already_present = False
+                        for group in self.available_item_groups:
+                            if item in group['items']:
+                                already_present = True
+                                break
+                        if not already_present:
+                            self.available_item_groups.append({
+                                'item': item,
+                                'items': [item],
+                                'quantity': 1,
+                                'display_name': identify_system.get_display_name(self.engine.player, item)
+                            })
+
+        # Clamp selected_item to valid range
+        compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot]) if self.slots else []
+        if compatible_groups:
+            self.selected_item = max(0, min(self.selected_item, len(compatible_groups) - 1))
+        else:
+            self.selected_item = 0
+
     def _create_equipment_slots(self) -> List[EquipmentSlot]:
         """Create equipment slots for list display."""
         return [
-            EquipmentSlot("R.Hand", 0, 0, [EquipmentType.WEAPON, EquipmentType.SHIELD], "o", "•"),
-            EquipmentSlot("L.Hand", 0, 1, [EquipmentType.WEAPON, EquipmentType.SHIELD], "o", "•"), 
+            EquipmentSlot("R.Hand", 0, 0, [EquipmentType.WEAPON, EquipmentType.SHIELD, EquipmentType.RANGED, EquipmentType.PROJECTILE], "o", "•"),
+            EquipmentSlot("L.Hand", 0, 1, [EquipmentType.WEAPON, EquipmentType.SHIELD, EquipmentType.RANGED, EquipmentType.PROJECTILE], "o", "•"), 
             EquipmentSlot("Head", 0, 2, [EquipmentType.HELMET], "o", "•"),
             EquipmentSlot("Torso", 0, 3, [EquipmentType.ARMOR], "o", "•"),
             EquipmentSlot("L.Arm", 0, 4, [EquipmentType.GAUNTLETS], "o", "•"),
@@ -95,9 +205,11 @@ class EquipmentUI(AskUserEventHandler):
             EquipmentSlot("L.Foot", 0, 8, [EquipmentType.BOOTS], "o", "•"),
             EquipmentSlot("R.Foot", 0, 9, [EquipmentType.BOOTS], "o", "•"),
             EquipmentSlot("Back", 0, 10, [EquipmentType.BACKPACK], "o", "•"),
+            EquipmentSlot("Ring 1", 20, 9, [EquipmentType.RING], "o", "•"),
+            EquipmentSlot("Ring 2", 20, 10, [EquipmentType.RING], "o", "•"),
         ]
     
-    def on_render(self, console: tcod.Console) -> None:
+    def on_render(self, console: Console) -> None:
         super().on_render(console)
         
         # Calculate smaller window size and position
@@ -105,6 +217,12 @@ class EquipmentUI(AskUserEventHandler):
         window_height = 20
         x = (console.width - window_width) // 2
         y = (console.height - window_height) // 2
+        self._ui_x = x
+        self._ui_y = y
+        self._set_popup_bounds(x, y, window_width, window_height)
+        
+        # Fade the background except for the equipment UI
+        super().render_faded(console, x, y, window_width, window_height)
         
         # Draw window frame
         MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
@@ -115,11 +233,13 @@ class EquipmentUI(AskUserEventHandler):
         
         # Draw available items list
         self._draw_items_list(console, x, y, window_width, window_height)
+
+        self._draw_player_stats(console, x, y)
         
         # Instructions
         instructions = [
-            "[↑↓] Navigate slots  [←→] Navigate items  [Space] Equip",
-            "[Del] Unequip  [Esc] Exit"
+            #"[WS] Navigate slots  [AD] Navigate items  [Space] Equip",
+            #"Mouse Compatible  [Esc/E] Exit"
         ]
         
         for i, instruction in enumerate(instructions):
@@ -129,28 +249,36 @@ class EquipmentUI(AskUserEventHandler):
                 fg=color.light_gray, bg=(45, 35, 25)
             )
     
-    def _draw_slots_list(self, console: tcod.Console, base_x: int, base_y: int,
+    def _draw_slots_list(self, console: Console, base_x: int, base_y: int,
                         window_width: int, window_height: int) -> None:
         """Draw equipment slots as a simple list."""
         from text_utils import print_colored_text_with_bg
         
         list_x = base_x + 3
         list_y = base_y + 3
-        
-        for i, slot in enumerate(self.slots):
+
+        main_slots = [slot for slot in self.slots if not slot.name.startswith("Ring")]
+        ring_slots = [slot for slot in self.slots if slot.name.startswith("Ring")]
+
+        # Draw core equipment slots in the left column.
+        for i, slot in enumerate(main_slots):
             equipped_item = slot.get_equipped_item(self.engine.player.equipment)
             is_disabled = self._is_slot_disabled(slot)
+            slot_x = list_x
+            slot_y = list_y + i
+
+            selected_index = self.slots.index(slot)
             
             # Choose colors based on selection, equipment status, and injury
             if is_disabled:
                 fg_color = color.red
                 bg_color = (45, 35, 25)
                 marker = "  "
-                if i == self.selected_slot:
+                if selected_index == self.selected_slot:
                     fg_color = color.white
                     bg_color = (80, 60, 30)
                     marker = "> "
-            elif i == self.selected_slot:
+            elif selected_index == self.selected_slot:
                 fg_color = color.white
                 bg_color = (80, 60, 30)
                 marker = "> "
@@ -177,19 +305,90 @@ class EquipmentUI(AskUserEventHandler):
             # Build text parts for colored printing
             slot_char = slot.equipped_char if equipped_item else slot.char
             text_parts = [
-                (f"{marker}{slot_char}{slot.name:6} [", fg_color),
+                (f"{marker}{slot_char}{slot.name:<7}[", fg_color),
                 (f"{slot_hp:>3}%", part_color),
                 ("]", fg_color)
             ]
             
             if equipped_item:
-                item_name = equipped_item.name[:20]  # Longer truncation for wider window
+                shown_name = identify_system.get_display_name(self.engine.player, equipped_item)
+                item_name = shown_name[:20]  # Longer truncation for wider window
                 text_parts.append((":", fg_color))
-                text_parts.append((item_name, equipped_item.rarity_color))
+                # Safely get rarity color or use white as fallback
+                item_color = identify_system.get_display_rarity_color(self.engine.player, equipped_item)
+                text_parts.append((item_name, item_color))
             
-            print_colored_text_with_bg(console, list_x, list_y + i, text_parts, bg_color)
-    
-    def _draw_items_list(self, console: tcod.Console, base_x: int, base_y: int,
+            print_colored_text_with_bg(console, slot_x, slot_y, text_parts, bg_color)
+
+        # Draw ring slots in a dedicated right-side mini panel.
+        ring_x = list_x + 25
+        ring_y = list_y + 8
+        console.print(ring_x, ring_y - 1, "Rings:", fg=color.yellow, bg=(45, 35, 25))
+
+        for ring_row, slot in enumerate(ring_slots):
+            equipped_item = slot.get_equipped_item(self.engine.player.equipment)
+            is_disabled = self._is_slot_disabled(slot)
+
+            slot_x = ring_x
+            slot_y = ring_y + ring_row
+            selected_index = self.slots.index(slot)
+
+            if is_disabled:
+                fg_color = color.red
+                bg_color = (45, 35, 25)
+                marker = "  "
+                if selected_index == self.selected_slot:
+                    fg_color = color.white
+                    bg_color = (80, 60, 30)
+                    marker = "> "
+            elif selected_index == self.selected_slot:
+                fg_color = color.white
+                bg_color = (80, 60, 30)
+                marker = "> "
+            elif equipped_item:
+                fg_color = color.white
+                bg_color = (45, 35, 25)
+                marker = "  "
+            else:
+                fg_color = color.white
+                bg_color = (45, 35, 25)
+                marker = "  "
+
+            slot_hp = self._get_slot_hp(slot)
+            if slot_hp <= 0:
+                part_color = color.dark_red
+            elif slot_hp < 30:
+                part_color = color.red
+            elif slot_hp < 70:
+                part_color = color.yellow
+            else:
+                part_color = color.green
+
+            slot_char = slot.equipped_char if equipped_item else slot.char
+            text_parts = [
+                (f"{marker}{slot_char}{slot.name:<7}[", fg_color),
+                (f"{slot_hp:>3}%", part_color),
+                ("]", fg_color),
+            ]
+
+            if equipped_item:
+                shown_name = identify_system.get_display_name(self.engine.player, equipped_item)
+                item_name = shown_name[:16]
+                text_parts.append((":", fg_color))
+                item_color = identify_system.get_display_rarity_color(self.engine.player, equipped_item)
+                text_parts.append((item_name, item_color))
+
+            print_colored_text_with_bg(console, slot_x, slot_y, text_parts, bg_color)
+    def _draw_player_stats(self, console: Console, base_x: int, base_y: int) -> None:
+        ''' Draw equipment stats like power and defense at the bottom of the equipment UI.'''
+        from text_utils import print_colored_text_with_bg
+        stats_x = base_x + 5
+        stats_y = base_y + 15
+        power = self.engine.player.fighter.power + self.engine.player.fighter.power_bonus
+        defense = self.engine.player.fighter.defense + self.engine.player.fighter.defense_bonus
+        stats_text = f"Power: {power}   Defense: {defense}"
+        print_colored_text_with_bg(console, stats_x, stats_y, [(stats_text, color.bronze_text)], (45, 35, 25))
+    def _draw_items_list(self, console: Console, base_x: int, base_y: int,
                         window_width: int, window_height: int) -> None:
         """Draw list of available items for the selected slot."""
         from text_utils import print_colored_text_with_bg
@@ -198,7 +397,7 @@ class EquipmentUI(AskUserEventHandler):
             return
             
         selected_slot = self.slots[self.selected_slot]
-        compatible_items = self._get_compatible_items(selected_slot)
+        compatible_groups = self._get_compatible_item_groups(selected_slot)
         
         # Items list area (right side of window, with more space)
         list_x = base_x + 40
@@ -208,59 +407,97 @@ class EquipmentUI(AskUserEventHandler):
         console.print(list_x, list_y, "Available Items:", fg=color.yellow, bg=(45, 35, 25))
         list_y += 1
         
-        # Show compatible items
-        if not compatible_items:
+# Show compatible item groups
+        if not compatible_groups:
             console.print(list_x, list_y, "None", fg=color.gray, bg=(45, 35, 25))
             return
-        
+
         # Clamp selected item to valid range
-        self.selected_item = max(0, min(self.selected_item, len(compatible_items) - 1))
+        self.selected_item = max(0, min(self.selected_item, len(compatible_groups) - 1))
         
-        # Draw items without cap, scrolling if needed
+        # Draw item groups without cap, scrolling if needed
         start_index = max(0, self.selected_item - 8)  # Keep selection visible, show ~9 items
         
-        for display_i, i in enumerate(range(start_index, len(compatible_items))):
+        for display_i, i in enumerate(range(start_index, len(compatible_groups))):
             if display_i >= window_height - 7:  # Respect window height
                 break
             
-            item = compatible_items[i]
+            group = compatible_groups[i]
+            item = group['item']  # Representative item
+            display_name = group['display_name']  # Includes quantity if > 1
             is_selected = i == self.selected_item
             bg_color = (80, 60, 30) if is_selected else (45, 35, 25)
             marker = "> " if is_selected else "  "
             
-            # Check if item is equipped and add (e) marker
-            equipped_marker = " (e)" if self._is_item_equipped(item) else ""
-            item_name = item.name[:max_items_width - 4] + equipped_marker  # Leave room for marker
+            # Check if any item in group is equipped and add (e) marker
+            equipped_marker = ""
+            for group_item in group['items']:
+                if self._is_item_equipped(group_item):
+                    equipped_marker = " (e)"
+                    break
+            
+            item_display = display_name[:max_items_width - 4] + equipped_marker  # Leave room for marker
             
             # Build text parts with rarity color for item name
             text_parts = [
                 (marker, color.white if not is_selected else color.white),
-                (item_name, item.rarity_color)
+                (item_display, item.rarity_color)
             ]
             
             print_colored_text_with_bg(console, list_x, list_y + display_i, text_parts, bg_color)
     
-    def _get_compatible_items(self, slot: EquipmentSlot) -> List[Item]:
-        """Get items that can be equipped in the given slot, with equipped items sorted to bottom."""
+    def _get_compatible_item_groups(self, slot: EquipmentSlot) -> List[Dict]:
+        """Get item groups that can be equipped in the given slot, including items currently in THIS slot."""
         compatible = []
-        for item in self.available_items:
-            if item.equippable.equipment_type in slot.equipment_types:
-                can_equip, _ = self.engine.player.equipment.can_equip_item(item)
-                if can_equip or slot.get_equipped_item(self.engine.player.equipment) == item:
-                    compatible.append(item)
+        currently_equipped_in_slot = slot.get_equipped_item(self.engine.player.equipment)
         
-        # Sort items: unequipped first, equipped last
-        compatible.sort(key=lambda item: self._is_item_equipped(item))
+        for group in self.available_item_groups:
+            representative_item = group['item']
+            if representative_item.equippable.equipment_type in slot.equipment_types:
+                # Check if any item in this group is currently equipped in THIS specific slot
+                has_item_in_slot = any(item == currently_equipped_in_slot for item in group['items'])
+                
+                if has_item_in_slot:
+                    compatible.append(group)
+                    continue
+                
+                # Check if any items in group are available (not equipped in OTHER slots)
+                available_items = []
+                for item in group['items']:
+                    if not self._is_item_equipped(item):
+                        can_equip, _ = self.engine.player.equipment.can_equip_item(item)
+                        if can_equip:
+                            available_items.append(item)
+                
+                if available_items:
+                    # Create a filtered group with only available items
+                    filtered_group = {
+                        'item': available_items[0],  # Use first available as representative
+                        'items': available_items,      # FIFO: first items in list are equipped first
+                        'quantity': len(available_items),
+                        'display_name': f"{available_items[0].name} (x{len(available_items)})" if len(available_items) > 1 else available_items[0].name
+                    }
+                    compatible.append(filtered_group)
+        
         return compatible
+    
+    def _get_selected_item_from_group(self, group: Dict) -> 'Item':
+        """Get the item to use from a group using FIFO logic."""
+        # FIFO: return the first available item from the group
+        for item in group['items']:
+            # For equipped items, return the specific equipped one
+            if self._is_item_equipped(item):
+                return item
+        
+        # For unequipped items, return the first one (FIFO)
+        return group['items'][0] if group['items'] else group['item']
     
     def _is_item_equipped(self, item: Item) -> bool:
         """Check if an item is currently equipped in any slot."""
         equipment = self.engine.player.equipment
-        return (equipment.weapon == item or 
-                equipment.offhand == item or
-                equipment.armor == item or
-                equipment.backpack == item or
-                item in equipment.equipped_items.values())
+        return (item in equipment.grasped_items.values() or
+                item in equipment.equipped_items.values() or
+                item in equipment.body_part_coverage.values())
 
     def _get_slot_hp(self, slot: EquipmentSlot) -> int:
         """"Returns the limb HP ratio associated with a slot, default 100."""
@@ -331,7 +568,7 @@ class EquipmentUI(AskUserEventHandler):
                 part = self.engine.player.body_parts.body_parts[part_type]
                 # Slot is disabled if body part is destroyed or severely wounded (≤ 25% HP)
                 damage_ratio = part.current_hp / part.max_hp
-                return damage_ratio <= 0.25
+                return damage_ratio <= 0.0
         except (KeyError, AttributeError):
             pass
         
@@ -340,37 +577,62 @@ class EquipmentUI(AskUserEventHandler):
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[AskUserEventHandler]:
         key = event.sym
         
+        
         # Slot navigation
-        if key == tcod.event.KeySym.UP:
+        if key == tcod.event.KeySym.W:
+            # Check if selected slot would have been -1 (out of bounds) before moving up, to play sound only on valid moves
+            if self.selected_slot > 0:
+                sounds.play_ui_move_sound()
+                
             self.selected_slot = max(0, self.selected_slot - 1)
+            
+                
             self.selected_item = 0  # Reset item selection when changing slots
+            
             return None
-        elif key == tcod.event.KeySym.DOWN:
+        elif key == tcod.event.KeySym.A:
+            # Check if selected slot would have been out of bounds before moving down, to play sound only on valid moves
+            if self.selected_slot < len(self.slots) - 1:
+                sounds.play_ui_move_sound()
             self.selected_slot = min(len(self.slots) - 1, self.selected_slot + 1)
             self.selected_item = 0  # Reset item selection when changing slots
             return None
         
         # Item navigation
-        elif key == tcod.event.KeySym.LEFT:
+        elif key == tcod.event.KeySym.A:
             if self.slots:
-                compatible_items = self._get_compatible_items(self.slots[self.selected_slot])
-                if compatible_items:
-                    self.selected_item = (self.selected_item - 1) % len(compatible_items)
+                compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot])
+                if compatible_groups:
+                    # Check if item groups exist before playing sound and changing selection
+                    sounds.play_ui_move_sound()
+                    self.selected_item = (self.selected_item - 1) % len(compatible_groups)
             return None
-        elif key == tcod.event.KeySym.RIGHT:
+        elif key == tcod.event.KeySym.D:
             if self.slots:
-                compatible_items = self._get_compatible_items(self.slots[self.selected_slot])
-                if compatible_items:
-                    self.selected_item = (self.selected_item + 1) % len(compatible_items)
+                compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot])
+                if compatible_groups:
+                    # Check if item groups exist before playing sound and changing selection
+                    sounds.play_ui_move_sound()
+                    self.selected_item = (self.selected_item + 1) % len(compatible_groups)
             return None
         
-        # Equip selected item
+        # W/S as alternative slot navigation
+        elif key == tcod.event.KeySym.W:
+            if self.selected_slot > 0:
+                sounds.play_ui_move_sound()
+            self.selected_slot = max(0, self.selected_slot - 1)
+            self.selected_item = 0
+            return None
+        elif key == tcod.event.KeySym.S:
+            if self.selected_slot < len(self.slots) - 1:
+                sounds.play_ui_move_sound()
+            self.selected_slot = min(len(self.slots) - 1, self.selected_slot + 1)
+            self.selected_item = 0
+            return None
+
+        # Equip/Unequip selected item
         elif key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.KP_ENTER or key == tcod.event.KeySym.SPACE:
             return self._handle_equip_selected()
-        
-        # Unequip current item
-        elif key == tcod.event.KeySym.DELETE:
-            return self._handle_unequip()
         
         # Exit
         elif key == tcod.event.KeySym.ESCAPE:
@@ -380,7 +642,7 @@ class EquipmentUI(AskUserEventHandler):
         return super().ev_keydown(event)
     
     def _handle_equip_selected(self) -> Optional[AskUserEventHandler]:
-        """Equip the currently selected item."""
+        """Equip or unequip the currently selected item."""
         if not self.slots:
             return None
             
@@ -393,48 +655,35 @@ class EquipmentUI(AskUserEventHandler):
                     f"Cannot use {selected_slot.name} - too injured!",
                     color.impossible
                 )
-            except:
+            except Exception:
                 pass
             return None  # Stay in equipment UI
         
-        compatible_items = self._get_compatible_items(selected_slot)
+        compatible_groups = self._get_compatible_item_groups(selected_slot)
+        currently_equipped_in_slot = selected_slot.get_equipped_item(self.engine.player.equipment)
         
-        if compatible_items and self.selected_item < len(compatible_items):
-            item_to_equip = compatible_items[self.selected_item]
+        if compatible_groups and self.selected_item < len(compatible_groups):
+            selected_group = compatible_groups[self.selected_item]
+            selected_item = self._get_selected_item_from_group(selected_group)
             
-            # Handle specific slot targeting for hands
-            if selected_slot.name == "L.Hand" and item_to_equip.equippable.equipment_type == EquipmentType.WEAPON:
-                # Force equip to offhand for left hand slot
-                if self.engine.player.equipment.offhand != item_to_equip:
-                    # If something is in offhand, swap it
-                    if self.engine.player.equipment.offhand:
-                        self.engine.player.equipment.unequip_item(self.engine.player.equipment.offhand, add_message=False)
-                    # If item is in weapon slot, move it to offhand
-                    if self.engine.player.equipment.weapon == item_to_equip:
-                        self.engine.player.equipment.weapon = None
-                        self.engine.player.equipment.grasped_items.discard(item_to_equip)
-                    self.engine.player.equipment.offhand = item_to_equip
-                    self.engine.player.equipment.grasped_items.add(item_to_equip)
-                    self.engine.player.equipment._play_equip_sound(item_to_equip)
-                    self.engine.player.equipment.equip_message(item_to_equip.name)
-            elif selected_slot.name == "R.Hand" and item_to_equip.equippable.equipment_type == EquipmentType.WEAPON:
-                # Force equip to weapon for right hand slot
-                if self.engine.player.equipment.weapon != item_to_equip:
-                    # If something is in weapon, swap it
-                    if self.engine.player.equipment.weapon:
-                        self.engine.player.equipment.unequip_item(self.engine.player.equipment.weapon, add_message=False)
-                    # If item is in offhand slot, move it to weapon
-                    if self.engine.player.equipment.offhand == item_to_equip:
-                        self.engine.player.equipment.offhand = None
-                        self.engine.player.equipment.grasped_items.discard(item_to_equip)
-                    self.engine.player.equipment.weapon = item_to_equip
-                    self.engine.player.equipment.grasped_items.add(item_to_equip)
-                    self.engine.player.equipment._play_equip_sound(item_to_equip)
-                    self.engine.player.equipment.equip_message(item_to_equip.name)
+            # Check if selected item is currently equipped in THIS slot
+            if selected_item == currently_equipped_in_slot:
+                # Unequip the item
+                if selected_slot.name == "L.Hand":
+                    self.engine.player.equipment.unequip_from_specific_hand("left hand")
+                elif selected_slot.name == "R.Hand":
+                    self.engine.player.equipment.unequip_from_specific_hand("right hand")
+                else:
+                    self.engine.player.equipment.unequip_item(selected_item, add_message=True)
             else:
-                # Standard equipping for other slots
-                action = actions.EquipAction(self.engine.player, item_to_equip)
-                action.perform()
+                # Equip the item
+                if selected_slot.name == "L.Hand":
+                    self.engine.player.equipment.equip_to_specific_hand(selected_item, "left hand")
+                elif selected_slot.name == "R.Hand":
+                    self.engine.player.equipment.equip_to_specific_hand(selected_item, "right hand")
+                else:
+                    action = actions.EquipAction(self.engine.player, selected_item)
+                    self.engine.execute_action(action, is_player_action=False)
         
         return None  # Stay in equipment UI
     
@@ -452,24 +701,125 @@ class EquipmentUI(AskUserEventHandler):
                     f"Cannot access {selected_slot.name} - too injured!",
                     color.impossible
                 )
-            except:
+            except Exception:
                 pass
             return None  # Stay in equipment UI
             
         equipped_item = selected_slot.get_equipped_item(self.engine.player.equipment)
         
         if equipped_item:
-            # Handle specific hand slot unequipping
+            # Handle specific slot targeting for hands
             if selected_slot.name == "L.Hand":
-                if self.engine.player.equipment.offhand == equipped_item:
-                    self.engine.player.equipment.unequip_item(equipped_item, add_message=True)
-                elif self.engine.player.equipment.weapon == equipped_item and not self.engine.player.equipment.offhand:
-                    self.engine.player.equipment.unequip_item(equipped_item, add_message=True)
+                self.engine.player.equipment.unequip_from_specific_hand("left hand")
             elif selected_slot.name == "R.Hand":
-                if self.engine.player.equipment.weapon == equipped_item:
-                    self.engine.player.equipment.unequip_item(equipped_item, add_message=True)
+                self.engine.player.equipment.unequip_from_specific_hand("right hand")
             else:
-                # Standard unequipping for other slots
+                # Use standard unequip for other slots
                 self.engine.player.equipment.unequip_item(equipped_item, add_message=True)
         
         return None  # Stay in equipment UI
+
+    def ev_mousewheel(self, event) -> None:
+        """Scroll through "slots with mouse wheel."""
+        if event.y > 0:  # Scroll down
+            if self.selected_slot > 0:
+                sounds.play_ui_move_sound()
+            self.selected_slot = max(0, self.selected_slot - 1)
+            self.selected_item = 0
+            return None
+        elif event.y < 0:  # Scroll up
+            if self.selected_slot < len(self.slots) - 1:
+                sounds.play_ui_move_sound()
+            self.selected_slot = min(len(self.slots) - 1, self.selected_slot + 1)
+            self.selected_item = 0
+            return None
+
+
+    def ev_mousemotion(self, event) -> None:
+        """Hover over slots or items to change selection."""
+        super().ev_mousemotion(event)
+        if not hasattr(self, '_ui_x'):
+            return None
+
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        bx, by = self._ui_x, self._ui_y
+
+        # Slots panel: list_x = base_x+3, rows base_y+3..base_y+3+len(slots)
+        if bx + 3 <= mouse_x < bx + 18 and by + 3 <= mouse_y < by + 3 + len(self.slots):
+            hovered_slot = mouse_y - (by + 3)
+            if hovered_slot != self.selected_slot:
+                sounds.play_ui_move_sound()
+                self.selected_item = 0
+            self.selected_slot = hovered_slot
+            return None
+
+        # Items panel: list_x = base_x+40, items start at base_y+3
+        if self.slots and bx + 40 <= mouse_x < bx + 64 and mouse_y >= by + 3:
+            compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot])
+            if not compatible_groups:
+                return None
+            start_index = max(0, self.selected_item - 8)
+            display_i = mouse_y - (by + 3)
+            actual_index = start_index + display_i
+            if 0 <= display_i < 13 and 0 <= actual_index < len(compatible_groups):
+                if actual_index != self.selected_item:
+                    sounds.play_ui_move_sound()
+                self.selected_item = actual_index
+
+    def ev_mousebuttondown(self, event) -> Optional[AskUserEventHandler]:
+        """Click a slot to select it; click an item to equip/unequip it."""
+
+        if event.button not in (tcod.event.BUTTON_LEFT, tcod.event.BUTTON_RIGHT):
+            return None
+        if not hasattr(self, '_ui_x'):
+            return None
+
+        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
+        bx, by = self._ui_x, self._ui_y
+
+        # Check if out of bounds of equipment UI
+        if not self._in_popup(mouse_x, mouse_y):
+            return self.on_exit()
+
+        # Right-click → context menu for the item under the cursor
+        if event.button == tcod.event.BUTTON_RIGHT:
+            return self.on_right_click(mouse_x, mouse_y)
+
+
+        # Slots panel click -> select slot
+        if bx + 3 <= mouse_x < bx + 18 and by + 3 <= mouse_y < by + 3 + len(self.slots):
+            self.selected_slot = mouse_y - (by + 3)
+            self.selected_item = 0
+            return None
+
+        # Items panel click -> equip/unequip
+        if self.slots and bx + 40 <= mouse_x < bx + 64 and mouse_y >= by + 3:
+            compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot])
+            if not compatible_groups:
+                return None
+            start_index = max(0, self.selected_item - 8)
+            display_i = mouse_y - (by + 3)
+            actual_index = start_index + display_i
+            if 0 <= display_i < 13 and 0 <= actual_index < len(compatible_groups):
+                self.selected_item = actual_index
+                return self._handle_equip_selected()
+
+        return None
+
+    def on_right_click(self, mx: int, my: int):
+        """Right-click inside the equipment UI – open a context menu for the
+        item under the cursor (items panel only)."""
+        if not self.slots or not hasattr(self, '_ui_x'):
+            return None
+        bx, by = self._ui_x, self._ui_y
+        # Only trigger in the items panel area
+        if bx + 40 <= mx < bx + 64 and my >= by + 3:
+            compatible_groups = self._get_compatible_item_groups(self.slots[self.selected_slot])
+            if compatible_groups:
+                start_index = max(0, self.selected_item - 8)
+                display_i = my - (by + 3)
+                actual_index = start_index + display_i
+                if 0 <= display_i < 13 and 0 <= actual_index < len(compatible_groups):
+                    item = compatible_groups[actual_index]['item']
+                    return ItemContextMenu(self, item, mx, my)
+        return None

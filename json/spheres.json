@@ -1,0 +1,651 @@
+{
+  "creation": {
+    "children": [
+      "time",
+      "space"
+    ],
+    "precluded": [
+      "destruction"
+    ],
+    "hostility": -0.5,
+    "description": "it constantly changes forms"
+  },
+  "time": {
+    "children": [
+      "fate",
+      "erosion"
+    ],
+    "precluded": [
+      "void"
+    ],
+    "hostility": -0.1,
+    "description": "it never stops moving"
+  },
+  "space": {
+    "children": [
+      "earth",
+      "fire",
+      "wind",
+      "water"
+    ],
+    "precluded": [
+      "void"
+    ],
+    "hostility": -0.1,
+    "description": "it seems to fill the entire space"
+  },
+  "destruction": {
+    "children": [
+      "war",
+      "death"
+    ],
+    "precluded": [
+      "creation",
+      "life"
+    ],
+    "hostility": 0.5,
+    "description": "it destroys everything it touches"
+  },
+  "fate": {
+    "children": [
+      "time"
+    ],
+    "precluded": [],
+    "hostility": -0.1,
+    "description": "it seems to know the future"
+  },
+  "erosion": {
+    "children": [
+      "earth"
+    ],
+    "precluded": [],
+    "hostility": 0.2,
+    "description": "it seems to erode everything around it"
+  },
+  "void": {
+    "children": [],
+    "precluded": [],
+    "hostility": 0.1,
+    "description": "it is shapeless"
+  },
+  "earth": {
+    "children": [
+      "stone",
+      "metal",
+      "structure"
+    ],
+    "precluded": [
+      "erosion"
+    ],
+    "hostility": -0.1,
+    "description": "it is made of soil and rock"
+  },
+  "fire": {
+    "children": [
+      "light",
+      "heat"
+    ],
+    "precluded": [
+      "water"
+    ],
+    "hostility": 0.2,
+    "description": "it is a pillar of flame"
+  },
+  "wind": {
+    "children": [
+      "the sky"
+    ],
+    "precluded": [],
+    "hostility": 0.1,
+    "description": "gusts of air flow around it"
+  },
+  "water": {
+    "children": [
+      "oceans",
+      "river",
+      "life"
+    ],
+    "precluded": [
+      "fire"
+    ],
+    "hostility": -0.1,
+    "description": "it flows like water"
+  },
+  "war": {
+    "children": [
+      "death",
+      "destruction"
+    ],
+    "precluded": [
+      "life"
+    ],
+    "hostility": 1.0,
+    "description": "it is covered in thick armor"
+  },
+  "death": {
+    "children": [
+      "disease",
+      "pain"
+    ],
+    "precluded": [
+      "life"
+    ],
+    "hostility": 1.0,
+    "description": "it is a bony figure"
+  },
+  "life": {
+    "children": [
+      "animals",
+      "plants",
+      "people",
+      "earth",
+      "water"
+    ],
+    "precluded": [
+      "death",
+      "war",
+      "destruction"
+    ],
+    "hostility": -1.0,
+    "description": "life springs from everything it touches"
+  },
+  "stone": {
+    "children": [
+      "structure",
+      "gems",
+      "ores",
+      "metal"
+    ],
+    "precluded": [
+      "water"
+    ],
+    "hostility": 0.1,
+    "description": "it is made of rock"
+  },
+  "metal": {
+    "children": [
+      "smithing",
+      "fire"
+    ],
+    "precluded": [],
+    "hostility": 0.1,
+    "description": "it is sharp and shimmering"
+  },
+  "structure": {
+    "children": [
+      "society"
+    ],
+    "precluded": [
+      "chaos"
+    ],
+    "hostility": -0.1,
+    "description": "it towers above everything"
+  },
+  "light": {
+    "children": [
+      "fire"
+    ],
+    "precluded": [
+      "darkness"
+    ],
+    "hostility": -0.2,
+    "description": "it radiates intense light"
+  },
+  "heat": {
+    "children": [
+      "fire"
+    ],
+    "precluded": [
+      "cold"
+    ],
+    "hostility": -0.1,
+    "description": "it radiates intense heat"
+  },
+  "the sky": {
+    "children": [
+      "suns",
+      "moons",
+      "stars"
+    ],
+    "precluded": [
+      "earth"
+    ],
+    "hostility": 0.2,
+    "description": "clouds shift across it"
+  },
+  "river": {
+    "children": [
+      "water",
+      "fish"
+    ],
+    "precluded": [
+      "fire",
+      "earth"
+    ],
+    "hostility": -0.1,
+    "description": "its surface flows"
+  },
+  "disease": {
+    "children": [
+      "death",
+      "pain"
+    ],
+    "precluded": [],
+    "hostility": 0.3,
+    "description": "it oozes and groans"
+  },
+  "pain": {
+    "children": [
+      "death"
+    ],
+    "precluded": [],
+    "hostility": 0.5,
+    "description": "it screams in agony"
+  },
+  "animals": {
+    "children": [
+      "life",
+      "meat",
+      "society",
+      "structure"
+    ],
+    "precluded": [
+      "death"
+    ],
+    "hostility": -0.2,
+    "description": "it wriggles and writhes as it moves"
+  },
+  "plants": {
+    "children": [
+      "forests",
+      "water",
+      "earth",
+      "mushrooms"
+    ],
+    "precluded": [
+      "fire",
+      "death"
+    ],
+    "hostility": -0.2,
+    "description": "it grows towards light"
+  },
+  "people": {
+    "children": [
+      "society",
+      "speech",
+      "life"
+    ],
+    "precluded": [
+      "death"
+    ],
+    "hostility": 0.3,
+    "description": "it has a multitude of faces"
+  },
+  "gems": {
+    "children": [
+      "wealth",
+      "society",
+      "stone"
+    ],
+    "precluded": [],
+    "hostility": 0.1,
+    "description": "it glimmers and refracts the light"
+  },
+  "ores": {
+    "children": [
+      "wealth",
+      "smithing",
+      "earth"
+    ],
+    "precluded": [],
+    "hostility": 0.1,
+    "description": "it is made of glimmering rock"
+  },
+  "smithing": {
+    "children": [
+      "fire",
+      "heat",
+      "society"
+    ],
+    "precluded": [],
+    "hostility": 0.1,
+    "description": "it exhales black fumes"
+  },
+  "society": {
+    "children": [
+      "laws",
+      "people",
+      "life",
+      "war"
+    ],
+    "precluded": [],
+    "hostility": 0.1,
+    "description": "it seems to be made of thousands of people"
+  },
+  "chaos": {
+    "children": [],
+    "precluded": [],
+    "hostility": 0.2,
+    "description": "it's shape is erratic and formless"
+  },
+  "darkness": {
+    "children": [
+      "void"
+    ],
+    "precluded": [],
+    "hostility": 0.2,
+    "description": "it absorbs light around it"
+  },
+  "cold": {
+    "children": [
+      "oceans",
+      "ice"
+    ],
+    "precluded": [],
+    "hostility": 0.1,
+    "description": "it has an air of freezing around it"
+  },
+  "suns": {
+    "children": [
+      "heat",
+      "light"
+    ],
+    "precluded": [],
+    "hostility": -0.1,
+    "description": "it shines brightly"
+  },
+  "moons": {
+    "children": [
+      "darkness",
+      "void"
+    ],
+    "precluded": [],
+    "hostility": 0.1,
+    "description": "it is pale and dimmly glows"
+  },
+  "stars": {
+    "children": [
+      "void",
+      "space"
+    ],
+    "precluded": [],
+    "hostility": 0,
+    "description": "it's surface is dark and flickering"
+  },
+  "fish": {
+    "children": [
+      "water",
+      "rivers",
+      "oceans"
+    ],
+    "precluded": [],
+    "hostility": -0.1,
+    "description": "it is scaly and wriggling"
+  },
+  "rivers": {
+    "children": [
+      "fish"
+    ],
+    "precluded": [],
+    "hostility": -0.1,
+    "description": "it flows and bends as it moves"
+  },
+  "meat": {
+    "children": [
+      "fish",
+      "animals",
+      "society"
+    ],
+    "precluded": [],
+    "hostility": 0.1,
+    "description": "it is made of viscera and meat"
+  },
+  "forests": {
+    "children": [
+      "wood",
+      "life"
+    ],
+    "precluded": [],
+    "hostility": -0.1,
+    "description": "it is tall and woody"
+  },
+  "mushrooms": {
+    "children": [
+      "food",
+      "forests",
+      "life",
+      "nature"
+    ],
+    "precluded": [],
+    "hostility": -0.1,
+    "description": "fungal growths line its body"
+  },
+  "speech": {
+    "children": [
+      "society",
+      "people"
+    ],
+    "precluded": [],
+    "hostility": 0.1,
+    "description": "it has a thousand voices"
+  },
+  "wealth": {
+    "children": [
+      "greed",
+      "gems",
+      "ores"
+    ],
+    "precluded": [],
+    "hostility": 0.1,
+    "description": "it is made of pure gold and gems"
+  },
+  "laws": {
+    "children": [
+      "hate",
+      "war"
+    ],
+    "precluded": [
+      "chaos"
+    ],
+    "hostility": -0.5,
+    "description": "it is perfectly symmetrical"
+  },
+  "ice": {
+    "children": [
+      "order",
+      "structure",
+      "weakness"
+    ],
+    "precluded": [
+      "fire",
+      "heat"
+    ],
+    "hostility": 0.1,
+    "description": "everything around it turns to ice"
+  },
+  "oceans": {
+    "children": [
+      "fish"
+    ],
+    "precluded": [],
+    "hostility": -0.1,
+    "description": "it seems to move like a wave"
+  },
+  "wood": {
+    "children": [
+      "forests",
+      "life",
+      "structure"
+    ],
+    "precluded": [],
+    "hostility": -0.1,
+    "description": "it is woody"
+  },
+  "food": {
+    "children": [
+      "fish",
+      "meat",
+      "animals",
+      "society",
+      "people"
+    ],
+    "precluded": [],
+    "hostility": -0.1,
+    "description": "it is made of uncountable fruits and meats"
+  },
+  "nature": {
+    "children": [
+      "forests",
+      "oceans",
+      "rivers",
+      "fish",
+      "animals"
+    ],
+    "precluded": [],
+    "hostility": -0.2,
+    "description": "it constantly moves and breathes"
+  },
+  "greed": {
+    "children": [
+      "laws",
+      "hate",
+      "war",
+      "weakness"
+    ],
+    "precluded": [],
+    "hostility": 0.5,
+    "description": "it is morbidly obese and hoards treasures"
+  },
+  "hate": {
+    "children": [
+      "death",
+      "war"
+    ],
+    "precluded": [],
+    "hostility": 1.0,
+    "description": "it screams and lashes constantly"
+  },
+  "sand": {
+    "children": [
+      "nature",
+      "earth",
+      "wind",
+      "time",
+      "glass"
+    ],
+    "precluded": [],
+    "hostility": -0.1,
+    "description": "it is made of uncountable flowing grains"
+  },
+  "glass": {
+    "children": [
+      "structure",
+      "beauty"
+    ],
+    "precluded": [
+      "strength"
+    ],
+    "hostility": -0.2,
+    "description": "it appears translucent and shimmering"
+  },
+  "beauty": {
+    "children": [
+      "art",
+      "gems",
+      "wealth",
+      "society",
+      "people"
+    ],
+    "precluded": [
+      "hate",
+      "war"
+    ],
+    "hostility": -0.5,
+    "description": "it radiates pure beauty"
+  },
+  "strength": {
+    "children": [
+      "war",
+      "society",
+      "love"
+    ],
+    "precluded": [
+      "weakness"
+    ],
+    "hostility": 0.2,
+    "description": "it is made of rippling muscles"
+  },
+  "art": {
+    "children": [
+      "beauty",
+      "society",
+      "creation"
+    ],
+    "precluded": [],
+    "hostility": -0.2,
+    "description": "it is formless and beautiful"
+  },
+  "love": {
+    "children": [
+      "people",
+      "structure",
+      "trust"
+    ],
+    "precluded": [
+      "war",
+      "hate"
+    ],
+    "hostility": -1.0,
+    "description": "it is a pair"
+  },
+  "weakness": {
+    "children": [],
+    "precluded": [
+      "strength"
+    ],
+    "hostility": 0,
+    "description": "it is thin and weak"
+  },
+  "trust": {
+    "children": [
+      "society",
+      "laws",
+      "people",
+      "structure"
+    ],
+    "precluded": [
+      "lies"
+    ],
+    "hostility": -0.5,
+    "description": "it is always balanced"
+  },
+  "lies": {
+    "children": [],
+    "precluded": [
+      "truth"
+    ],
+    "hostility": 0.5,
+    "description": "it is always unbalanced"
+  },
+  "order": {
+    "children": [],
+    "precluded": [
+      "chaos"
+    ],
+    "hostility": -0.3,
+    "description": "it is rigid"
+  },
+  "truth": {
+    "children": [
+      "trust",
+      "structure",
+      "order"
+    ],
+    "precluded": [
+      "chaos",
+      "lies"
+    ],
+    "hostility": -0.1,
+    "description": "it is always balanced"
+  }
+}

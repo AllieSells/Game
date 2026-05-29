@@ -19,6 +19,8 @@ class Container(BaseComponent):
         self.locked = locked
 
     def add(self, item: Item) -> bool:
+        if item is None:
+            return False
         if len(self.items) >= self.capacity:
             return False
         # If item already in this container, treat as success (idempotent)

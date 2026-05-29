@@ -10,10 +10,18 @@ from enum import Enum, auto
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 from components.base_component import BaseComponent
+
+from liquid_system import LiquidType
 import random
 
 if TYPE_CHECKING:
     from entity import Actor
+
+# Import hit difficulty modifiers from actions module
+# Avoid circular import by importing at function level
+def _get_body_part_modifiers():
+    from actions import BODY_PART_MODIFIERS
+    return BODY_PART_MODIFIERS
 
 
 class BodyPartType(Enum):
@@ -22,6 +30,7 @@ class BodyPartType(Enum):
     HEAD = auto()
     NECK = auto()
     TORSO = auto()
+    CORE = auto()
     
     # Arms
     LEFT_ARM = auto()
@@ -34,23 +43,43 @@ class BodyPartType(Enum):
     RIGHT_LEG = auto()
     LEFT_FOOT = auto()
     RIGHT_FOOT = auto()
+
+    # Other legs
+    FRONT_LEFT_LEG = auto()
+    FRONT_RIGHT_LEG = auto()
+    SECOND_LEFT_LEG = auto()
+    SECOND_RIGHT_LEG = auto()
+    THIRD_LEFT_LEG = auto()
+    THIRD_RIGHT_LEG = auto()
+    BACK_LEFT_LEG = auto()
+    BACK_RIGHT_LEG = auto()
     
     # Animal-specific
     TAIL = auto()
     WINGS = auto()
     
     # Insect-specific
+    THORAX = auto()
+    ABDOMEN = auto()
     ANTENNA = auto()
     MANDIBLES = auto()
+
+    # Inanimate objects
+    STRUCTURE = auto()
 
 
 class AnatomyType(Enum):
     """Different creature anatomy layouts."""
     HUMANOID = auto()
+    SNAKE = auto()
     QUADRUPED = auto()
     INSECT = auto()
+    ARACHNID = auto()
     BIRD = auto()
+    ORB = auto()
     SIMPLE = auto()  # Basic creatures
+    OBJECT = auto()  
+    DRAGON = auto()
 
 
 @dataclass
@@ -67,6 +96,8 @@ class BodyPart:
     protection: int = 0     # Natural armor
     tags: Set[str] = field(default_factory=set)  # Equipment tags this part can accommodate (e.g., "hand", "grasp", "manipulate")
     status_effects: Set[str] = field(default_factory=set)
+    coating = LiquidType.NONE  # Type of liquid coating this part has (e.g., blood, slime, oil)
+    coating_age: int = 0  # Age of the coating for evaporation tracking
     
     def __post_init__(self):
         if self.current_hp is None:
@@ -136,8 +167,202 @@ class BodyParts(BaseComponent):
         """Initialize body parts based on anatomy type."""
         if anatomy_type == AnatomyType.HUMANOID:
             self._create_humanoid_anatomy()
+        elif anatomy_type == AnatomyType.QUADRUPED:
+            self._create_quadruped_anatomy()
+        elif anatomy_type == AnatomyType.ARACHNID:
+            self._create_arachnid_anatomy()
+        elif anatomy_type == AnatomyType.SNAKE:
+            self._create_snake_anatomy()
+        elif anatomy_type == AnatomyType.ORB:
+            self._create_orb_anatomy()
+        elif anatomy_type == AnatomyType.OBJECT:
+            self._create_object_anatomy()
+        elif anatomy_type == AnatomyType.DRAGON:
+            self._create_dragon_anatomy()
         else:  # SIMPLE
             self._create_simple_anatomy()
+
+    def _create_dragon_anatomy(self) -> None:
+        parent_max_hp = self.max_hp
+        self.body_parts = {
+            BodyPartType.HEAD: BodyPart(
+                BodyPartType.HEAD, "head", .4, max_hp=int(0.4 * parent_max_hp), is_vital=True,
+                tags={"head", "armor", "cranium"}
+            ),
+            BodyPartType.TORSO: BodyPart(
+                BodyPartType.TORSO, "torso", 1.0, max_hp=int(1.0 * parent_max_hp), is_vital=True,
+                tags={"torso", "armor", "core"}
+            ),
+            BodyPartType.WINGS: BodyPart(
+                BodyPartType.WINGS, "wings", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
+                tags={"wings", "locomotion"}
+            ),
+            BodyPartType.TAIL: BodyPart(
+                BodyPartType.TAIL, "tail", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
+                tags={"tail", "armor"}
+            ),
+            BodyPartType.LEFT_LEG: BodyPart(
+                BodyPartType.LEFT_LEG, "left leg", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "left_leg", "lower_limbs"}
+            ),
+            BodyPartType.RIGHT_LEG: BodyPart(
+                BodyPartType.RIGHT_LEG, "right leg", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "right_leg", "lower_limbs"}
+            ),
+            BodyPartType.LEFT_ARM: BodyPart(
+                BodyPartType.LEFT_ARM, "left arm", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"arm", "armor", "left", "left_arm", "upper_limbs"}
+            ),
+            BodyPartType.RIGHT_ARM: BodyPart(
+                BodyPartType.RIGHT_ARM, "right arm", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"arm", "armor", "right", "right_arm", "upper_limbs"}
+            ),
+            BodyPartType.LEFT_HAND: BodyPart(
+                BodyPartType.LEFT_HAND, "left hand", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True, can_grasp=True,
+                tags={"hand", "grasp", "manipulate", "hold", "use", "left", "left_hand", "upper_limbs"}
+            ),
+            BodyPartType.RIGHT_HAND: BodyPart(
+                BodyPartType.RIGHT_HAND, "right hand", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True, can_grasp=True,
+                tags={"hand", "grasp", "manipulate", "hold", "use", "right", "right_hand", "upper_limbs"}
+            ),
+            BodyPartType.LEFT_FOOT: BodyPart(
+                BodyPartType.LEFT_FOOT, "left foot", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True,
+                tags={"foot", "locomotion", "left", "left_foot", "lower_limbs"}
+            ),
+            BodyPartType.RIGHT_FOOT: BodyPart(
+                BodyPartType.RIGHT_FOOT, "right foot", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True,
+                tags={"foot", "locomotion", "right", "right_foot", "lower_limbs"}
+            ),
+            BodyPartType.TAIL: BodyPart(
+                BodyPartType.TAIL, "tail", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
+                tags={"tail"}
+            )
+        }
+
+    def _create_object_anatomy(self) -> None:
+        """'Anatomy' for objects"""
+        parent_max_hp = self.max_hp
+        self.body_parts = {
+            BodyPartType.STRUCTURE: BodyPart(
+                BodyPartType.STRUCTURE, "structure", 1.0, max_hp=parent_max_hp, is_vital=True, protection=1,
+                tags={"structure"}
+            )
+
+        }
+    def _create_orb_anatomy(self) -> None:
+        """Create orb anatomy (for floating orbs, slimes, etc.)."""
+        parent_max_hp = self.max_hp
+        
+        self.body_parts = {
+            BodyPartType.CORE: BodyPart(
+                BodyPartType.CORE, "core", 1.0, max_hp=parent_max_hp, is_vital=True, protection=1,
+                tags={"core", "armor"}
+            ),
+        }
+
+    def _create_snake_anatomy(self) -> None:
+        parent_max_hp = self.max_hp
+
+        self.body_parts = {
+            BodyPartType.HEAD: BodyPart(
+                BodyPartType.HEAD, "head", 2.0, max_hp=int(0.5 * parent_max_hp), is_vital=True,
+                tags={"head", "armor", "cranium"}
+            ),
+            BodyPartType.TORSO: BodyPart(
+                BodyPartType.TORSO, "torso", 1.0, max_hp=int(1.0 * parent_max_hp), is_vital=True,
+                tags={"torso", "armor", "core"}
+            ),
+            BodyPartType.TAIL: BodyPart(
+                BodyPartType.TAIL, "tail", 0.5, max_hp=int(0.5 * parent_max_hp), is_vital=False, is_limb=True,
+                tags={"tail", "armor"}
+            )
+        }
+
+    def _create_arachnid_anatomy(self) -> None:
+        """Create arachnid body parts (spiders, scorpions, etc.)."""
+        parent_max_hp = self.max_hp
+        
+        self.body_parts = {
+            BodyPartType.THORAX: BodyPart(
+                BodyPartType.THORAX, "thorax", 1.0, max_hp=parent_max_hp, is_vital=True,
+                tags={"thorax", "armor"}
+            ),
+            BodyPartType.FRONT_LEFT_LEG: BodyPart(
+                BodyPartType.FRONT_LEFT_LEG, "front left leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "front_left_leg"}
+            ),
+            BodyPartType.FRONT_RIGHT_LEG: BodyPart(
+                BodyPartType.FRONT_RIGHT_LEG, "front right leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "front_right_leg"}
+            ),
+            BodyPartType.SECOND_LEFT_LEG: BodyPart(
+                BodyPartType.SECOND_LEFT_LEG, "second left leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "second_left_leg"}
+            ),
+            BodyPartType.SECOND_RIGHT_LEG: BodyPart(
+                BodyPartType.SECOND_RIGHT_LEG, "second right leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "second_right_leg"}
+            ),
+            BodyPartType.THIRD_LEFT_LEG: BodyPart(
+                BodyPartType.THIRD_LEFT_LEG, "third left leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "third_left_leg"}
+            ),
+            BodyPartType.THIRD_RIGHT_LEG: BodyPart(
+                BodyPartType.THIRD_RIGHT_LEG, "third right leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "third_right_leg"}
+            ),
+            BodyPartType.BACK_LEFT_LEG: BodyPart(
+                BodyPartType.BACK_LEFT_LEG, "back left leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "back_left_leg"}
+            ),
+            BodyPartType.BACK_RIGHT_LEG: BodyPart(
+                BodyPartType.BACK_RIGHT_LEG, "back right leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "back_right_leg"}
+            ),
+            BodyPartType.ABDOMEN: BodyPart(
+                BodyPartType.ABDOMEN, "abdomen", .5, max_hp=int(0.5 * parent_max_hp), is_vital=True,
+                tags={"abdomen", "armor"}
+            )
+        }
+
+    def _create_quadruped_anatomy(self) -> None:
+        """Rats, wolves, horses, etc. — 4-legged animals without distinct arms."""
+        parent_max_hp = self.max_hp
+        self.body_parts = {
+            BodyPartType.HEAD: BodyPart(
+                BodyPartType.HEAD, "head", .5, max_hp=int(0.5 * parent_max_hp), is_vital=True,
+                tags={"head", "armor", "cranium"}
+            ),
+            BodyPartType.NECK: BodyPart(
+                BodyPartType.NECK, "neck", .267, max_hp=int(0.267 * parent_max_hp), is_vital=True,
+                tags={"neck", "armor", "cranium"}
+            ),
+            BodyPartType.TORSO: BodyPart(
+                BodyPartType.TORSO, "torso", 1.0, max_hp=int(1.0 * parent_max_hp), is_vital=True,
+                tags={"torso", "armor", "core"}
+            ),
+            BodyPartType.FRONT_LEFT_LEG: BodyPart(
+                BodyPartType.FRONT_LEFT_LEG, "left front leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "front_left_leg"}
+            ),
+            BodyPartType.FRONT_RIGHT_LEG: BodyPart(
+                BodyPartType.FRONT_RIGHT_LEG, "right front leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "front_right_leg"}
+            ),
+            BodyPartType.BACK_LEFT_LEG: BodyPart(
+                BodyPartType.BACK_LEFT_LEG, "left back leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "left", "back_left_leg"}
+            ),
+            BodyPartType.BACK_RIGHT_LEG: BodyPart(
+                BodyPartType.BACK_RIGHT_LEG, "right back leg", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
+                tags={"leg", "locomotion", "right", "back_right_leg"}
+            ),
+            BodyPartType.TAIL: BodyPart(
+                BodyPartType.TAIL, "tail", .2, max_hp=int(0.2 * parent_max_hp), is_limb=True,
+                tags={"tail", "armor"}
+            )
+        }
+    
     
     def _create_humanoid_anatomy(self) -> None:
         """Create humanoid body parts (humans, elves, orcs, etc.)."""
@@ -147,46 +372,47 @@ class BodyParts(BaseComponent):
         self.body_parts = {
             BodyPartType.HEAD: BodyPart(
                 BodyPartType.HEAD, "head", .5, max_hp=int(0.5 * parent_max_hp), is_vital=True,
-                tags={"head", "armor"}
+                tags={"head", "armor", "cranium"}
             ),
             BodyPartType.NECK: BodyPart(
-                BodyPartType.NECK, "neck", .267, max_hp=int(0.267 * parent_max_hp), is_vital=True
+                BodyPartType.NECK, "neck", .267, max_hp=int(0.267 * parent_max_hp), is_vital=True,
+                tags={"neck", "armor", "cranium"}
             ),
             BodyPartType.TORSO: BodyPart(
                 BodyPartType.TORSO, "torso", 1.0, max_hp=int(1.0 * parent_max_hp), is_vital=True,
-                tags={"torso", "armor"}
+                tags={"torso", "armor", "core"}
             ),
             BodyPartType.LEFT_ARM: BodyPart(
                 BodyPartType.LEFT_ARM, "left arm", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
-                tags={"arm", "armor"}
+                tags={"arm", "armor", "left", "left_arm", "upper_limbs"}
             ),
             BodyPartType.RIGHT_ARM: BodyPart(
                 BodyPartType.RIGHT_ARM, "right arm", .4, max_hp=int(0.4 * parent_max_hp), is_limb=True,
-                tags={"arm", "armor"}
+                tags={"arm", "armor", "right", "right_arm", "upper_limbs"}
             ),
             BodyPartType.LEFT_HAND: BodyPart(
                 BodyPartType.LEFT_HAND, "left hand", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True, can_grasp=True,
-                tags={"hand", "grasp", "manipulate", "hold", "use"}
+                tags={"hand", "grasp", "manipulate", "hold", "use", "left", "left_hand", "upper_limbs"}
             ),
             BodyPartType.RIGHT_HAND: BodyPart(
                 BodyPartType.RIGHT_HAND, "right hand", .167, max_hp=int(0.167 * parent_max_hp), is_limb=True, can_grasp=True,
-                tags={"hand", "grasp", "manipulate", "hold", "use"}
+                tags={"hand", "grasp", "manipulate", "hold", "use", "right", "right_hand", "upper_limbs"}
             ),
             BodyPartType.LEFT_LEG: BodyPart(
                 BodyPartType.LEFT_LEG, "left leg", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
-                tags={"leg", "locomotion"}
+                tags={"leg", "locomotion", "left", "left_leg", "lower_limbs"}
             ),
             BodyPartType.RIGHT_LEG: BodyPart(
                 BodyPartType.RIGHT_LEG, "right leg", .5, max_hp=int(0.5 * parent_max_hp), is_limb=True,
-                tags={"leg", "locomotion"}
+                tags={"leg", "locomotion", "right", "right_leg", "lower_limbs"}
             ),
             BodyPartType.LEFT_FOOT: BodyPart(
                 BodyPartType.LEFT_FOOT, "left foot", .2, max_hp=int(0.2 * parent_max_hp), is_limb=True,
-                tags={"foot", "locomotion", "armor"}
+                tags={"foot", "locomotion", "armor", "left", "left_foot", "lower_limbs"}
             ),
             BodyPartType.RIGHT_FOOT: BodyPart(
                 BodyPartType.RIGHT_FOOT, "right foot", .2, max_hp=int(0.2 * parent_max_hp), is_limb=True,
-                tags={"foot", "locomotion", "armor"}
+                tags={"foot", "locomotion", "armor", "right", "right_foot", "lower_limbs"}
             ),
         }
     
@@ -250,17 +476,24 @@ class BodyParts(BaseComponent):
         if not available_parts:
             return None
         
-        # Weight body parts by size/importance
+        # Use hit difficulty modifiers from BODY_PART_MODIFIERS to calculate weights
+        # Higher modifier = easier to hit = higher weight
+        modifiers = _get_body_part_modifiers()
         weights = []
         for part in available_parts:
-            if part.part_type == BodyPartType.TORSO:
-                weights.append(30)  # Most likely to be hit
-            elif part.part_type in [BodyPartType.HEAD]:
-                weights.append(10)  # Smaller target
-            elif part.is_limb:
-                weights.append(15)  # Medium target
+            part_type_name = part.part_type.name
+            # Look up hit difficulty in BODY_PART_MODIFIERS
+            hit_difficulty = 0
+            if part_type_name in modifiers:
+                hit_difficulty = modifiers[part_type_name][1]
             else:
-                weights.append(20)  # Default
+                # Check for partial matches
+                for key in modifiers:
+                    if key in part_type_name:
+                        hit_difficulty = modifiers[key][1]
+                        break
+            # Convert to weight: base 100 + modifier (so TORSO=115, HEAD=70, etc.)
+            weights.append(max(1, 100 + hit_difficulty))
         
         damaged_part = random.choices(available_parts, weights=weights)[0]
         actual_damage = damaged_part.take_damage(damage)
@@ -285,12 +518,20 @@ class BodyParts(BaseComponent):
         if self.anatomy_type == AnatomyType.SIMPLE:
             return not self.body_parts[BodyPartType.TORSO].is_destroyed
         
-        # Check if at least one leg is functional
-        legs = [part for part_type, part in self.body_parts.items() 
-                if part_type in [BodyPartType.LEFT_LEG, BodyPartType.RIGHT_LEG, 
-                               BodyPartType.LEFT_FOOT, BodyPartType.RIGHT_FOOT]
-                and not part.is_destroyed]
+        # Orbs float — they can always move unless their core is destroyed
+        if self.anatomy_type == AnatomyType.ORB:
+            core = self.body_parts.get(BodyPartType.CORE)
+            return core is None or not core.is_destroyed
+
+        # Snakes move with their torso/tail, not legs
+        if self.anatomy_type == AnatomyType.SNAKE:
+            torso = self.body_parts.get(BodyPartType.TORSO)
+            return torso is not None and not torso.is_destroyed
         
+        # Check if at least one locomotion part is functional
+        legs = [part for part in self.body_parts.values()
+                if "locomotion" in part.tags and not part.is_destroyed]
+
         return len(legs) > 0
     
     def can_use_hands(self) -> bool:
@@ -308,20 +549,11 @@ class BodyParts(BaseComponent):
                 return 1.0 - (torso.current_hp / torso.max_hp)
             return 0.0
         
-        leg_parts = [
-            BodyPartType.LEFT_LEG, BodyPartType.RIGHT_LEG,
-            BodyPartType.LEFT_FOOT, BodyPartType.RIGHT_FOOT
-        ]
-        
-        total_legs = 0
-        functional_legs = 0
-        
-        for part_type in leg_parts:
-            part = self.get_part(part_type)
-            if part:
-                total_legs += 1
-                if not part.is_destroyed:
-                    functional_legs += 1
+        locomotion_parts = [part for part in self.body_parts.values()
+                             if "locomotion" in part.tags]
+
+        total_legs = len(locomotion_parts)
+        functional_legs = sum(1 for part in locomotion_parts if not part.is_destroyed)
         
         if total_legs == 0:
             return 0.0
@@ -362,15 +594,44 @@ class BodyParts(BaseComponent):
             total_healing += part.heal(amount)
         return total_healing
     
+    def set_max_health(self, new_max_hp: int) -> None:
+        """Set new max health and redistribute to body parts based on existing health ratios."""
+        self.max_hp = new_max_hp
+        
+        for part in self.body_parts.values():
+            # Preserve current health percentage
+            health_ratio = part.current_hp / part.max_hp if part.max_hp > 0 else 1.0
+            
+            # Update max HP based on part's proportion of total health
+            part.max_hp = int(part.max_hp_ratio * new_max_hp)
+            
+            # Maintain same health percentage, but don't exceed new max
+            part.current_hp = min(int(part.max_hp * health_ratio), part.max_hp)
+    
     def get_status_description(self) -> List[str]:
         """Get detailed status of all body parts."""
         descriptions = []
         
         for part in self.body_parts.values():
+            status_parts = []
+            
+            # Add damage status
             if part.is_destroyed:
-                descriptions.append(f"{part.name}: destroyed")
+                status_parts.append("destroyed")
             elif part.is_damaged:
-                descriptions.append(f"{part.name}: {part.damage_level_text}")
+                status_parts.append(part.damage_level_text)
+                
+            # Add coating status
+            if part.coating != LiquidType.NONE:
+                coating_name = part.coating.get_display_name()
+                status_parts.append(f"coated in {coating_name}")
+            
+            # Build description
+            if status_parts:
+                descriptions.append(f"{part.name}: {', '.join(status_parts)}")
+            elif part.coating == LiquidType.NONE and not part.is_damaged:
+                # Only show healthy parts if they're not coated and not damaged
+                continue
         
         if not descriptions:
             descriptions.append("All body parts are healthy.")

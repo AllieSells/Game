@@ -1,0 +1,14 @@
+# Requirements for GLB to ASCII conversion
+# Install with: pip install -r glb_ascii_requirements.txt
+
+# 3D Model Loading (choose one or both)
+trimesh>=3.20.0          # Recommended: Robust 3D processing
+pygltflib>=1.15.0        # Alternative: Direct GLTF/GLB support
+
+# Core dependencies
+numpy>=1.20.0            # Mathematical operations
+tcod>=13.0.0             # Already in your project
+
+# Optional for enhanced features
+pillow>=8.0.0            # Image processing (optional)
+scipy>=1.7.0             # Advanced mathematical operations (optional)

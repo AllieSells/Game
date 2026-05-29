@@ -4,7 +4,11 @@ import math
 import random
 from typing import Optional, Tuple, Type, TypeVar, TYPE_CHECKING, Union
 
+import color
+import enchants
+import liquid_system
 from render_order import RenderOrder
+from components.damage_types import DamageType
 
 """Entity module for game characters and objects."""
 
@@ -17,14 +21,12 @@ if TYPE_CHECKING:
     from components.inventory import Inventory
     from components.level import Level
     from components.effect import Effect
-    from components.body_parts import BodyParts, AnatomyType
+    from components.body_parts import BodyParts
     from game_map import GameMap
+    from components.ability import Ability
+
 
 T = TypeVar("T", bound="Entity")
-
-# Import names
-from components import names
-import color
 
 class Entity:
 
@@ -37,10 +39,13 @@ class Entity:
         x: int = 0,
         y: int = 0,
         char: str = "?",
+        active_ability: Optional[Ability] = None,
         color: Tuple[int, int, int] = (255, 255, 255),
         name: str = "<Unnamed>",
         blocks_movement: bool = False,
-        render_order: RenderOrder = RenderOrder.CORPSE
+        render_order: RenderOrder = RenderOrder.CORPSE,
+        entity_clones: list = [],
+
         ):
         self.x = x
         self.y = y
@@ -49,8 +54,14 @@ class Entity:
         self.name = name
         self.blocks_movement = blocks_movement
         self.render_order = render_order
+        self.grammar_countable = False
+        self.entity_clones = entity_clones
+        self.parent = parent
+        # Multi-part entity system for bosses
+        self.child_parts = []  # Other entities that move with this one
+        self.parent_entity = None  # Main entity if this is a child part
+        self.active_ability = active_ability
         if parent:
-            self.parent = parent
             parent.entities.add(self)
 
     @property
@@ -62,9 +73,8 @@ class Entity:
         self.x = x
         self.y = y
         if gamemap:
-            if hasattr(self, "parent"):
-                if self.parent is self.gamemap:
-                    self.gamemap.entities.remove(self)
+            if hasattr(self, "parent") and self.parent and hasattr(self.parent, 'entities'):
+                self.parent.entities.remove(self)
             self.parent = gamemap
             gamemap.entities.add(self)
     
@@ -79,13 +89,68 @@ class Entity:
         clone.y = y
         clone.parent = gamemap
         gamemap.entities.add(clone)
+        
+        # If this is an Actor with an equipment table, equip items based on probability
+        if isinstance(clone, Actor) and hasattr(clone, 'equipment_table') and clone.equipment_table:
+            clone._apply_equipment_table()
+        
         return clone
+    
+    def _apply_equipment_table(self) -> None:
+        """Apply random equipment from the equipment table to this actor."""
+        if not self.equipment_table or not self.equipment:
+            return
+        
+        for slot, items in self.equipment_table.items():
+            item_names = list(items.keys())
+            item_weights = list(items.values())
+            chosen_item = random.choices(item_names, weights=item_weights, k=1)[0]
+            
+            if chosen_item is not None:
+                # If it's a callable (factory function), call it to get a fresh item
+                if callable(chosen_item):
+                    item_copy = chosen_item()
+                else:
+                    # Deep copy to avoid shared references
+                    item_copy = copy.deepcopy(chosen_item)
+                # Roll for enchantment
+                item_copy.roll_for_enchantment()
+                item_copy.parent = self.inventory
+                
+                # Try to equip if possible
+                equipped = False
+                if item_copy.equippable:
+                    self.equipment.equip_item(item_copy, add_message=False)
+                    equipped = self.equipment.is_item_equipped(item_copy)
+                else:
+                    pass
+                
+                # If it wasn't equipped (not equippable or failed to equip), add to inventory
+                if not equipped:
+                    self.inventory.items.append(item_copy)
 
     def move(self, dx: int, dy: int) -> None:
         #movement controls
 
         self.x += dx
         self.y += dy
+        
+        # Move all child parts to maintain formation
+        if hasattr(self, 'child_parts'):
+            for part in self.child_parts:
+                if part and hasattr(part, 'x') and hasattr(part, 'y'):
+                    part.x += dx
+                    part.y += dy
+
+        # Auto-pickup ammo-tagged items whenever the player moves, regardless of
+        # which action path performed the movement.
+        if getattr(self, "is_player", False):
+            try:
+                from actions import PickupAction
+                PickupAction(self)._collect_ammo_at_current_position()
+            except Exception:
+                pass
+
 class Actor(Entity):
     def __init__(
         self,
@@ -93,6 +158,8 @@ class Actor(Entity):
         x: int = 0,
         y: int = 0,
         char: str = "?",
+        travel_char: str = "?",
+        is_player: bool = False,
         color: Tuple[int, int, int] = (255, 255, 255),
         name: str = "<Unnamed>",
         ai_cls: Optional[Type[BaseAI]] = None,
@@ -110,6 +177,7 @@ class Actor(Entity):
         description: str = "",
         unknown_name: Optional[str] = None,
         is_known : bool = True,
+        is_swimming: bool = False,
         opinion: int = 50,
         sentient: bool = False,
         sight_radius: int = 6,
@@ -120,11 +188,23 @@ class Actor(Entity):
         speed: int = 100,  # Higher = faster, 100 = normal speed
         manipulation: int = 100, # Higher = better at using items, opening doors, etc. 100 = normal manipulation
         dodge_chance: float = 0.0,  # Chance to dodge attacks (0.0 to 1.0)
+        base_hit_chance: float = 1.0,  # Attacker accuracy multiplier (ACC component, 1.0 = average)
+        evasion: float = 0.3,          # How hard this entity is to hit (DIFF component, higher = harder)
+        equipment_scale: float = 1.0,
         preferred_dodge_direction: Optional[str] = random.choice(["north", "south", "east", "west"]), 
         verb_base: Optional[str] = None,
         verb_present: Optional[str] = None,
         verb_past: Optional[str] = None,
         verb_participial: Optional[str] = None,
+        equipment_table: Optional[dict] = None,  # Random equipment spawning table
+        known_spells: Optional[list] = None,  # List of spell objects this actor can use
+        mana: int = 0,
+        mana_max: int = 0,
+        harvestable: bool = False,
+        passive_healing: float = 0.025,  
+        damage_resistances: Optional[list] = None,
+        effect_resistances: Optional[list] = None,
+        active_ability: Optional[Ability] = None,
     ):
         super().__init__(
             x=x,
@@ -135,6 +215,12 @@ class Actor(Entity):
             blocks_movement=True,
             render_order=RenderOrder.ACTOR
         )
+
+        # Sprite compositing: base_char never changes; char is rebuilt on equip
+        self.base_char: str = char
+        self.sprite_layers: list = []  # list of equip_sprite_cp ints currently active
+        self.equipment_scale: float = equipment_scale
+        self.is_player = is_player
 
         # Initialize AI if provided
         self.ai: Optional[BaseAI] = ai_cls(self) if ai_cls is not None else None
@@ -176,6 +262,9 @@ class Actor(Entity):
         self.knowledge = {
             "name": self.name,
         }
+        self.portrait = None
+        self.tradable = False
+        self.job = None
         self.description = description
         self.unknown_name = unknown_name
         self.is_known = is_known
@@ -194,9 +283,23 @@ class Actor(Entity):
         self.verb_past = verb_past or self.verb_base + "ed"
         self.verb_participial = verb_participial or self.verb_base + "ing"
         self.dodge_chance = dodge_chance
+        self.base_hit_chance = base_hit_chance
+        self.evasion = evasion
+        self.mana = mana
+        self.mana_max = mana_max
         self.preferred_dodge_direction = preferred_dodge_direction
+        self.equipment_table = equipment_table  # Store equipment table for spawning
+        self.known_spells = known_spells if known_spells is not None else []
+        self.quickcast_slots = [None] * 9  # Quick cast spell slots (1-9)
+        self.dodge_cooldown = 0
+        self.dodge_cooldown_max = 5  # Cooldown in turns
+        self._portrait_path: Optional[str] = None  # set by generate_portrait()
+        self.passive_healing = passive_healing
+        self.damage_resistances = damage_resistances if damage_resistances is not None else []
+        self.effect_resistances = effect_resistances if effect_resistances is not None else []
+
     
-    def add_effect(self, effect: 'Effect') -> None:
+    def add_effect(self, effect: Effect) -> None:
         """Attach an Effect to this actor."""
         if not hasattr(self, "effects"):
             self.effects = []
@@ -242,8 +345,96 @@ class Actor(Entity):
     def is_alive(self) -> bool:
         return bool(self.ai)
     
-    def generate_villager(self) -> None:
-        print("Generating villager attributes...")
+    def generate_villager(
+        self,
+        *,
+        job: Optional[str] = None,
+        gendered_noun: Optional[str] = None,
+        age: Optional[int] = None,
+        hair_color: Optional[str] = None,
+        hair_style: Optional[str] = None,
+        facial_hair: Optional[str] = None,
+        skin_tone: Optional[str] = None,
+        build: Optional[str] = None,
+        marks: Optional[str] = None,
+        posture: Optional[str] = None,
+        eye_color: Optional[str] = None,
+        clothing_style: Optional[str] = None,
+        head: Optional[str] = None,
+        torso: Optional[str] = None,
+        legs: Optional[str] = None,
+        feet: Optional[str] = None,
+        accessories: Optional[str] = None,
+    ) -> None:
+        
+        jobs = {
+            'Farmer': 30,
+            'Mason': 20,
+            'Brewer': 10,
+            'Scavenger': 20,
+            'Gaurd': 20,
+            'Blacksmith': 10,
+            'Sigil Carver': 10
+        }
+
+        self.job = random.choices(list(jobs.keys()), weights=list(jobs.values()), k=1)[0]
+        if job is not None:
+            self.job = job
+        #self.engine.debug_log(f"Generating villager attributes... {self.job}: {self.job}", handler=type(self).__name__, event="generate_villager")
+        trade_supply = random.randint(2,5)
+        import entity_factories
+        for i in range(trade_supply):
+            item = None
+            if self.job == 'Farmer':
+                self.tradable = False
+            elif self.job == 'Mason':
+                self.tradable = False
+            elif self.job == 'Brewer':
+                self.tradable = True
+                
+                item = copy.deepcopy(entity_factories.get_random_potion())
+                if hasattr(item, 'roll_for_enchantment'):
+                    item.roll_for_enchantment()
+            elif self.job == 'Scavenger':
+                self.tradable = True
+                
+                item = copy.deepcopy(random.choice([
+                    entity_factories.lesser_health_potion,
+                    entity_factories.dagger,
+                    entity_factories.leather_armor,
+                    entity_factories.leather_cap,
+                    entity_factories.leather_leggings,
+                    entity_factories.leather_boot,
+                    entity_factories.arrow
+
+                ]))
+                if hasattr(item, 'roll_for_enchantment'):
+                    item.roll_for_enchantment()
+            elif self.job == 'Guard':
+                self.tradable = False
+            elif self.job == 'Blacksmith':
+                self.tradable = True
+                
+                item = copy.deepcopy(random.choice([
+                    entity_factories.dagger,
+                    entity_factories.shortsword,
+                    entity_factories.longsword,
+                    entity_factories.arrow
+                ]))
+                if hasattr(item, 'roll_for_enchantment'):
+                    item.roll_for_enchantment()
+            elif self.job == 'Sigil Carver':
+                self.tradable = True
+                
+                item = copy.deepcopy(entity_factories.generate_spellbook())
+                if hasattr(item, 'roll_for_enchantment'):
+                    item.roll_for_enchantment()
+            # Only add valid items to inventory
+            if item is not None:
+                self.inventory.items.append(item)
+
+
+
         # Generate villager-specific attributes or behaviors
 
         self.opinion += random.randint(-10, 10)
@@ -254,6 +445,8 @@ class Actor(Entity):
             "person": 5,
         }
         self.knowledge["gendered_noun"] = random.choices(list(gender_noun.keys()), weights=list(gender_noun.values()), k=1)[0]
+        if gendered_noun is not None:
+            self.knowledge["gendered_noun"] = gendered_noun
 
         # Pronouns based on gendered noun
         if self.knowledge["gendered_noun"] == "man":
@@ -283,7 +476,7 @@ class Actor(Entity):
         # Get name
 
         # Get age
-        age = random.randint(16, 80)
+        age = age if age is not None else random.randint(16, 80)
         self.knowledge["age"] = age
 
         # Get hair color
@@ -322,6 +515,8 @@ class Actor(Entity):
             hair_colors = {
                 "hairless": 100}
             self.knowledge["hair_color"] = None
+        if hair_color is not None:
+            self.knowledge["hair_color"] = hair_color
         if self.knowledge["hair_color"] == "bald" or self.knowledge["hair_color"] == "hairless":
             self.knowledge["hair_style"] = ""
         else:
@@ -334,6 +529,8 @@ class Actor(Entity):
                 "wavy",
             ]
             self.knowledge["hair_style"] = random.choice(hair_styles)
+        if hair_style is not None:
+            self.knowledge["hair_style"] = hair_style
 
         # Facial hair
         if self.knowledge["gender"] == "Male" and age >= 18 or self.knowledge["gender"] == "Androgynous" and age >= 18:
@@ -349,18 +546,15 @@ class Actor(Entity):
                 self.knowledge["facial_hair"] = None
         else:
             self.knowledge["facial_hair"] = None
+        if facial_hair is not None:
+            self.knowledge["facial_hair"] = facial_hair
         
         # Get complexion from dictionary (nested dicts with realistic weights)
         complexions = {
             "skin_tone": {
-                "very pale": 5,
-                "pale": 15,
                 "fair": 25,
-                "light olive": 10,
-                "tan": 20,
-                "brown": 15,
-                "dark": 8,
-                "very dark": 2,
+                "brown": 25,
+                "dark": 25,
             },
             "build": {
                 " very slim": 8,
@@ -417,6 +611,17 @@ class Actor(Entity):
         eye_choices = list(complexions["eye_color"].keys())
         eye_weights = list(complexions["eye_color"].values())
         self.knowledge["eye_color"] = random.choices(eye_choices, weights=eye_weights, k=1)[0]
+        # Apply explicit appearance overrides
+        if skin_tone is not None:
+            self.knowledge["skin_tone"] = skin_tone
+        if build is not None:
+            self.knowledge["build"] = build
+        if marks is not None:
+            self.knowledge["marks"] = marks
+        if posture is not None:
+            self.knowledge["posture"] = posture
+        if eye_color is not None:
+            self.knowledge["eye_color"] = eye_color
 
         # Clothing style
         clothing_styles = {
@@ -426,7 +631,7 @@ class Actor(Entity):
         }
         clothing_choices = list(clothing_styles.keys())
         clothing_weights = list(clothing_styles.values())
-        self.knowledge["clothing_style"] = random.choices(clothing_choices, weights=clothing_weights, k=1)[0]
+        self.knowledge["clothing_style"] = clothing_style if clothing_style is not None else random.choices(clothing_choices, weights=clothing_weights, k=1)[0]
 
         # clothing generation
         if self.knowledge["clothing_style"] == "casual":
@@ -463,8 +668,7 @@ class Actor(Entity):
         elif self.knowledge["clothing_style"] == "formal":
             clothing_options = {
                 "head": {
-                    "silk hat": 50,
-                    "felt hat": 30,
+                    "cone hat": 50,
                     None: 70,
                 },
                 "torso": {
@@ -504,12 +708,12 @@ class Actor(Entity):
                     "dirty cloth trousers": 30,
                 },
                 "feet": {
-                    "worn leather boots": 70,
+                    "worn leather shoes": 70,
                     "dirty cloth shoes": 30,
                     None: 60,
                 },
                 "accessories": {
-                    "broken neckalces": 50,
+                    "broken necklaces": 50,
                     "frayed belts": 50,
                     None: 80,
                 },
@@ -518,12 +722,12 @@ class Actor(Entity):
             "white": 20,
             "black": 20,
             "brown": 20,
-            "gray": 10,
-            "blue": 15,
-            "red": 5,
-            "green": 15,
-            "yellow": 1,
-            "purple": 2,
+            "gray": 20,
+            "blue": 20,
+            "red": 20,
+            "green": 20,
+            "yellow": 20,
+            "purple": 20,
         }
         for slot, options in clothing_options.items():
             option_choices = list(options.keys())
@@ -537,6 +741,15 @@ class Actor(Entity):
                 picked_color = random.choices(color_choices, weights=color_weights, k=1)[0]
                 self.knowledge[slot] = f"{picked_color} {picked_item}"
 
+        # Apply explicit clothing slot overrides
+        _clothing_overrides = {
+            "head": head, "torso": torso, "legs": legs,
+            "feet": feet, "accessories": accessories,
+        }
+        for _slot, _val in _clothing_overrides.items():
+            if _val is not None:
+                self.knowledge[_slot] = _val
+
 
 
         # Description generation
@@ -546,13 +759,13 @@ class Actor(Entity):
             if self.knowledge["facial_hair"]:
                 self.knowledge["description"] += f" is bald, with a {self.knowledge['facial_hair']} face."
             else:
-                self.knowledge["description"] += f" is bald."
+                self.knowledge["description"] += " is bald."
         else:
             self.knowledge["description"] += f" has {self.knowledge['hair_style']} {self.knowledge['hair_color']} hair"
             if self.knowledge["facial_hair"]:
                 self.knowledge["description"] += f" and a {self.knowledge['facial_hair']} face."
             else:
-                self.knowledge["description"] += f"."
+                self.knowledge["description"] += "."
 
         # Eyes
         self.knowledge["description"] += f" {self.knowledge['pronouns']['possessive_adjective'].capitalize()} eyes are {self.knowledge['eye_color']}."
@@ -606,9 +819,17 @@ class Actor(Entity):
         self.knowledge["description"] += "."
 
 
-        return self.knowledge["description"]
-                
+        self.portrait = None
 
+        self.generate_portrait()
+
+        return self.knowledge["description"]
+
+    def generate_portrait(self) -> None:
+        """Composite portrait_parts layers into a cached PNG and set self._portrait_path."""
+        import sprite_manager
+        sprite_manager.compose_portrait(self)
+    
 
 class Item(Entity):
     def __init__(
@@ -624,7 +845,6 @@ class Item(Entity):
             equippable: Optional[Equippable] = None,
             burn_duration: Optional[int] = None,
             value: int = 0,
-            weight: float = 0.0,
             pickup_sound = None,
             drop_sound = None,
             equip_sound = None,
@@ -633,7 +853,17 @@ class Item(Entity):
             verb_present: Optional[str] = None,
             verb_past: Optional[str] = None,
             verb_participial: Optional[str] = None,
-            rarity_color: color = color.white,
+            rarity_color: color = color.common,
+            tags: Optional[list] = None,
+            liquid_type: Optional[liquid_system.LiquidType] = None,
+            liquid_amount: Optional[int] = None,
+            weight: Optional[float] = None,
+            identification_level: int = 0,  # Required skill level to see true description
+            identification_skill: str = "identification",  # Which skill is used for identification
+            equip_sprite_cp: int | None = None,
+            damage_type: DamageType = DamageType.PHYSICAL,
+            unknown_name: Optional[str] = None,
+
 
 
     ):
@@ -672,4 +902,105 @@ class Item(Entity):
         self.verb_past = verb_past or self.verb_base + "d"
         self.verb_participial = verb_participial or self.verb_base + "ing"
         self.rarity_color = rarity_color
+        # Preserve base presentation so identification can mask enchanted variants
+        # (name/color/rarity) until the item is identified.
+        self.base_name = name
+        self.base_color = color
+        self.base_rarity_color = rarity_color
+        self.tags = tags if tags else []
+        self.liquid_type = liquid_type
+        self.liquid_amount = liquid_amount
+        self.weight = weight
+        self.identification_level = identification_level
+        self.identification_skill = identification_skill
+        self.enchantment_level = 0
+        self.enchantments = []
+        self.equip_sprite_cp = equip_sprite_cp  # Sprite sheet cell index for equipped appearance
+        self.damage_type = damage_type
+        self.unknown_name = unknown_name
         
+    def get_description(self, observer=None) -> str:
+        """Get the item description, potentially distorted based on observer's skill level."""
+        if not observer or not hasattr(observer, 'level') or self.identification_level == 0:
+            return self.description
+            
+
+        return self.description
+    
+    def _distort_description(self) -> str:
+        """Create a distorted version of the description."""
+        import hashlib
+        
+        # Create a consistent seed based on the item's name and description
+        # This ensures the same item always produces the same distorted text
+        seed_string = f"{self.name}_{self.description}"
+        seed_hash = hashlib.md5(seed_string.encode()).hexdigest()
+        seed_value = int(seed_hash[:8], 16)  # Use first 8 hex chars as seed
+        
+        # Use local random instance to avoid affecting global seed
+        local_random = random.Random(seed_value)
+        
+        words = self.description.split()
+        distorted_words = []
+
+        for word in words:
+            chars = list(word)
+            for char in chars:
+                if local_random.random() < 0.2:  # 20% chance to replace a character
+                    chars[chars.index(char)] = '?'  # Replace with '?'
+                else: 
+                    # Shuffle characters
+                    local_random.shuffle(chars)
+            distorted_words.append(''.join(chars))
+        
+        return ' '.join(distorted_words)
+
+    def roll_for_enchantment(self) -> Item:
+        import roman
+        
+
+        # Check if this is a weapon by looking at tags
+        is_weapon = hasattr(self, 'tags') and 'weapon' in self.tags
+        is_armor = hasattr(self, 'tags') and 'armor' in self.tags
+        
+        if random.random() < 0.25: # 25% chance to be enchanted
+
+            if is_weapon and random.random() < 0.5:  # 50% chance to increase enchantment level
+                self.enchantment_level += 1
+                self.name = f"{self.name} +{roman.toRoman(self.enchantment_level)}"
+                if hasattr(self.equippable, 'power_bonus') and self.equippable.power_bonus >= 0:
+                    self.equippable.power_bonus += self.enchantment_level
+                self.value += 20
+            elif is_armor and random.random() < 0.5:  # 50% chance to get a defensive enchantment
+                self.enchantment_level += 1
+                self.name = f"{self.name} +{roman.toRoman(self.enchantment_level)}"
+                if hasattr(self.equippable, 'defense_bonus') and self.equippable.defense_bonus >= 0:
+                    self.equippable.defense_bonus += self.enchantment_level
+                self.value += 20
+
+            # Only apply FLAME enchantment to weapons
+            if is_weapon and random.random() < 0.25: # 25% chance for magical enchantment
+                enchantment = random.choice([enchants.Enchantment.FLAME, enchants.Enchantment.CURSED])
+                self.enchantments.append(enchantment)
+                # Update the name to show it's enchanted
+                self.name = f"{enchantment.get_enchantment_name()} {self.name}"
+                self.rarity_color = enchantment.get_color()
+                self.value += 50
+            elif is_armor and random.random() < 1.25: # 25% chance for magical enchantment
+                enchantment = random.choice([enchants.Enchantment.CURSED])
+                self.enchantments.append(enchantment)
+                self.name = f"{enchantment.get_enchantment_name()} {self.name}"
+                self.rarity_color = enchantment.get_color()
+                self.value += 50
+        return self
+
+
+    def _is_cursed(self) -> bool:
+        """Return True when item has a CURSED enchantment marker."""
+        try:
+            for ench in (getattr(self, "enchantments", None) or []):
+                if str(getattr(ench, "name", "")).upper() == "CURSED":
+                    return True
+        except Exception:
+            pass
+        return False

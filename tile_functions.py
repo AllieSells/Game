@@ -27,13 +27,8 @@ def open_door(engine: "Engine", actor: "Actor", x: int, y: int) -> Optional[str]
         # Change the tile to an open door
         engine.game_map.tiles[x, y] = tile_types.open_door
         
-        # Add message to log, if visible to the player
-        #if engine.game_map.visible[x, y]:
-        #    message = f"{actor.name} opens the door."
-        #    if hasattr(engine, 'message_log'):
-        #        engine.message_log.add_message(message, color.grey)
-        
-        return message
+        # Return success message  
+        return "Door opened"
         
     except Exception as e:
         return None
@@ -58,13 +53,8 @@ def close_door(engine: "Engine", actor: "Actor", x: int, y: int) -> Optional[str
         # Change the tile to a closed door
         engine.game_map.tiles[x, y] = tile_types.closed_door
         
-        # Add message to log, only if visible to the player
-        #if engine.game_map.visible[x, y]:
-        #    message = f"{actor.name} closes the door."
-        #    if hasattr(engine, 'message_log'):
-        #        engine.message_log.add_message(message, color.grey)
-        
-        return message
+        # Return success message
+        return "Door closed"
         
     except Exception as e:
         return None
@@ -92,6 +82,7 @@ def toggle_door(engine: "Engine", actor: "Actor", x: int, y: int) -> Optional[st
 TILE_FUNCTIONS = {
     "Door": lambda engine, actor, x, y: open_door(engine, actor, x, y),
     "Open Door": lambda engine, actor, x, y: close_door(engine, actor, x, y),
+    "Locked Door": lambda engine, actor, x, y: unlock_door(engine, actor, x, y),
     # Add more tile functions here as needed
     # "Lever": lambda engine, actor, x, y: toggle_lever(engine, actor, x, y),
     # "Chest": lambda engine, actor, x, y: open_chest(engine, actor, x, y),
@@ -121,3 +112,24 @@ def interact_with_tile(engine: "Engine", actor: "Actor", x: int, y: int) -> Opti
             
     except Exception:
         return None
+
+def unlock_door(engine: Engine, actor: Actor, x: int, y: int) -> Optional[str]:
+        # Check if tile is actually a locked door
+        current_tile = engine.game_map.tiles[x, y]
+        if not (hasattr(current_tile, 'dtype') and
+                current_tile['name'] == "Locked Door"):
+            return None
+    
+        # Check if there is an entity blocking the door
+        blocking_entity = engine.game_map.get_blocking_entity_at_location(x, y)
+        if blocking_entity:
+            return None
+
+        # Check if actor has a key!
+        for item in actor.inventory:
+            if item.name == "Dungeon Key":
+                # Unlock the door
+                engine.game_map.tiles[x, y] = tile_types.dungeon_exit
+                actor.inventory.remove(item)  # Remove the key from inventory
+                return None
+        return None  # No key found in inventory
