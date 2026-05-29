@@ -314,7 +314,13 @@ class Fighter(BaseComponent):
         finally:
             self._retaliating = False
 
-    def take_damage(self, amount: int, targeted_part=None, causes_bleeding: bool = True) -> None:
+    def take_damage(
+        self,
+        amount: int,
+        targeted_part=None,
+        causes_bleeding: bool = True,
+        spawn_damage_number: bool = True,
+    ) -> None:
         # The Guide is invulnerable — retaliate against the player instead
         if getattr(self.parent, 'type', None) == 'Guide':
             self._guide_retaliate()
@@ -329,6 +335,9 @@ class Fighter(BaseComponent):
                 self.parent.ai.say("hurt")
 
         
+        if amount <= 0:
+            return
+
         # Reduce overall HP — body part damage is applied by actions.py before this call
         self.hp -= amount
 
@@ -356,19 +365,22 @@ class Fighter(BaseComponent):
                 self.hp = 0
         
         # Add blood spilling when taking damage (only if causes_bleeding is True).
-        # Throttled to 40% of hits and minimum damage of 2 to avoid per-turn
-        # sprite-composition cost when many entities take small periodic damage.
+        # Use optimized create_splash for fuller blood pools without the old hitch profile.
         if self.can_bleed:
-            if (causes_bleeding and amount >= 2 and random.random() < 0.4
+            if (causes_bleeding and amount >= 1 and random.random() < 0.65
                     and hasattr(self.parent, 'gamemap')
                     and hasattr(self.parent.gamemap, 'liquid_system')):
                 from liquid_system import LiquidType
-                blood_amount = min(2, max(1, amount // 4))
+                radius = 1 if amount < 8 else 2
+                max_depth = 2 if amount < 10 else 3
+                fill_chance = 0.9 if amount < 5 else 1.0
                 self.parent.gamemap.liquid_system.create_splash(
-                    self.parent.x, self.parent.y,
+                    self.parent.x,
+                    self.parent.y,
                     LiquidType.BLOOD,
-                    radius=1,
-                    max_depth=blood_amount
+                    radius=radius,
+                    max_depth=max_depth,
+                    fill_chance=fill_chance,
                 )
         
         # Trigger damage indicator if this is the player
@@ -376,20 +388,18 @@ class Fighter(BaseComponent):
             hasattr(self.parent.gamemap, 'engine') and
             self.parent is self.parent.gamemap.engine.player):
             self.parent.gamemap.engine.trigger_damage_indicator()
-            if amount > 0:
+            if spawn_damage_number:
                 try:
-                    from gpu_stack import DamageNumberParticle
                     self.parent.gamemap.engine.animation_queue.append(
-                        DamageNumberParticle((self.parent.x, self.parent.y), amount, color=(220, 220, 0))
+                        gpu_stack.DamageNumberParticle((self.parent.x, self.parent.y), amount, color=(220, 220, 0))
                     )
                 except Exception:
                     pass
-        elif amount > 0 and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
+        elif spawn_damage_number and hasattr(self.parent, 'gamemap') and hasattr(self.parent.gamemap, 'engine'):
             # Spawn a floating damage number above the hit enemy
             try:
-                from gpu_stack import DamageNumberParticle
                 self.parent.gamemap.engine.animation_queue.append(
-                    DamageNumberParticle((self.parent.x, self.parent.y), amount)
+                    gpu_stack.DamageNumberParticle((self.parent.x, self.parent.y), amount)
                 )
             except Exception:
                 pass

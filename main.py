@@ -3,13 +3,14 @@ import time
 # Package with python -m PyInstaller MyGame.spec
 initial_time = time.time() # Track total loading
 
+import rpc
 
 import os
 os.environ["SDL_APP_NAME"] = "DoA: Dungeons of Ærrok"
 os.environ["SDL_APP_ID"] = "com.loxen.doa"
 os.environ["SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR"] = "0"  
 os.environ["SDL_VIDEO_ALLOW_SCREENSAVER"] = "0"
-os.environ["SDL_HINT_RENDER_DRIVER"] = "D3D11"
+#os.environ["SDL_RENDER_DRIVER"] = "opengl"
 # Set version
 os.environ["SDL_RENDER_SCALE_QUALITY"] = "1"  #  filtering when tiles are scaled
 import warnings
@@ -782,6 +783,7 @@ def main() -> None:
     try:
         last_frame = time.time()
         while True:
+            rpc.update(state="Main Menu", details = "Playing Dungeons of Ærrok")
             now = time.time()
             delta = now - last_frame
             last_frame = now
@@ -1229,7 +1231,7 @@ def main() -> None:
                             int(debug_console.height * base_tile_h),
                         ),
                     )
-                if getattr(active_engine, "show_lag_profiler", False) or getattr(active_engine, "show_perf_profiler", False):
+                if getattr(active_engine, "show_lag_profiler", False):
                     cached_overlay_handler = None
                     overlay_dirty = True
                     ui_console.clear()
@@ -1256,10 +1258,7 @@ def main() -> None:
                         render_functions.render_gpu_minimap_body(renderer, active_engine, base_tile_w, base_tile_h)
                     render_functions.render_gpu_reset_bar(renderer, handler, window_w, window_h, ui_console_renderer, hud_dest_h)
                     debug_console.clear()
-                    if getattr(active_engine, "show_perf_profiler", False):
-                        render_functions.render_perf_profiler(debug_console, active_engine)
-                    else:
-                        render_functions.render_lag_profiler(debug_console, active_engine)
+                    render_functions.render_lag_profiler(debug_console, active_engine)
                     _lag_pixels = render_console_with_transparency(debug_console)
                     if _lag_profiler_tex is None:
                         _lag_profiler_tex = renderer.upload_texture(_lag_pixels)
@@ -2131,11 +2130,16 @@ def main() -> None:
                 )
 
             #_rlog("renderer.present")
+            _present_wait_ms = 0.0
             try:
+                _present_t0 = time.perf_counter()
                 renderer.present()
+                _present_wait_ms = (time.perf_counter() - _present_t0) * 1000.0
             except Exception as e:
                 print(f"Error during renderer.present(): {e}")
                 raise
+            if active_engine is not None:
+                active_engine.profile_external_ms("present_wait", _present_wait_ms)
             #_rlog("present done")
 
 # ---------------------- # 
@@ -2217,8 +2221,13 @@ def main() -> None:
             # Frame limiting 
             elapsed = time.time() - current_time
             sleep_time = frame_time - elapsed
+            _sleep_actual_ms = 0.0
             if sleep_time > 0:
+                _sleep_t0 = time.perf_counter()
                 time.sleep(sleep_time)
+                _sleep_actual_ms = (time.perf_counter() - _sleep_t0) * 1000.0
+            if active_engine is not None:
+                active_engine.profile_external_ms("frame_sleep", _sleep_actual_ms)
             last_time = current_time
 
     except exceptions.QuitWithoutSaving:

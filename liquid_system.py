@@ -17,6 +17,7 @@ Focuses on visual appeal, modular design, and unified damage mechanics.
 from __future__ import annotations
 from enum import Enum, auto
 from dataclasses import dataclass
+import math
 from typing import Dict, Tuple, Optional, TYPE_CHECKING
 import random
 import numpy as np
@@ -362,6 +363,26 @@ class LiquidSystem:
     # Liquid types that can actively affect entities (cause damage/healing/effects).
     # Inert types (BLOOD, WATER, OIL, SLIME) skip the costly entity-coating scan.
     _HAZARDOUS_LIQUIDS = frozenset({LiquidType.FIRE, LiquidType.POISON, LiquidType.HEALTHPOTION})
+    _SPLASH_OFFSETS_CACHE: Dict[int, list[tuple[int, int, int]]] = {}
+
+    @classmethod
+    def _get_splash_offsets(cls, radius: int) -> list[tuple[int, int, int]]:
+        """Return cached (dx, dy, dist_sq) offsets inside a circular splash radius."""
+        r = max(0, int(radius))
+        cached = cls._SPLASH_OFFSETS_CACHE.get(r)
+        if cached is not None:
+            return cached
+
+        radius_sq = r * r
+        offsets: list[tuple[int, int, int]] = []
+        for dx in range(-r, r + 1):
+            for dy in range(-r, r + 1):
+                dist_sq = dx * dx + dy * dy
+                if dist_sq <= radius_sq:
+                    offsets.append((dx, dy, dist_sq))
+
+        cls._SPLASH_OFFSETS_CACHE[r] = offsets
+        return offsets
 
     def create_spray(self, start_x: int, start_y: int, direction: Tuple[int, int], liquid_type: LiquidType
                         , length: int = 5) -> None:
@@ -395,7 +416,7 @@ class LiquidSystem:
 
 
     def create_splash(self, center_x: int, center_y: int, liquid_type: LiquidType,
-                     radius: int = 2, max_depth: int = 2) -> None:
+                     radius: int = 2, max_depth: int = 2, fill_chance: float = 0.8) -> None:
         """Create a splash pattern around a center point."""
         coat_entities = liquid_type in self._HAZARDOUS_LIQUIDS
         # Build position map once instead of O(E) scan per tile.
@@ -407,23 +428,24 @@ class LiquidSystem:
 
         self._begin_batch()
         try:
-            radius_sq = radius * radius
-            for dx in range(-radius, radius + 1):
-                for dy in range(-radius, radius + 1):
-                    dist_sq = dx * dx + dy * dy
-                    if dist_sq > radius_sq:
-                        continue
-                    x, y = center_x + dx, center_y + dy
-                    if not self.game_map.in_bounds(x, y):
-                        continue
-                    distance = dist_sq ** 0.5
-                    # Deeper liquid closer to center
-                    depth = max(1, max_depth - int(distance))
-                    if random.random() < 0.8:  # Some randomness
-                        self.add_liquid(x, y, liquid_type, depth)
-                    # Only scan/coat entities for liquids that can harm or heal them
-                    if coat_entities:
-                        self._coat_entities_in_splash(x, y, liquid_type, distance, radius, entity_pos_map)
+            splash_offsets = self._get_splash_offsets(radius)
+            clamped_fill = max(0.0, min(1.0, float(fill_chance)))
+            for dx, dy, dist_sq in splash_offsets:
+                x, y = center_x + dx, center_y + dy
+                if not self.game_map.in_bounds(x, y):
+                    continue
+
+                if clamped_fill < 1.0 and random.random() >= clamped_fill:
+                    continue
+
+                # Deeper liquid closer to center; integer sqrt is cheaper than float sqrt.
+                depth = max(1, max_depth - math.isqrt(dist_sq))
+                self.add_liquid(x, y, liquid_type, depth)
+
+                # Only scan/coat entities for liquids that can harm or heal them.
+                if coat_entities:
+                    distance = math.sqrt(dist_sq)
+                    self._coat_entities_in_splash(x, y, liquid_type, distance, radius, entity_pos_map)
         finally:
             self._end_batch()
 

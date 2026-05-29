@@ -5313,15 +5313,7 @@ class MainGameEventHandler(EventHandler):
         # F1 toggles lag profiler overlay
         elif key == tcod.event.K_F1:
             self.engine.show_lag_profiler = not getattr(self.engine, "show_lag_profiler", False)
-            if self.engine.show_lag_profiler:
-                self.engine.show_perf_profiler = False
             self.engine.message_log.add_message("Lag profiler toggled.", color.green)
-        # F9 toggles performance profiler overlay (CPU/GPU/render timings)
-        elif key == tcod.event.K_F9:
-            self.engine.show_perf_profiler = not getattr(self.engine, "show_perf_profiler", False)
-            if self.engine.show_perf_profiler:
-                self.engine.show_lag_profiler = False
-            self.engine.message_log.add_message("Performance profiler toggled.", color.green)
         # F2 toggles debug overlay
         elif key == tcod.event.K_F2:
             self.engine.debug = not self.engine.debug
@@ -5407,14 +5399,7 @@ class MainGameEventHandler(EventHandler):
             #return ThrowSelectionHandler(self.engine)
         elif key == tcod.event.KeySym.F1:
             self.engine.show_lag_profiler = not getattr(self.engine, "show_lag_profiler", False)
-            if self.engine.show_lag_profiler:
-                self.engine.show_perf_profiler = False
             self.engine.message_log.add_message("Lag profiler toggled.", color.green)
-        elif key == tcod.event.KeySym.F9:
-            self.engine.show_perf_profiler = not getattr(self.engine, "show_perf_profiler", False)
-            if self.engine.show_perf_profiler:
-                self.engine.show_lag_profiler = False
-            self.engine.message_log.add_message("Performance profiler toggled.", color.green)
         elif key == tcod.event.KeySym.E:
             # Combined inventory + equipment grid
             from inventory_ui import InventoryGridUI
@@ -7159,7 +7144,6 @@ UI:
 
 DEBUG:
     F1: Lag Profiler
-    F9: Perf Profiler
     F2: Player Debug
     F3: Entity/Tile Debug
     F5: Material Inspector

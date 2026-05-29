@@ -178,6 +178,8 @@ class GameMap:
         if gpu_only:
             self._active_lights.append(
                 {
+                    "source_x": int(source_x),
+                    "source_y": int(source_y),
                     "x": float(source_x) + float(wobble_dx),
                     "y": float(source_y) + float(wobble_dy),
                     "radius": max(1.0, float(radius)),
@@ -199,6 +201,8 @@ class GameMap:
         try:
             self._active_lights.append(
                 {
+                    "source_x": int(source_x),
+                    "source_y": int(source_y),
                     "x": float(source_x) + float(wobble_dx),
                     "y": float(source_y) + float(wobble_dy),
                     "radius": max(1.0, float(radius)),
@@ -249,6 +253,8 @@ class GameMap:
         except Exception:
             self._active_lights.append(
                 {
+                    "source_x": int(source_x),
+                    "source_y": int(source_y),
                     "x": float(source_x),
                     "y": float(source_y),
                     "radius": max(1.0, float(radius)),
@@ -531,7 +537,7 @@ class GameMap:
                     wdx, wdy, di = _wobble(0.0)
                     self._add_light_source(px, py, radius=7, max_intensity=1.0,
                                            wobble_dx=wdx, wobble_dy=wdy, di=di,
-                                           gpu_only=_gpu_mode)
+                                           gpu_only=_gpu_mode, light_color=(255, 207, 166))
 
                 # Player always emits a subtle ambient glow so torchless players
                 # can still navigate.  Darkvision replaces this with a larger dim cone.
@@ -541,12 +547,12 @@ class GameMap:
                     for effect in getattr(player, "effects", [])
                 )
                 if has_darkvision:
-                    self._add_light_source(px, py, radius=10, max_intensity=0.25,
-                                           gpu_only=_gpu_mode)
+                    self._add_light_source(px, py, radius=16, max_intensity=0.5,
+                                           gpu_only=_gpu_mode, light_color=(249, 219, 255))
                 elif not has_torch:
                     # Faint personal glow: just enough to see immediately around the player.
                     self._add_light_source(px, py, radius=3, max_intensity=0.4,
-                                           gpu_only=_gpu_mode)
+                                           gpu_only=_gpu_mode, light_color=(255, 255, 255))
 
                 # Campfire and Bonfire lighting - doesn't affect FOV, only visual lighting
                 try:
@@ -573,7 +579,7 @@ class GameMap:
                                 wdx, wdy, di = _wobble(cx * 3.7 + cy * 5.3)
                                 self._add_light_source(cx, cy, radius=5, max_intensity=0.8,
                                                        wobble_dx=wdx, wobble_dy=wdy, di=di,
-                                                       gpu_only=_gpu_mode)
+                                                       gpu_only=_gpu_mode, light_color=(255, 85, 23))
                             elif item.name == "Bonfire":
                                 bx, by = item.x, item.y
                                 if not (0 <= bx < self.width and 0 <= by < self.height):
@@ -581,7 +587,7 @@ class GameMap:
                                 wdx, wdy, di = _wobble(bx * 3.7 + by * 5.3)
                                 self._add_light_source(bx, by, radius=15, max_intensity=1.0,
                                                        wobble_dx=wdx, wobble_dy=wdy, di=di,
-                                                       gpu_only=_gpu_mode)
+                                                       gpu_only=_gpu_mode, light_color=(255, 85, 23))
                         except Exception:
                             continue
                 except Exception:
@@ -630,16 +636,20 @@ class GameMap:
 
         # Render tiles with gradient lighting based on light levels
         self._render_tiles_with_gradient(console)
-        
-        # ANIM RENDER AREA
+
+        animations_by_priority = {0: [], 1: [], 2: []}
         if hasattr(self.engine, "animation_queue"):
-            # First render priority 0 (under everything).
             for anim in list(self.engine.animation_queue):
                 anim_priority = getattr(anim, "render_priority", None)
                 if anim_priority is None:
                     anim_priority = 2 if getattr(anim, "draw_above", False) else 0
-                if anim_priority != 0:
-                    continue
+                if anim_priority in animations_by_priority:
+                    animations_by_priority[anim_priority].append(anim)
+        
+        # ANIM RENDER AREA
+        if animations_by_priority[0]:
+            # First render priority 0 (under everything).
+            for anim in animations_by_priority[0]:
                 try:
                     anim.tick(console, self)
                 except Exception:
@@ -676,13 +686,8 @@ class GameMap:
                             pass
 
         # Now render priority 1 animations (between items and actors)
-        if hasattr(self.engine, "animation_queue"):
-            for anim in list(self.engine.animation_queue):
-                anim_priority = getattr(anim, "render_priority", None)
-                if anim_priority is None:
-                    anim_priority = 2 if getattr(anim, "draw_above", False) else 0
-                if anim_priority != 1:
-                    continue
+        if animations_by_priority[1]:
+            for anim in animations_by_priority[1]:
                 try:
                     anim.tick(console, self)
                 except Exception:
@@ -698,13 +703,8 @@ class GameMap:
                 self._render_entity(console, entity)
                 drawn_positions.add(pos)
         # Finally render priority 2 animations (above actors)
-        if hasattr(self.engine, "animation_queue"):
-            for anim in list(self.engine.animation_queue):
-                anim_priority = getattr(anim, "render_priority", None)
-                if anim_priority is None:
-                    anim_priority = 2 if getattr(anim, "draw_above", False) else 0
-                if anim_priority != 2:
-                    continue
+        if animations_by_priority[2]:
+            for anim in animations_by_priority[2]:
                 try:
                     anim.tick(console, self)
                 except Exception:

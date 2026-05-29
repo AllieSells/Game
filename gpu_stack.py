@@ -347,61 +347,113 @@ class DamageNumberParticle:
 
 
 class BurningParticle:
-    """A single short-lived flame spark that rises upward from a burning entity.
+    """Fire emitter that owns multiple internal sparks.
 
-    Spawn several per turn (see engine.py) to build up a convincing fire.
-    Each spark rises up to 1 tile above its spawn point, then dies.
-    Rendered in the bloom pass by GPUStack._burn_render.
+    One emitter instance is reused per fire source (tile/entity/campfire) and
+    emits short-lived spark states internally, avoiding burst allocation of many
+    BurningParticle class objects in the animation queue.
     """
 
-    def __init__(self, position: tuple, entity: object = None, contained: bool = False):
+    def __init__(
+        self,
+        position: tuple,
+        entity: object = None,
+        contained: bool = False,
+        max_sparks: int = 2,
+        emit_per_tick: int = 1,
+        ttl_frames: int = 18,
+    ):
         x, y = position
-        # Random horizontal spread across the tile, spawn in lower half
-
-        self.origin_y = float(y)          # cap: never rise > 1 tile above this
-        self.vx = random.uniform(-0.018, 0.018)   # gentle horizontal wobble
-        self.vy = random.uniform(-0.07, -0.035)   # rise upward (negative = up)
         self.entity = entity
-        self.frames = random.randint(10, 22)
-        self.total_frames = self.frames
-        self.render_priority = 2
         self.contained = contained
-        self.fx = float(x) + (random.uniform(-0.42, 0.42) if not contained else 0.0)
-        self.fy = float(y) + (random.uniform(0.0, 0.35) if not contained else 0.2)
+        self.render_priority = 2
+
+        self.anchor_x = float(x)
+        self.anchor_y = float(y)
+        self.max_sparks = max(1, int(max_sparks))
+        self.emit_per_tick = max(1, int(emit_per_tick))
+        self.frames = max(1, int(ttl_frames))
+        self.total_frames = self.frames
+        self.emitting = True
+
+        # Render code and caches expect fx/fy on animations; keep these in sync
+        # with the emitter anchor for compatibility.
+        self.fx = self.anchor_x
+        self.fy = self.anchor_y
+
+        # Internal spark states (each dict has fx/fy/vx/vy/frames/total/origin_y).
+        self.sparks: list[dict] = []
+
+    def set_anchor(self, x: float, y: float) -> None:
+        self.anchor_x = float(x)
+        self.anchor_y = float(y)
+        self.fx = self.anchor_x
+        self.fy = self.anchor_y
+
+    def refresh(self, ttl_frames: int = 18, max_sparks: int | None = None, emit_per_tick: int | None = None) -> None:
+        self.emitting = True
+        self.frames = max(self.frames, max(1, int(ttl_frames)))
+        if max_sparks is not None:
+            self.max_sparks = max(1, int(max_sparks))
+        if emit_per_tick is not None:
+            self.emit_per_tick = max(1, int(emit_per_tick))
+
+    def deactivate(self) -> None:
+        """Stop spawning new sparks but allow current sparks to fade out."""
+        self.emitting = False
+
+    def _spawn_spark(self) -> None:
+        spark_origin_y = self.anchor_y
+        spark = {
+            "origin_y": spark_origin_y,
+            "vx": random.uniform(-0.018, 0.018),
+            "vy": random.uniform(-0.07, -0.035),
+            "frames": random.randint(8, 14),
+            "total_frames": 0,
+            "fx": self.anchor_x + (random.uniform(-0.42, 0.42) if not self.contained else 0.0),
+            "fy": self.anchor_y + (random.uniform(0.0, 0.35) if not self.contained else 0.2),
+        }
+        spark["total_frames"] = spark["frames"]
+        self.sparks.append(spark)
 
     def tick(self, console, game_map) -> None:
-        # Handle tile-based fire (entity is None) or entities without body parts
-        if not self.entity or not hasattr(self.entity, 'body_parts') or not self.entity.body_parts:
+        # Follow dynamic entities while keeping a stable anchor for static sources.
+        if self.entity is not None and hasattr(self.entity, "x") and hasattr(self.entity, "y"):
+            self.set_anchor(self.entity.x, self.entity.y)
+
+        # Emit new sparks up to current budget while active.
+        if self.emitting and self.frames > 0 and len(self.sparks) < self.max_sparks:
+            emit_count = min(self.emit_per_tick, self.max_sparks - len(self.sparks))
+            for _ in range(emit_count):
+                self._spawn_spark()
+
+        updated_sparks: list[dict] = []
+        for spark in self.sparks:
             if self.contained:
-                self.fx += self.vx * 2
-                self.fy += self.vy / 2
+                spark["fx"] += spark["vx"] * 2
+                spark["fy"] += spark["vy"] / 2
             else:
-                self.fx += self.vx
-                self.fy += self.vy
-            # Cap rise at 1 tile above spawn
-            if self.fy < self.origin_y - 1.0:
-                self.fy = self.origin_y - 1.0
-                self.vy = 0.0
-            self.frames -= 1
-            return
+                spark["fx"] += spark["vx"]
+                spark["fy"] += spark["vy"]
 
-        # Handle entity-based fire (burning entity body parts)
-        from liquid_system import LiquidType
-        has_fire_coating = any(
-            part.coating == LiquidType.FIRE
-            for part in self.entity.body_parts.body_parts.values()
-        )
-        if not has_fire_coating:
-            self.frames -= 1
-            return
+            # Cap rise at 1 tile above spawn.
+            min_y = spark["origin_y"] - 1.0
+            if spark["fy"] < min_y:
+                spark["fy"] = min_y
+                spark["vy"] = 0.0
 
-        self.fx += self.vx
-        self.fy += self.vy
-        # Cap rise at 1 tile above spawn
-        if self.fy < self.origin_y - 1.0:
-            self.fy = self.origin_y - 1.0
-            self.vy = 0.0
+            spark["frames"] -= 1
+            if spark["frames"] > 0:
+                updated_sparks.append(spark)
+        self.sparks = updated_sparks
+
         self.frames -= 1
+        if self.frames <= 0:
+            self.emitting = False
+
+        # Keep emitter alive while existing sparks are still visible, but do not emit.
+        if self.sparks:
+            self.frames = max(1, self.frames)
 
 class DodgeParticle:
     """Physics state for a dodge-step effect.
@@ -1817,11 +1869,15 @@ class GPUStack:
         # ---------------------------------------------------------------
         self._lightmap_tex      = None
         self._lightmap_tex_size = (0, 0)
+        self.lightmap_update_interval = 1
+        self._lightmap_frame_counter = 0
         # Optional bridge for a future unified ModernGL frame compositor.
         # When disabled or no composer is registered, the legacy SDL path is used.
         self.enable_modern_gl_lightmap_unified = False
         self.modern_gl_lightmap_composer = None
         self._unified_gl_status_logged = False
+        self._unified_runtime_disabled = False
+        self._cached_lighting_engine = None
 
         # Register the built-in particle passes
         self.gpu_anim_registry.append(self._gpu_ember_render)   
@@ -2892,11 +2948,6 @@ class GPUStack:
         from bright yellow-white at birth through orange to dim red at death,
         mirroring how a real flame tongue cools as it rises.
         """
-        burns = [a for a in active_engine.animation_queue
-                 if isinstance(a, BurningParticle) and a.frames > 0]
-        if not burns:
-            return False
-
         tile_px_w = self.base_tile_w * self.game_zoom
         tile_px_h = self.base_tile_h * self.game_zoom
         origin_x, origin_y = active_engine.get_camera_origin(
@@ -2906,53 +2957,56 @@ class GPUStack:
         drew      = False
 
         with renderer.set_render_target(self._gal_src):
-            for burn in burns:
+            for burn in active_engine.animation_queue:
+                if not isinstance(burn, BurningParticle) or burn.frames <= 0:
+                    continue
                 # Visibility — check origin tile (entity tile), not spark tile
-                ex = int(round(burn.entity.x if hasattr(burn.entity, 'x') else burn.fx))
-                ey = int(round(burn.entity.y if hasattr(burn.entity, 'y') else burn.fy))
+                ex = int(round(burn.entity.x if hasattr(burn.entity, 'x') else burn.anchor_x))
+                ey = int(round(burn.entity.y if hasattr(burn.entity, 'y') else burn.anchor_y))
                 if not game_map.in_bounds(ex, ey):
                     continue
                 if not game_map.visible[ex, ey]:
                     continue
 
-                scr_x = burn.fx - origin_x
-                scr_y = burn.fy - origin_y
-                if not (-1.0 <= scr_x < self.game_view_width + 1.0 and
-                        -1.0 <= scr_y < self.game_view_height + 1.0):
-                    continue
+                for spark in getattr(burn, "sparks", []):
+                    scr_x = spark["fx"] - origin_x
+                    scr_y = spark["fy"] - origin_y
+                    if not (-1.0 <= scr_x < self.game_view_width + 1.0 and
+                            -1.0 <= scr_y < self.game_view_height + 1.0):
+                        continue
 
-                px = int(scr_x * tile_px_w + tile_px_w * 0.5)
-                py = int(scr_y * tile_px_h + tile_px_h * 0.5)
-                if not (2 <= px < self._gal_w - 2 and 2 <= py < self._gal_h - 2):
-                    continue
+                    px = int(scr_x * tile_px_w + tile_px_w * 0.5)
+                    py = int(scr_y * tile_px_h + tile_px_h * 0.5)
+                    if not (2 <= px < self._gal_w - 2 and 2 <= py < self._gal_h - 2):
+                        continue
 
-                # age 0=birth 1=death
-                age = 1.0 - (burn.frames / float(burn.total_frames))
+                    # age 0=birth 1=death
+                    age = 1.0 - (spark["frames"] / float(spark["total_frames"]))
 
-                # Colour: young=yellow-white, middle=orange, old=dim red
-                if age < 0.4:
-                    t   = age / 0.4
-                    r   = 255
-                    g   = int(255 - t * 105)   # 255 -> 150
-                    b   = int(180 - t * 180)   # 180 -> 0
-                else:
-                    t   = (age - 0.4) / 0.6
-                    r   = int(255 - t * 55)    # 255 -> 200
-                    g   = int(150 - t * 150)   # 150 -> 0
-                    b   = 0
+                    # Colour: young=yellow-white, middle=orange, old=dim red
+                    if age < 0.4:
+                        t   = age / 0.4
+                        r   = 255
+                        g   = int(255 - t * 105)   # 255 -> 150
+                        b   = int(180 - t * 180)   # 180 -> 0
+                    else:
+                        t   = (age - 0.4) / 0.6
+                        r   = int(255 - t * 55)    # 255 -> 200
+                        g   = int(150 - t * 150)   # 150 -> 0
+                        b   = 0
 
-                # Alpha: full for first 60%, then fade out
-                alpha = int(220 * max(0.0, 1.0 - max(0.0, age - 0.6) / 0.4))
-                if alpha < 8:
-                    continue
+                    # Alpha: full for first 60%, then fade out
+                    alpha = int(220 * max(0.0, 1.0 - max(0.0, age - 0.6) / 0.4))
+                    if alpha < 8:
+                        continue
 
-                # Small vertically-elongated flame tongue
-                w = max(2, int(tile_px_w * 0.09))
-                h = max(3, int(tile_px_h * 0.18))
-                renderer.draw_color = (r, g, b, alpha)
-                renderer.fill_rect((float(px - w // 2), float(py - h // 2),
-                                    float(w), float(h)))
-                drew = True
+                    # Small vertically-elongated flame tongue
+                    w = max(2, int(tile_px_w * 0.09))
+                    h = max(3, int(tile_px_h * 0.18))
+                    renderer.draw_color = (r, g, b, alpha)
+                    renderer.fill_rect((float(px - w // 2), float(py - h // 2),
+                                        float(w), float(h)))
+                    drew = True
 
         return drew
 
@@ -4108,17 +4162,36 @@ class GPUStack:
             finally:
                 self._unified_gl_status_logged = True
 
+        def _record_ms(section: str, start_time: float, end_time: float | None = None) -> None:
+            if active_engine is None:
+                return
+            t1 = _time.perf_counter() if end_time is None else end_time
+            active_engine.profile_external_ms(section, max(0.0, (t1 - start_time) * 1000.0))
+
         _t0 = _time.perf_counter()
+
+        if not self.enable_modern_gl_lightmap_unified:
+            self._unified_runtime_disabled = False
+
+        self._lightmap_frame_counter += 1
         # Force the shader.py GPU backend here; it will fall back internally
         # if ModernGL is unavailable.
-        import shader as _shader_mod
-        lighting_engine = _shader_mod.get_lighting_engine(mode="gpu")
+        lighting_engine = self._cached_lighting_engine
+        if lighting_engine is None or getattr(lighting_engine, "mode", None) != "gpu":
+            import shader as _shader_mod
+            lighting_engine = _shader_mod.get_lighting_engine(mode="gpu")
+            self._cached_lighting_engine = lighting_engine
+
+        interval = max(1, int(getattr(self, "lightmap_update_interval", 1) or 1))
+        can_reuse = self._lightmap_tex is not None and interval > 1
+        should_rebuild = (not can_reuse) or (self._lightmap_frame_counter % interval == 0)
 
         # Unified path hook: render lightmap into shader.py ModernGL target,
         # then let an external composer blend it without CPU readback.
         composer = self.modern_gl_lightmap_composer
-        if self.enable_modern_gl_lightmap_unified and callable(composer):
+        if self.enable_modern_gl_lightmap_unified and not self._unified_runtime_disabled and callable(composer):
             try:
+                _t_unified0 = _time.perf_counter()
                 prepared = True
                 prepare_fn = getattr(composer, "prepare_engine", None)
                 if callable(prepare_fn):
@@ -4134,38 +4207,48 @@ class GPUStack:
                         game_dest_h=int(game_dest_h),
                     ))
                     if composed:
+                        self._unified_runtime_disabled = False
                         _emit_unified_status_once()
-                        _t1 = _time.perf_counter()
-                        try:
-                            active_engine.profile_external_ms("lightmap_build", (_t1 - _t0) * 1000.0)
-                            active_engine.profile_external_ms("lightmap_upload", 0.0)
-                            active_engine.profile_external_ms("lightmap_blit", 0.0)
-                        except Exception:
-                            pass
                         return
+
+                # Unified path was requested but could not compose this frame.
+                # Disable runtime retries to avoid paying this cost every frame.
+                self._unified_runtime_disabled = True
+                try:
+                    active_engine.profile_external_ms("lightmap_unified_disabled", 1.0)
+                    msg = "UnifiedGL runtime auto-disabled after fallback; using SDL lightmap path."
+                    print("[INFO]: " + msg)
+                    if hasattr(active_engine, "message_log") and active_engine.message_log is not None:
+                        active_engine.message_log.add_message(msg)
+                except Exception:
+                    pass
             except Exception:
                 # Fall through to legacy path on any bridge/composer failure.
+                self._unified_runtime_disabled = True
                 pass
 
-        lm_np = lighting_engine.build_lightmap(game_map, game_console)
-        _t1 = _time.perf_counter()
-        lm_size = (lm_np.shape[1], lm_np.shape[0])
-        if self._lightmap_tex is None or lm_size != self._lightmap_tex_size:
-            self._lightmap_tex      = self.renderer.upload_texture(lm_np)
-            self._lightmap_tex_size = lm_size
+        if should_rebuild:
+            lm_np = lighting_engine.build_lightmap(game_map, game_console)
+
+            _t_upload0 = _time.perf_counter()
+            lm_size = (lm_np.shape[1], lm_np.shape[0])
+            if self._lightmap_tex is None or lm_size != self._lightmap_tex_size:
+                self._lightmap_tex      = self.renderer.upload_texture(lm_np)
+                self._lightmap_tex_size = lm_size
+            else:
+                self._lightmap_tex.update(lm_np)
+            _t_upload1 = _time.perf_counter()
+            _record_ms("lightmap_upload", _t_upload0, _t_upload1)
         else:
-            self._lightmap_tex.update(lm_np)
-        _t2 = _time.perf_counter()
+            _record_ms("lightmap_upload", _t0, _t0)
+
+        if self._lightmap_tex is None:
+            return
+
+        _t_blit0 = _time.perf_counter()
         self._lightmap_tex.blend_mode = tcod.sdl.render.BlendMode.MOD
         self.renderer.copy(self._lightmap_tex,
                            dest=(int(dest_offset_x), int(dest_offset_y), int(game_dest_w), int(game_dest_h)))
-        _t3 = _time.perf_counter()
+        _t_blit1 = _time.perf_counter()
         _emit_unified_status_once()
-
-        # Feed render-side timings into the F1 lag profiler.
-        try:
-            active_engine.profile_external_ms("lightmap_build", (_t1 - _t0) * 1000.0)
-            active_engine.profile_external_ms("lightmap_upload", (_t2 - _t1) * 1000.0)
-            active_engine.profile_external_ms("lightmap_blit", (_t3 - _t2) * 1000.0)
-        except Exception:
-            pass
+        _record_ms("lightmap_blit", _t_blit0, _t_blit1)

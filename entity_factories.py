@@ -629,7 +629,7 @@ quiver.ammo_counts = {"arrow": 20}
 quiver.selected_ammo_type = "arrow"
 
 coin = Item(
-    char="$",
+    char=chr(0xE0C0),
     color=(255, 223, 0),
     name="Coin",
     description="A shiny gold coin.",

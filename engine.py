@@ -119,10 +119,8 @@ class Engine:
         # and intensity delta (di) for torch/fire flicker.
         self._torch_t: float = 0.0
 
-        # F1 lag profiler overlay toggle (independent of F2 debug mode).
+        # F1 profiler overlay toggle (independent of F2 debug mode).
         self.show_lag_profiler = False
-        # F9 performance profiler overlay toggle (CPU/GPU/render breakdown).
-        self.show_perf_profiler = False
 
         # Lightweight frame profiler (used by F1 lag chart).
         self.lag_profiler = {
@@ -146,9 +144,9 @@ class Engine:
         Samples are merged into the next tick frame report so F2 shows them in
         the same chart as core engine timings.
 
-        Keep only the latest sample per section until the next tick finalize.
-        This avoids runaway accumulation (e.g. render loop profiling continuing
-        while tick finalization is paused), which can inflate EMA into 10000+ ms.
+        Samples are accumulated per section until the next tick finalize.
+        This preserves accuracy when a section is reported multiple times within
+        the same frame.
         """
         try:
             profiler = getattr(self, "lag_profiler", None)
@@ -157,7 +155,7 @@ class Engine:
 
             ms = max(0.0, float(elapsed_ms))
             ext = profiler.setdefault("external_frame_ms", {})
-            ext[section] = ms
+            ext[section] = float(ext.get(section, 0.0) or 0.0) + ms
         except Exception:
             pass
 
@@ -187,14 +185,33 @@ class Engine:
             if isinstance(ext, dict) and ext:
                 for section, ms in ext.items():
                     frame_samples_ms[section] = float(frame_samples_ms.get(section, 0.0) or 0.0) + float(ms or 0.0)
-                # Keep total coherent with merged sections.
-                frame_samples_ms["total"] = float(frame_samples_ms.get("total", 0.0) or 0.0) + sum(
-                    float(v or 0.0) for v in ext.values()
+                # Only add non-overlapping frame contributors to top-level total.
+                # Frame pacing waits are excluded; shader lm_gpu_total is authoritative
+                # for build cost, so wrapper lightmap_build stays non-additive.
+                non_additive_exact = {"frame_sleep", "present_wait", "lightmap_build"}
+                additive_ext_total = sum(
+                    float(value or 0.0)
+                    for section, value in ext.items()
+                    if section not in non_additive_exact
                 )
+                frame_samples_ms["total"] = float(frame_samples_ms.get("total", 0.0) or 0.0) + additive_ext_total
                 profiler["external_frame_ms"] = {}
 
             profiler["last_frame_ms"] = dict(frame_samples_ms)
             profiler["frame_count"] = int(profiler.get("frame_count", 0)) + 1
+
+            # Decay sections not observed this frame so stale metrics disappear.
+            ema_map = profiler.setdefault("ema_ms", {})
+            _decay = 0.8
+            for section in list(ema_map.keys()):
+                if section in frame_samples_ms:
+                    continue
+                decayed = float(ema_map.get(section, 0.0) or 0.0) * _decay
+                if decayed < 0.01:
+                    del ema_map[section]
+                else:
+                    ema_map[section] = decayed
+
             for section, ms in frame_samples_ms.items():
                 self._profile_section(section, ms / 1000.0)
         except Exception:
@@ -404,6 +421,7 @@ class Engine:
     def tick(self, console: Console):
         _frame_start = time.perf_counter()
         _frame_samples_ms: dict[str, float] = {}
+        self.tick_count += 1
 
         def _mark(section_name: str, section_start: float) -> None:
             _frame_samples_ms[section_name] = _frame_samples_ms.get(section_name, 0.0) + (
@@ -434,12 +452,9 @@ class Engine:
 
         # Always clean up expired animations regardless of map type.
         _section_start = time.perf_counter()
-        expired = [anim for anim in list(self.animation_queue) if getattr(anim, "frames", 1) <= 0]
-        for anim in expired:
-            try:
-                self.animation_queue.remove(anim)
-            except ValueError:
-                pass
+        self.animation_queue = deque(
+            anim for anim in self.animation_queue if getattr(anim, "frames", 1) > 0
+        )
         _mark("cleanup", _section_start)
 
         # Always advance auto-move regardless of map type.
@@ -572,20 +587,100 @@ class Engine:
         try:
             # Build particle count cache once per frame to avoid O(n*m) lookups
             tile_fire_counts, entity_fire_counts, position_ember_counts, position_drip_counts, position_dust_counts = self._build_particle_count_cache()
+            total_tile_fires = sum(tile_fire_counts.values())
+            total_entity_fires = sum(entity_fire_counts.values())
+            total_fire_particles = total_tile_fires + total_entity_fires
 
             self._tick_ambient_particles(position_dust_counts)
+
+            burning_entities = {
+                e
+                for e in self.game_map.entities
+                if any(getattr(effect, "name", "") == "Burning" for effect in getattr(e, "effects", []))
+            }
+            for anim in self.animation_queue:
+                if not isinstance(anim, BurningParticle):
+                    continue
+                anim_entity = getattr(anim, "entity", None)
+                if anim_entity is None:
+                    continue
+                if anim_entity not in burning_entities and hasattr(anim, "deactivate"):
+                    anim.deactivate()
+
+            campfire_positions = {
+                (int(e.x), int(e.y))
+                for e in self.game_map.entities
+                if getattr(e, "name", None) == "Campfire"
+            }
+            for anim in self.animation_queue:
+                if not isinstance(anim, BurningParticle):
+                    continue
+                if not getattr(anim, "contained", False):
+                    continue
+                apos = (
+                    int(round(getattr(anim, "anchor_x", getattr(anim, "fx", -9999)))),
+                    int(round(getattr(anim, "anchor_y", getattr(anim, "fy", -9999)))),
+                )
+                if apos not in campfire_positions and hasattr(anim, "deactivate"):
+                    anim.deactivate()
             
-            # Get liquid system - check for fire coatings on tiles (outside entity loop)
-            for coating in self.game_map.liquid_system.coatings.values():
-                if coating.liquid_type == LiquidType.FIRE:
-                    pos = coating.get_pos()
-                    # Count existing tile-based fire particles at this position
-                    FIRE_CAP = 36
-                    current_fires = tile_fire_counts.get(pos, 0)
-                    # Spawn multiple particles per tick (like entities do)
-                    if current_fires < FIRE_CAP:
-                        for _ in range(random.randint(3, 5)):
-                            self.animation_queue.append(BurningParticle(pos, None))
+            # Fire particles from tile coatings: keep visible-only pressure bounded.
+            tile_fire_cap = 30
+            fire_global_cap = 5000
+            existing_tile_emitters = {}
+            for anim in self.animation_queue:
+                if not isinstance(anim, BurningParticle):
+                    continue
+                if getattr(anim, 'entity', None) is not None or getattr(anim, 'contained', False):
+                    continue
+                ex = int(round(getattr(anim, 'anchor_x', getattr(anim, 'fx', 0.0))))
+                ey = int(round(getattr(anim, 'anchor_y', getattr(anim, 'fy', 0.0))))
+                existing_tile_emitters[(ex, ey)] = anim
+
+            for pos, coating in self.game_map.liquid_system.coatings.items():
+                if coating.liquid_type != LiquidType.FIRE:
+                    continue
+                if total_fire_particles >= fire_global_cap:
+                    break
+
+                x, y = pos
+                if not self.game_map.in_bounds(x, y) or not self.game_map.visible[x, y]:
+                    continue
+
+                current_fires = tile_fire_counts.get(pos, 0)
+                remaining = tile_fire_cap - current_fires
+                if remaining <= 0:
+                    continue
+
+                depth = max(1, int(getattr(coating, "depth", 1)))
+                # Deeper fire spawns slightly more tongues, but hard-capped per tick.
+                spawn_target = 1 if depth == 1 else 2
+                allowed_spawn = min(remaining, spawn_target, fire_global_cap - total_fire_particles)
+                if allowed_spawn <= 0:
+                    continue
+
+                emitter = existing_tile_emitters.get(pos)
+                if emitter is None:
+                    emitter = BurningParticle(
+                        pos,
+                        None,
+                        max_sparks=current_fires + allowed_spawn,
+                        emit_per_tick=allowed_spawn,
+                        ttl_frames=18,
+                    )
+                    self.animation_queue.append(emitter)
+                    existing_tile_emitters[pos] = emitter
+                else:
+                    emitter.set_anchor(pos[0], pos[1])
+                    emitter.refresh(
+                        ttl_frames=18,
+                        max_sparks=current_fires + allowed_spawn,
+                        emit_per_tick=allowed_spawn,
+                    )
+
+                tile_fire_counts[pos] = current_fires + allowed_spawn
+                total_fire_particles += allowed_spawn
+                total_tile_fires += allowed_spawn
             
             for entity in list(self.game_map.entities):
                 # Update corpse sprite based on whether it still has loot
@@ -614,25 +709,8 @@ class Engine:
                                 traceback.print_exc()
                                 pass
                 
-                # Check entities for fire coatings on body parts
+                # Spawn drip particles for blood/water body-part coatings
                 if hasattr(entity, 'body_parts') and entity.body_parts:
-                    # Check if this entity has fire coating on any body part
-                    has_fire_coating = any(
-                        part.coating == LiquidType.FIRE 
-                        for part in entity.body_parts.body_parts.values()
-                    )
-                    
-                    if has_fire_coating:
-                        # Spawn a burst of flame sparks each turn, capped so the
-                        # queue doesn't grow unbounded for long-burning entities.
-                        FIRE_CAP = 36
-                        current_fires = entity_fire_counts.get(entity, 0)
-                        if current_fires < FIRE_CAP:
-                            for _ in range(random.randint(3, 5)):
-                                self.animation_queue.append(
-                                    BurningParticle((entity.x, entity.y), entity))
-
-                    # Spawn drip particles for blood/water body-part coatings
                     if self.animations_enabled and getattr(entity, 'ai', True) is not None:
                         drip_coatings = [
                             part.coating for part in entity.body_parts.body_parts.values()
@@ -662,8 +740,29 @@ class Engine:
                             is_bonfire = entity.name == "Bonfire"
                             smoke_chance = 0.08 if is_bonfire else 0.05
                             if entity.name == "Campfire":
-                                if not any(isinstance(a, FireFlicker) and a.position == pos for a in self.animation_queue):
-                                    self.animation_queue.append(BurningParticle((entity.x, entity.y), None, contained=True))
+                                contained_emitter = next(
+                                    (
+                                        a for a in self.animation_queue
+                                        if isinstance(a, BurningParticle)
+                                        and getattr(a, "contained", False)
+                                        and int(round(getattr(a, "anchor_x", getattr(a, "fx", -9999)))) == pos[0]
+                                        and int(round(getattr(a, "anchor_y", getattr(a, "fy", -9999)))) == pos[1]
+                                    ),
+                                    None,
+                                )
+                                if contained_emitter is None and total_fire_particles < fire_global_cap:
+                                    contained_emitter = BurningParticle(
+                                        (entity.x, entity.y),
+                                        None,
+                                        contained=True,
+                                        max_sparks=3,
+                                        emit_per_tick=1,
+                                        ttl_frames=20,
+                                    )
+                                    self.animation_queue.append(contained_emitter)
+                                if contained_emitter is not None:
+                                    contained_emitter.set_anchor(entity.x, entity.y)
+                                    contained_emitter.refresh(ttl_frames=20, max_sparks=3, emit_per_tick=1)
                             elif is_bonfire:
                                 if not any(isinstance(a, BonefireFlicker) and a.position == pos for a in self.animation_queue):
                                     self.animation_queue.append(BonefireFlicker(pos))
@@ -770,14 +869,18 @@ class Engine:
         
         for anim in self.animation_queue:
             if isinstance(anim, BurningParticle):
+                spark_count = max(0, len(getattr(anim, 'sparks', [])))
                 entity = getattr(anim, 'entity', None)
                 if entity is None:
-                    # Tile-based fire particle
-                    pos = (int(round(anim.fx)), int(round(anim.fy)))
-                    tile_fire_counts[pos] = tile_fire_counts.get(pos, 0) + 1
+                    # Tile-based fire emitter
+                    pos = (
+                        int(round(getattr(anim, 'anchor_x', getattr(anim, 'fx', 0.0)))),
+                        int(round(getattr(anim, 'anchor_y', getattr(anim, 'fy', 0.0)))),
+                    )
+                    tile_fire_counts[pos] = tile_fire_counts.get(pos, 0) + spark_count
                 else:
-                    # Entity-based fire particle
-                    entity_fire_counts[entity] = entity_fire_counts.get(entity, 0) + 1
+                    # Entity-based fire emitter
+                    entity_fire_counts[entity] = entity_fire_counts.get(entity, 0) + spark_count
             elif isinstance(anim, EmberParticle):
                 pos = (int(round(anim.fx)), int(round(anim.fy)))
                 position_ember_counts[pos] = position_ember_counts.get(pos, 0) + 1
@@ -1208,7 +1311,7 @@ class Engine:
 
 
         # Torch increases FOV radius; campfires only affect Darkness (lighting), not FOV
-        radius = 6 if has_torch else 3
+        radius = 16 #if has_torch else 3
         if self.has_effect(self.player, DarkvisionEffect):
             radius = 10
 

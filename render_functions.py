@@ -285,9 +285,10 @@ def render_lag_profiler(console: Console, engine) -> None:
         return
 
     frame_ms = float(getattr(engine, "frame_time_ms", 0.0) or 0.0)
+    cpu_frame_ms = float(getattr(engine, "frame_cpu_ms", 0.0) or 0.0)
     console.print(
         chart_x, chart_y + 1,
-        f"Real Frame: {frame_ms:5.2f}ms  CPU Tick: {total_ms:5.2f}ms",
+        f"Real: {frame_ms:5.2f}ms  CPU: {cpu_frame_ms:5.2f}ms  Profiled: {total_ms:5.2f}ms",
         fg=(180, 220, 255),
     )
 
@@ -299,7 +300,42 @@ def render_lag_profiler(console: Console, engine) -> None:
         "global_anims": "globalfx",
         "cleanup": "cleanup",
         "tutorial": "tutorial",
+        "frame_cpu": "cpu_frame",
+        "engine_tick": "eng_tick",
+        "render_game": "render_game",
+        "crt_barrel_ca": "crt_barrel",
+        "crt_post_blit": "crt_blit",
+        "crt_scan": "crt_scan",
+        "crt_final": "crt_final",
+        "event_loop": "events",
+        "present_wait": "present",
+        "frame_sleep": "sleep",
+        "lightmap_engine_get": "lm_get_eng",
+        "lightmap_unified_disabled": "lm_uni_off",
+        "lm_gpu_total": "lm_gpu_tot",
+        "lm_gpu_setup": "lm_gpu_setup",
+        "lm_gpu_explored_floor": "lm_gpu_xfloor",
+        "lm_gpu_smooth": "lm_gpu_smooth",
+        "lm_gpu_vis_rebuild": "lm_gpu_vrebd",
+        "lm_gpu_vis_post": "lm_gpu_vpost",
+        "lm_gpu_resource_ensure": "lm_gpu_resrc",
+        "lm_gpu_atlas": "lm_gpu_atlas",
+        "lm_gpu_atlas_build": "lm_gpu_atlsb",
+        "lm_gpu_lookup_build": "lm_gpu_lookup",
+        "lm_gpu_atlas_upload": "lm_gpu_atlsu",
+        "lm_gpu_bind_textures": "lm_gpu_bindt",
+        "lm_gpu_light_pack": "lm_gpu_lpack",
+        "lm_gpu_uniforms": "lm_gpu_unifs",
+        "lm_gpu_uniform_write": "lm_gpu_unifw",
+        "lm_gpu_draw": "lm_gpu_draw",
+        "lm_gpu_draw_only": "lm_gpu_drawo",
+        "lm_gpu_readback": "lm_gpu_rback",
+        "lm_gpu_readback_only": "lm_gpu_rbako",
+        "lm_gpu_final_blend": "lm_gpu_fblnd",
+        "lm_gpu_blend_upload": "lm_gpu_blup",
+        "lm_gpu_explored_fade": "lm_gpu_exfad",
     }
+    label_width = 13
 
     section_items = []
     for key, value in ema_ms.items():
@@ -330,7 +366,7 @@ def render_lag_profiler(console: Console, engine) -> None:
             fg = (200, 200, 200)
 
         label = label_alias.get(key, key)
-        console.print(chart_x, row, f"{label[:12]:<12} {ms:5.2f} {pct:4.0f}% {bar}", fg=fg)
+        console.print(chart_x, row, f"{label[:label_width]:<{label_width}} {ms:5.2f} {pct:4.0f}% {bar}", fg=fg)
         row += 1
 
     other_ms = max(0.0, denom_ms - shown_ms)
@@ -338,7 +374,7 @@ def render_lag_profiler(console: Console, engine) -> None:
         pct = (other_ms / denom_ms * 100.0)
         fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
         bar = ("#" * fill) + ("." * (bar_width - fill))
-        console.print(chart_x, row, f"{'other':<12} {other_ms:5.2f} {pct:4.0f}% {bar}", fg=(160, 160, 160))
+        console.print(chart_x, row, f"{'other':<{label_width}} {other_ms:5.2f} {pct:4.0f}% {bar}", fg=(160, 160, 160))
         row += 1
 
     last_total = float(last_ms.get("total", 0.0) or 0.0)
@@ -371,119 +407,7 @@ def render_lag_profiler(console: Console, engine) -> None:
             else:
                 fg = (200, 200, 200)
             label = label_alias.get(key, key)
-            console.print(chart_x, row, f"{label[:12]:<12} {ms:5.2f} {pct:4.0f}% d{delta:+5.1f}", fg=fg)
-            row += 1
-
-
-def render_perf_profiler(console: Console, engine) -> None:
-    """Render an F9 performance panel with CPU/GPU/render lag breakdown."""
-    console.clear()
-
-    profiler = getattr(engine, "lag_profiler", None)
-    if not isinstance(profiler, dict):
-        return
-
-    ema_ms = profiler.get("ema_ms", {}) or {}
-    last_ms = profiler.get("last_frame_ms", {}) or {}
-
-    frame_ms = float(getattr(engine, "frame_time_ms", 0.0) or 0.0)
-    cpu_tick_ms = float(ema_ms.get("total", 0.0) or 0.0)
-
-    render_keys = (
-        "console_render",
-        "lightmap_build",
-        "lightmap_upload",
-        "lightmap_blit",
-    )
-    gpu_bound_keys = (
-        "lightmap_build",
-        "lightmap_upload",
-        "lightmap_blit",
-    )
-
-    render_ema_ms = sum(float(ema_ms.get(k, 0.0) or 0.0) for k in render_keys)
-    gpu_ema_ms = sum(float(ema_ms.get(k, 0.0) or 0.0) for k in gpu_bound_keys)
-    est_headroom_ms = max(0.0, frame_ms - max(cpu_tick_ms, render_ema_ms))
-
-    x = 0
-    y = 0
-    console.print(x, y, "Perf Profiler (CPU/GPU/Render)", fg=(255, 220, 120))
-
-    if cpu_tick_ms <= 0.0 and render_ema_ms <= 0.0:
-        console.print(x, y + 1, "Collecting profiler samples...", fg=(140, 140, 140))
-        return
-
-    console.print(x, y + 1, f"Frame (real): {frame_ms:5.2f} ms", fg=(180, 220, 255))
-    console.print(x, y + 2, f"CPU tick EMA : {cpu_tick_ms:5.2f} ms", fg=(220, 220, 220))
-    console.print(x, y + 3, f"Render EMA   : {render_ema_ms:5.2f} ms", fg=(220, 220, 220))
-    console.print(x, y + 4, f"GPU-bound EMA: {gpu_ema_ms:5.2f} ms", fg=(255, 200, 150))
-    console.print(x, y + 5, f"Frame slack  : {est_headroom_ms:5.2f} ms", fg=(170, 170, 170))
-
-    bar_width = 14
-    row = y + 7
-    console.print(x, row, "RENDER BREAKDOWN (EMA):", fg=(255, 180, 120))
-    row += 1
-
-    denom = max(render_ema_ms, 0.001)
-    label_alias = {
-        "console_render": "console",
-        "lightmap_build": "lm_build",
-        "lightmap_upload": "lm_upload",
-        "lightmap_blit": "lm_blit",
-    }
-
-    entries = []
-    for key in render_keys:
-        ms = float(ema_ms.get(key, 0.0) or 0.0)
-        if ms > 0.0:
-            entries.append((key, ms))
-    entries.sort(key=lambda kv: kv[1], reverse=True)
-
-    shown = 0.0
-    for key, ms in entries:
-        shown += ms
-        pct = (ms / denom) * 100.0
-        fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
-        bar = ("#" * fill) + ("." * (bar_width - fill))
-        fg = (255, 120, 120) if pct >= 40.0 else (255, 180, 120) if pct >= 20.0 else (200, 200, 200)
-        label = label_alias.get(key, key)
-        console.print(x, row, f"{label:<12} {ms:5.2f} {pct:4.0f}% {bar}", fg=fg)
-        row += 1
-
-    other = max(0.0, denom - shown)
-    if other > 0.1:
-        pct = (other / denom) * 100.0
-        fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
-        bar = ("#" * fill) + ("." * (bar_width - fill))
-        console.print(x, row, f"{'other':<12} {other:5.2f} {pct:4.0f}% {bar}", fg=(160, 160, 160))
-        row += 1
-
-    last_total = float(last_ms.get("total", 0.0) or 0.0)
-    console.print(x, row, f"Last CPU tick : {last_total:5.2f} ms", fg=(170, 170, 170))
-    row += 1
-
-    spike_threshold = max(20.0, cpu_tick_ms * 1.35)
-    if isinstance(last_ms, dict) and last_ms and last_total >= spike_threshold:
-        console.print(x, row, "SPIKE OFFENDERS (LAST):", fg=(255, 180, 120))
-        row += 1
-        offenders = []
-        for key, value in last_ms.items():
-            if key == "total":
-                continue
-            ms = float(value or 0.0)
-            if ms > 0.0:
-                offenders.append((key, ms))
-        offenders.sort(key=lambda kv: kv[1], reverse=True)
-
-        last_sum_ms = sum(ms for _, ms in offenders)
-        last_denom_ms = max(last_total, last_sum_ms, 0.001)
-        for key, ms in offenders[:6]:
-            pct = (ms / last_denom_ms) * 100.0
-            ema_val = float(ema_ms.get(key, 0.0) or 0.0)
-            delta = ms - ema_val
-            fg = (255, 120, 120) if pct >= 30.0 else (255, 180, 120) if pct >= 15.0 else (200, 200, 200)
-            label = label_alias.get(key, key)
-            console.print(x, row, f"{label[:12]:<12} {ms:5.2f} {pct:4.0f}% d{delta:+5.1f}", fg=fg)
+            console.print(chart_x, row, f"{label[:label_width]:<{label_width}} {ms:5.2f} {pct:4.0f}% d{delta:+5.1f}", fg=fg)
             row += 1
 
 

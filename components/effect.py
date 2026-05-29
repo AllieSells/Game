@@ -201,7 +201,11 @@ class PoisonEffect(Effect):
         from components.damage_types import DamageType
         import actions
         final_damage = actions.apply_typed_damage(target, self.amount, DamageType.POISON)
-        target.fighter.take_damage(final_damage, causes_bleeding=False)
+        target.fighter.take_damage(
+            final_damage,
+            causes_bleeding=False,
+            spawn_damage_number=False,
+        )
         return self.duration <= 0
 
 
@@ -415,12 +419,61 @@ class BurningEffect(Effect):
             return False
         self.duration -= 1
         sounds._play_burn_sound_at(target.x, target.y, target.gamemap.engine.player, target.gamemap)
+
+        # Visual fire particles are emitted by the effect itself so burning
+        # always renders flames, even when body-part coatings are absent.
+        try:
+            from gpu_stack import BurningParticle
+            engine = getattr(target.gamemap, "engine", None)
+            if engine is not None and hasattr(engine, "animation_queue") and target.fighter and target.fighter.hp > 0:
+                if target is engine.player or target.gamemap.visible[target.x, target.y]:
+                    entity_fire_cap = 20
+                    fire_global_cap = 320
+
+                    current_entity_fires = 0
+                    current_total_fires = 0
+                    entity_emitter = None
+                    for anim in engine.animation_queue:
+                        if not isinstance(anim, BurningParticle) or getattr(anim, "frames", 0) <= 0:
+                            continue
+                        spark_count = max(0, len(getattr(anim, "sparks", [])))
+                        current_total_fires += spark_count
+                        if getattr(anim, "entity", None) is target:
+                            current_entity_fires += spark_count
+                            entity_emitter = anim
+
+                    remaining_entity = entity_fire_cap - current_entity_fires
+                    remaining_global = fire_global_cap - current_total_fires
+                    allowed_spawn = max(0, min(2, remaining_entity, remaining_global))
+
+                    if entity_emitter is None:
+                        entity_emitter = BurningParticle(
+                            (target.x, target.y),
+                            target,
+                            max_sparks=entity_fire_cap,
+                            emit_per_tick=max(1, allowed_spawn),
+                            ttl_frames=20,
+                        )
+                        engine.animation_queue.append(entity_emitter)
+                    else:
+                        entity_emitter.set_anchor(target.x, target.y)
+                        entity_emitter.refresh(
+                            ttl_frames=20,
+                            max_sparks=entity_fire_cap,
+                            emit_per_tick=max(1, allowed_spawn),
+                        )
+        except Exception:
+            pass
         
         # Apply fire damage with damage type for resistance calculation
         from components.damage_types import DamageType
         import actions
         final_damage = actions.apply_typed_damage(target, self.amount, DamageType.FIRE)
-        target.fighter.take_damage(final_damage, causes_bleeding=False)
+        target.fighter.take_damage(
+            final_damage,
+            causes_bleeding=False,
+            spawn_damage_number=False,
+        )
         return self.duration <= 0
 
 

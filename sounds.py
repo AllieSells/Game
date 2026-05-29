@@ -769,6 +769,33 @@ _explosion_sounds_preloaded = [
     Sound("RP/sfx/spells/fireball/fireball2.mp3"),
 ]
 _dragon_breath_sound_preloaded = Sound("RP/sfx/spells/dragon_breath/dragon_breath1.mp3")
+_block_sounds_preloaded = [
+    Sound("RP/sfx/hit_block/block1.mp3"),
+    Sound("RP/sfx/hit_block/block2.mp3"),
+    Sound("RP/sfx/hit_block/block3.mp3"),
+]
+_finishing_blow_sounds_preloaded = [
+    Sound("RP/sfx/hit_final_blow/finalblow1.wav"),
+    Sound("RP/sfx/hit_final_blow/finalblow2.wav"),
+    Sound("RP/sfx/hit_final_blow/finalblow3.wav"),
+]
+_miss_sounds_preloaded = [
+    Sound("RP/sfx/hit_miss/miss1.wav"),
+    Sound("RP/sfx/hit_miss/miss2.wav"),
+    Sound("RP/sfx/hit_miss/miss3.wav"),
+    Sound("RP/sfx/hit_miss/miss4.wav"),
+    Sound("RP/sfx/hit_miss/miss5.wav"),
+]
+_weapon_hit_no_armor_sounds_preloaded = [
+    Sound("RP/sfx/hit_weapon_no_armor/hit1.wav"),
+    Sound("RP/sfx/hit_weapon_no_armor/hit2.wav"),
+    Sound("RP/sfx/hit_weapon_no_armor/hit3.wav"),
+]
+_weapon_hit_armor_sounds_preloaded = [
+    Sound("RP/sfx/hit_weapon_armor/hit1.wav"),
+    Sound("RP/sfx/hit_weapon_armor/hit2.wav"),
+    Sound("RP/sfx/hit_weapon_armor/hit3.wav"),
+]
 
 # Helper functions for global sounds with pitch variation
 def play_quaff_sound():
@@ -973,22 +1000,12 @@ def play_walk_sound(entity_x=0, entity_y=0):
     _play_delayed_footstep(_STONE_WALK_FILES, 0.5, (0.9, 1.5), entity_x, entity_y, delay_scale=0.05)
 
 def play_block_sound():
-    block_sounds = [
-        Sound("RP/sfx/hit_block/block1.mp3"),
-        Sound("RP/sfx/hit_block/block2.mp3"),
-        Sound("RP/sfx/hit_block/block3.mp3"),
-    ]
-    sound = random.choice(block_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.5)
+    sound = random.choice(_block_sounds_preloaded)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.99, 1.01), volume=0.5)
 
 def play_attack_sound_finishing_blow():
-    finishing_blow_sounds = [
-        Sound("RP/sfx/hit_final_blow/finalblow1.wav"),
-        Sound("RP/sfx/hit_final_blow/finalblow2.wav"),
-        Sound("RP/sfx/hit_final_blow/finalblow3.wav"),
-    ]
-    sound = random.choice(finishing_blow_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.5)
+    sound = random.choice(_finishing_blow_sounds_preloaded)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.99, 1.01), volume=0.5)
 
 def play_chain_sound():
     chain_sounds = [
@@ -1010,37 +1027,20 @@ def play_plate_sound():
 
 
 def play_miss_sound():
-    miss_sounds = [
-        Sound("RP/sfx/hit_miss/miss1.wav"),
-        Sound("RP/sfx/hit_miss/miss2.wav"),
-        Sound("RP/sfx/hit_miss/miss3.wav"),
-        Sound("RP/sfx/hit_miss/miss4.wav"),
-        Sound("RP/sfx/hit_miss/miss5.wav"),
-    ]
-    sound = random.choice(miss_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.2), volume=0.5)
+    sound = random.choice(_miss_sounds_preloaded)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.99, 1.01), volume=0.5)
     
 def play_attack_sound_weapon_to_no_armor():
-    attack_sounds = [
-        Sound("RP/sfx/hit_weapon_no_armor/hit1.wav"),
-        Sound("RP/sfx/hit_weapon_no_armor/hit2.wav"),
-        Sound("RP/sfx/hit_weapon_no_armor/hit3.wav"),
-    ]
-    sound = random.choice(attack_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.25))
+    sound = random.choice(_weapon_hit_no_armor_sounds_preloaded)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.99, 1.01))
 
 
 def play_dragon_breath_sound():
     play_sound_with_pitch_variation(_dragon_breath_sound_preloaded, pitch_range=(0.99, 1.01), volume=0.75)
 
 def play_attack_sound_weapon_to_armor():
-    attack_sounds = [
-        Sound("RP/sfx/hit_weapon_armor/hit1.wav"),
-        Sound("RP/sfx/hit_weapon_armor/hit2.wav"),
-        Sound("RP/sfx/hit_weapon_armor/hit3.wav"),
-    ]
-    sound = random.choice(attack_sounds)
-    play_sound_with_pitch_variation(sound, pitch_range=(0.8, 1.25))
+    sound = random.choice(_weapon_hit_armor_sounds_preloaded)
+    play_sound_with_pitch_variation(sound, pitch_range=(0.99, 1.01))
 
 def play_glass_break_sound():
     play_sound_with_pitch_variation(Sound("RP/sfx/materials/glass/break1.mp3"), pitch_range=(0.8, 1.25), volume=0.5)
@@ -1076,12 +1076,12 @@ _burn_sound_last_time: float = 0.0
 
 def _play_burn_sound_at(x, y, player, game_map):
     global _burn_sound_last_time
-    # Skip ~67% of burn sound calls to avoid running sound code per-entity per-turn.
-    if random.random() > 0.33:
+    # Skip ~80% of burn sound calls to avoid running sound code per-entity per-turn.
+    if random.random() > 0.20:
         return
     import time as _time
     now = _time.monotonic()
-    if now - _burn_sound_last_time < 0.08:  # Hard cap: no more than ~12 burn sounds/second
+    if now - _burn_sound_last_time < 0.15:  # Hard cap: no more than ~6-7 burn sounds/second
         return
     _burn_sound_last_time = now
 
@@ -1219,13 +1219,13 @@ def play_unequip_blade_sound():
 class AmbientSoundType:
     """Configuration for an ambient sound type."""
     def __init__(self, name: str, sound_file: str, entity_names: list, map_type: str = None, 
-                 proximity_threshold: int = 5, base_volume: float = 0.2):
+                 proximity_threshold: int = 5, base_volume: float = 1.0):
         self.name = name
         self.sound_file = sound_file  
         self.entity_names = entity_names  # List of entity names that produce this ambient
         self.map_type = map_type  # Optional map type filter (e.g. "dungeon")
         self.proximity_threshold = proximity_threshold
-        self.base_volume = 0.3
+        self.base_volume = base_volume
 
 # Registry of ambient sound types
 AMBIENT_TYPES = {
@@ -1270,11 +1270,11 @@ AMBIENT_TYPES = {
     ),
     'menu_music': AmbientSoundType(
         name='menu_music',
-        sound_file='RP/music/menu1.mp3',  # Change this to your music file  
+        sound_file='RP/music/menu1.wav',  # Change this to your music file  
         entity_names=[None],
         map_type=None,
         proximity_threshold=999,
-        base_volume=0.2
+        base_volume=1.0
     ),
     'boss_music': AmbientSoundType(
         name='boss_music',
