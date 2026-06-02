@@ -1312,6 +1312,10 @@ goblin = Actor(
         'bag': {
             get_bread("Moldy"): 50,
             None: 50
+        },
+        'off-hand': {
+            torch: 50,
+            None: 50
         }
     },
     can_speak = True,
@@ -1469,7 +1473,8 @@ def create_dragon(gamemap, x: int, y: int) -> Actor:
         damage_resistances=[
             (DamageType.PHYSICAL, 0.5),  # 50% physical resistance
             (DamageType.FIRE, 0.0),     # Immune to fire
-        ]
+        ],
+        is_boss = True
     )
     
     # Spawn the main entity (legs at ground level)

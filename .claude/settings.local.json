@@ -9,7 +9,9 @@
       "Bash(python -m py_compile components/dialogue_generator.py)",
       "Bash(python -c \"from components.dialogue_generator import generate; print\\(generate\\('Greeting', 'neutral', {'name':'Mira'}\\)\\)\")",
       "Bash(python -c ' *)",
-      "Bash(python -c \"from components.dialogue_generator import generate; print\\(generate\\('Greeting','neutral',{'name':'X'},language='goblin'\\)\\); print\\(generate\\('Opening','neutral',{'name':'X','location':'Millhaven'},language='common'\\)\\)\")"
+      "Bash(python -c \"from components.dialogue_generator import generate; print\\(generate\\('Greeting','neutral',{'name':'X'},language='goblin'\\)\\); print\\(generate\\('Opening','neutral',{'name':'X','location':'Millhaven'},language='common'\\)\\)\")",
+      "Bash(python -m py_compile input_handlers.py)",
+      "Bash(python -m py_compile components/fighter.py)"
     ]
   }
 }

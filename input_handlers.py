@@ -4533,6 +4533,7 @@ effect <name> [duration]      - Apply effect. Examples: effect sleep, effect dar
 Available effects: {effects_list}
 
 give(ITEM)                    - Ex. give(sigil_stone)
+give(spells)                  - Unlock every spell
 spawn(ENTITY)                 - Ex. spawn giant_spider                 
 chest [basic|advanced]        - Spawn a chest with generated loot
 
@@ -4576,6 +4577,26 @@ noclip                        - Toggle noclip mode (phase through walls)
                 import entity_factories
                 self.engine.player.inventory.items.append(entity_factories.generate_spellbook())
                 self.push_output("Generated spellbook added to inventory")
+
+            elif command == "give(spells)":
+                import inspect
+                import components.spells as _spells
+                player = self.engine.player
+                if not hasattr(player, "known_spells") or player.known_spells is None:
+                    player.known_spells = []
+                already = {type(s) for s in player.known_spells}
+                added = []
+                for name, cls in inspect.getmembers(_spells, inspect.isclass):
+                    if name.endswith("Spell") and name != "Spell" and cls not in already:
+                        try:
+                            player.known_spells.append(cls())
+                            added.append(name.replace("Spell", ""))
+                        except Exception:
+                            pass
+                if added:
+                    self.push_output(f"Unlocked {len(added)} spell(s): {', '.join(added)}")
+                else:
+                    self.push_output("All spells already known.")
 
             elif command == "chest" or command.startswith("chest "):
                 import entity_factories as _ef
@@ -4753,6 +4774,66 @@ noclip                        - Toggle noclip mode (phase through walls)
             cursor_x = min(x + 2 + len(">>> ") + self.cursor_pos, x + width - 3)
             console.print(cursor_x, y + height - 2, "_", fg=color.gold_accent, bg=(60, 40, 25))
 
+
+class GameWonEventHandler(EventHandler):
+   
+    FADE_DURATION = 3.0
+   
+    def __init__(self, engine: Engine, boss_name: str = ""):
+        super().__init__(engine)
+        import time as _time
+
+        self._spawn_time = _time.monotonic()
+        self.boss_name = str(boss_name)
+
+    def _get_fade_alpha(self) -> float:
+        """Return 0.0 → 1.0 over FADE_DURATION seconds."""
+        import time as _time
+        elapsed = _time.monotonic() - self._spawn_time
+        return min(1.0, elapsed / self.FADE_DURATION)
+
+    def on_render(self, console: tcod.Console) -> None:
+        super().on_render(console)
+        alpha = self._get_fade_alpha()
+        if alpha <= 0.0:
+            return
+
+        window_width = 30
+        window_height = 6
+        x = (console.width - window_width) // 2
+        y = (console.height - window_height) // 2
+        
+        # Fade the entire screen except for the game over message area
+        super().render_faded(console, x, y, window_width, window_height)
+        
+        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height, bg_color=(color.dark_red))
+        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "VICTORY", border_fg=(color.red))
+        
+        console.print(x + 1, y + 2, "Thanks for playing!", fg=(color.yellow))
+        console.print(x + 1, y + 3, "Feel free to keep exploring.", fg=(color.light_green))
+
+        # Blend the popup region toward the underlying game image based on alpha
+        if alpha < 1.0:
+            inv = 1.0 - alpha
+            # Dim fg toward black and bg toward the game background
+            x2 = min(console.width, x + window_width)
+            y2 = min(console.height, y + window_height)
+            region_fg = console.fg[x:x2, y:y2].astype(np.float32)
+            region_bg = console.bg[x:x2, y:y2].astype(np.float32)
+            # Lerp toward the faded background colour (the area outside the popup)
+            fade_bg = np.array((20, 20, 30), dtype=np.float32)
+            console.fg[x:x2, y:y2] = (region_fg * alpha + fade_bg * inv).astype(np.uint8)
+            console.bg[x:x2, y:y2] = (region_bg * alpha + fade_bg * inv).astype(np.uint8)
+    
+
+
+    def ev_quit(self, event: tcod.event.Quit) -> None:
+        return MainGameEventHandler(self.engine)
+
+    def ev_keydown(self, event: tcod.event.KeyDown) -> None:
+        if event.sym == tcod.event.K_ESCAPE:
+            return MainGameEventHandler(self.engine)
+    
 
 class GameOverEventHandler(EventHandler):
 

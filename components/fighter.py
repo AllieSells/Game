@@ -252,6 +252,30 @@ class Fighter(BaseComponent):
         except Exception:
             pass
 
+        if getattr(self.parent, "is_boss", False):
+            # Spawn down stairs on the boss's tile so the player can progress.
+            try:
+                import tile_types as _tt
+                gm = self.parent.gamemap
+                bx, by = self.parent.x, self.parent.y
+                gm.tiles[bx, by] = _tt.down_stairs
+                gm.downstairs_location = (bx, by)
+                self.engine.message_log.add_message(
+                    "A staircase descends into the depths...", color.descend
+                )
+            except Exception:
+                pass
+
+            # Resume normal dungeon music.
+            try:
+                sounds.start_dungeon_music()
+            except Exception:
+                pass
+
+            from input_handlers import GameWonEventHandler
+            self.engine._pending_handler = GameWonEventHandler(self.engine, self.parent.name)
+            self.engine._pending_handler_ready = False
+
         # Overall XP system phased out - traits provide progression now
         # try:
         #     self.engine.player.level.add_xp(self.parent.level.xp_given)
@@ -549,6 +573,11 @@ class Receiver(Fighter):
                 except Exception as e:
                     self.engine.debug_log(f"ERROR: Failed to discard {self.parent.name} from gamemap entities on death: {e}", handler=self.__class__.__name__, event="DeathCleanup")
                     pass
+
+        if getattr(self.parent, "is_boss", False):
+            from input_handlers import GameWonEventHandler
+            self.engine._pending_handler = GameWonEventHandler(self.engine, self.parent.name)
+            self.engine._pending_handler_ready = False
 
         # Check if oil barrel
         if self.parent.name == "Oil Barrel":

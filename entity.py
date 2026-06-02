@@ -207,6 +207,7 @@ class Actor(Entity):
         effect_resistances: Optional[list] = None,
         active_ability: Optional[Ability] = None,
         _portrait_path: Optional[str] = None,
+        is_boss: bool = False
     ):
         super().__init__(
             x=x,
@@ -302,6 +303,7 @@ class Actor(Entity):
         self.damage_resistances = damage_resistances if damage_resistances is not None else []
         self.effect_resistances = effect_resistances if effect_resistances is not None else []
         self.can_speak = can_speak
+        self.is_boss = is_boss
 
     
     def add_effect(self, effect: Effect) -> None:

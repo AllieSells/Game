@@ -5,10 +5,10 @@
     // Lighting settings
     "lighting_mode": "gpu",
     // CRT filter settings
-    "crt_scanlines": false,
+    "crt_scanlines": true,
     "crt_vignette": true,
     "crt_bloom": true,
-    "crt_ca": false,
+    "crt_ca": true,
     "crt_curvature": true,
     "light_flicker": true,
     // Lighting settings

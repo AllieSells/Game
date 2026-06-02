@@ -568,6 +568,17 @@ class GameMap:
                                 self._add_light_source(ex, ey, radius=5, max_intensity=1.0,
                                                        wobble_dx=wdx, wobble_dy=wdy, di=di,
                                                        gpu_only=_gpu_mode)
+                            
+                            has_torch = False
+                            if hasattr(entity, 'equipment'):
+                                has_torch = entity.equipment.has_item_equipped("Torch")
+                                if has_torch:
+                                    px, py = entity.x, entity.y
+                                    wdx, wdy, di = _wobble(0.0)
+                                    self._add_light_source(px, py, radius=7, max_intensity=1.0,
+                                                        wobble_dx=wdx, wobble_dy=wdy, di=di,
+                                                        gpu_only=_gpu_mode, light_color=(255, 207, 166))
+
                         except Exception as e:
                             print(f"Error processing entity for lighting: {e}")
                     for item in getattr(self, "items", []):
