@@ -326,6 +326,22 @@ longsword = Item(
     damage_type=DamageType.SLASHING
 )
 
+round_shield = Item(
+    char=chr(0xE0B9),
+    equip_sprite_cp=0xE0BA,
+    name="Round Shield",
+    equippable=equippable.RoundShield(),
+    description="A sturdy round shield.",
+    value = 15,
+    pickup_sound=sounds.pick_up_wood_sound,
+    drop_sound=sounds.drop_wood_sound,
+    equip_sound=sounds.pick_up_wood_sound, # Place holder
+    unequip_sound=sounds.drop_wood_sound, # Place holder
+    rarity_color=color.common,
+    tags = ["round shield", "shield", "armor", "wood", "offhand"],
+    weight=3.0,
+)
+
 
 
 bow = Item(
@@ -1181,7 +1197,16 @@ kobold = Actor(
     verb_present="scratches",
     verb_past="scratched",
     verb_participial="scratching",
-    dodge_chance=0.10, 
+    dodge_chance=0.10,
+    can_speak = True,
+    knowledge = {
+        "language": "yipyak",
+        "gender": random.choice(["male", "female"]),
+        "pitch": 0.5,
+        "location": "the dungeon",
+    },
+    opinion=0,
+    _portrait_path = "components/portrait_parts/base/kobold/kobold.png",
 )
 
 shade = Actor(
@@ -1288,7 +1313,16 @@ goblin = Actor(
             get_bread("Moldy"): 50,
             None: 50
         }
-    }
+    },
+    can_speak = True,
+    knowledge = {
+        "language": "goblin",
+        "gender": random.choice(["male", "female"]),
+        "pitch": 0.6,
+        "location": "dungeon",
+    },
+    opinion=0,
+    _portrait_path = "components/portrait_parts/base/goblin/goblin.png",
 )
 
 
@@ -1647,6 +1681,7 @@ tutorial_guide = Actor(
     is_known=True,
     type = "Guide",
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=999999999999),
+    can_speak = True,
 )
 
 villager = Actor(
@@ -1662,6 +1697,7 @@ villager = Actor(
     is_known=False,
     type = "NPC",
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
+    can_speak = True,
 )
 
 quest_giver = Actor(

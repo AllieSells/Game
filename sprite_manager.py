@@ -945,11 +945,10 @@ def compose_sprite(layer_codepoints: list[int], overlay_scale: float = 1.0, x_of
             layer_normal_detail = _normal_detail_by_cp.get(layer_cp)
             layer_specular_mask = _specular_mask_by_cp.get(layer_cp)
             
-            # Get normal field (might not be cached yet)
-            layer_normal_tuple = _normal_field_by_cp.get(layer_cp)
-            if layer_normal_tuple is not None:
-                layer_normals, _ = layer_normal_tuple
-            else:
+            # Get normal field; lazily derive it from albedo when missing.
+            try:
+                layer_normals, _ = get_normal_field(layer_cp)
+            except Exception:
                 layer_normals = None
             
             # Get alpha for blending
@@ -2205,9 +2204,9 @@ def compose_portrait(actor) -> str | None:
     gender     = know.get("gender", "Male")
     base_key   = _SKIN_TO_BASE.get(skin, "white")
     gender_key = "female" if gender == "Female" else "male"
-    base_path  = os.path.join(_PORTRAIT_PARTS_DIR, "base", f"{base_key}_{gender_key}.png")
+    base_path  = os.path.join(_PORTRAIT_PARTS_DIR, "base/human", f"{base_key}_{gender_key}.png")
     if not os.path.isfile(base_path):
-        base_path = os.path.join(_PORTRAIT_PARTS_DIR, "base", "white_male.png")
+        base_path = os.path.join(_PORTRAIT_PARTS_DIR, "base/human", "white_male.png")
     if not os.path.isfile(base_path):
         return None
 
@@ -2378,6 +2377,13 @@ def compose_portrait(actor) -> str | None:
             actor.char = actor.base_char
 
     return out_path
+
+def compose_simple_portrait(actor) -> str | None:
+
+    know = getattr(actor, "name", "None")
+    base_key = os.path.join(_PORTRAIT_PARTS_DIR, "base", f"{know}")
+
+    return base_key
 
 
 def save_composites_sheet(path: str = "RP/composites.png") -> None:

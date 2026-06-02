@@ -297,6 +297,13 @@ water = new_tile(
     light=(0xE140, (255, 255, 255), (30, 110, 135)),
 )
 
+func_light = new_tile(
+    name="Functional Light",
+    walkable=True,
+    transparent=True,
+    dark=(0xE18B, (255, 255, 255), (50, 50, 50)),
+    light=(0xE18B, (255, 255, 255), (200, 200, 200)),
+)
 
 
 def generate_foliage_tile():

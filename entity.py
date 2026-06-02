@@ -162,6 +162,7 @@ class Actor(Entity):
         is_player: bool = False,
         color: Tuple[int, int, int] = (255, 255, 255),
         name: str = "<Unnamed>",
+        can_speak: bool = False,
         ai_cls: Optional[Type[BaseAI]] = None,
         equipment: Optional[Equipment] = None,
         fighter: Optional[Fighter] = None,
@@ -205,6 +206,7 @@ class Actor(Entity):
         damage_resistances: Optional[list] = None,
         effect_resistances: Optional[list] = None,
         active_ability: Optional[Ability] = None,
+        _portrait_path: Optional[str] = None,
     ):
         super().__init__(
             x=x,
@@ -262,6 +264,8 @@ class Actor(Entity):
         self.knowledge = {
             "name": self.name,
         }
+        if knowledge:
+            self.knowledge.update(knowledge)
         self.portrait = None
         self.tradable = False
         self.job = None
@@ -293,10 +297,11 @@ class Actor(Entity):
         self.quickcast_slots = [None] * 9  # Quick cast spell slots (1-9)
         self.dodge_cooldown = 0
         self.dodge_cooldown_max = 5  # Cooldown in turns
-        self._portrait_path: Optional[str] = None  # set by generate_portrait()
+        self._portrait_path: Optional[str] = _portrait_path  # optional static portrait override
         self.passive_healing = passive_healing
         self.damage_resistances = damage_resistances if damage_resistances is not None else []
         self.effect_resistances = effect_resistances if effect_resistances is not None else []
+        self.can_speak = can_speak
 
     
     def add_effect(self, effect: Effect) -> None:
@@ -350,6 +355,7 @@ class Actor(Entity):
         *,
         job: Optional[str] = None,
         gendered_noun: Optional[str] = None,
+        pitch: Optional[float] = None,
         age: Optional[int] = None,
         hair_color: Optional[str] = None,
         hair_style: Optional[str] = None,
@@ -474,6 +480,10 @@ class Actor(Entity):
             }
             self.knowledge["gender"] = "Androgynous"
         # Get name
+        if pitch:
+            self.knowledge["pitch"] = pitch
+        else:
+            self.knowledge["pitch"] = random.uniform(0.7, 1.3)
 
         # Get age
         age = age if age is not None else random.randint(16, 80)

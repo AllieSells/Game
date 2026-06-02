@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import json
 import textwrap
+import time
 from typing import Callable, Tuple, Optional, TYPE_CHECKING, Union
 
 import numpy as np
@@ -357,43 +358,15 @@ class AskUserEventHandler(EventHandler):
 
 
 class PopupEventHandler(AskUserEventHandler):
-    """Base class for all modal popup / menu UI elements.
 
-    Provides shared infrastructure so each popup does not have to re-implement
-    the same boilerplate:
-
-    * **Click-outside-to-close** – call ``_set_popup_bounds(x, y, w, h)``
-      inside ``on_render`` once the window position is known.  Any click that
-      lands outside those bounds automatically calls ``on_exit()``.
-    * **Right-click context hook** – override ``on_right_click(mx, my)`` to
-      open a context menu or otherwise handle right-clicks inside the popup.
-    * **Left-click hook** – override ``on_left_click(mx, my)`` for
-      pointer-based item / option selection.
-
-    Example skeleton for a new popup::
-
-        class MyMenu(PopupEventHandler):
-            def on_render(self, console):
-                super().on_render(console)
-                x, y, w, h = ...        # compute window position
-                self._set_popup_bounds(x, y, w, h)
-                # ... draw the window ...
-
-            def on_left_click(self, mx, my):
-                # handle click-on-item logic
-                ...
-
-            def on_right_click(self, mx, my):
-                # optionally open a context menu
-                return ItemContextMenu(self, item, mx, my)
-    """
-
-    def __init__(self, engine: "Engine") -> None:
+    def __init__(self, engine: "Engine", _anim_duration: float = 0.1) -> None:
         super().__init__(engine)
         self._px: Optional[int] = None
         self._py: Optional[int] = None
         self._pw: Optional[int] = None
         self._ph: Optional[int] = None
+        self._opened_at = time.monotonic()
+        self._anim_duration = 0.1  # Duration of the popup animation in seconds
 
     # ------------------------------------------------------------------
     # Bounds helpers
@@ -413,6 +386,13 @@ class PopupEventHandler(AskUserEventHandler):
             return True  # bounds not set yet – assume inside to avoid accidental close
         return (self._px <= mx < self._px + self._pw and
                 self._py <= my < self._py + self._ph)
+
+    def get_popup_scale(self):
+        t = (time.monotonic() - self._opened_at) / self._anim_duration
+        t = min(1.0, max(0.0, t))
+
+        return 1.0 - (1.0 - t) ** 3 # linear ease in
+
 
     # ------------------------------------------------------------------
     # Mouse dispatch
@@ -447,6 +427,32 @@ class PopupEventHandler(AskUserEventHandler):
     def on_right_click(self, mx: int, my: int) -> Optional[ActionOrHandler]:
         """Right-click inside the popup.  Override in subclasses."""
         return None
+
+class TestPopupHandler(PopupEventHandler):
+
+    def on_render(self, console: tcod.Console) -> None:
+        super().on_render(console)
+
+        scale = self.get_popup_scale()
+        total_width = 30
+        total_height = 10
+
+        x = (console.width - 30) // 2
+        y = (console.height - 10) // 2
+        draw_w = max(4, int(total_width * scale))
+        draw_h = max(4, int(total_height * scale))
+        draw_x = x + (total_width - draw_w) // 2
+        draw_y = y + (total_height - draw_h) // 2
+
+
+        self._set_popup_bounds(draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_parchment_background(console, draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_ornate_border(console, draw_x, draw_y, draw_w, draw_h, "Test Popup")
+        print(scale)
+        if scale < 1.0:
+            return
+
+        console.print(draw_x + 2, draw_y + 2, "This is a test popup.", fg=(255, 255, 255))
 
 
 class CharacterScreenEventHandler(EventHandler):
@@ -495,20 +501,30 @@ class TradeEventHandler(PopupEventHandler):
         # Position window
         x = (console.width - total_width) // 2
         y = 10
-        self._set_popup_bounds(x, y, total_width, height)
-        
-        # Fade the background except for the container menu
-        super().render_faded(console, x, y, total_width, height)
 
-        # Draw main fantasy parchment background
-        MenuRenderer.draw_parchment_background(console, x, y, total_width, height)
+        scale = self.get_popup_scale()
+
+
+        x = (console.width - 30) // 2
+        y = (console.height - 10) // 2
+        draw_w = max(4, int(total_width * scale))
+        draw_h = max(4, int(height * scale))
+        draw_x = x + (total_width - draw_w) // 2
+        draw_y = y + (height - draw_h) // 2
         
+        self._set_popup_bounds(draw_x, draw_y, draw_w, draw_h)
+        super().render_faded(console, draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_parchment_background(console, draw_x, draw_y, draw_w, draw_h)
         # Draw ornate main border
         npc_color = getattr(self.container.parent, 'color', 'Container')
         container_name = getattr(self.container.parent, 'name', 'Container')
         is_corpse = getattr(self.container.parent, 'type', None) == 'Dead'
         title = "Corpse" if is_corpse else f"Trading with {container_name}"
-        MenuRenderer.draw_ornate_border(console, x, y, total_width, height, title)
+        MenuRenderer.draw_ornate_border(console, draw_x, draw_y, draw_w, draw_h, title)
+        
+
+        if scale < 1.0:
+            return
 
         # Calculate panel dimensions
         panel_width = (total_width - 6) // 2  # Leave space for divider and margins
@@ -771,6 +787,7 @@ class TradeEventHandler(PopupEventHandler):
 
 class DialogueEventHandler(PopupEventHandler):
     """Handles dialogue interactions with NPCs with hierarchical menu system."""
+    _TEXT_REVEAL_RATE = 42.0
     
     def __init__(self, engine: Engine, npc: Actor):
         super().__init__(engine)
@@ -782,6 +799,8 @@ class DialogueEventHandler(PopupEventHandler):
         self.npc = npc
         # Initialize dialogue system
         self.dialogue = ConversationNode()
+        self._dialogue_started_at = None
+        self._last_visible_chars = 0
         
         # Menu system
         self.current_menu = "main"
@@ -814,6 +833,8 @@ class DialogueEventHandler(PopupEventHandler):
         
         # Generate initial dialogue text
         self.current_dialogue = self.dialogue.generate_dialogue(character=self.npc, context=self.npc.dialogue_context)
+        self._dialogue_started_at = None
+        self._last_visible_chars = 0
 
         if self.npc.dialogue_context and "Identity" in self.npc.dialogue_context:
             self.engine.debug_log(f"NPC identity revealed: {self.npc.name}", handler=type(self).__name__, event="dialogue")
@@ -854,6 +875,7 @@ class DialogueEventHandler(PopupEventHandler):
     
     def on_render(self, console: tcod.Console) -> None:
         super().on_render(console)
+        scale = self.get_popup_scale()
 
         BOX_W  = 50
         PORT_W = 6   # portrait area width  in tiles (square: keep == PORT_H)
@@ -867,14 +889,31 @@ class DialogueEventHandler(PopupEventHandler):
         x = (80 - BOX_W) // 2
         y = max(1, (40 - BOX_H) // 2)
 
-        self._set_popup_bounds(x, y, BOX_W, BOX_H)
-        super().render_faded(console, x, y, BOX_W, BOX_H)
+        
+        
+
+        draw_w = max(4, int(BOX_W * scale))
+        draw_h = max(4, int(BOX_H * scale))
+        draw_x = x + (BOX_W - draw_w) // 2
+        draw_y = y + (BOX_H - draw_h) // 2
+
+
+
 
         current_menu_data = self.menu_structure[self.current_menu]
 
         # ── Background & outer border ─────────────────────────────────────────
-        MenuRenderer.draw_parchment_background(console, x, y, BOX_W, BOX_H)
-        MenuRenderer.draw_ornate_border(console, x, y, BOX_W, BOX_H, current_menu_data["title"])
+        self._set_popup_bounds(draw_x, draw_y, draw_w, draw_h)
+        super().render_faded(console, draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_parchment_background(console, draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_ornate_border(console, draw_x, draw_y, draw_w, draw_h, current_menu_data["title"])
+
+
+        if scale < 1.0:
+            return
+        
+        if self._dialogue_started_at is None:
+            self._dialogue_started_at = time.monotonic()
 
         # ── Portrait zone: black bg so the GPU PNG sits cleanly on top ────────
         PORT_X = x + 1
@@ -895,9 +934,27 @@ class DialogueEventHandler(PopupEventHandler):
         TEXT_W = BOX_W - PORT_W - 3   # from TEXT_X to right border (exclusive)
         if hasattr(self, 'current_dialogue') and self.current_dialogue:
             from text_utils import wrap_colored_text, print_colored_text
-            wrapped = wrap_colored_text(
-                self.current_dialogue[0], TEXT_W, default_color=color.teal
+            full_text = self.current_dialogue[0]
+            
+            # Dialogue reveal counter
+            visible_chars = min(
+                len(full_text),
+                max(1, int((time.monotonic() - self._dialogue_started_at) * self._TEXT_REVEAL_RATE)),
             )
+            wrapped = wrap_colored_text(
+                full_text[:visible_chars], TEXT_W, default_color=color.teal
+            )
+            if visible_chars > self._last_visible_chars:
+                for c in range(self._last_visible_chars + 1, visible_chars + 1):
+                    if c != len(full_text) and c % 2 == 0:
+                        #print(visible_chars)
+                        if self.npc.knowledge.get("gender") and self.npc.knowledge.get("pitch"):
+                            sounds.play_voice(self.npc.knowledge["gender"], self.npc.knowledge["pitch"])
+                        else:
+                            continue
+
+            self._last_visible_chars = visible_chars
+
             curr_y = PORT_Y
             for line_parts in wrapped:
                 if curr_y >= PORT_Y + PORT_H:
@@ -941,17 +998,22 @@ class DialogueEventHandler(PopupEventHandler):
         console.print(x + 1, y + BOX_H - 2, "↑↓: Navigate  Enter: Select  Esc: Exit", fg=color.grey)
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
-        sounds.play_ui_move_sound()
         current_menu_data = self.menu_structure[self.current_menu]
         options = current_menu_data["options"]
         key = event.sym
         
         # Arrow key navigation (like inventory)
         if key == tcod.event.KeySym.UP:
+            prev_index = self.selected_index
             self.selected_index = max(0, self.selected_index - 1)
+            if self.selected_index != prev_index:
+                sounds.play_ui_move_sound()
             return None
         elif key == tcod.event.KeySym.DOWN:
+            prev_index = self.selected_index
             self.selected_index = min(len(options) - 1 if options else 0, self.selected_index + 1)
+            if self.selected_index != prev_index:
+                sounds.play_ui_move_sound()
             return None
             
         # Enter key to select option (Return, enter, space, or right key)
@@ -963,6 +1025,8 @@ class DialogueEventHandler(PopupEventHandler):
         # Letter selection (like inventory system)
         index = key - tcod.event.KeySym.A
         if 0 <= index < len(options):
+            if self.selected_index != index:
+                sounds.play_ui_move_sound()
             self.selected_index = index
             return self.handle_menu_selection()
     
@@ -1036,6 +1100,8 @@ class DialogueEventHandler(PopupEventHandler):
                 self.current_dialogue = self.dialogue.generate_dialogue(
                     character=self.npc, context=context
                 )
+                self._dialogue_started_at = time.monotonic()
+                self._last_visible_chars = 0
                 
                 display_name = self.npc.name if self.npc.is_known else self.npc.unknown_name
                 self.engine.message_log.add_message(f"{display_name}: {self.current_dialogue[0]}", color.blue)
@@ -1060,6 +1126,8 @@ class DialogueEventHandler(PopupEventHandler):
             self.current_dialogue = self.dialogue.generate_dialogue(
                 character=self.npc, context=context
             )
+            self._dialogue_started_at = time.monotonic()
+            self._last_visible_chars = 0
             
             # Safety check
             if self.current_dialogue is None:
@@ -1169,1364 +1237,6 @@ class LevelUpEventHandler(PopupEventHandler):
     ) -> Optional[ActionOrHandler]:
         # Cant click out
         return None
-class ContainerEventHandler(PopupEventHandler):
-    # Handler displays both inventories and allows transferring items
-    def __init__(self, engine: Engine, container: Container):
-        super().__init__(engine)
-        self.engine.context_hints = [
-            ("Click", "Take/Give"),
-            ("Tab/Esc", "Close"),
-        ]
-        # Innit container being interacted with
-        self.container = container
-        # Skip filter, not needed
-
-        # Selected index for arrow navigation
-        self.selected_index: int = 0
-        # Which inventory is active: "Player" or "Container"
-        self.menu: str = "Container"
-        # Scroll offsets for each panel
-        self.player_scroll: int = 0
-        self.container_scroll: int = 0
-        self.width = 70
-        self.height = 25
-        self.x = 0
-        self.y = 0
-
-    def on_render(self, console: tcod.Console) -> None:
-        # Renders inventory menu displaying items in both inventories with fantasy styling
-        super().on_render(console)
-        # Don't group items in container view - show each item at its actual position
-        player_items = list(self.engine.player.inventory.items)
-        container_items = list(self.container.items)
-        number_of_player_items = len(player_items)
-        number_of_container_items = len(container_items)
-
-        # Enhanced window sizing for beautiful layout
-        total_width = 70
-        height = 25
-        
-
-        # Position window
-        x = (console.width - total_width) // 2
-        y = 10
-        self.x = x
-        self.y = y
-        self._set_popup_bounds(x, y, total_width, height)
-        
-        # Fade the background except for the container menu
-        super().render_faded(console, x, y, total_width, height)
-
-        # Draw main fantasy parchment background
-        MenuRenderer.draw_parchment_background(console, x, y, total_width, height)
-        
-        # Draw ornate main border
-        container_name = getattr(self.container.parent, 'name', 'Container')
-        is_corpse = getattr(self.container.parent, 'type', None) == 'Dead'
-        title = "Corpse" if is_corpse else f"Container: {container_name}"
-        MenuRenderer.draw_ornate_border(console, x, y, total_width, height, title)
-
-        # Calculate panel dimensions
-        panel_width = (total_width - 6) // 2  # Leave space for divider and margins
-        panel_height = height - 6
-        
-        # Left panel (Player inventory)
-        left_x = x + 2
-        left_y = y + 3
-        
-        # Right panel (Container inventory) 
-        right_x = x + 3 + panel_width + 2
-        right_y = y + 3
-        
-        # Draw panel backgrounds
-        panel_bg = (40, 30, 22)
-        for px in range(panel_width):
-            for py in range(panel_height):
-                console.print(left_x + px, left_y + py, " ", bg=panel_bg)
-                console.print(right_x + px, right_y + py, " ", bg=panel_bg)
-        
-        # Draw decorative divider between panels
-        #self._draw_decorative_divider(console, divider_x, left_y, panel_height)
-        
-        # Panel headers
-        player_header = "Your Inventory"
-        container_header = "Corpse" if is_corpse else f"{container_name}"
-        
-        # Center headers in panels
-        player_header_x = left_x + (panel_width - len(player_header)) // 2
-        container_header_x = right_x + (panel_width - len(container_header)) // 2
-        
-        console.print(player_header_x, left_y + 1, player_header, fg=(255, 215, 0), bg=panel_bg)
-        console.print(container_header_x, right_y + 1, container_header, fg=(255, 215, 0), bg=panel_bg)
-        
-        # Active panel indicator
-        if self.menu == "Player":
-            console.print(left_x + 1, left_y + 1, "◆", fg=(255, 215, 0), bg=panel_bg)
-        else:
-            console.print(right_x + 1, right_y + 1, "◆", fg=(255, 215, 0), bg=panel_bg)
-
-        # Ensure index is selected
-        if not hasattr(self, "selected_index"):
-            self.selected_index = 0
-        # Clamp selected index based on active menu
-        if number_of_player_items > 0 and self.menu == "Player":
-            if self.selected_index >= number_of_player_items:
-                self.selected_index = max(0, number_of_player_items - 1)
-
-        if number_of_container_items > 0 and self.menu == "Container":
-            if self.selected_index >= number_of_container_items:
-                self.selected_index = max(0, number_of_container_items - 1)
-
-        # Draw player inventory items
-        item_start_y = left_y + 3
-        max_visible = panel_height - 4  # rows available for items
-
-        # Clamp scroll offsets
-        self.player_scroll = max(0, min(self.player_scroll, max(0, number_of_player_items - max_visible)))
-        self.container_scroll = max(0, min(self.container_scroll, max(0, number_of_container_items - max_visible)))
-
-        if number_of_player_items > 0:
-            visible_player_items = player_items[self.player_scroll : self.player_scroll + max_visible]
-            for i, item in enumerate(visible_player_items):
-                real_index = i + self.player_scroll
-                item_key = chr(ord("a") + real_index)
-                is_equipped = self.engine.player.equipment.item_is_equipped(item)
-                is_selected = real_index == self.selected_index and self.menu == "Player"
-
-                shown_name = identify_system.get_display_name(self.engine.player, item)
-                item_string = f"{item_key}) {shown_name}"
-                if is_equipped:
-                    item_string = f"{item_string} (e)"
-
-                # Draw with selection highlighting
-                if is_selected:
-                    for hx in range(panel_width - 4):
-                        console.print(left_x + 2 + hx, item_start_y + i, " ", bg=(80, 60, 30))
-                    console.print(left_x + 2, item_start_y + i, "✦", fg=(255, 223, 127), bg=(80, 60, 30))
-                    console.print(left_x + 4, item_start_y + i, item_string, fg=item.rarity_color, bg=(80, 60, 30))
-                else:
-                    console.print(left_x + 4, item_start_y + i, item_string, fg=item.rarity_color, bg=panel_bg)
-            # Scroll indicators
-            if self.player_scroll > 0:
-                console.print(left_x + panel_width - 2, item_start_y, "↑", fg=(255, 215, 0), bg=panel_bg)
-            if self.player_scroll + max_visible < number_of_player_items:
-                console.print(left_x + panel_width - 2, item_start_y + len(visible_player_items) - 1, "↓", fg=(255, 215, 0), bg=panel_bg)
-        else:
-            console.print(left_x + 4, item_start_y, "~ Empty ~", fg=(120, 100, 80), bg=panel_bg)
-
-        # Draw container inventory items  
-        if number_of_container_items > 0:
-            visible_container_items = container_items[self.container_scroll : self.container_scroll + max_visible]
-            for i, item in enumerate(visible_container_items):
-                real_index = i + self.container_scroll
-                item_key = chr(ord("a") + real_index)
-                is_selected = real_index == self.selected_index and self.menu == "Container"
-                shown_name = identify_system.get_display_name(self.engine.player, item)
-                item_string = f"{item_key}) {shown_name}"
-
-                # Draw with selection highlighting
-                if is_selected:
-                    for hx in range(panel_width - 4):
-                        console.print(right_x + 2 + hx, item_start_y + i, " ", bg=(80, 60, 30))
-                    console.print(right_x + 2, item_start_y + i, "✦", fg=(255, 223, 127), bg=(80, 60, 30))
-                    console.print(right_x + 4, item_start_y + i, item_string, fg=item.rarity_color, bg=(80, 60, 30))
-                else:
-                    console.print(right_x + 4, item_start_y + i, item_string, fg=item.rarity_color, bg=panel_bg)
-            # Scroll indicators
-            if self.container_scroll > 0:
-                console.print(right_x + panel_width - 2, item_start_y, "↑", fg=(255, 215, 0), bg=panel_bg)
-            if self.container_scroll + max_visible < number_of_container_items:
-                console.print(right_x + panel_width - 2, item_start_y + len(visible_container_items) - 1, "↓", fg=(255, 215, 0), bg=panel_bg)
-        else:
-            console.print(right_x + 4, item_start_y, "~ Empty ~", fg=(120, 100, 80), bg=panel_bg)
-        
-        # Instructions footer
-        instructions = ""
-        inst_x = x + (total_width - len(instructions)) // 2
-        console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
-
-    def ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:
-        """Allow mouse hover to change selection."""
-        super().ev_mousemotion(event)
-        if not hasattr(self, 'x') or not hasattr(self, 'y'):
-            return None
-
-        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
-
-        panel_width = (70 - 6) // 2  # 32
-        left_x = self.x + 2
-        right_x = self.x + 3 + panel_width + 2
-        item_start_y = self.y + 6
-
-        player_items = list(self.engine.player.inventory.items)
-        container_items = list(self.container.items)
-
-        # Check if mouse is over the left (player) panel item area
-        max_visible = 15
-        if left_x <= mouse_x < left_x + panel_width and item_start_y <= mouse_y < item_start_y + min(len(player_items), max_visible):
-            hovered_index = (mouse_y - item_start_y) + self.player_scroll
-            if hovered_index != self.selected_index or self.menu != "Player":
-                sounds.play_ui_move_sound()
-            self.menu = "Player"
-            self.selected_index = hovered_index
-            self.engine.cursor_hint = None
-
-        # Check if mouse is over the right (container) panel item area
-        elif right_x <= mouse_x < right_x + panel_width and item_start_y <= mouse_y < item_start_y + min(len(container_items), max_visible):
-            hovered_index = (mouse_y - item_start_y) + self.container_scroll
-            if hovered_index != self.selected_index or self.menu != "Container":
-                sounds.play_ui_move_sound()
-            self.menu = "Container"
-            self.selected_index = hovered_index
-            self.engine.cursor_hint = "bag"
-        else:
-            self.engine.cursor_hint = None
-
-
-    def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
-        if event.button != tcod.event.BUTTON_LEFT:
-            return None
-
-
-        self.engine.mouse_held = True
-        if not hasattr(self, 'x') or not hasattr(self, 'y'):
-            return None
-
-        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
-        panel_width = (70 - 6) // 2  # 32
-        left_x = self.x + 2
-        right_x = self.x + 3 + panel_width + 2
-        item_start_y = self.y + 6
-
-        # Check if mouse click was outside UI
-        if not self._in_popup(mouse_x, mouse_y):
-            return self.on_exit()
-
-        player_items = list(self.engine.player.inventory.items)
-        container_items = list(self.container.items)
-
-        max_visible = 15
-        if left_x <= mouse_x < left_x + panel_width and item_start_y <= mouse_y < item_start_y + min(len(player_items), max_visible):
-            clicked_index = (mouse_y - item_start_y) + self.player_scroll
-            self.menu = "Player"
-            self.selected_index = clicked_index
-            return self.on_item_selected(player_items[clicked_index])
-        elif right_x <= mouse_x < right_x + panel_width and item_start_y <= mouse_y < item_start_y + min(len(container_items), max_visible):
-            clicked_index = (mouse_y - item_start_y) + self.container_scroll
-            self.menu = "Container"
-            self.selected_index = clicked_index
-            return self.on_item_selected(container_items[clicked_index])
-        return None
-
-    def ev_mousewheel(self, event: tcod.event.MouseWheel) -> Optional[ActionOrHandler]:
-        max_visible = 15  # matches panel_height - 4
-        if self.menu == "Player":
-            total = len(self.engine.player.inventory.items)
-            max_scroll = max(0, total - max_visible)
-            if event.y < 0:  # wheel down → scroll list down
-                self.player_scroll = min(max_scroll, self.player_scroll + 1)
-            elif event.y > 0:  # wheel up → scroll list up
-                self.player_scroll = max(0, self.player_scroll - 1)
-        else:
-            total = len(self.container.items)
-            max_scroll = max(0, total - max_visible)
-            if event.y < 0:
-                self.container_scroll = min(max_scroll, self.container_scroll + 1)
-            elif event.y > 0:
-                self.container_scroll = max(0, self.container_scroll - 1)
-        return None
-
-    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
-        key = event.sym
-
-        # Get items for selection
-        player_items = list(self.engine.player.inventory.items)
-
-        # Tab shifts active menu
-        if key == tcod.event.K_TAB:
-            self.engine.cursor_hint = None
-            return MainGameEventHandler(self.engine)
-        # Arrow-key navigation
-        if key == tcod.event.K_UP:
-            if self.selected_index > 0:
-                sounds.play_ui_move_sound()
-            self.selected_index = max(0, self.selected_index - 1)
-            # Auto-scroll to keep selection visible
-            _mv = 15
-            if self.menu == "Player" and self.selected_index < self.player_scroll:
-                self.player_scroll = self.selected_index
-            elif self.menu == "Container" and self.selected_index < self.container_scroll:
-                self.container_scroll = self.selected_index
-            return None
-        elif key == tcod.event.K_DOWN:
-            if self.menu == "Player":
-                max_index = max(0, len(player_items) - 1)
-            else:
-                max_index = max(0, len(self.container.items) - 1)
-            if self.selected_index < max_index:
-                sounds.play_ui_move_sound()
-            self.selected_index = min(max_index, self.selected_index + 1)
-            # Auto-scroll to keep selection visible
-            _mv = 15
-            if self.menu == "Player" and self.selected_index >= self.player_scroll + _mv:
-                self.player_scroll = self.selected_index - _mv + 1
-            elif self.menu == "Container" and self.selected_index >= self.container_scroll + _mv:
-                self.container_scroll = self.selected_index - _mv + 1
-            return None
-        elif key in CONFIRM_KEYS:
-            if self.menu == "Player":
-                if not player_items:
-                    return None
-                return self.on_item_selected(player_items[self.selected_index])
-            else:
-                if not self.container.items:
-                    return None
-                return self.on_item_selected(self.container.items[self.selected_index])
-
-        # Letter selection
-        index = key - tcod.event.KeySym.A
-        if 0 <= index <= 26:
-            try:
-                if self.menu == "Player":
-                    selected_item = player_items[index]
-                else:
-                    selected_item = self.container.items[index]
-            except IndexError:
-                self.engine.message_log.add_message("Invalid entry.", color.invalid)
-                return None
-            return self.on_item_selected(selected_item)
-        return super().ev_keydown(event)
-
-    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        # Transfer this item between inventories
-        if self.menu == "Player":
-            # Transfer from player to container
-            try:
-                # Check if equipped
-                if self.engine.player.equipment.item_is_equipped(item):
-                    self.engine.player.equipment.unequip_item(item, add_message=True)
-                    
-
-                # Check container capacity
-                if len(self.container.items) >= self.container.capacity:
-                    self.engine.message_log.add_message("Container is full.", color.error)
-                    return self
-
-                self.engine.player.inventory.items.remove(item)
-                identify_system.cancel_identification_for_item(self.engine.player, item, engine=self.engine, quiet=True)
-                # Move item into the container and update its parent so
-                # later logic (consumption, transfers) sees the correct owner.
-                self.container.items.append(item)
-                self.engine.debug_log(f"Inventory = {[item.name for item in self.engine.player.inventory.items]}", handler=type(self).__name__, event="trade")
-                try:
-                    item.parent = self.container
-                except Exception:
-                    pass
-
-                if hasattr(item, "drop_sound") and item.drop_sound is not None:
-                    try:
-                        item.drop_sound()
-                    except Exception as e:
-                        self.engine.debug_log(f"Error calling drop sound: {e}", handler=type(self).__name__, event="trade")
-                
-                shown_name = identify_system.get_display_name(self.engine.player, item)
-                self.engine.message_log.add_message(f"You transfer the {shown_name}.")
-            except Exception as e:
-                self.engine.debug_log(f"Transfer failed with exception: {e}", handler=type(self).__name__, event="trade")
-                self.engine.debug_log(traceback.format_exc(), handler=type(self).__name__, event="trade")
-                shown_name = identify_system.get_display_name(self.engine.player, item)
-                self.engine.message_log.add_message(f"Could not transfer {shown_name}.", color.error)
-        else:
-            # Transfer from container to player
-            try:
-                self.container.items.remove(item)
-                if not self.engine.player.inventory.can_carry(item):
-                    self.engine.message_log.add_message("Your inventory is full.", color.error)
-                    # Return item to container
-                    self.container.items.append(item)
-                else:
-                    if "coin" in item.name.lower():
-                        # Auto-convert coins to player gold
-                        self.engine.player.gold += item.value
-                        self.engine.message_log.add_message("You pick up some coins.")
-
-                        # Play coin pickup sound if it exists
-                        if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
-                            try:
-                                item.pickup_sound()
-                            except Exception as e:
-                                self.engine.debug_log(f"Error calling pickup sound: {e}", handler=type(self).__name__, event="trade")
-                        return self
-                    # Add to player inventory and update parent link.
-                    self.engine.player.inventory.items.append(item)
-                    try:
-                        item.parent = self.engine.player.inventory
-                    except Exception:
-                        pass
-                    
-                    # Play item pickup sound if it exists
-                    if hasattr(item, "pickup_sound") and item.pickup_sound is not None:
-                      
-                        try:
-                            item.pickup_sound()
-                   
-                        except Exception as e:
-                            self.engine.debug_log(f"Error calling pickup sound: {e}", handler=type(self).__name__, event="trade")
-                    else:
-                        self.engine.debug_log(f"No pickup sound for {item}", handler=type(self).__name__, event="trade")
-
-                    shown_name = identify_system.get_display_name(self.engine.player, item)
-                    self.engine.message_log.add_message(f"You take the {shown_name}.")
-
-                    # If corpse is now empty, switch to a picked-clean tile
-                    is_corpse = getattr(self.container.parent, 'type', None) == 'Dead'
-                    if is_corpse and not self.container.items:
-                        import random as _random
-                        self.container.parent.char = _random.choice([chr(0xE010), chr(0xE011), chr(0xE012)])
-            except Exception:
-                self.engine.debug_log(traceback.format_exc(), handler=type(self).__name__, event="trade")
-                shown_name = identify_system.get_display_name(self.engine.player, item)
-                self.engine.message_log.add_message(f"Could not transfer {shown_name} to {self.container.name}.", color.error)
-        # Return back to container handler
-        return self
-
-    def _draw_decorative_divider(self, console, x: int, y: int, height: int):
-        """Draw a smooth decorative vertical divider."""
-        divider_fg = (139, 105, 60)  # Bronze
-        accent_fg = (205, 164, 87)   # Gold accent
-        bg = (color.parchment_dark)            # Slightly lighter than parchment
-        
-        for dy in range(height):
-            console.print(x, y + dy, " ", bg=bg)
-            
-            if dy == 0:
-                console.print(x, y + dy, "╦", fg=accent_fg, bg=bg)
-            elif dy == height - 1:
-                console.print(x, y + dy, "╩", fg=accent_fg, bg=bg)
-            else:
-                console.print(x, y + dy, "│", fg=divider_fg, bg=bg)
-
-class InventoryEventHandler(PopupEventHandler):
-    """This handler lets the user select an item.
-
-    What happens then depends on the subclass.
-    """
-
-    TITLE = "<missing title>"
-
-    def __init__(self, engine: Engine, item_filter: Optional[Callable] = None):
-        super().__init__(engine)
-        self.engine.context_hints = [
-            ("RClick", "Context Menu"),
-            ("Enter", "Use/Equip"),
-            ("Esc", "Close"),
-        ]
-        # item_filter should accept an Item and return True if it should be shown
-        self.item_filter: Callable = item_filter if item_filter is not None else (lambda i: True)
-        # selected index for arrow navigation
-        self.selected_index: int = 0
-        # category tabs
-        self.current_category: int = 0
-        self.categories = [
-
-            ("All", self._filter_all),
-            ("Equipment", self._filter_equipment), 
-            ("Consumables", self._filter_consumables),
-            ("Misc", self._filter_misc)
-        ]
-        self.height = None
-        self.width = None
-
-    def on_render(self, console: tcod.Console) -> None:
-        """Render a beautiful fantasy-themed inventory with atmospheric styling."""
-        super().on_render(console)
-        
-        # Build filtered list according to filter function and current category
-        item_groups = self.engine.player.inventory.get_display_groups()
-        category_filter = self.categories[self.current_category][1]
-        filtered_groups = []
-        for group in item_groups:
-            if self.item_filter(group['item']) and category_filter(group['item']):
-                filtered_groups.append(group)
-        
-        number_of_items_in_inventory = len(filtered_groups)
-
-        # Enhanced window sizing for beautiful layout
-        sidebar_width = 14  # Category sidebar
-        items_width = 32    # Item list area  
-        preview_width = 22  # Preview area
-        total_width = sidebar_width + items_width + preview_width + 4  # +4 for decorative spacing
-        height = max(24, number_of_items_in_inventory + 10)  # Taller for descriptions
-        self.height, self.width = height, total_width
-
-        # Position based on player location
-        if self.engine.player.x <= 30:
-            x = 3
-        else:
-            x = max(0, console.width - total_width - 3)
-        y = 1
-
-        # Cache render coordinates for mouse hover
-        self._render_x = x
-        self._render_y = y
-        self._render_items_x = x + sidebar_width + 1
-        self._set_popup_bounds(x, y, total_width, height)
-        self._sidebar_x = x + 1
-        self._sidebar_y = y + 3
-        self._sidebar_width = sidebar_width - 2
-        
-        # Fade the background except for the inventory menu
-        super().render_faded(console, x, y, total_width, height)
-
-        # Draw main fantasy parchment background
-        MenuRenderer.draw_parchment_background(console, x, y, total_width, height)
-        
-        # Draw ornate main border
-        MenuRenderer.draw_ornate_border(console, x, y, total_width, height, self.TITLE)
-        
-        # Draw illuminated category sidebar
-        self._draw_illuminated_sidebar(console, x+1, y + 3, sidebar_width - 2, height - 6)
-        
-        # Draw decorative dividers
-        items_x = x + sidebar_width + 1
-        preview_x = x + sidebar_width + items_width + 2
-        self._draw_decorative_divider(console, items_x - 1, y + 2, height - 4)
-        self._draw_decorative_divider(console, preview_x - 1, y + 2, height - 4)
-
-        # Ensure we have a selected index for arrow-key navigation
-        if not hasattr(self, "selected_index"):
-            self.selected_index = 0
-
-        current_y = y + 4  # Start with more spacing
-        
-        # Render inventory items with elegant styling
-        if number_of_items_in_inventory > 0:
-            # Clamp selected index to the filtered list
-            if self.selected_index >= number_of_items_in_inventory:
-                self.selected_index = max(0, number_of_items_in_inventory - 1)
-
-            for i, group in enumerate(filtered_groups):
-                if current_y >= y + height - 3:
-                    break  # Don't draw outside the frame
-                    
-                item_key = chr(ord("a") + i)
-                item = group['item']
-                display_name = identify_system.get_display_name(self.engine.player, item)
-                qty = int(group.get('quantity', 1) or 1)
-                if qty > 1:
-                    display_name = f"{display_name} (x{qty})"
-                is_equipped = self.engine.player.equipment.item_is_equipped(item)
-                is_selected = i == self.selected_index
-
-                # Create elegant item string 
-                item_type_char = self._get_item_type_char(item)
-                item_string = f"{item_key}]{item_type_char}{display_name}"
-                
-                if is_equipped:
-                    item_string = f"{item_string} (e)"  # (e) for equipped
-
-                # Draw with beautiful highlighting
-                if is_selected:
-                    # Elegant selection background with gradient effect
-                    self._draw_selection_highlight(console, items_x, current_y, items_width - 2)
-                    console.print(items_x + 1, current_y, "✦", fg=(255, 223, 127), bg=(80, 60, 30))  # Beautiful star
-                    console.print(items_x + 2, current_y, item_string, fg=item.rarity_color, bg=(80, 60, 30))
-                else:
-                    console.print(items_x + 1, current_y, item_string, fg=item.rarity_color)
-                
-                current_y += 1
-
-            # Draw selected item preview with ornate styling
-            selected_group = filtered_groups[self.selected_index]
-            selected_item = selected_group['item']
-            self._draw_ornate_preview(console, preview_x, y + 3, preview_width - 1, height - 6, selected_item)
-            
-        else:
-            console.print(items_x + 2, current_y, "~ Your pack is empty ~", fg=(120, 100, 80))
-            # Draw empty preview panel with mystical styling
-            console.print(preview_x + 2, y + 8, "~ No item selected ~", fg=(120, 100, 80))
-        
-        # Draw elegant instruction footer
-        instructions = ""
-        inst_x = x + (total_width - len(instructions)) // 2
-        console.print(inst_x, y + height - 2, instructions, fg=(180, 140, 100))
-    
-    def _draw_illuminated_sidebar(self, console, x: int, y: int, width: int, height: int):
-        """Draw an illuminated manuscript-style category sidebar."""
-        category_icons = {
-            'All': '',      # 8-pointed star
-            'Equipment': '', # Crossed swords  
-            'Consumables': '', # Hot beverage (potion-like)
-            'Misc': ''      # Diamond with dot
-        }
-        
-        active_colors = {
-            'bg': (65, 35, 20),
-            'fg': (255, 223, 127),
-            'icon': (255, 215, 0)
-        }
-        
-        inactive_colors = {
-            'bg': (45, 30, 20),
-            'fg': (160, 130, 90),
-            'icon': (140, 110, 70)
-        }
-        
-        cat_y = y
-        for i, (name, _) in enumerate(self.categories):
-            if cat_y >= y + height - 1:
-                break
-                
-            is_active = i == self.current_category
-            colors = active_colors if is_active else inactive_colors
-            icon = category_icons.get(name, '•')
-            
-            # Draw illuminated background
-            for bx in range(width):
-                console.print(x + bx, cat_y, " ", bg=colors['bg'])
-            
-            if is_active:
-                # Elegant active indicator at far left
-                console.print(x, cat_y, ">", fg=colors['icon'], bg=colors['bg'])
-                console.print(x , cat_y, f"{name}", fg=colors['fg'], bg=colors['bg'])
-            else:
-                # Left-aligned inactive categories
-                console.print(x, cat_y, f"{icon} {name}", fg=colors['fg'], bg=colors['bg'])
-            
-            cat_y += 1  # Tighter spacing
-    
-    def _draw_decorative_divider(self, console, x: int, y: int, height: int):
-        """Draw a smooth decorative vertical divider."""
-        divider_fg = (139, 105, 60)  # Bronze
-        accent_fg = (205, 164, 87)   # Gold accent
-        bg = (40, 30, 22)            # Slightly lighter than parchment
-        
-        for dy in range(height):
-            console.print(x, y + dy, " ", bg=bg)
-            
-            if dy == 0:
-                console.print(x, y + dy, "╤", fg=accent_fg, bg=bg)
-            elif dy == height - 1:
-                console.print(x, y + dy, "╧", fg=accent_fg, bg=bg)
-            else:
-                console.print(x, y + dy, "│", fg=divider_fg, bg=bg)
-    
-    def _draw_selection_highlight(self, console, x: int, y: int, width: int):
-        """Draw beautiful selection highlighting with gradient effect."""
-        # Warm golden selection gradient
-        for hx in range(width):
-            # Create subtle gradient from center outward
-            center = width // 2
-            distance = abs(hx - center)
-            intensity = max(0.3, 1.0 - (distance / center * 0.4))
-            
-            bg_color = (
-                int(80 * intensity),
-                int(60 * intensity), 
-                int(30 * intensity)
-            )
-            console.print(x + hx, y, " ", bg=bg_color)
-    
-    def _draw_ornate_preview(self, console, x: int, y: int, width: int, height: int, item):
-        """Draw an ornate item preview panel with illuminated manuscript styling."""
-        # Elegant preview background
-        preview_bg = (40, 30, 22)
-        border_fg = (139, 105, 60)
-        
-        # Fill preview area
-        for py in range(height):
-            for px in range(width):
-                console.print(x + px, y + py, " ", bg=preview_bg)
-        
-        # Decorative border
-        for py in range(height):
-            if py == 0 or py == height - 1:
-                for px in range(width):
-                    char = '═' if px % 3 != 1 else '╬'
-                    console.print(x + px, y + py, char, fg=border_fg, bg=preview_bg)
-            else:
-                console.print(x, y + py, '║', fg=border_fg, bg=preview_bg)
-                console.print(x + width - 1, y + py, '║', fg=border_fg, bg=preview_bg)
-        
-        # Draw the existing item preview content with enhanced styling
-        self._draw_enhanced_item_preview(console, x, y, width, height, item)
-    
-    def _draw_enhanced_item_preview(self, console, x: int, y: int, width: int, height: int, item):
-        """Draw a compact fantasy-themed item preview with more space for stats."""
-        preview_bg = (40, 30, 22)
-        
-        # Fill entire preview area with background
-        for py in range(height):
-            for px in range(width):
-                console.print(x + px, y + py, " ", bg=preview_bg)
-        
-        # Compact title
-        title_y = y + 1
-        title_text = "Item"
-        title_x = x + (width - len(title_text)) // 2
-        console.print(title_x, title_y-1, title_text, fg=(255, 215, 0), bg=preview_bg)
-        
-        # Compact 3x3 item display
-        grid_x = x + (width - 3) // 2
-        grid_y = title_y + 2
-        
-        # Simple 3x3 smooth border
-        border_fg = (205, 164, 87)   # Gold
-        item_bg = (60, 40, 25)       # Rich item background
-        
-        # Draw completely smooth 3x3 border
-        console.print(grid_x, grid_y, "┌", fg=border_fg, bg=preview_bg)
-        console.print(grid_x + 1, grid_y, "─", fg=border_fg, bg=preview_bg)
-        console.print(grid_x + 2, grid_y, "┐", fg=border_fg, bg=preview_bg)
-        
-        console.print(grid_x, grid_y + 1, "│", fg=border_fg, bg=preview_bg)
-        console.print(grid_x + 1, grid_y + 1, " ", bg=item_bg)
-        console.print(grid_x + 2, grid_y + 1, "│", fg=border_fg, bg=preview_bg)
-        
-        console.print(grid_x, grid_y + 2, "└", fg=border_fg, bg=preview_bg)
-        console.print(grid_x + 1, grid_y + 2, "─", fg=border_fg, bg=preview_bg)
-        console.print(grid_x + 2, grid_y + 2, "┘", fg=border_fg, bg=preview_bg)
-        
-        # Item character in center
-        item_char = self._get_item_display_char(item)
-        item_color = self._get_item_color(item)
-        console.print(grid_x + 1, grid_y + 1, item_char, fg=item_color, bg=item_bg)
-        
-        # Item name with better positioning - use full available width and rarity color
-        name_y = grid_y + 4
-        item_name = identify_system.get_display_name(self.engine.player, item)
-        # Use almost full width (width-2 for borders, width-3 for safety margin)
-        max_name_length = width - 3
-        if len(item_name) > max_name_length:
-            item_name = item_name[:max_name_length - 3] + "..."
-        console.print(x + 2, name_y, item_name, fg=item.rarity_color, bg=preview_bg)
-        
-        # Stats section with better spacing
-        stats_y = name_y + 1
-        stat_lines = self._get_stat_comparison(item)
-        
-        # Always show at least basic info if no stats
-        if not stat_lines:
-            max_item_name_length = width - 8  # Account for "Item: " prefix
-            shown_name = identify_system.get_display_name(self.engine.player, item)
-            item_display = shown_name[:max_item_name_length] if len(shown_name) > max_item_name_length else shown_name
-            stat_lines = [
-                f"Item: {item_display}",
-                "Select to interact"
-            ]
-        
-        # Display stat lines with full width utilization
-        current_stat_y = stats_y
-        for i, stat_line in enumerate(stat_lines[:6]):  # Show 6 stat lines max to leave room for description
-            if current_stat_y >= y + height - 8:  # Leave room for description
-                break
-            # Use almost full available width (accounting for borders and small margin)
-            max_stat_length = width - 3
-            if len(stat_line) > max_stat_length:
-                stat_line = stat_line[:max_stat_length - 3] + "..."
-            
-            # Use appropriate colors for equipment status
-            if stat_line.strip() == "Equipped":
-                console.print(x + 2, current_stat_y, stat_line, fg=(0, 255, 0), bg=preview_bg)  # Bright green
-            elif stat_line.strip() == "Not equipped":
-                console.print(x + 2, current_stat_y, stat_line, fg=(255, 150, 150), bg=preview_bg)  # Light red
-            else:
-                console.print(x + 2, current_stat_y, stat_line, fg=(200, 170, 120), bg=preview_bg)
-            current_stat_y += 1
-        
-        # Add description section
-        desc_y = current_stat_y + 1
-        if desc_y < y + height - 3:  # Make sure we have room
-            # Get item description with skill-based viewing
-            description = item.get_description(self.engine.player)
-            if description and description.strip():
-                # Add separator line
-                console.print(x + 2, desc_y, "─" * (width - 4), fg=(139, 105, 60), bg=preview_bg)
-                desc_y += 1
-                
-                # Wrap and display description
-                wrapped_lines = self._wrap_text(description, width - 4)
-                for desc_line in wrapped_lines[:4]:  # Show up to 4 lines of description
-                    if desc_y >= y + height - 2:
-                        break
-                    console.print(x + 2, desc_y, desc_line, fg=(180, 160, 130), bg=preview_bg)
-                    desc_y += 1
-    
-    def _filter_all(self, item) -> bool:
-        """Show all items."""
-        return True
-        
-    def _filter_equipment(self, item) -> bool:
-        """Show only equippable items."""
-        return getattr(item, "equippable", None) is not None
-        
-    def _filter_consumables(self, item) -> bool:
-        """Show only consumable items."""
-        return getattr(item, "consumable", None) is not None
-        
-    def _filter_misc(self, item) -> bool:
-        """Show items that are neither equipment nor consumables."""
-        return not self._filter_equipment(item) and not self._filter_consumables(item)
-    
-    def _draw_fantasy_frame(self, console, x: int, y: int, width: int, height: int, title: str):
-        """Draw a fantasy-themed frame with decorative corners."""
-        # Color scheme: stone/metal fantasy theme
-        frame_fg = (180, 140, 100)  # Bronze/brass color
-        frame_bg = (25, 20, 15)     # Dark brown/black
-        title_fg = (255, 215, 0)    # Gold
-        
-        # Clear the area first
-        for fy in range(height):
-            for fx in range(width):
-                console.print(x + fx, y + fy, " ", bg=frame_bg)
-        
-        # Draw border with fantasy characters
-        # Top border
-        console.print(x, y, "╔", fg=frame_fg, bg=frame_bg)
-        for i in range(1, width - 1):
-            console.print(x + i, y, "═", fg=frame_fg, bg=frame_bg)
-        console.print(x + width - 1, y, "╗", fg=frame_fg, bg=frame_bg)
-        
-        # Bottom border  
-        console.print(x, y + height - 1, "╚", fg=frame_fg, bg=frame_bg)
-        for i in range(1, width - 1):
-            console.print(x + i, y + height - 1, "═", fg=frame_fg, bg=frame_bg)
-        console.print(x + width - 1, y + height - 1, "╝", fg=frame_fg, bg=frame_bg)
-        
-        # Side borders
-        for i in range(1, height - 1):
-            console.print(x, y + i, "║", fg=frame_fg, bg=frame_bg)
-            console.print(x + width - 1, y + i, "║", fg=frame_fg, bg=frame_bg)
-        
-        # Title with decorative elements
-        title_text = f"═══ {title} ═══"
-        title_start = x + (width - len(title_text)) // 2
-        console.print(title_start, y, title_text, fg=title_fg, bg=frame_bg)
-    
-    def _get_item_type_char(self, item) -> str:
-        return " "  # Circle for misc items
-    
-    def _wrap_text(self, text: str, width: int) -> list:
-        """Wrap text to fit within the specified width."""
-        words = text.split()
-        lines = []
-        current_line = ""
-        
-        for word in words:
-            # If adding this word would exceed width, start a new line
-            if current_line and len(current_line) + 1 + len(word) > width:
-                lines.append(current_line)
-                current_line = word
-            else:
-                if current_line:
-                    current_line += " " + word
-                else:
-                    current_line = word
-        
-        # Add the last line if it exists
-        if current_line:
-            lines.append(current_line)
-        
-        return lines
-    
-    def _draw_item_preview(self, console, x: int, y: int, width: int, height: int, item):
-        """Draw the 3x3 item preview and stat comparison."""
-        preview_start_y = y + 3
-        
-        # Draw 3x3 item display in center
-        item_char = self._get_item_display_char(item)
-        
-        # 3x3 grid centered
-        grid_x = x + (width - 3) // 2
-        grid_y = preview_start_y + 2
-        
-        # Draw fancy border around the item with same style as main borders
-        border_fg = (180, 140, 100)  # Bronze/brass color
-        border_bg = (25, 20, 15)     # Dark brown/black
-        center_bg = (60, 40, 20)     # Item background
-        
-        # Draw 3x3 border frame (actual 3x3 as requested)
-        # Top border
-        console.print(grid_x, grid_y, "╔", fg=border_fg, bg=border_bg)
-        console.print(grid_x + 1, grid_y, "═", fg=border_fg, bg=border_bg)
-        console.print(grid_x + 2, grid_y, "╗", fg=border_fg, bg=border_bg)
-        
-        # Middle row with item - use direct color assignment  
-        console.print(grid_x, grid_y + 1, "║", fg=border_fg, bg=border_bg)
-        
-        # Get item color directly
-        item_color = self._get_item_color(item)
-        
-        # Print item with proper color
-        console.print(grid_x + 1, grid_y + 1, item_char, fg=item_color, bg=center_bg)
-        
-        console.print(grid_x + 2, grid_y + 1, "║", fg=border_fg, bg=border_bg)
-        
-        # Bottom border
-        console.print(grid_x, grid_y + 2, "╚", fg=border_fg, bg=border_bg)
-        console.print(grid_x + 1, grid_y + 2, "═", fg=border_fg, bg=border_bg)
-        console.print(grid_x + 2, grid_y + 2, "╝", fg=border_fg, bg=border_bg)
-        
-        # Item name (position adjusted for new border)
-        name_y = grid_y + 4
-        item_name = identify_system.get_display_name(self.engine.player, item)
-        if len(item_name) > width - 2:
-            item_name = item_name[:width - 5] + "..."
-        console.print(x + 1, name_y, item_name, fg=(255, 215, 0))
-        
-        # Stat comparison
-        stats_y = name_y + 2
-        stat_lines = self._get_stat_comparison(item)
-        
-        from text_utils import print_colored_markup
-        for i, stat_line in enumerate(stat_lines):
-            if stats_y + i >= y + height - 2:
-                break
-            print_colored_markup(console, x, stats_y + i, stat_line, default_color=(192, 192, 192))
-    
-    def _get_item_display_char(self, item) -> str:
-        """Get the character to display in the 3x3 preview."""
-        return item.char
-    
-    def _get_item_color(self, item):
-        """Get the actual color object for item display based on type and status."""
-        import color
-        
-        # More robust equipment check - avoid false positives
-        is_equipped = False
-        if hasattr(self.engine.player, 'equipment') and hasattr(item, 'equippable'):
-            is_equipped = self.engine.player.equipment.item_is_equipped(item)
-            
-        # Use the item's actual color if available, otherwise fall back to type-based colors
-        if hasattr(item, 'color') and item.color:
-            return item.color
-        elif is_equipped:
-            return color.green  # Bright green for equipped items only
-        elif getattr(item, "equippable", None):
-            return color.light_gray  # Light gray for unequipped equipment
-        elif getattr(item, "consumable", None):
-            tags = {str(tag).lower() for tag in getattr(item, "tags", [])}
-            if "potion" in tags:
-                return color.magenta  # Magenta for potions
-            elif "scroll" in tags:
-                return color.yellow  # Yellow for scrolls
-            return color.cyan  # Cyan for other consumables
-        return color.white  # White for unknown items
-
-    def _get_item_color_name(self, item) -> str:
-        """Get the color name for text markup based on item type and status."""
-        # More robust equipment check - avoid false positives
-        is_equipped = False
-        if hasattr(self.engine.player, 'equipment') and hasattr(item, 'equippable'):
-            is_equipped = self.engine.player.equipment.item_is_equipped(item)
-            
-        if is_equipped:
-            return "green"  # Bright green for equipped items only
-        elif getattr(item, "equippable", None): 
-            return "light_gray"  # Light gray for unequipped equipment
-        elif getattr(item, "consumable", None):
-            tags = {str(tag).lower() for tag in getattr(item, "tags", [])}
-            if "potion" in tags:
-                return "magenta"  # Magenta for potions
-            elif "scroll" in tags:
-                return "yellow"  # Yellow for scrolls
-            return "cyan"  # Cyan for other consumables
-        return "white"  # White for unknown items
-    
-    def _get_stat_comparison(self, item) -> list:
-        """Generate stat comparison text for the item."""
-        lines = []
-        player = self.engine.player
-        
-        # Type information
-        if getattr(item, "equippable", None):
-            is_equipped = player.equipment.item_is_equipped(item)
-            
-            # Get equipment type
-            eq_type = getattr(item.equippable, "equipment_type", None)
-            if eq_type:
-                type_name = eq_type.name.replace("_", " ").title()
-                # Abbreviate type names to save space
-                type_abbreviations = {
-                    "Main Hand": "Weapon",
-                    "Off Hand": "Shield", 
-                    "Chest": "Armor",
-                    "Head": "Helmet",
-                    "Legs": "Leggings",
-                    "Feet": "Boots"
-                }
-                type_display = type_abbreviations.get(type_name, type_name)
-                lines.append(type_display)
-                
-                # Show appropriate stat based on equipment type
-                eq_name = eq_type.name.lower()
-                
-                if "weapon" in eq_name or "sword" in eq_name or "dagger" in eq_name:
-                    # Weapons show power
-                    if hasattr(item.equippable, "power_bonus"):
-                        power = item.equippable.power_bonus
-                        if is_equipped:
-                            current_power = player.fighter.power
-                            lines.append(f"Power: {current_power}({-power:+d})")
-                        else:
-                            current_power = player.fighter.power
-                            lines.append(f"Power: {current_power} (+{power})")
-                            
-                elif "armor" in eq_name or "mail" in eq_name or "leather" in eq_name or "shield" in eq_name:
-                    # Armor shows defense
-                    if hasattr(item.equippable, "defense_bonus"):
-                        defense = item.equippable.get_defense()
-                        if is_equipped:
-                            current_defense = player.fighter.defense
-                            lines.append(f"Defense: {current_defense}({-defense:+d})")
-                        else:
-                            current_defense = player.fighter.defense
-                            lines.append(f"Defense: {current_defense} (+{defense})")
-                            
-                else:
-                    # Generic equipment - show both if available
-                    if hasattr(item.equippable, "power_bonus"):
-                        power = item.equippable.power_bonus
-                        if power != 0:
-                            if is_equipped:
-                                current_power = player.fighter.power
-                                lines.append(f"Power: {current_power}({-power:+d})")
-                            else:
-                                current_power = player.fighter.power
-                                lines.append(f"Power: {current_power} (+{power})")
-                                
-                    if hasattr(item.equippable, "defense_bonus"):
-                        defense = item.equippable.get_defense()
-                        if defense != 0:
-                            if is_equipped:
-                                current_defense = player.fighter.defense
-                                lines.append(f"Defense: {current_defense}({-defense:+d})")
-                            else:
-                                current_defense = player.fighter.defense
-                                lines.append(f"Defense: {current_defense} (+{defense})")
-            
-            # Equipment status
-            if is_equipped:
-                lines.append("Equipped")  # Will be colored green in display
-            else:
-                lines.append("Not equipped")
-                
-        elif getattr(item, "consumable", None):
-            lines.append("Consumable")
-            
-            # Healing items
-            tags = {str(tag).lower() for tag in getattr(item, "tags", [])}
-            if hasattr(item.consumable, "amount") and "health" in tags:
-                heal_amount = item.consumable.amount
-                current_hp = player.fighter.hp
-                max_hp = player.fighter.max_hp
-                potential_hp = min(max_hp, current_hp + heal_amount)
-                lines.append(f"Heals: {heal_amount}")
-                lines.append(f"HP: {current_hp}→{potential_hp}")
-            
-
-        
-        else:
-            lines.append("Miscellaneous")
-            lines.append("Press D to drop")
-        
-        # Limit to available space
-        return lines[:6]
-
-    def ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:
-        """Allow mouse hover to change selection."""
-        super().ev_mousemotion(event)
-        if not hasattr(self, '_render_items_x') or not hasattr(self, '_render_y'):
-            return None
-
-        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
-        items_x = self._render_items_x
-        items_start_y = self._render_y + 4
-        items_width = 32
-
-        item_groups = self.engine.player.inventory.get_display_groups()
-        category_filter = self.categories[self.current_category][1]
-        filtered_groups = [g for g in item_groups if self.item_filter(g['item']) and category_filter(g['item'])]
-
-        if (items_x <= mouse_x < items_x + items_width and
-                items_start_y <= mouse_y < items_start_y + len(filtered_groups)):
-            hovered_index = mouse_y - items_start_y
-            if hovered_index != self.selected_index:
-                sounds.play_ui_move_sound()
-            self.selected_index = hovered_index
-            return
-
-        # Hover over sidebar categories
-        if hasattr(self, '_sidebar_x'):
-            sidebar_x = self._sidebar_x
-            sidebar_y = self._sidebar_y
-            sidebar_w = self._sidebar_width
-            for i in range(len(self.categories)):
-                if (sidebar_x <= mouse_x < sidebar_x + sidebar_w
-                        and mouse_y == sidebar_y + i):
-                    if i != self.current_category:
-                        sounds.play_ui_move_sound()
-                        self.current_category = i
-                        self.selected_index = 0
-                    break
-
-    def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
-        if event.button not in (tcod.event.BUTTON_LEFT, tcod.event.BUTTON_RIGHT):
-            return None
-        if event.button == tcod.event.BUTTON_LEFT:
-            self.engine.mouse_held = True
-        if not hasattr(self, '_render_items_x') or not hasattr(self, '_render_y'):
-            return self.on_exit()
-
-        mouse_x, mouse_y = int(event.tile.x), int(event.tile.y)
-        items_x = self._render_items_x
-        items_start_y = self._render_y + 4
-
-        # Click on sidebar category
-        if hasattr(self, '_sidebar_x') and event.button == tcod.event.BUTTON_LEFT:
-            sidebar_x = self._sidebar_x
-            sidebar_y = self._sidebar_y
-            sidebar_w = self._sidebar_width
-            for i in range(len(self.categories)):
-                if (sidebar_x <= mouse_x < sidebar_x + sidebar_w
-                        and mouse_y == sidebar_y + i):
-                    if i != self.current_category:
-                        sounds.play_ui_move_sound()
-                        self.current_category = i
-                        self.selected_index = 0
-                    return None
-        items_width = 32
-
-        # Check if out of bounds of UI (right-click outside also closes)
-        if not self._in_popup(mouse_x, mouse_y):
-            return self.on_exit()
-
-        item_groups = self.engine.player.inventory.get_display_groups()
-        category_filter = self.categories[self.current_category][1]
-        filtered_groups = [g for g in item_groups if self.item_filter(g['item']) and category_filter(g['item'])]
-
-        if (items_x <= mouse_x < items_x + items_width and
-                items_start_y <= mouse_y < items_start_y + len(filtered_groups)):
-            clicked_index = mouse_y - items_start_y
-            self.selected_index = clicked_index
-            clicked_item = filtered_groups[clicked_index]['item']
-            if event.button == tcod.event.BUTTON_RIGHT:
-                return ItemContextMenu(self, clicked_item, mouse_x, mouse_y)
-            return self.on_item_selected(clicked_item)
-
-
-    def ev_mousewheel(self, event: tcod.event.MouseWheel) -> Optional[ActionOrHandler]:
-        if event.y < 0:
-            self.current_category = min(len(self.categories) - 1, self.current_category + 1)
-        elif event.y > 0:
-            self.current_category = max(0, self.current_category - 1)
-        else:
-            return None
-        self.selected_index = 0
-        sounds.play_ui_move_sound()
-        return None
-
-    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
-        sounds.play_ui_move_sound()
-        key = event.sym
-
-        # Build filtered list for selection mapping
-        item_groups = self.engine.player.inventory.get_display_groups()
-        category_filter = self.categories[self.current_category][1]
-        filtered_groups = []
-        for group in item_groups:
-            if self.item_filter(group['item']) and category_filter(group['item']):
-                filtered_groups.append(group)
-
-        # Arrow-key navigation: up/down to move selection, left/right for tabs, Enter to confirm
-        if key == tcod.event.K_UP:
-            self.selected_index = max(0, self.selected_index - 1)
-            return None
-        if key == tcod.event.K_DOWN:
-            self.selected_index = min(len(filtered_groups) - 1 if filtered_groups else 0, self.selected_index + 1)
-            return None
-        if key == tcod.event.K_LEFT:
-            self.current_category = max(0, self.current_category - 1)
-            self.selected_index = 0  # Reset selection when changing tabs
-            return None
-        if key == tcod.event.K_RIGHT:
-            self.current_category = min(len(self.categories) - 1, self.current_category + 1)
-            self.selected_index = 0  # Reset selection when changing tabs
-            return None
-        # Number keys 1-4 for quick tab switching
-        if tcod.event.KeySym.N1 <= key <= tcod.event.KeySym.N4:
-            tab_index = key - tcod.event.KeySym.N1
-            if tab_index < len(self.categories):
-                self.current_category = tab_index
-                self.selected_index = 0  # Reset selection when changing tabs
-                return None
-        
-        if key in CONFIRM_KEYS:
-            # If inventory empty, do nothing
-            if len(filtered_groups) == 0:
-                return None
-            selected_group = filtered_groups[getattr(self, "selected_index", 0)]
-            selected_item = selected_group['item']
-            return self.on_item_selected(selected_item)
-
-        # Letter selection still supported but operates on the filtered list
-
-        return super().ev_keydown(event)
-
-    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        if item.consumable:
-            action_or_handler = item.consumable.get_action(self.engine.player)
-            if action_or_handler:
-                if hasattr(action_or_handler, 'perform'):
-                    self.engine.execute_action(action_or_handler, is_player_action=False)
-                    return None
-                else:
-                    return action_or_handler
-            return None
-        elif item.equippable:
-            action = actions.EquipAction(self.engine.player, item)
-            self.engine.execute_action(action, is_player_action=False)
-            return None
-        else:
-            return None
-
-class ScrollActivateHandler(InventoryEventHandler):
-    # Handles using magic/scroll item
-    TITLE = "Select a scroll to read"
-
-    def __init__(self, engine, item_filter = None):
-        super().__init__(engine, item_filter=lambda it: getattr(it, "consumable", None) is not None and "scroll" in {str(tag).lower() for tag in getattr(it, "tags", [])})
-
-    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        # Execute scroll action and stay in inventory
-        if item.consumable and "scroll" in {str(tag).lower() for tag in getattr(item, "tags", [])}:
-            action_or_handler = item.consumable.get_action(self.engine.player)
-            if action_or_handler:
-                # Check if it's a handler (needs input) or action (can perform immediately)
-                if hasattr(action_or_handler, 'perform'):
-                    self.engine.execute_action(action_or_handler, is_player_action=False)
-                    return None  # Stay in inventory
-                else:
-                    # It's a handler that needs input, return it
-                    return action_or_handler
-            return None  # Stay in inventory
-        else:
-            shown_name = identify_system.get_display_name(self.engine.player, item)
-            self.engine.message_log.add_message(f"You cannot read the {shown_name}.", color.invalid)
-            return None  # Stay in inventory
-
-
-
-            
-
-
-class InventoryActivateHandler(InventoryEventHandler):
-    # Handles using inventory item
-    TITLE = "Select an item to use"
-
-    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        if item.consumable:
-            action_or_handler = item.consumable.get_action(self.engine.player)
-            if action_or_handler:
-                if hasattr(action_or_handler, 'perform'):
-                    try:
-                        self.engine.execute_action(action_or_handler, is_player_action=False)
-                    except exceptions.Impossible as exc:
-                        self.engine.message_log.add_message(exc.args[0], color.impossible)
-                    return None
-                else:
-                    return action_or_handler
-            return None
-        else:
-            return None
-        
-class ThrowSelectionHandler(InventoryEventHandler):
-    # Handles selecting an item to throw
-    TITLE = "Select an item to throw"
-
-    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        # Returns the action for throwing the selected item
-        return ThrowTargetHandler(self.engine, item)
-
-class QuaffActivateHandler(InventoryEventHandler):
-    # Handles using inventory item
-    TITLE = "Select potion to quaff"
-
-    def __init__(self, engine: Engine):
-        super().__init__(engine, item_filter=lambda it: getattr(it, "consumable", None) is not None and "potion" in {str(tag).lower() for tag in getattr(it, "tags", [])})
-
-    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        # Execute potion action and stay in inventory
-        if item.consumable and "potion" in {str(tag).lower() for tag in getattr(item, "tags", [])}:
-            sounds.play_quaff_sound()
-            action_or_handler = item.consumable.get_action(self.engine.player)
-            if action_or_handler:
-                # Check if it's a handler (needs input) or action (can perform immediately)
-                if hasattr(action_or_handler, 'perform'):
-                    self.engine.execute_action(action_or_handler, is_player_action=False)
-                    return None  # Stay in inventory
-                else:
-                    # It's a handler that needs input, return it
-                    return action_or_handler
-            return None  # Stay in inventory
-        else:
-            shown_name = identify_system.get_display_name(self.engine.player, item)
-            self.engine.message_log.add_message(f"You cannot drink the {shown_name}.", color.invalid)
-            return None  # Stay in inventory
-    
-class InventoryDropHandler(InventoryEventHandler):
-    #Handles dropping inventory item
-    
-    TITLE = "Select an item to drop"
-
-    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        # Remember the current filtered list to adjust selection index
-        all_items = list(self.engine.player.inventory.items)
-        filtered_items = [it for it in all_items if self.item_filter(it)]
-        
-        # Get current item index in filtered list
-        try:
-            current_filtered_index = filtered_items.index(item)
-        except ValueError:
-            current_filtered_index = 0
-        
-        # Execute drop action
-        action = actions.DropItem(self.engine.player, item)
-        self.engine.execute_action(action, is_player_action=False)
-        
-        # Adjust selected index after dropping item
-        # Get the new filtered list after dropping
-        all_items = list(self.engine.player.inventory.items)
-        new_filtered_items = [it for it in all_items if self.item_filter(it)]
-        
-        # Adjust selection to stay reasonable
-        if len(new_filtered_items) == 0:
-            self.selected_index = 0
-        else:
-            # Keep same index if possible, otherwise move to previous item
-            self.selected_index = min(current_filtered_index, len(new_filtered_items) - 1)
-        
-        return None  # Stay in inventory
-
-
-# class InventoryEquipHandler(InventoryEventHandler):
-#     """Shows only equippable items and equips the selected one."""
-#     TITLE = "Select an item to equip"
-# 
-#     def __init__(self, engine: Engine):
-#         # Filter for items that have an equippable component
-#         super().__init__(engine, item_filter=lambda it: getattr(it, "equippable", None) is not None)
-# 
-#     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-#         if getattr(item, "equippable", None):
-#             # Execute equip action and stay in inventory
-#             action = actions.EquipAction(self.engine.player, item)
-#             action.perform()
-#             return None  # Stay in inventory
-#         else:
-#             self.engine.message_log.add_message(f"{item.name} cannot be equipped.", color.invalid)
-#             return None
-
 
 class ItemContextMenu(EventHandler):
     """A floating right-click context menu for an inventory item.
@@ -2538,7 +1248,7 @@ class ItemContextMenu(EventHandler):
 
     def __init__(
         self,
-        parent_handler: "InventoryEventHandler",
+        parent_handler: "None",
         item,
         click_x: int,
         click_y: int,
@@ -3638,37 +2348,55 @@ class SpellCastingHandler(PopupEventHandler):
         """Render the spell casting interface."""
         # First render the underlying game
         super().on_render(console)
-        
+        scale = self.get_popup_scale()
         if not self.available_spells:
             # Show "no spells known" message
-            window_width = 40
-            window_height = 8
-            x = (console.width - window_width) // 2
-            y = (console.height - window_height) // 2
-            self._set_popup_bounds(x, y, window_width, window_height)
+            total_width = 40
+            total_height = 8
+            x = (console.width - total_width) // 2
+            y = (console.height - total_height) // 2
+
             
-            MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
-            MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Spellcasting")
+
+
+            x = (console.width - 40) // 2
+            y = (console.height - 8) // 2
+            draw_w = max(4, int(total_width * scale))
+            draw_h = max(4, int(total_height * scale))
+            draw_x = x + (total_width - draw_w) // 2
+            draw_y = y + (total_height - draw_h) // 2
+            
+            self._set_popup_bounds(draw_x, draw_y, draw_w, draw_h)
+            MenuRenderer.draw_parchment_background(console, draw_x, draw_y, draw_w, draw_h)
+            MenuRenderer.draw_ornate_border(console, draw_x, draw_y, draw_w, draw_h, "Spellcasting")
+
+            if scale < 1.0:
+                return
             
             console.print(x + 2, y + 3, "You know no spells.", fg=color.impossible)
             console.print(x + 2, y + 6, "[Esc] Cancel", fg=color.grey)
             return
         
         # Calculate window dimensions
-        window_width = 70  # Wider for quick cast display
+        total_width = 70  # Wider for quick cast display
         spell_list_height = len(self.available_spells)
-        window_height = min(40, max(20, spell_list_height + 15))  # Taller menu
+        total_height = min(40, max(20, spell_list_height + 15))  # Taller menu
         
-        x = (console.width - window_width) // 2
-        y = (console.height - window_height) // 2
-        self._set_popup_bounds(x, y, window_width, window_height)
+        x = (console.width - total_width) // 2
+        y = (console.height - total_height) // 2
         
-        # Fade the background except for the spell menu
-        super().render_faded(console, x, y, window_width, window_height)
-        
-        # Draw main window
-        MenuRenderer.draw_parchment_background(console, x, y, window_width, window_height)
-        MenuRenderer.draw_ornate_border(console, x, y, window_width, window_height, "Spellcasting")
+        draw_w = max(4, int(total_width * scale))
+        draw_h = max(4, int(total_height * scale))
+        draw_x = x + (total_width - draw_w) // 2
+        draw_y = y + (total_height - draw_h) // 2
+
+        self._set_popup_bounds(draw_x, draw_y, draw_w, draw_h)
+        super().render_faded(console, draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_parchment_background(console, draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_ornate_border(console, draw_x, draw_y, draw_w, draw_h, "Spellcasting")
+
+        if scale < 1.0:
+            return
         
         # Show player's current mana
         mana_text = f"Mana: {self.engine.player.mana}/{self.engine.player.mana_max}"
@@ -3676,7 +2404,7 @@ class SpellCastingHandler(PopupEventHandler):
 
         
         # Calculate visible spell range for scrolling
-        visible_height = window_height - 12  # More space for headers and footers
+        visible_height = total_height - 12  # More space for headers and footers
         start_index = self.scroll_offset
         end_index = min(len(self.available_spells), start_index + visible_height)
         
@@ -3706,7 +2434,7 @@ class SpellCastingHandler(PopupEventHandler):
             
             if is_selected:
                 # Highlight selected spell
-                for highlight_x in range(x + 1, x + window_width - 1):
+                for highlight_x in range(x + 1, x + total_width - 1):
                     console.print(highlight_x, render_y, " ", bg=(80, 60, 40))
             
             # Spell number and quick cast indicator
@@ -3730,7 +2458,7 @@ class SpellCastingHandler(PopupEventHandler):
             
             # Mana cost
             mana_text = f"({spell.mana_cost} mana)"
-            mana_x = x + window_width - len(mana_text) - 2
+            mana_x = x + total_width - len(mana_text) - 2
             console.print(mana_x, render_y, mana_text, fg=(100, 149, 237) if can_cast else (128, 128, 128), 
                          bg=(80, 60, 40) if is_selected else None)
             
@@ -3739,7 +2467,7 @@ class SpellCastingHandler(PopupEventHandler):
         # Show selected spell description if available
         if self.available_spells:
             selected_spell = self.available_spells[self.selected_index]
-            desc_start_y = y + window_height - 4
+            desc_start_y = y + total_height - 4
             
             if selected_spell.arcana_level > self.engine.player.level.traits['arcana']['level']:
                 description = "???"
@@ -3748,7 +2476,7 @@ class SpellCastingHandler(PopupEventHandler):
                 description = selected_spell.get_description(self.engine.player)
             # Word wrap the description
             
-            desc_width = window_width - 4
+            desc_width = total_width - 4
             words = description.split()
             lines = []
             current_line = []
@@ -3778,15 +2506,15 @@ class SpellCastingHandler(PopupEventHandler):
         
         # Show scroll indicators
         if start_index > 0:
-            console.print(x + window_width - 2, list_start_y, "↑", fg=color.yellow)
+            console.print(x + total_width - 2, list_start_y, "↑", fg=color.yellow)
         if end_index < len(self.available_spells):
-            console.print(x + window_width - 2, y + window_height - 5, "↓", fg=color.yellow)
+            console.print(x + total_width - 2, y + total_height - 5, "↓", fg=color.yellow)
         
         
         # Cache render coords for mouse interaction
         self._spell_render_x = x
         self._spell_render_y = y
-        self._spell_window_width = window_width
+        self._spell_window_width = total_width
         self._spell_list_start_y = list_start_y
         self._spell_scroll_offset = self.scroll_offset
         self._spell_visible_height = visible_height
@@ -5197,6 +3925,23 @@ class MainGameEventHandler(EventHandler):
             else:
                 return actions.MeleeAction(self.engine.player, dx, dy, target_part, tile_rel_pos=tile_rel_pos)
         if event.button == tcod.event.MouseButton.RIGHT:
+            _ks = tcod.event.get_keyboard_state()
+            _shift_held = bool(_ks[225] or _ks[229])  # SDL_SCANCODE_LSHIFT/RSHIFT
+
+            if _shift_held and self.engine.mouse_ui_y <= 38:
+                mouse_x, mouse_y = self.engine.mouse_x, self.engine.mouse_y
+                target_actor = self.engine.game_map.get_actor_at_location(mouse_x, mouse_y)
+                if (
+                    target_actor is not None
+                    and target_actor is not self.engine.player
+                    and hasattr(target_actor, "ai")
+                    and target_actor.can_speak
+                ):
+                    reach = max(abs(mouse_x - self.engine.player.x), abs(mouse_y - self.engine.player.y))
+                    if reach <= 3:
+                        return DialogueEventHandler(self.engine, target_actor)
+                    self.engine.message_log.add_message("Too far away to talk!", color.impossible)
+                    return None
 
             # --- Minimap right-click: navigate to clicked map location ---
             import render_functions as _rf
@@ -5404,6 +4149,8 @@ class MainGameEventHandler(EventHandler):
             # Combined inventory + equipment grid
             from inventory_ui import InventoryGridUI
             return InventoryGridUI(self.engine)
+        elif key == tcod.event.KeySym.P:
+            return TestPopupHandler(self.engine)
         # elif key == tcod.event.KeySym.U:
         #     return InventoryEquipHandler(self.engine)
         elif key == tcod.event.KeySym.Q:
@@ -6663,6 +5410,7 @@ class EntityDebugHandler(SelectIndexHandler):
         lines.append((f"Armor defense mult: x{armor_profile.defense_bonus_multiplier:.2f}", color.white))
         lines.append((f"Armor dodge delta: {armor_profile.dodge_delta:+.2f}", color.white))
         lines.append((f"Effective dodge chance: {effective_dodge * 100:.0f}%", color.cyan))
+        #lines.append((f"Effective block chance: {effective_dodge * 100:.0f}%", color.cyan))
         if weapon_tags:
             lines.append((f"Weapon tags: {', '.join(sorted(weapon_tags))}", color.gray))
         if armor_tags:
@@ -7466,6 +6214,7 @@ class Settings(BaseEventHandler):
                 f.write("{\n")
                 f.write("    // Display settings\n")
                 f.write(f'    "fullscreen": {json.dumps(self.settings_data.get("fullscreen", False))},\n')
+                #f.write(f'    "ambient_audio": {json.dumps(self.settings_data.get("ambient_audio", 50))},\n')
                 f.write(f'    "audio": {json.dumps(self.settings_data.get("audio", 50))},\n')
                 f.write("    // Lighting settings\n")
                 f.write(f'    "lighting_mode": {json.dumps(self.settings_data.get("lighting_mode", "gpu"))},\n')

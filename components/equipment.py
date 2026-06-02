@@ -490,8 +490,38 @@ class Equipment(BaseComponent):
         if part_name in self.body_part_coverage:
             item = self.body_part_coverage[part_name]
             if item.equippable:
-                return item.tags
+                return set(getattr(item, 'tags', []) or [])
+        return set()
+
+    def get_shield_item(self) -> Optional[Item]:
+        """Return the currently equipped shield item, if any."""
+        shield = self.equipped_items.get("SHIELD")
+        if shield and getattr(shield, 'equippable', None):
+            return shield
+
+        for item in self.equipped_items.values():
+            if not item or not getattr(item, 'equippable', None):
+                continue
+            if getattr(item.equippable.equipment_type, 'name', '') == 'SHIELD':
+                return item
         return None
+
+    def get_shield_tags(self) -> Set[str]:
+        """Return tags for equipped shield(s), used for global shield checks."""
+        shield = self.get_shield_item()
+        if not shield:
+            return set()
+        return set(getattr(shield, 'tags', []) or [])
+
+    def get_global_shield_defense(self) -> int:
+        """Return shield defense that applies to all incoming hits."""
+        shield = self.get_shield_item()
+        if not shield or not getattr(shield, 'equippable', None):
+            return 0
+
+        item_tags = set(getattr(shield, 'tags', []) or [])
+        armor_profile = profsys.armor_profile(self.parent, item_tags)
+        return int(round(shield.equippable.defense_bonus * armor_profile.defense_bonus_multiplier))
 
     def get_all_armor_tags(self) -> Set[str]:
         tags: Set[str] = set()
@@ -510,6 +540,8 @@ class Equipment(BaseComponent):
         if part_name in self.body_part_coverage:
             item = self.body_part_coverage[part_name]
             if item.equippable:
+                if getattr(item.equippable.equipment_type, 'name', '') == 'SHIELD':
+                    return 0
                 item_tags = set(getattr(item, 'tags', []) or [])
                 armor_profile = profsys.armor_profile(self.parent, item_tags)
                 return int(round(item.equippable.defense_bonus * armor_profile.defense_bonus_multiplier))

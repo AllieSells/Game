@@ -68,6 +68,11 @@ WEAPON_SKILL_DAMAGE_PER_LEVEL = 0.2
 ARMOR_SKILL_BASE_DEFENSE = 0.72
 ARMOR_SKILL_DEFENSE_PER_LEVEL = 0.10
 
+# Shield block skill scaling.
+SHIELD_BLOCK_BASE_CHANCE = 0.15
+SHIELD_BLOCK_CHANCE_PER_LEVEL = 0.15
+SHIELD_BLOCK_MAX_CHANCE = 0.85
+
 # Tag-to-skill registry used by combat and XP hooks.
 # Keep this data-driven so adding a new weapon/armor family only requires a new rule.
 WEAPON_TAG_TRAIT_RULES = {

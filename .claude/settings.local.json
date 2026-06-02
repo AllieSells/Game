@@ -3,7 +3,13 @@
     "allow": [
       "Bash(python -m py_compile sprite_manager.py)",
       "Bash(python -m py_compile shader.py)",
-      "Bash(timeout 15 python main.py)"
+      "Bash(timeout 15 python main.py)",
+      "Bash(python -m py_compile components/ai.py)",
+      "Bash(python -m py_compile components/dialogue_generator.py languages.py)",
+      "Bash(python -m py_compile components/dialogue_generator.py)",
+      "Bash(python -c \"from components.dialogue_generator import generate; print\\(generate\\('Greeting', 'neutral', {'name':'Mira'}\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"from components.dialogue_generator import generate; print\\(generate\\('Greeting','neutral',{'name':'X'},language='goblin'\\)\\); print\\(generate\\('Opening','neutral',{'name':'X','location':'Millhaven'},language='common'\\)\\)\")"
     ]
   }
 }

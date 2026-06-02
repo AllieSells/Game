@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, Iterable, Set
+import random
 
 from balance_config import (
     AGILITY_DODGE_BONUS_PER_LEVEL,
@@ -25,6 +26,9 @@ from balance_config import (
     WEAPON_SKILL_BASE_DAMAGE,
     WEAPON_SKILL_DAMAGE_PER_LEVEL,
     WEAPON_TAG_TRAIT_RULES,
+    SHIELD_BLOCK_BASE_CHANCE,
+    SHIELD_BLOCK_CHANCE_PER_LEVEL,
+    SHIELD_BLOCK_MAX_CHANCE,
     trait_delta,
 )
 
@@ -205,3 +209,28 @@ def armor_profile(defender, armor_tags: Iterable[str]) -> ProficiencyResult:
 
 def agility_dodge_bonus(actor) -> float:
     return trait_delta(_trait_level(actor, "agility")) * AGILITY_DODGE_BONUS_PER_LEVEL
+
+
+def shield_check(defender, armor_tags: Iterable[str]) -> bool:
+    matched_rules = _resolve_tag_traits(armor_tags, ARMOR_TAG_TRAIT_RULES)
+    shield_rules = {
+        tag: trait_candidates
+        for tag, trait_candidates in matched_rules.items()
+        if "shield" in tag
+    }
+    if not shield_rules:
+        return False
+
+    block_chance = SHIELD_BLOCK_BASE_CHANCE
+    shield_score = 0.0
+    for trait_candidates in shield_rules.values():
+        shield_score = max(shield_score, _weighted_best_delta(defender, trait_candidates))
+
+    block_chance += shield_score * SHIELD_BLOCK_CHANCE_PER_LEVEL
+    raw_block_chance = block_chance
+    block_chance = _clamp(block_chance, 0.0, SHIELD_BLOCK_MAX_CHANCE)
+    print(
+        f"Shield block chance raw={raw_block_chance:.2%}, effective={block_chance:.2%} (cap={SHIELD_BLOCK_MAX_CHANCE:.0%})"
+    )
+
+    return block_chance > 0 and random.random() < block_chance

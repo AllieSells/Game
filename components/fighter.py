@@ -413,6 +413,7 @@ class Fighter(BaseComponent):
     ) -> tuple[int, int]:
         """Apply target-side mitigation and return the final damage plus armor defense."""
         armor_defense = 0
+        shield_defense = 0
 
         # Get defense for specific part
         if targeted_part:
@@ -422,6 +423,10 @@ class Fighter(BaseComponent):
         # Fallback to base defense
         else:
             base_defense = self.defense
+
+        # Shields mitigate globally regardless of targeted region.
+        if self.parent.equipment:
+            shield_defense = self.parent.equipment.get_global_shield_defense()
 
         # Aggregate mitigation multipliers from effects that apply to this attack
         defense_multiplier = 1.0
@@ -434,7 +439,7 @@ class Fighter(BaseComponent):
 
 
         # Combine for total defense
-        total_defense = (base_defense*defense_multiplier) + armor_defense
+        total_defense = (base_defense * defense_multiplier) + armor_defense + shield_defense
 
         base_damage = raw_damage - total_defense
         mitigation_multiplier = 1.0
@@ -447,6 +452,7 @@ class Fighter(BaseComponent):
         
 
         mitigated_damage = max(0, int(base_damage * damage_multiplier * mitigation_multiplier))
+
 
         return mitigated_damage, armor_defense
         
@@ -549,3 +555,13 @@ class Receiver(Fighter):
             from liquid_system import LiquidType
             self.parent.gamemap.liquid_system.create_splash(self.parent.x, self.parent.y, LiquidType.FIRE, radius=3, max_depth=5)
             sounds.play_explosion_sound()
+            try:
+                self.engine.trigger_screen_shake(
+                    source_x=self.parent.x,
+                    source_y=self.parent.y,
+                    strength_px=8.0,
+                    duration_frames=12,
+                    max_distance_tiles=12,
+                )
+            except Exception:
+                pass

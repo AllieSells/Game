@@ -1,0 +1,195 @@
+{
+  "_facts": {
+    "_doc": "Every key in an NPC's knowledge dict is injectable as {key}. Nested dicts are flattened with underscores (pronouns.subject -> {pronouns_subject}). None values become empty string.",
+    "_always_present": {
+      "name":           "NPC display name",
+      "location":       "e.g. 'Ashenvale'",
+      "location_empty": "same as location, or empty string"
+    },
+    "_villager": {
+      "age":                       "integer, e.g. 34",
+      "age_group":                 "'young' | 'older' | 'elderly'",
+      "gender":                    "'Male' | 'Female' | 'Androgynous'",
+      "gendered_noun":             "'man' | 'woman' | 'person'",
+      "pronouns_subject":          "'he' | 'she' | 'they'",
+      "pronouns_object":           "'him' | 'her' | 'them'",
+      "pronouns_possessive_adjective": "'his' | 'her' | 'their'",
+      "pronouns_possessive":       "'his' | 'hers' | 'theirs'",
+      "hair_color":                "'black' | 'brown' | 'blonde' | 'red' | 'gray' | 'white' | 'bald'",
+      "hair_style":                "'short' | 'long' | 'curly' | 'straight' | 'wavy'",
+      "facial_hair":               "'bearded' | 'mustached' | 'goateed' | 'stubbled' | (omitted if none)",
+      "eye_color":                 "'brown' | 'blue' | 'green' | 'gray' | 'hazel'",
+      "skin_tone":                 "'fair' | 'brown' | 'dark'",
+      "build":                     "'n average' | ' slim' | ' very slim' | 'n athletic' | ' muscular' | ' heavyset'  (use as 'a{build} build')",
+      "marks":                     "'freckles' | 'scars' | 'tattoos' | 'birthmarks' | (omitted if none)",
+      "posture":                   "'slouched' | 'upright' | 'commandingly' | (omitted if none)",
+      "clothing_style":            "'casual' | 'formal' | 'ragged'"
+    },
+    "_parts": "Parts (defined under 'parts') are injectable as {key} and randomly picked each use."
+  },
+
+  "contexts": {
+
+    "Opening": {
+      "neutral": {
+        "common": { "compose": [
+          ["Hello", "Greetings", "Well met,", "Ah,", "Ah, greetings,"],
+          [" {address}", " friend", " traveler", " stranger"],
+          [".", "! What can I do for you?", ". Welcome{location_closer}."]
+        ]},
+        "goblin": ["Rike rek.", "Rike ikg."]
+      },
+      "friendly": {
+        "common": { "compose": [
+          ["Wonderful to see you,", "A pleasure as always,", "My dear"],
+          [" {address}"],
+          ["!", "! Come, come.", "! Good to have you."]
+        ]},
+        "goblin": ["Reragre goukh kukg u!", "U ihouw."]
+      },
+      "hostile": {
+        "common": ["What do you want?", "Get to the point.", "Hurry up, then.", "Make it quick."],
+        "goblin": ["I gu u kad?", "Dear, gakhep", "Deidak grer."]
+      }
+    },
+
+    "Greeting": {
+      "neutral": {
+        "common": ["Hello there.", "Greetings.", "Well met.", "Welcome.", "Ah, a friendly face."],
+        "goblin": ["Rike.", "Dag met.", "Wewtugk"]
+      },
+      "friendly": {
+        "common": ["Wonderful to see you, {address}!", "My dear {address}, a pleasure.", "Always good to see you, {address}!"],
+        "goblin": ["Grikh goukh kukg u, {address}.", "U ihouw, {address}."]
+      },
+      "hostile": {
+        "common": ["What do you want?", "Leave me alone.", "Not you again."],
+        "goblin": ["Detirge hak.", "Gra ki greg u."]
+      }
+    },
+
+    "Identity": {
+      "neutral": {
+        "common": ["I am called {name}.", "My name is {name}.", "They call me {name}.", "You can call me {name}.", "I go by {name}."],
+        "goblin": ["Gra ka {name}.", "Gre rukg ka {name}.", "Ka pet gra {name}."]
+      },
+      "friendly": {
+        "common": ["I am {name}, at your service, {address}!", "The name is {name}. Good to properly meet you."],
+        "goblin": ["Gra ka {name}!"]
+      },
+      "hostile": {
+        "common": ["Why would I tell you my name?", "My name is none of your business.", "Figure it out yourself."],
+        "goblin": ["Rakid pirur gra gu te u?", "Ki dedeptak, hig!"]
+      }
+    },
+
+    "Location": {
+      "neutral": {
+        "common": ["This is {location}.", "You are in {location}.", "We are in {location}.", "This place is called {location}.", "This area is known as {location}."],
+        "goblin": ["Pak ka {location}.", "U ka gra {location}, parri.", "Gred? ta ka ki pet {location}."]
+      },
+      "friendly": {
+        "common": ["Welcome to {location}, {address}!", "Ah, you have found yourself in {location}."],
+        "goblin": ["Wewtugk goukh {location}!"]
+      },
+      "hostile": {
+        "common": ["None of your business.", "Figure it out yourself."],
+        "goblin": ["Rakid pirur gra gu te?", "Kip gep dekh, hig!"]
+      }
+    },
+
+    "Knowledge": {
+      "neutral": {
+        "common": ["I have told you everything I know.", "What more do you want to know?", "I know nothing more to share.", "Ask me something specific."],
+        "goblin": ["Gra tou hadrag gudap", "Gra kede ki te gudap", "Hadrag gudap"]
+      },
+      "friendly": {
+        "common": ["{address}, what do you wish to know?", "Happy to help, {address}. What would you like to know?"],
+        "goblin": ["PLACEHOLDER"]
+      },
+      "hostile": {
+        "common": ["I have nothing to say to you.", "My knowledge is not yours to take."],
+        "goblin": ["PLACEHOLDER"]
+      }
+    },
+
+    "Goodbye": {
+      "neutral": {
+        "common": ["Yes?", "Hello again.", "What is it?", "Oh, it is you again.", "Yes, what now?", "We were just talking."],
+        "goblin": ["Ketgagk?", "Rike digked."]
+      },
+      "friendly": {
+        "common": ["Back so soon? Always a pleasure.", "What can I do for you now, {address}?"],
+        "goblin": ["Rike digked!"]
+      },
+      "hostile": {
+        "common": ["What do you want now?", "Can you not leave me alone?"],
+        "goblin": ["I gu u kad, hig?"]
+      }
+    },
+
+    "Response": {
+      "neutral": {
+        "common": ["I have told you everything I know.", "Yes?", "What more do you want?", "Anything else?"],
+        "goblin": ["Gra ku ki te u ettu.", "I dekh ket u kad?"]
+      },
+      "friendly": {
+        "common": ["Is there anything else I can help you with, {address}?", "What else can I do for you?"],
+        "goblin": ["Oukg kede gra gu di?"]
+      },
+      "hostile": {
+        "common": ["I have nothing more to say.", "Leave me alone."],
+        "goblin": ["Detirge hak.", "..."]
+      }
+    },
+
+    "RefuseTrade": {
+      "neutral": {
+        "common": ["I have nothing to trade.", "Sorry, I have nothing to trade.", "I do not have anything to trade right now."],
+        "goblin": ["Gra ku hadrag.", "Hadrag goukh guoud."]
+      },
+      "friendly": {
+        "common": ["I wish I could help, {address}, but I have nothing to trade.", "Apologies, {address}. My stock is empty."],
+        "goblin": ["Grewad, hadrag goukh guoud."]
+      },
+      "hostile": {
+        "common": ["I will not trade with you.", "I have no interest in trading with you."],
+        "goblin": ["Dekg, tirge hak, hig.", "Kah... hig..."]
+      }
+    },
+
+    "Fallback": {
+      "neutral": {
+        "common": ["I have nothing to say right now.", "..."],
+        "goblin": ["Mm.", "...", "Gra ka keki"]
+      },
+      "hostile": {
+        "common": ["I have nothing to say to you.", "Leave me alone."],
+        "goblin": ["Detirge hak, hig"]
+      }
+    }
+
+  },
+
+  "parts": {
+    "common": {
+      "address":         ["traveler", "adventurer", "stranger", "friend", "wanderer", "wayfarer"],
+      "location_closer": ["", "", "", " to {location}", " to {location_empty}"]
+    },
+    "goblin": {
+      "address": ["u", "hig", "kagad ker", "kat"]
+    }
+  },
+
+  "next_context": {
+    "Opening":     ["Response"],
+    "Greeting":    ["Response"],
+    "Identity":    ["Response", "Identity"],
+    "Location":    ["Response"],
+    "Knowledge":   ["Response"],
+    "Goodbye":     ["Response"],
+    "Response":    ["Response"],
+    "RefuseTrade": ["Response"],
+    "Fallback":    ["Default"]
+  }
+}

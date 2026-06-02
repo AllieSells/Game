@@ -551,8 +551,8 @@ class GameMap:
                                            gpu_only=_gpu_mode, light_color=(249, 219, 255))
                 elif not has_torch:
                     # Faint personal glow: just enough to see immediately around the player.
-                    self._add_light_source(px, py, radius=3, max_intensity=0.4,
-                                           gpu_only=_gpu_mode, light_color=(255, 255, 255))
+                    self._add_light_source(px, py, radius=3, max_intensity=0.1,
+                                           gpu_only=_gpu_mode, light_color=(255, 255, 255), wobble_dx=0.1, wobble_dy=0.1)
 
                 # Campfire and Bonfire lighting - doesn't affect FOV, only visual lighting
                 try:
@@ -627,12 +627,27 @@ class GameMap:
             except Exception:
                 self.tiles["light_level"][:] = 0.0
 
-            # Find tile light sources (Window tiles emit ambient light).
-            window_name = np.array("Window", dtype="U64")
-            window_positions = np.argwhere(self.tiles["name"] == window_name)
-            for wx, wy in window_positions:
-                self._add_light_source(int(wx), int(wy), radius=8, max_intensity=50.0,
+            # Find tile light sources (func_light)
+            func_light_name = np.array("Functional Light", dtype="U64")
+            func_light_positions = np.argwhere(self.tiles["name"] == func_light_name)
+            for fx, fy in func_light_positions:
+                self._add_light_source(int(fx), int(fy), radius=15, max_intensity=50.0,
                                        light_color=(255, 255, 255), gpu_only=_gpu_mode)
+            
+        # Animation emission here
+        if hasattr(self.engine, "_anim_light_emitters"):
+            for emitter in self.engine._anim_light_emitters:
+                try:
+                    x = emitter.get("source_x", None)
+                    y = emitter.get("source_y", None)
+                    radius = emitter.get("radius", 5)
+                    max_intensity = emitter.get("max_intensity", 1.0)
+                    color = emitter.get("color", (255, 255, 255))
+                    self._add_light_source(int(x), int(y), radius=radius, max_intensity=max_intensity,
+                                           light_color=color, gpu_only=_gpu_mode)
+                except Exception as e:
+                    print(f"Error processing animation light emitter: {e}")
+                    continue
 
         # Render tiles with gradient lighting based on light levels
         self._render_tiles_with_gradient(console)

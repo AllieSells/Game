@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Optional
 import os
 import math
 import numpy as np
+import tcod.event
 from tcod.console import Console
 from tcod.map import compute_fov
 from collections import deque
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 
 import time
 from animations import FireFlicker, BonefireFlicker, FlameAnimation
-from gpu_stack import SmokeCloudParticle, EmberParticle, DripParticle, LightShaftParticles, BurningParticle, SleepingParticle, DustParticle
+from gpu_stack import SmokeCloudParticle, EmberParticle, DripParticle, BurningParticle, SleepingParticle, DustParticle
 import sprite_manager
 import tcod.noise
 
@@ -50,6 +51,8 @@ class Engine:
         self.tutorial_checkpoints: list = []
         
         self.animation_queue = deque()
+        self._active_animation_buckets: dict[type, list] = {}
+        self._active_animation_cache_valid = False
         self.animations_enabled = True
         self.debug = False
         self.cursor_hint = None 
@@ -70,11 +73,20 @@ class Engine:
         self._ambient_particle_gates = {
             "dust": None,
         }
+        self._ambient_particle_min_light = {
+            "dust": 0.30,
+        }
         
         # Damage indicator system
         self.damage_indicator_timer = 0
         self.damage_indicator_duration = 20  # frames to show damage indicator
         self.pending_damage_glitch = False   # set True when player takes damage; consumed by main.py
+        # Camera shake state (updated once per tick, applied in camera offset).
+        self._screen_shake_frames = 0
+        self._screen_shake_amplitude_px = 0.0
+        self._screen_shake_decay = 0.82
+        self._screen_shake_offset_x = 0
+        self._screen_shake_offset_y = 0
         
         # Movement sound system
         self.last_movement_time = 0
@@ -127,6 +139,8 @@ class Engine:
             "ema_ms": {},
             "last_frame_ms": {},
             "external_frame_ms": {},
+            "turn_ema_ms": {},   # per-turn EMA: only updated when player acts, not decayed between turns
+            "turn_last_ms": {},  # raw breakdown of the most recent player turn
             "frame_count": 0,
         }
 
@@ -137,6 +151,30 @@ class Engine:
         self.camera_render_y = 0.0
         self.camera_smoothing = 0.25
         self._camera_initialized = False
+
+    def invalidate_active_animation_cache(self) -> None:
+        self._active_animation_buckets = {}
+        self._active_animation_cache_valid = False
+
+    def rebuild_active_animation_cache(self) -> dict[type, list]:
+        buckets: dict[type, list] = {}
+        for anim in self.animation_queue:
+            if getattr(anim, "frames", 0) <= 0:
+                continue
+            anim_type = type(anim)
+            bucket = buckets.get(anim_type)
+            if bucket is None:
+                buckets[anim_type] = [anim]
+            else:
+                bucket.append(anim)
+        self._active_animation_buckets = buckets
+        self._active_animation_cache_valid = True
+        return buckets
+
+    def get_active_animation_bucket(self, anim_type: type, refresh: bool = False):
+        if refresh or not self._active_animation_cache_valid:
+            self.rebuild_active_animation_cache()
+        return self._active_animation_buckets.get(anim_type, ())
 
     def profile_external_ms(self, section: str, elapsed_ms: float) -> None:
         """Queue a profiling sample (milliseconds) from non-tick systems.
@@ -214,6 +252,33 @@ class Engine:
 
             for section, ms in frame_samples_ms.items():
                 self._profile_section(section, ms / 1000.0)
+        except Exception:
+            pass
+
+    def _record_turn_profile(self, section_ms: dict[str, float]) -> None:
+        """Record per-turn section costs.  Called once per player action, not every frame.
+
+        Uses a separate EMA that is never decayed between turns so the chart
+        shows meaningful averages even when the player acts infrequently.
+        """
+        try:
+            profiler = getattr(self, "lag_profiler", None)
+            if not isinstance(profiler, dict):
+                return
+            profiler["turn_last_ms"] = {k: float(v) for k, v in section_ms.items()}
+            turn_ema = profiler.setdefault("turn_ema_ms", {})
+            alpha = 0.3
+            for section, ms in section_ms.items():
+                ms = max(0.0, float(ms))
+                prev = float(turn_ema.get(section, ms))
+                turn_ema[section] = prev + (ms - prev) * alpha
+            for section in list(turn_ema.keys()):
+                if section not in section_ms:
+                    decayed = float(turn_ema[section]) * 0.85
+                    if decayed < 0.01:
+                        del turn_ema[section]
+                    else:
+                        turn_ema[section] = decayed
         except Exception:
             pass
 
@@ -350,7 +415,72 @@ class Engine:
         # wobble from Python's banker's rounding at +/-0.5.
         off_x = int(dx + 0.5) if dx >= 0.0 else int(dx - 0.5)
         off_y = int(dy + 0.5) if dy >= 0.0 else int(dy - 0.5)
+        off_x += int(getattr(self, "_screen_shake_offset_x", 0) or 0)
+        off_y += int(getattr(self, "_screen_shake_offset_y", 0) or 0)
         return off_x, off_y
+
+    def trigger_screen_shake(
+        self,
+        source_x: Optional[int] = None,
+        source_y: Optional[int] = None,
+        strength_px: float = 6.0,
+        duration_frames: int = 10,
+        max_distance_tiles: int = 10,
+    ) -> bool:
+        """Queue a cheap camera shake, attenuated by player distance from source.
+
+        Returns True if shake was applied for this event, False if filtered out.
+        """
+        amp = max(0.0, float(strength_px))
+        frames = max(0, int(duration_frames))
+        if amp <= 0.0 or frames <= 0:
+            return False
+
+        if (
+            source_x is not None
+            and source_y is not None
+            and self.player is not None
+            and max_distance_tiles is not None
+            and int(max_distance_tiles) > 0
+        ):
+            # Chebyshev distance is cheap and fits tile movement.
+            dx = abs(int(source_x) - int(self.player.x))
+            dy = abs(int(source_y) - int(self.player.y))
+            dist = max(dx, dy)
+            max_dist = int(max_distance_tiles)
+            if dist > max_dist:
+                return False
+            proximity = 1.0 - (float(dist) / float(max_dist))
+            amp *= max(0.15, proximity)
+
+        if amp <= 0.0:
+            return False
+
+        self._screen_shake_frames = max(int(getattr(self, "_screen_shake_frames", 0) or 0), frames)
+        self._screen_shake_amplitude_px = max(float(getattr(self, "_screen_shake_amplitude_px", 0.0) or 0.0), amp)
+        return True
+
+    def _update_screen_shake(self) -> None:
+        """Advance one frame of camera shake and compute this frame's offsets."""
+        frames = int(getattr(self, "_screen_shake_frames", 0) or 0)
+        amp = float(getattr(self, "_screen_shake_amplitude_px", 0.0) or 0.0)
+
+        if frames <= 0 or amp <= 0.0:
+            self._screen_shake_frames = 0
+            self._screen_shake_amplitude_px = 0.0
+            self._screen_shake_offset_x = 0
+            self._screen_shake_offset_y = 0
+            return
+
+        max_jitter = max(1, int(amp + 0.5))
+        self._screen_shake_offset_x = random.randint(-max_jitter, max_jitter)
+        self._screen_shake_offset_y = random.randint(-max_jitter, max_jitter)
+
+        self._screen_shake_frames = frames - 1
+        self._screen_shake_amplitude_px = amp * float(getattr(self, "_screen_shake_decay", 0.82) or 0.82)
+        if self._screen_shake_frames <= 0 or self._screen_shake_amplitude_px < 0.35:
+            self._screen_shake_frames = 0
+            self._screen_shake_amplitude_px = 0.0
 
     def _effect_list(self, target) -> list:
         effects = getattr(target, "effects", None)
@@ -382,46 +512,13 @@ class Engine:
             pass
         return effect
 
-    def tutorial_ticking(self, console: Console):
-        for entity in self.game_map.entities:
-            if getattr(entity, "type", None) == "Guide":
-                guide = entity
-                break
-        try:
-            if "start" not in self.tutorial_checkpoints:
-                self.tutorial_checkpoints.append("start")
-                guide.ai.say(custom="Welcome adventurer. Use WASD or right click to move. Try it out a bit!")
-            else:
-                if "moved" not in self.tutorial_checkpoints:
-                    if self.turn_count > 5:
-                        self.tutorial_checkpoints.append("moved")
-                        guide.ai.say(custom="Excellent. Now, move to that chest northward, and right click on it to get some basic equipment.")
-                else:
-                    if "looted" not in self.tutorial_checkpoints:
-                        if len(self.player.inventory.items) > 0:
-                            self.tutorial_checkpoints.append("looted")
-                            guide.ai.say(custom="Well done. Equip items using the (TAB) inventory. Try defeating that training dummy by moving into it, or left clicking it.")
-                    else:
-                        if "defeat" not in self.tutorial_checkpoints:
-                            dummy = next((e for e in self.game_map.entities if getattr(e, "name", None) == "Training Dummy"), None)
-                            if not dummy or (dummy.fighter and dummy.fighter.hp <= 0):
-                                self.tutorial_checkpoints.append("defeat")
-                                guide.ai.say(custom="That was a real challenge. You will gain levels as you hone your skills (F). Open your inventory (TAB) and use the sigil stone from the chest.")
-                        else:
-                            if "stoneused" not in self.tutorial_checkpoints:
-                                # check if player has level 2 arcana
-                                if self.player.level and self.player.level.traits['arcana']['level'] >= 2:
-                                    self.tutorial_checkpoints.append("stoneused")
-                                    guide.ai.say(custom="Well done. Access the controls menu (M) if you need a refresher. Ascend (>) the stairs to the west, and best of luck traveller.")
-        except Exception as e:
-            print(f"ERROR: Exception in tutorial ticking: {e}")
-
 
     
     def tick(self, console: Console):
         _frame_start = time.perf_counter()
         _frame_samples_ms: dict[str, float] = {}
         self.tick_count += 1
+        self._update_screen_shake()
 
         def _mark(section_name: str, section_start: float) -> None:
             _frame_samples_ms[section_name] = _frame_samples_ms.get(section_name, 0.0) + (
@@ -455,6 +552,7 @@ class Engine:
         self.animation_queue = deque(
             anim for anim in self.animation_queue if getattr(anim, "frames", 1) > 0
         )
+        self.invalidate_active_animation_cache()
         _mark("cleanup", _section_start)
 
         # Always advance auto-move regardless of map type.
@@ -506,8 +604,6 @@ class Engine:
 
         # Handle tutorial-specific ticking for tutorial maps
         _section_start = time.perf_counter()
-        if hasattr(self, 'game_map') and getattr(self.game_map, 'biome', None) == "tutorial":
-            self.tutorial_ticking(console)
         _mark("tutorial", _section_start)
         
 
@@ -555,52 +651,28 @@ class Engine:
             self.animation_queue.appendleft(GlobalDungeonWaterAnimation())
         _mark("global_anims", _section_start)
 
-        # Spawn directional light shaft particles for visible Window tiles.
         # Check north (y-1) and south (y+1) independently: if that side is open
         # (transparent), spawn a shaft going in that direction.
         _section_start = time.perf_counter()
-        if self.animations_enabled and hasattr(self, 'game_map'):
-            existing_shafts = {
-                (int(a.fx), int(a.fy), a.shaft_direction)
-                for a in self.animation_queue
-                if isinstance(a, LightShaftParticles) and a.frames > 0
-            }
-            visible_windows = np.argwhere(
-                self.game_map.visible & (self.game_map.tiles["name"] == "Window")
-            )
-            for x, y in visible_windows:
-                ix, iy = int(x), int(y)
-                # North side open → shaft goes north (up on screen, direction=-1)
-                if (self.game_map.in_bounds(ix, iy - 1)
-                        and self.game_map.tiles[ix, iy - 1]["transparent"]
-                        and (ix, iy, -1) not in existing_shafts):
-                    self.animation_queue.append(LightShaftParticles((ix, iy), shaft_direction=-1))
-                # South side open → shaft goes south (down on screen, direction=+1)
-                if (self.game_map.in_bounds(ix, iy + 1)
-                        and self.game_map.tiles[ix, iy + 1]["transparent"]
-                        and (ix, iy, 1) not in existing_shafts):
-                    self.animation_queue.append(LightShaftParticles((ix, iy), shaft_direction=1))
-            _mark("light_shafts", _section_start)
-
-        
-        _section_start = time.perf_counter()
         try:
             # Build particle count cache once per frame to avoid O(n*m) lookups
+            _ss = time.perf_counter()
             tile_fire_counts, entity_fire_counts, position_ember_counts, position_drip_counts, position_dust_counts = self._build_particle_count_cache()
             total_tile_fires = sum(tile_fire_counts.values())
             total_entity_fires = sum(entity_fire_counts.values())
             total_fire_particles = total_tile_fires + total_entity_fires
+            active_burning_emitters = list(self.get_active_animation_bucket(BurningParticle, refresh=True))
 
             self._tick_ambient_particles(position_dust_counts)
+            _mark("particle_cache", _ss)
 
+            _ss = time.perf_counter()
             burning_entities = {
                 e
                 for e in self.game_map.entities
                 if any(getattr(effect, "name", "") == "Burning" for effect in getattr(e, "effects", []))
             }
-            for anim in self.animation_queue:
-                if not isinstance(anim, BurningParticle):
-                    continue
+            for anim in active_burning_emitters:
                 anim_entity = getattr(anim, "entity", None)
                 if anim_entity is None:
                     continue
@@ -612,9 +684,7 @@ class Engine:
                 for e in self.game_map.entities
                 if getattr(e, "name", None) == "Campfire"
             }
-            for anim in self.animation_queue:
-                if not isinstance(anim, BurningParticle):
-                    continue
+            for anim in active_burning_emitters:
                 if not getattr(anim, "contained", False):
                     continue
                 apos = (
@@ -628,9 +698,7 @@ class Engine:
             tile_fire_cap = 30
             fire_global_cap = 5000
             existing_tile_emitters = {}
-            for anim in self.animation_queue:
-                if not isinstance(anim, BurningParticle):
-                    continue
+            for anim in active_burning_emitters:
                 if getattr(anim, 'entity', None) is not None or getattr(anim, 'contained', False):
                     continue
                 ex = int(round(getattr(anim, 'anchor_x', getattr(anim, 'fx', 0.0))))
@@ -670,6 +738,7 @@ class Engine:
                     )
                     self.animation_queue.append(emitter)
                     existing_tile_emitters[pos] = emitter
+                    active_burning_emitters.append(emitter)
                 else:
                     emitter.set_anchor(pos[0], pos[1])
                     emitter.refresh(
@@ -742,9 +811,8 @@ class Engine:
                             if entity.name == "Campfire":
                                 contained_emitter = next(
                                     (
-                                        a for a in self.animation_queue
-                                        if isinstance(a, BurningParticle)
-                                        and getattr(a, "contained", False)
+                                        a for a in active_burning_emitters
+                                        if getattr(a, "contained", False)
                                         and int(round(getattr(a, "anchor_x", getattr(a, "fx", -9999)))) == pos[0]
                                         and int(round(getattr(a, "anchor_y", getattr(a, "fy", -9999)))) == pos[1]
                                     ),
@@ -755,14 +823,15 @@ class Engine:
                                         (entity.x, entity.y),
                                         None,
                                         contained=True,
-                                        max_sparks=3,
-                                        emit_per_tick=1,
-                                        ttl_frames=20,
+                                        max_sparks=10,
+                                        emit_per_tick=3,
+                                        ttl_frames=30,
                                     )
                                     self.animation_queue.append(contained_emitter)
+                                    active_burning_emitters.append(contained_emitter)
                                 if contained_emitter is not None:
                                     contained_emitter.set_anchor(entity.x, entity.y)
-                                    contained_emitter.refresh(ttl_frames=20, max_sparks=3, emit_per_tick=1)
+                                    contained_emitter.refresh(ttl_frames=30, max_sparks=10, emit_per_tick=3)
                             elif is_bonfire:
                                 if not any(isinstance(a, BonefireFlicker) and a.position == pos for a in self.animation_queue):
                                     self.animation_queue.append(BonefireFlicker(pos))
@@ -839,9 +908,36 @@ class Engine:
                                 self.animation_queue.append(SleepingParticle(entity))
                     except Exception:
                         pass
-        
+            _mark("entity_loop", _ss)
+
+            # Get particles for emission
+            _ss = time.perf_counter()
+            emitters = []
+            for anim in self.animation_queue:
+                if getattr(anim, "frames", 0) <= 0:
+                    continue
+                get_light = getattr(anim, "get_light", None)
+                if get_light is None:
+                    continue
+                data = get_light()
+                if not data:
+                    continue
+
+                # Flatten if dict
+                if isinstance(data, dict):
+                    emitters.append(data)
+                elif isinstance(data, (list, tuple)):
+                    for item in data:
+                        if isinstance(item, dict):
+                             emitters.append(item)
+
+            self._anim_light_emitters = emitters
+            _mark("light_emitters", _ss)
+
             # Update ambient sounds based on player proximity
+            _ss = time.perf_counter()
             sounds.update_all_ambient_sounds(self.player, self.game_map.entities, self.game_map)
+            _mark("ambient_sounds", _ss)
         except Exception:
             traceback.print_exc()
             pass
@@ -866,30 +962,32 @@ class Engine:
         position_ember_counts = {}
         position_drip_counts = {}
         position_dust_counts = {}
-        
-        for anim in self.animation_queue:
-            if isinstance(anim, BurningParticle):
-                spark_count = max(0, len(getattr(anim, 'sparks', [])))
-                entity = getattr(anim, 'entity', None)
-                if entity is None:
-                    # Tile-based fire emitter
-                    pos = (
-                        int(round(getattr(anim, 'anchor_x', getattr(anim, 'fx', 0.0)))),
-                        int(round(getattr(anim, 'anchor_y', getattr(anim, 'fy', 0.0)))),
-                    )
-                    tile_fire_counts[pos] = tile_fire_counts.get(pos, 0) + spark_count
-                else:
-                    # Entity-based fire emitter
-                    entity_fire_counts[entity] = entity_fire_counts.get(entity, 0) + spark_count
-            elif isinstance(anim, EmberParticle):
-                pos = (int(round(anim.fx)), int(round(anim.fy)))
-                position_ember_counts[pos] = position_ember_counts.get(pos, 0) + 1
-            elif isinstance(anim, DripParticle):
-                pos = (int(round(anim.fx)), int(round(anim.fy)))
-                position_drip_counts[pos] = position_drip_counts.get(pos, 0) + 1
-            elif isinstance(anim, DustParticle):
-                pos = getattr(anim, 'source_pos', (int(round(anim.fx)), int(round(anim.fy))))
-                position_dust_counts[pos] = position_dust_counts.get(pos, 0) + 1
+
+        buckets = self.rebuild_active_animation_cache()
+
+        for anim in buckets.get(BurningParticle, ()): 
+            spark_count = max(0, len(getattr(anim, 'sparks', [])))
+            entity = getattr(anim, 'entity', None)
+            if entity is None:
+                pos = (
+                    int(round(getattr(anim, 'anchor_x', getattr(anim, 'fx', 0.0)))),
+                    int(round(getattr(anim, 'anchor_y', getattr(anim, 'fy', 0.0)))),
+                )
+                tile_fire_counts[pos] = tile_fire_counts.get(pos, 0) + spark_count
+            else:
+                entity_fire_counts[entity] = entity_fire_counts.get(entity, 0) + spark_count
+
+        for anim in buckets.get(EmberParticle, ()): 
+            pos = (int(round(anim.fx)), int(round(anim.fy)))
+            position_ember_counts[pos] = position_ember_counts.get(pos, 0) + 1
+
+        for anim in buckets.get(DripParticle, ()): 
+            pos = (int(round(anim.fx)), int(round(anim.fy)))
+            position_drip_counts[pos] = position_drip_counts.get(pos, 0) + 1
+
+        for anim in buckets.get(DustParticle, ()): 
+            pos = getattr(anim, 'source_pos', (int(round(anim.fx)), int(round(anim.fy))))
+            position_dust_counts[pos] = position_dust_counts.get(pos, 0) + 1
         
         return tile_fire_counts, entity_fire_counts, position_ember_counts, position_drip_counts, position_dust_counts
 
@@ -942,7 +1040,24 @@ class Engine:
         if tile["name"] == "Water":
             return False
 
+        min_light = self.get_ambient_particle_min_light("dust", 0.0)
+        if min_light > 0.0:
+            try:
+                tile_light = float(self.game_map.tiles["light_level"][x, y])
+            except Exception:
+                tile_light = 0.0
+            if tile_light < min_light:
+                return False
+
         return self._passes_ambient_particle_gate("dust", x, y)
+
+    def get_ambient_particle_min_light(self, particle_key: str, default: float = 0.0) -> float:
+        """Return the minimum light level required to show/spawn a particle type."""
+        try:
+            value = self._ambient_particle_min_light.get(particle_key, default)
+            return max(0.0, min(1.0, float(value)))
+        except Exception:
+            return max(0.0, min(1.0, float(default)))
 
     def _passes_ambient_particle_gate(self, particle_key: str, x: int, y: int) -> bool:
         """Return True when the tile passes the configured future gate for a particle type."""
@@ -1455,11 +1570,14 @@ class Engine:
             return
 
         tile = self.mouse_x, self.mouse_y
+        _ks = tcod.event.get_keyboard_state()
+        _shift_held = bool(_ks[225] or _ks[229])  # SDL_SCANCODE_LSHIFT/RSHIFT
         # Only recompute cursor_hint when the mouse tile changes
-        if getattr(self, '_last_cursor_tile', None) != (tile, self.mouse_ui_y):
-            self._last_cursor_tile = (tile, self.mouse_ui_y)
+        if getattr(self, '_last_cursor_tile', None) != (tile, self.mouse_ui_y, _shift_held):
+            self._last_cursor_tile = (tile, self.mouse_ui_y, _shift_held)
             interactable = False
             fightable = False
+            speakable = False
             self.cursor_hint = None
             if self.mouse_ui_y > 38:
                 interactable = False
@@ -1472,7 +1590,9 @@ class Engine:
                 for ent in self.game_map.entities:
                     if ent.x != self.mouse_x or ent.y != self.mouse_y:
                         continue
-                    # Friendly NPCs are interactable, not fightable
+                    if getattr(ent, "can_speak", False):
+                        speakable = True
+                    # Friendly NPCs are interactable and optionally speakable.
                     if hasattr(ent, "ai") and getattr(ent.ai, "type", None) == "Friendly":
                         interactable = True
                         continue
@@ -1485,10 +1605,12 @@ class Engine:
                     # Check if enemy, has hp, and NOT player
                     elif hasattr(ent, "fighter") and ent.fighter and ent.fighter.hp > 0 and ent.fighter != self.player.fighter:
                         fightable = True
-            if interactable:
-                self.cursor_hint = "interact"
+            if _shift_held and speakable:
+                self.cursor_hint = "speak"
             elif fightable:
                 self.cursor_hint = "fight"
+            elif interactable:
+                self.cursor_hint = "interact"
         render_functions.render_names_at_mouse_location(
             console=console, x=1, y=42, engine=self  # MOUSE_LOCATION coordinates
             )

@@ -79,7 +79,9 @@ class TurnManager:
                     ai_elapsed += time.perf_counter() - _ai_start
                     actor.initiative_counter -= 100  # Consume action
                 except Exception as e:
-                    print(f"ERROR: Actor {actor.name} failed to perform action: {e}")
+                    import traceback
+                    print(f"ERROR: Actor {actor.name} failed to perform action: {traceback.format_exc()}")
+                    #raise e
                     actor.initiative_counter -= 100  # Still consume turn
             elif actor.ai:
                 actor.initiative_counter -= 100  # Sleep still burns the turn
@@ -110,15 +112,20 @@ class TurnManager:
     def process_player_turn_end(self) -> BaseEventHandler | None:
         """
         Called after a valid player action to process all turn-end effects.
-        
+
         Returns:
             BaseEventHandler if we need to switch handlers (like GameOver), None otherwise.
         """
+        _turn_bd: dict[str, float] = {}  # per-turn breakdown for the F1 profiler
+
         # Refresh passive ring effects first so expiring buffs are extended
         # before their tick/message phase runs.
+        _t = time.perf_counter()
         self._handle_equipped_ring_effects()
+        _turn_bd["tm_rings"] = (time.perf_counter() - _t) * 1000.0
 
         # Tick active ability cooldowns for all actors once per world tick.
+        _t = time.perf_counter()
         for actor in list(self.engine.game_map.actors):
             ability = getattr(actor, "active_ability", None)
             if ability is None:
@@ -126,9 +133,10 @@ class TurnManager:
             tick_fn = getattr(ability, "tick_cooldown", None)
             if callable(tick_fn):
                 tick_fn(1)
+        _turn_bd["tm_abilities"] = (time.perf_counter() - _t) * 1000.0
 
         # Handle all effects on entities
-
+        _t = time.perf_counter()
         for actor in list(self.engine.game_map.actors):
             if not hasattr(actor, "effects") or not actor.effects:
                 continue
@@ -152,16 +160,20 @@ class TurnManager:
                 except Exception:
                     # Don't let a broken effect crash the engine tick
                     pass
-
+        _turn_bd["tm_effects"] = (time.perf_counter() - _t) * 1000.0
 
         # 1. Handle equipment durability (torches burning out, etc.)
+        _t = time.perf_counter()
         handler_change = self._handle_equipment_durability()
+        _turn_bd["tm_equip"] = (time.perf_counter() - _t) * 1000.0
         if handler_change:
             return handler_change
+
         # Hunger / saturation handling:
         # - Saturation decreases faster each tick (represents recent food buffering).
         # - While saturation is high, hunger decreases slowly. As saturation depletes
         #   the hunger decrease ramps up to the full rate when saturation == 0.
+        _t = time.perf_counter()
         player = self.engine.player
         base_hunger_decrease = 0.05   # hunger drain once saturation is gone
         saturation_decay = 0.25        # saturation consumed per player turn; stew (+100) lasts ~100 turns
@@ -185,36 +197,49 @@ class TurnManager:
 
         player.hunger = max(0.0, player.hunger - (base_hunger_decrease * hunger_mult))
         self.total_player_moves += 1
-
+        _turn_bd["tm_hunger"] = (time.perf_counter() - _t) * 1000.0
 
         self.engine.debug_log(f"TOTAL PLAYER MOVES: {self.total_player_moves}", handler=self.__class__.__name__, event="PlayerTurnEnd")
 
-
-        # Process any remaining actor turns after player acted
+        # Process any remaining actor turns after player acted (internally reports ai_postturn)
+        _t = time.perf_counter()
         self._process_remaining_turns()
-        
+        _turn_bd["tm_ai_post"] = (time.perf_counter() - _t) * 1000.0
+
         # 3. Update field of view
+        _t = time.perf_counter()
         self._update_fov()
-        
+        _turn_bd["tm_fov"] = (time.perf_counter() - _t) * 1000.0
+
         # 4. Handle status effects and environmental effects
+        _t = time.perf_counter()
         self._handle_status_effects()
+        _turn_bd["tm_status"] = (time.perf_counter() - _t) * 1000.0
 
         # 5. Update player state (e.g., check for starvation)
+        _t = time.perf_counter()
         self._update_player_state()
-        
+        _turn_bd["tm_player"] = (time.perf_counter() - _t) * 1000.0
+
         # 6. Handle special game state checks (level up, death, etc.)
+        _t = time.perf_counter()
         handler_change = self._handle_game_state_checks()
+        _turn_bd["tm_checks"] = (time.perf_counter() - _t) * 1000.0
         if handler_change:
             return handler_change
-        
+
         # 7. Process liquid system aging and evaporation
+        _t = time.perf_counter()
         if hasattr(self.engine.game_map, 'liquid_system'):
             self.engine.game_map.liquid_system.tick_liquid()
+        _turn_bd["tm_liquid"] = (time.perf_counter() - _t) * 1000.0
 
         # 8. Process liquid coating entities
+        _t = time.perf_counter()
         self._process_body_part_coating_evaporation()
         self._process_body_part_liquid_coating()
         self._process_body_part_liquid_effects()
+        _turn_bd["tm_body"] = (time.perf_counter() - _t) * 1000.0
 
         # Keep composite sprite pressure bounded by reclaiming entries that are
         # no longer reachable from the current engine state.
@@ -240,12 +265,15 @@ class TurnManager:
                     include_cached_world_maps=False,
                 )
                 self._last_prune_turn = self.total_player_moves
-                self.engine.profile_external_ms("sprite_prune", (time.perf_counter() - _prune_start) * 1000.0)
+                _prune_ms = (time.perf_counter() - _prune_start) * 1000.0
+                self.engine.profile_external_ms("sprite_prune", _prune_ms)
+                _turn_bd["tm_sprite_prune"] = _prune_ms
         except Exception:
             pass
 
+        # Commit per-turn breakdown to the profiler (uses turn-granularity EMA).
+        self.engine._record_turn_profile(_turn_bd)
 
-        
         return None
     
     def _process_body_part_liquid_coating(self) -> None:

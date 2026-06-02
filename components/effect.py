@@ -433,8 +433,13 @@ class BurningEffect(Effect):
                     current_entity_fires = 0
                     current_total_fires = 0
                     entity_emitter = None
-                    for anim in engine.animation_queue:
-                        if not isinstance(anim, BurningParticle) or getattr(anim, "frames", 0) <= 0:
+                    burning_emitters = (
+                        engine.get_active_animation_bucket(BurningParticle, refresh=True)
+                        if hasattr(engine, "get_active_animation_bucket")
+                        else engine.animation_queue
+                    )
+                    for anim in burning_emitters:
+                        if not isinstance(anim, BurningParticle):
                             continue
                         spark_count = max(0, len(getattr(anim, "sparks", [])))
                         current_total_fires += spark_count

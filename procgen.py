@@ -1203,9 +1203,14 @@ def generate_first_floor(
             # top and bottom walls, between x49 and x59
             if y == tut_room.y1 or y == tut_room.y2:
                 if x > tut_room.x1 + 1 and x < tut_room.x2 - 2:
-                    # every 3 tiles
-                    if (x - (tut_room.x1 + 2)) % 3 == 0:
+                    # every 5 tiles
+                    if (x - (tut_room.x1 + 2)) % 5 == 0:
                         dungeon.tiles[x, y] = tile_types.window
+                        # Place floor tile behind the window to prevent it from being a solid wall
+                        if y == tut_room.y1:
+                            dungeon.tiles[x, y - 1] = tile_types.func_light
+                        elif y == tut_room.y2:
+                            dungeon.tiles[x, y + 1] = tile_types.func_light
     center_y = (tut_room.y1 + tut_room.y2) // 2
 
     # Locked door on the west wall — the only exit, unlocked with a Dungeon Key
@@ -1218,7 +1223,7 @@ def generate_first_floor(
 
     import loot_tables
     _start_chest = entity_factories.make_chest_with_loot(loot_tables.generate_starter_chest_loot(), capacity=15)
-    _start_chest.spawn(dungeon, 46, 21)
+    #_start_chest.spawn(dungeon, 46, 21)
 
     #dungeon.tiles[56, 21] = tile_types.generate_foliage_tile()
     #dungeon.tiles[55, 21] = tile_types.generate_foliage_tile()
@@ -1230,7 +1235,7 @@ def generate_first_floor(
 
     rooms.append(tut_room)
 
-    entity_factories.training_dummy.spawn(dungeon, 49, 21)
+    entity_factories.training_dummy.spawn(dungeon, 47, 22)
     guide = copy.deepcopy(entity_factories.tutorial_guide)
     guide.generate_villager(
         job="guide",
@@ -1246,9 +1251,10 @@ def generate_first_floor(
         torso="brown silk robe",
         legs="silk trousers",
         feet="leather shoes",
-        accessories="gold necklaces"
+        accessories="gold necklaces",
+        pitch=0.7
     )
-    guide.spawn(dungeon, 43, 28)
+    guide.spawn(dungeon, 47, 27)
 
     player_start = (tut_room.x1 + 2, center_y)
     _placer.place(*player_start, dungeon)
@@ -1605,7 +1611,11 @@ def generate_dungeon(
                         tile = dungeon.tiles[x,y]
                         tile_cp = int(tile["light"]["ch"])
                         foliage_cp = int(foliage["light"]["ch"])
-                        sprite = sprite_manager.compose_sprite([tile_cp, foliage_cp])
+                        foliage_tint = tuple(int(v) for v in foliage["light"]["fg"])
+                        sprite = sprite_manager.compose_sprite(
+                            [tile_cp, foliage_cp],
+                            layer_tints=[None, foliage_tint],
+                        )
                         composed_cp = ord(sprite)
                         result = dungeon.tiles[x, y].copy()
                         result["light"]["ch"] = composed_cp

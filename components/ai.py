@@ -12,8 +12,6 @@ import color
 import sounds
 from components.effect import has_effect_name, is_invisible, InvisibilityEffect
 
-from languages import generate_sentence
-
 
 if TYPE_CHECKING:
     from entity import Actor
@@ -86,17 +84,12 @@ class BaseAI(Action):
 
     def say(self, context: Optional[str] = "idle", custom: Optional[str] = None) -> None:
         if (self.entity.name == "Goblin" or self.entity.name == "Troll"):
-            say = generate_sentence(context , "goblin", known=False)
             from render_functions import SpeechBubble
             self.engine.speech_bubbles.append(SpeechBubble(self.entity, 90))
-            self.engine.message_log.add_message(f"{self.entity.name}: '{say}'", color.green)
         if (self.entity.name == "The Guide"):
             from render_functions import SpeechBubble
             self.engine.speech_bubbles.append(SpeechBubble(self.entity, 90))
-            if custom:
-                self.engine.message_log.add_message(f"{self.entity.name}: '{custom}'", color.gold_accent)
-            else:
-                pass
+            _ = custom
 
 
     def perform(self) -> None:
@@ -295,7 +288,6 @@ class BaseAI(Action):
         entity's `sight_radius` attribute if present, otherwise 6.
         """
         try:
-
             gm = self.entity.gamemap
             if radius is None:
                 radius = getattr(self.entity, "sight_radius", 6)
@@ -306,15 +298,12 @@ class BaseAI(Action):
                 return False  # Can't see invisible actors at all
             if target_in_darkness:
                 radius = max(1, radius - 4)  # Significantly reduced sight range in darkness
-            
-            
-            # Check if this entity itself is in darkness (reduced sight) FUTURE IMPLEMENT
-            #self_in_darkness = any(getattr(e, "name", "") == "Darkness" for e in getattr(self.entity, "effects", []))
-            #if self_in_darkness:
-            #    radius = max(1, radius - 2)  # Self in darkness also reduces sight
+
+            # Cheap Chebyshev pre-filter: skip expensive compute_fov when clearly out of range.
+            if max(abs(self.entity.x - actor.x), abs(self.entity.y - actor.y)) > radius:
+                return False
 
             fov = tcod.map.compute_fov(gm.tiles["transparent"], (self.entity.x, self.entity.y), radius)
-            
             return bool(fov[actor.x, actor.y])
         except Exception:
             return False
@@ -403,15 +392,18 @@ class HostileEnemy(BaseAI):
                     if random.random() < 0.5:
                         self.say("observe")
 
- 
             self.wander_wait_turns = 0
-            self.path = []
             self.last_saw_player = 0
-            
+
             if distance <= 1:
+                self.path = []
                 return MeleeAction(self.entity, dx, dy).perform()
-            
-            self.path = self.get_path_with_doors(target.x, target.y)
+
+            # Re-path only when target moved to a new tile; otherwise follow the cached path.
+            _tgt = (target.x, target.y)
+            if not self.path or getattr(self, "_path_target", None) != _tgt:
+                self.path = self.get_path_with_doors(target.x, target.y)
+                self._path_target = _tgt
         else:
             # Lost line-of-sight (including invisibility): drop stale chase path.
             if self.last_saw_player == 0:
@@ -595,23 +587,23 @@ class PhasingAI(HostileEnemy):
         if self.can_see_actor(target):
             # Player detected - maintain approach (phasing keeps us undetectable)
             self.wander_wait_turns = 0
-            self.path = []
             self.last_saw_player = 0
-            
+
             if distance <= 1:
                 # Adjacent to player - attack!
                 # Explicitly break invisibility before attacking to ensure it's visible
                 remove_phasing_effect(self.entity)
-                
+                self.path = []
                 result = MeleeAction(self.entity, dx, dy).perform()
-                
                 # After attack, trigger cooldown so we can't immediately re-phase
                 self.phasing_cooldown = self.phasing_cooldown_max
-                
                 return result
-            
-            # Not adjacent yet - keep approaching (invisibly, if phasing active)
-            self.path = self.get_path_with_doors(target.x, target.y)
+
+            # Re-path only when target moved to a new tile; otherwise follow cached path.
+            _tgt = (target.x, target.y)
+            if not self.path or getattr(self, "_path_target", None) != _tgt:
+                self.path = self.get_path_with_doors(target.x, target.y)
+                self._path_target = _tgt
         else:
             # Lost line-of-sight: drop stale path
             if self.last_saw_player == 0:
@@ -799,24 +791,23 @@ class RetreatingPhasingAI(PhasingAI):
         # **NORMAL MODE**: Chase or wander
         if self.can_see_actor(target):
             self.wander_wait_turns = 0
-            self.path = []
             self.last_saw_player = 0
-            
+
             if distance <= 1:
                 # Adjacent - attack and enter retreat mode
                 remove_phasing_effect(self.entity)  # Materialize for attack
-                
+                self.path = []
                 result = MeleeAction(self.entity, dx, dy).perform()
-
                 # Trigger cooldown + retreat pathing.
                 self.phasing_cooldown = self.phasing_cooldown_max
                 self.is_retreating = True
-                self.path = []
-
                 return result
-            
-            # Chase player (invisibly)
-            self.path = self.get_path_with_doors(target.x, target.y)
+
+            # Re-path only when target moved to a new tile; otherwise follow cached path.
+            _tgt = (target.x, target.y)
+            if not self.path or getattr(self, "_path_target", None) != _tgt:
+                self.path = self.get_path_with_doors(target.x, target.y)
+                self._path_target = _tgt
         else:
             if self.last_saw_player == 0:
                 self.path = []
@@ -1378,7 +1369,7 @@ class RangedEnemyAI(HostileEnemy):
         super().__init__(entity)
         self.type = "RangedEnemyAI"
         self.ranged_cooldown = 0
-        self.ranged_cooldown_turns = 3
+        self.ranged_cooldown_turns = 10
 
     def perform(self) -> None:
         """Fire projectiles at player when in range, melee if player gets too close, and otherwise chase."""

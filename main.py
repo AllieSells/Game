@@ -12,7 +12,7 @@ os.environ["SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR"] = "0"
 os.environ["SDL_VIDEO_ALLOW_SCREENSAVER"] = "0"
 #os.environ["SDL_RENDER_DRIVER"] = "opengl"
 # Set version
-os.environ["SDL_RENDER_SCALE_QUALITY"] = "1"  #  filtering when tiles are scaled
+os.environ["SDL_RENDER_SCALE_QUALITY"] = "nearest"  #  filtering when tiles are scaled
 import warnings
 import sys
 import hashlib
@@ -160,7 +160,7 @@ try:
     scanlines_tex.blend_mode = tcod.sdl.render.BlendMode.MOD
     scanlines_h = scanlines_np.shape[0]  # one sine period
     scanlines_scroll = 0.0
-    scanlines_speed = 10.0  # pixels per second
+    scanlines_speed = 5.0  # pixels per second
 except Exception:
     scanlines_tex = None
     scanlines_h = 2
@@ -610,6 +610,10 @@ def main() -> None:
     cursor_sword_img = Image.open(get_data_path("RP/cursors/cursor_sword.png")).convert("RGBA")
     pixels_cursor_sword = np.array(cursor_sword_img, dtype=np.uint8)
     cursor_sword = tcod.sdl.mouse.new_color_cursor(pixels_cursor_sword, (0, 0))
+
+    cursor_speak_img = Image.open(get_data_path("RP/cursors/cursor_speak.png")).convert("RGBA")
+    pixels_cursor_speak = np.array(cursor_speak_img, dtype=np.uint8)
+    cursor_speak = tcod.sdl.mouse.new_color_cursor(pixels_cursor_speak, (0, 0))
     
     cursor_walk_img = Image.open(get_data_path("RP/cursors/cursor_walk.png")).convert("RGBA")
     pixels_cursor_walk = np.array(cursor_walk_img, dtype=np.uint8)
@@ -814,6 +818,8 @@ def main() -> None:
                 tcod.sdl.mouse.set_cursor(cursor_sword)
             elif hint == 'interact':
                 tcod.sdl.mouse.set_cursor(cursor_interact)
+            elif hint == 'speak':
+                tcod.sdl.mouse.set_cursor(cursor_speak)
             elif hint == 'walk':
                 tcod.sdl.mouse.set_cursor(cursor_walk)
             elif _mouse_held:
@@ -1489,6 +1495,11 @@ def main() -> None:
                         and handler._get_fade_alpha() < 1.0):
                     overlay_dirty = True
 
+                # Dialogue speak-box text reveals over time, so keep this popup live
+                # even when there are no input events.
+                if isinstance(handler, input_handlers.DialogueEventHandler):
+                    overlay_dirty = True
+
                 # Detect InventoryGridUI (either as direct handler or as parent of
                 # a context-menu overlay) so the scaled inventory stays visible.
                 _is_scaled_inv = getattr(handler, '_is_scaled_inventory', False)
@@ -1498,6 +1509,8 @@ def main() -> None:
                                    else None)
                 if _scaled_inv_src is not None and getattr(_scaled_inv_src, '_drag_item', None) is not None:
                     overlay_dirty = True
+
+                overlay_dirty = True
 
                 if overlay_dirty or cached_overlay_handler is not handler:
                     ui_console.clear()
@@ -1629,6 +1642,12 @@ def main() -> None:
                 # When False (context menu on top): render grid PRE-chrome so the BLEND
                 # layer (chrome with transparent hole + context menu) sits on top.
                 _grid_is_direct = _inv_grid_handler is not None and handler is _inv_grid_handler
+                _inv_popup_scale_fn = (getattr(_inv_grid_handler, 'get_popup_scale', None)
+                                       if _inv_grid_handler is not None else None)
+                _inv_popup_scale = (_inv_popup_scale_fn()
+                                    if callable(_inv_popup_scale_fn)
+                                    else 1.0)
+                _inv_popup_animating = _inv_popup_scale < 1.0
 
                 # ── Eq panel helper — called from both pre-chrome and post-chrome blocks ───────
                 # Normal : slots fully opaque (NONE blend) covering the body diagram.
@@ -1702,7 +1721,7 @@ def main() -> None:
                         _draw_body_diagram(bright=True)    # Alt: bright diagram, no slots
 
                 # Pre-chrome grid render — context menu / BLEND overlay case only
-                if _inv_grid_handler is not None and not _grid_is_direct:
+                if _inv_grid_handler is not None and not _grid_is_direct and not _inv_popup_animating:
                     _gdt = _inv_grid_handler._grid_dest_tiles
                     _grid_item_tex = inv_console_renderer.render(_inv_grid_handler._grid_console)
                     _grid_item_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
@@ -1756,8 +1775,36 @@ def main() -> None:
                     # renderer so it never shares a texture with game_console_renderer.
                     # Dest = full window → each tile is (window_w/40) × (window_h/25) = 32×32 px
                     # at the default 1280×800 resolution, giving clean 2× readable characters.
-                    _inv_tex = inv_console_renderer.render(_scaled_inv_src._inv_console)
-                    renderer.copy(_inv_tex, dest=(0, 0, window_w, window_h))
+                    _scaled_popup_scale_fn = getattr(_scaled_inv_src, 'get_popup_scale', None)
+                    _scaled_popup_scale = (_scaled_popup_scale_fn()
+                                           if callable(_scaled_popup_scale_fn)
+                                           else 1.0)
+                    _scaled_animating = _scaled_popup_scale < 1.0
+
+                    # During scale-in, draw only the animated popup bounds from ui_console.
+                    # Copying the full scaled inventory console here would paint a full-screen
+                    # black layer before the handler has rendered its chrome into _inv_console.
+                    if _scaled_animating and _scaled_inv_src._px is not None:
+                        _spx, _spy, _spw, _sph = (
+                            _scaled_inv_src._px,
+                            _scaled_inv_src._py,
+                            _scaled_inv_src._pw,
+                            _scaled_inv_src._ph,
+                        )
+                        renderer.copy(
+                            _ov_tex,
+                            source=(
+                                int(_spx * _tw), int(_spy * _th),
+                                int(_spw * _tw), int(_sph * _th),
+                            ),
+                            dest=(
+                                int(_spx * base_tile_w), int(_spy * base_tile_h),
+                                int(_spw * base_tile_w), int(_sph * base_tile_h),
+                            ),
+                        )
+                    else:
+                        _inv_tex = inv_console_renderer.render(_scaled_inv_src._inv_console)
+                        renderer.copy(_inv_tex, dest=(0, 0, window_w, window_h))
                     
                     # ── Tooltip overlay (stat breakdown) ──────────────────────────────────────
                     if getattr(_scaled_inv_src, '_tooltip_visible', False):
@@ -1785,7 +1832,7 @@ def main() -> None:
                     renderer.copy(overlay_popup_tex, dest=overlay_popup_dest)
 
                 # ── Post-chrome grid render — direct handler only (items on top of chrome) ───────
-                if _grid_is_direct:
+                if _grid_is_direct and not _inv_popup_animating:
                     _gdt = _inv_grid_handler._grid_dest_tiles
                     _grid_item_tex = inv_console_renderer.render(_inv_grid_handler._grid_console)
                     _grid_item_tex.blend_mode = tcod.sdl.render.BlendMode.NONE
@@ -1833,6 +1880,7 @@ def main() -> None:
 
                 # ── Drag icon (pixel-smooth, ADD blend → transparent bg, solid glyph) ─────
                 if (_inv_grid_handler is not None
+                    and not _inv_popup_animating
                         and getattr(_inv_grid_handler, '_drag_item', None) is not None):
                     _ddt = _inv_grid_handler._drag_dest_pixels
                     _drag_tex = inv_console_renderer.render(_inv_grid_handler._drag_console)
@@ -2079,6 +2127,7 @@ def main() -> None:
                         _dp_img = Image.open(_dlg_port_path).convert("RGBA")
                         _dp_np  = np.array(_dp_img, dtype=np.uint8)
                         _dialogue_portrait_tex  = renderer.upload_texture(_dp_np)
+                        _dialogue_portrait_tex.scale_mode = tcod.sdl.render.ScaleMode.NEAREST
                         _dialogue_portrait_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
                         _dialogue_portrait_path = _dlg_port_path
                     except Exception as _dpe:

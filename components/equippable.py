@@ -276,3 +276,7 @@ class Ring(Equippable):
             effect_cooldown=effect_cooldown,
             effect_duration=effect_duration,
         )
+
+class RoundShield(Equippable):
+    def __init__(self) -> None:
+        super().__init__(equipment_type=EquipmentType.SHIELD, defense_bonus=3, required_tags={"hand", "grasp"}, equip_all_matching=False)

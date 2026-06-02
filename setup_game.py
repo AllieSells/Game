@@ -1555,6 +1555,7 @@ class MainMenu(input_handlers.BaseEventHandler):
         if _auto_music:
             sounds.start_menu_ambience()
             sounds.start_menu_music()
+            sounds.update_all_loop_volumes_from_settings()
         self.menu_start_y = 0
         self.menu_start_x = 0
         self.menu_width = 0

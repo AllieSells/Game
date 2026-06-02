@@ -23,6 +23,7 @@ class Level(BaseComponent):
               'agility',
               'vigor',
               'armor',
+              'shields',
               'light armor',
               'medium armor',
               'heavy armor',
@@ -49,7 +50,7 @@ class Level(BaseComponent):
     # Format: 'category_trait': ['subcategory1', 'subcategory2', ...]
     TRAIT_CATEGORIES = {
         'strength': ['agility', 'vigor'],
-        'armor': ['light armor', 'medium armor', 'heavy armor', 'shields'],
+        'armor': ['shields','light armor', 'medium armor', 'heavy armor', 'shields'],
         'blades': ['daggers', 'swords'],
         'arcana': ['abjuration', 'conjuration', 'divination', 'enchantment', 'evocation', 'illusion', 'necromancy', 'transmutation'],
         'intellect': ['identification']
@@ -62,10 +63,10 @@ class Level(BaseComponent):
         'agility': 'AGI', 
         'vigor': 'VIG',
         'armor': 'ARM',
+        'shields': 'SHD',
         'light armor': 'LARM',
         'medium armor': 'MARM',
         'heavy armor': 'HARM',
-        'shields': 'SHD',
         'blades': 'BLD',
         'daggers': 'DAG',
         'swords': 'SWD',   

@@ -1,11 +1,11 @@
 {
     // Display settings
     "fullscreen": false,
-    "audio": 30,
+    "audio": 70,
     // Lighting settings
     "lighting_mode": "gpu",
     // CRT filter settings
-    "crt_scanlines": true,
+    "crt_scanlines": false,
     "crt_vignette": true,
     "crt_bloom": true,
     "crt_ca": false,

@@ -234,34 +234,60 @@ def render_debug_overlay(console: Console, fps: float, player_pos: Tuple[int, in
     except Exception:
         pass
 
-    # Material inspector at mouse position
+    # Particle counter + lag profiler summary (F2 section replacement).
     try:
-        import sprite_manager as _sm
-        import numpy as np
-        mx, my = int(engine.mouse_x), int(engine.mouse_y)
-        if engine.game_map.in_bounds(mx, my):
-            tile = engine.game_map.tiles[mx, my]
-            cp = int(tile['graphic'])
-            
-            # Get material data
-            get_packed = getattr(_sm, "get_packed_material", None)
-            if get_packed:
-                normals, alpha, emission, specular, normal_detail, specular_mask = get_packed(cp, scale=1, out_h=10, out_w=10)
-                
-                # Compute statistics
-                emissive_mean = float(np.mean(emission)) if emission is not None else 0.0
-                emissive_max = float(np.max(emission)) if emission is not None else 0.0
-                specular_mean = float(np.mean(specular)) if specular is not None else 0.0
-                specular_max = float(np.max(specular)) if specular is not None else 0.0
-                normal_detail_mean = float(np.mean(normal_detail)) if normal_detail is not None else 0.0
-                
-                # Display material data
-                console.print(render_x, render_y + 14, f"=== MATERIAL @ ({mx},{my}) cp=0x{cp:04X} ===", fg=(255, 255, 100))
-                console.print(render_x, render_y + 15, f"Emissive: mean={emissive_mean:.3f} max={emissive_max:.3f}", fg=(255, 200, 100))
-                console.print(render_x, render_y + 16, f"Specular: mean={specular_mean:.3f} max={specular_max:.3f}", fg=(200, 200, 255))
-                console.print(render_x, render_y + 17, f"NormalDetail: mean={normal_detail_mean:.3f}", fg=(150, 255, 150))
+        from collections import Counter
+
+        anim_queue = getattr(engine, "animation_queue", None)
+        counts = Counter()
+        total_anims = 0
+        particle_total = 0
+        if anim_queue is not None:
+            for anim in anim_queue:
+                total_anims += 1
+                cls_name = type(anim).__name__
+                counts[cls_name] += 1
+                if cls_name.endswith("Particle"):
+                    particle_total += 1
+
+        profiler = getattr(engine, "lag_profiler", None)
+        ema_ms = profiler.get("ema_ms", {}) if isinstance(profiler, dict) else {}
+        last_ms = profiler.get("last_frame_ms", {}) if isinstance(profiler, dict) else {}
+
+        ema_anim_total = float(ema_ms.get("gpu_anim_draw_total", 0.0) or 0.0)
+        ema_anim_bloom = float(ema_ms.get("gpu_anim_draw_bloom", 0.0) or 0.0)
+        ema_anim_nobloom = float(ema_ms.get("gpu_anim_draw_nobloom", 0.0) or 0.0)
+        last_anim_total = float(last_ms.get("gpu_anim_draw_total", 0.0) or 0.0)
+
+        top_items = counts.most_common(5)
+
+        row = render_y + 14
+        console.print(render_x, row, "=== PARTICLES / LAG ===", fg=(255, 255, 100))
+        row += 1
+        console.print(render_x, row, f"anims: {total_anims}", fg=(220, 220, 220))
+        row += 1
+        console.print(render_x, row, f"particles: {particle_total}", fg=(220, 220, 220))
+        row += 1
+        console.print(render_x, row, "Top anims:", fg=(190, 220, 255))
+        row += 1
+        if top_items:
+            for i, (name, count) in enumerate(top_items, start=1):
+                short_name = name if len(name) <= 20 else (name[:17] + "...")
+                console.print(render_x, row, f"{i}. {short_name}: {count}", fg=(190, 220, 255))
+                row += 1
+        else:
+            console.print(render_x, row, "none", fg=(140, 140, 140))
+            row += 1
+
+        console.print(render_x, row, f"Anim EMA total: {ema_anim_total:5.2f} ms", fg=(180, 220, 255))
+        row += 1
+        console.print(render_x, row, f"Anim EMA bloom:{ema_anim_bloom:5.2f} ms", fg=(180, 220, 255))
+        row += 1
+        console.print(render_x, row, f"Anim EMA noBLM:{ema_anim_nobloom:5.2f} ms", fg=(180, 220, 255))
+        row += 1
+        console.print(render_x, row, f"Anim Last total:{last_anim_total:5.2f} ms", fg=(170, 170, 170))
     except Exception as e:
-        console.print(render_x, render_y + 14, f"Material error: {str(e)[:40]}", fg=(255, 50, 50))
+        console.print(render_x, render_y + 14, f"Profiler error: {str(e)[:40]}", fg=(255, 50, 50))
 
     # (Lag chart rendered separately by render_lag_profiler when F1 is active.)
 
@@ -274,141 +300,190 @@ def render_lag_profiler(console: Console, engine) -> None:
         return
     ema_ms = profiler.get("ema_ms", {}) or {}
     last_ms = profiler.get("last_frame_ms", {}) or {}
+    turn_ema_ms = profiler.get("turn_ema_ms", {}) or {}
+    turn_last_ms = profiler.get("turn_last_ms", {}) or {}
     total_ms = float(ema_ms.get("total", 0.0) or 0.0)
 
+    MAX_ROW = console.height - 1
     chart_x = 0
-    chart_y = 0
-    console.print(chart_x, chart_y, "Lag Chart (EMA)", fg=(255, 220, 120))
+    row = 0
+    console.print(chart_x, row, "FRAME SECTIONS (EMA)", fg=(255, 220, 120))
+    row += 1
 
     if total_ms <= 0.0:
-        console.print(chart_x, chart_y + 1, "Collecting profiler samples...", fg=(140, 140, 140))
+        console.print(chart_x, row, "Collecting profiler samples...", fg=(140, 140, 140))
         return
 
     frame_ms = float(getattr(engine, "frame_time_ms", 0.0) or 0.0)
     cpu_frame_ms = float(getattr(engine, "frame_cpu_ms", 0.0) or 0.0)
     console.print(
-        chart_x, chart_y + 1,
-        f"Real: {frame_ms:5.2f}ms  CPU: {cpu_frame_ms:5.2f}ms  Profiled: {total_ms:5.2f}ms",
+        chart_x, row,
+        f"Real:{frame_ms:5.1f} CPU:{cpu_frame_ms:5.1f} Tick:{total_ms:5.1f}ms",
         fg=(180, 220, 255),
     )
+    row += 1
 
     label_alias = {
-        "entity_updates": "entities",
-        "light_shafts": "light",
-        "auto_move": "autopath",
-        "grass_waves": "grass",
-        "global_anims": "globalfx",
-        "cleanup": "cleanup",
-        "tutorial": "tutorial",
-        "frame_cpu": "cpu_frame",
-        "engine_tick": "eng_tick",
-        "render_game": "render_game",
-        "crt_barrel_ca": "crt_barrel",
-        "crt_post_blit": "crt_blit",
-        "crt_scan": "crt_scan",
-        "crt_final": "crt_final",
-        "event_loop": "events",
-        "present_wait": "present",
-        "frame_sleep": "sleep",
-        "lightmap_engine_get": "lm_get_eng",
+        "entity_updates": "ent_total",
+        "entity_loop":    "ent_loop",
+        "particle_cache": "ptcl_cache",
+        "light_emitters": "lght_emit",
+        "ambient_sounds": "amb_sound",
+        "light_shafts":   "light",
+        "auto_move":      "autopath",
+        "autopath_scan":  "ap_scan",
+        "autopath_step":  "ap_step",
+        "grass_waves":    "grass",
+        "global_anims":   "globalfx",
+        "cleanup":        "cleanup",
+        "tutorial":       "tutorial",
+        "frame_cpu":      "cpu_frame",
+        "engine_tick":    "eng_tick",
+        "render_game":    "render_game",
+        "crt_barrel_ca":  "crt_barrel",
+        "crt_post_blit":  "crt_blit",
+        "crt_scan":       "crt_scan",
+        "crt_final":      "crt_final",
+        "event_loop":     "events",
+        "present_wait":   "present",
+        "frame_sleep":    "sleep",
+        "ai_preturn":     "ai_pre",
+        "ai_postturn":    "ai_post",
+        "sprite_prune":   "spr_prune",
+        "lightmap_engine_get":     "lm_get_eng",
         "lightmap_unified_disabled": "lm_uni_off",
-        "lm_gpu_total": "lm_gpu_tot",
-        "lm_gpu_setup": "lm_gpu_setup",
-        "lm_gpu_explored_floor": "lm_gpu_xfloor",
-        "lm_gpu_smooth": "lm_gpu_smooth",
-        "lm_gpu_vis_rebuild": "lm_gpu_vrebd",
-        "lm_gpu_vis_post": "lm_gpu_vpost",
-        "lm_gpu_resource_ensure": "lm_gpu_resrc",
-        "lm_gpu_atlas": "lm_gpu_atlas",
-        "lm_gpu_atlas_build": "lm_gpu_atlsb",
-        "lm_gpu_lookup_build": "lm_gpu_lookup",
-        "lm_gpu_atlas_upload": "lm_gpu_atlsu",
-        "lm_gpu_bind_textures": "lm_gpu_bindt",
-        "lm_gpu_light_pack": "lm_gpu_lpack",
-        "lm_gpu_uniforms": "lm_gpu_unifs",
-        "lm_gpu_uniform_write": "lm_gpu_unifw",
-        "lm_gpu_draw": "lm_gpu_draw",
-        "lm_gpu_draw_only": "lm_gpu_drawo",
-        "lm_gpu_readback": "lm_gpu_rback",
-        "lm_gpu_readback_only": "lm_gpu_rbako",
-        "lm_gpu_final_blend": "lm_gpu_fblnd",
-        "lm_gpu_blend_upload": "lm_gpu_blup",
-        "lm_gpu_explored_fade": "lm_gpu_exfad",
+        "lm_gpu_total":            "lm_gpu_tot",
+        "lm_gpu_setup":            "lm_gpu_setup",
+        "lm_gpu_explored_floor":   "lm_gpu_xflr",
+        "lm_gpu_smooth":           "lm_gpu_smth",
+        "lm_gpu_vis_rebuild":      "lm_gpu_vreb",
+        "lm_gpu_vis_post":         "lm_gpu_vpst",
+        "lm_gpu_resource_ensure":  "lm_gpu_res",
+        "lm_gpu_atlas":            "lm_gpu_atls",
+        "lm_gpu_atlas_build":      "lm_gpu_atlb",
+        "lm_gpu_lookup_build":     "lm_gpu_lkup",
+        "lm_gpu_atlas_upload":     "lm_gpu_atlu",
+        "lm_gpu_bind_textures":    "lm_gpu_bnd",
+        "lm_gpu_light_pack":       "lm_gpu_lpk",
+        "lm_gpu_uniforms":         "lm_gpu_uni",
+        "lm_gpu_uniform_write":    "lm_gpu_uw",
+        "lm_gpu_draw":             "lm_gpu_draw",
+        "lm_gpu_draw_only":        "lm_gpu_drwo",
+        "lm_gpu_readback":         "lm_gpu_rdbk",
+        "lm_gpu_readback_only":    "lm_gpu_rbko",
+        "lm_gpu_final_blend":      "lm_gpu_fbl",
+        "lm_gpu_blend_upload":     "lm_gpu_blu",
+        "lm_gpu_explored_fade":    "lm_gpu_xfad",
     }
-    label_width = 13
+    turn_label_alias = {
+        "tm_rings":        "rings",
+        "tm_abilities":    "abilities",
+        "tm_effects":      "status_fx",
+        "tm_equip":        "equip_dur",
+        "tm_hunger":       "hunger",
+        "tm_ai_post":      "ai_turns",
+        "tm_fov":          "fov",
+        "tm_status":       "game_fx",
+        "tm_player":       "plr_state",
+        "tm_checks":       "game_chk",
+        "tm_liquid":       "liquid",
+        "tm_body":         "body_liq",
+        "tm_sprite_prune": "spr_prune",
+    }
+    label_width = 10
+    bar_width = 11
 
-    section_items = []
-    for key, value in ema_ms.items():
-        if key == "total":
-            continue
-        ms = float(value or 0.0)
-        if ms > 0.0:
-            section_items.append((key, ms))
+    def _draw_section(items, denom, x, start_row, max_rows, alias_map):
+        r = start_row
+        shown = 0.0
+        for key, ms in items[:max_rows]:
+            if r > MAX_ROW:
+                break
+            shown += ms
+            pct = ms / denom * 100.0
+            fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
+            bar = ("#" * fill) + ("." * (bar_width - fill))
+            if pct >= 40.0:
+                fg = (255, 100, 100)
+            elif pct >= 20.0:
+                fg = (255, 180, 100)
+            else:
+                fg = (200, 200, 200)
+            lbl = alias_map.get(key, key)
+            console.print(x, r, f"{lbl[:label_width]:<{label_width}} {ms:5.2f} {pct:4.0f}% {bar}", fg=fg)
+            r += 1
+        other = max(0.0, denom - shown)
+        if other > 0.25 and r <= MAX_ROW:
+            pct = other / denom * 100.0
+            fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
+            bar = ("#" * fill) + ("." * (bar_width - fill))
+            console.print(x, r, f"{'other':<{label_width}} {other:5.2f} {pct:4.0f}% {bar}", fg=(150, 150, 150))
+            r += 1
+        return r
+
+    # --- frame sections (filter out tm_ keys — they live in the turn panel) ---
+    section_items = [
+        (k, float(v or 0.0))
+        for k, v in ema_ms.items()
+        if k != "total" and not k.startswith("tm_") and float(v or 0.0) > 0.0
+    ]
     section_items.sort(key=lambda kv: kv[1], reverse=True)
     section_sum_ms = sum(ms for _, ms in section_items)
     denom_ms = max(total_ms, section_sum_ms, 0.001)
 
-    bar_width = 14
-    row = chart_y + 2
-    shown_ms = 0.0
-    max_rows = 8
-    for key, ms in section_items[:max_rows]:
-        shown_ms += ms
-        pct = (ms / denom_ms * 100.0)
-        fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
-        bar = ("#" * fill) + ("." * (bar_width - fill))
-
-        if pct >= 40.0:
-            fg = (255, 120, 120)
-        elif pct >= 20.0:
-            fg = (255, 180, 120)
-        else:
-            fg = (200, 200, 200)
-
-        label = label_alias.get(key, key)
-        console.print(chart_x, row, f"{label[:label_width]:<{label_width}} {ms:5.2f} {pct:4.0f}% {bar}", fg=fg)
-        row += 1
-
-    other_ms = max(0.0, denom_ms - shown_ms)
-    if other_ms > 0.25:
-        pct = (other_ms / denom_ms * 100.0)
-        fill = max(0, min(bar_width, int(round((pct / 100.0) * bar_width))))
-        bar = ("#" * fill) + ("." * (bar_width - fill))
-        console.print(chart_x, row, f"{'other':<{label_width}} {other_ms:5.2f} {pct:4.0f}% {bar}", fg=(160, 160, 160))
-        row += 1
+    row = _draw_section(section_items, denom_ms, chart_x, row, 6, label_alias)
 
     last_total = float(last_ms.get("total", 0.0) or 0.0)
-    console.print(chart_x, row, f"Last frame total: {last_total:5.2f} ms", fg=(170, 170, 170))
-    row += 1
-
-    spike_threshold = max(20.0, total_ms * 1.35)
-    if isinstance(last_ms, dict) and last_ms and last_total >= spike_threshold:
-        console.print(chart_x, row, "SPIKE OFFENDERS (LAST):", fg=(255, 180, 120))
+    if row <= MAX_ROW:
+        console.print(chart_x, row, f"last:{last_total:5.2f}ms", fg=(150, 150, 150))
         row += 1
-        offenders = []
-        for key, value in last_ms.items():
-            if key == "total":
-                continue
-            ms = float(value or 0.0)
-            if ms > 0.0:
-                offenders.append((key, ms))
-        offenders.sort(key=lambda kv: kv[1], reverse=True)
-        last_sum_ms = sum(ms for _, ms in offenders)
-        last_denom_ms = max(last_total, last_sum_ms, 0.001)
 
-        for key, ms in offenders[:6]:
-            pct = (ms / last_denom_ms * 100.0)
-            ema_val = float(ema_ms.get(key, 0.0) or 0.0)
-            delta = ms - ema_val
-            if pct >= 30.0:
-                fg = (255, 120, 120)
-            elif pct >= 15.0:
-                fg = (255, 180, 120)
-            else:
-                fg = (200, 200, 200)
-            label = label_alias.get(key, key)
-            console.print(chart_x, row, f"{label[:label_width]:<{label_width}} {ms:5.2f} {pct:4.0f}% d{delta:+5.1f}", fg=fg)
+    # spike offenders (compact: max 2 rows)
+    spike_threshold = max(20.0, total_ms * 1.35)
+    if isinstance(last_ms, dict) and last_ms and last_total >= spike_threshold and row + 3 <= MAX_ROW:
+        console.print(chart_x, row, "SPIKE:", fg=(255, 180, 120))
+        row += 1
+        offenders = sorted(
+            [(k, float(v or 0.0)) for k, v in last_ms.items() if k != "total" and float(v or 0.0) > 0.0],
+            key=lambda kv: kv[1], reverse=True,
+        )
+        last_denom = max(last_total, sum(ms for _, ms in offenders), 0.001)
+        for key, ms in offenders[:2]:
+            if row > MAX_ROW:
+                break
+            pct = ms / last_denom * 100.0
+            delta = ms - float(ema_ms.get(key, 0.0) or 0.0)
+            fg = (255, 100, 100) if pct >= 30.0 else (255, 180, 100)
+            lbl = label_alias.get(key, key)
+            console.print(chart_x, row, f"{lbl[:label_width]:<{label_width}} {ms:5.2f} d{delta:+5.1f}", fg=fg)
             row += 1
+
+    # --- turn sections panel ---
+    if row < MAX_ROW:
+        row += 1  # blank separator
+    if row <= MAX_ROW:
+        turn_total_ema = sum(float(v or 0.0) for v in turn_ema_ms.values())
+        turn_total_last = sum(float(v or 0.0) for v in turn_last_ms.values())
+        console.print(
+            chart_x, row,
+            f"TURN/ACTION (EMA) last:{turn_total_last:5.1f}ms",
+            fg=(120, 220, 255),
+        )
+        row += 1
+
+    if turn_ema_ms and row <= MAX_ROW:
+        turn_items = sorted(
+            [(k, float(v or 0.0)) for k, v in turn_ema_ms.items() if float(v or 0.0) > 0.01],
+            key=lambda kv: kv[1], reverse=True,
+        )
+        turn_denom = max(turn_total_ema, 0.001)
+        row = _draw_section(turn_items, turn_denom, chart_x, row, 9, turn_label_alias)
+        if row <= MAX_ROW:
+            console.print(chart_x, row, f"turn ema total: {turn_total_ema:5.2f}ms", fg=(100, 180, 220))
+            row += 1
+    elif row <= MAX_ROW:
+        console.print(chart_x, row, "No turn data yet (take an action)", fg=(120, 120, 120))
+        row += 1
 
 
 

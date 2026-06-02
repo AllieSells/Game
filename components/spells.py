@@ -73,7 +73,7 @@ class Spell():
             return 0, False
         
         # Use the centralized damage calculation for spells
-        final_damage, _, was_fully_resisted = actions.calculate_damage(
+        final_damage, _, was_fully_resisted, deflected = actions.calculate_damage(
             attacker=action.entity,
             target=target,
             base_damage=damage,

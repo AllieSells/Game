@@ -38,6 +38,7 @@ import tile_ids
 import balance_config
 import proficiency_system as profsys
 import text_utils
+from render_functions import MenuRenderer
 
 from input_handlers import PopupEventHandler, ItemContextMenu, CONFIRM_KEYS
 from equipment_types import EquipmentType
@@ -231,7 +232,7 @@ class InventoryGridUI(PopupEventHandler):
     _is_scaled_inventory = False
 
     def __init__(self, engine: "Engine") -> None:
-        super().__init__(engine)
+        super().__init__(engine, _anim_duration=0.3)
 
         engine.context_hints = [
             ("RClick", "Options"),
@@ -496,6 +497,24 @@ class InventoryGridUI(PopupEventHandler):
     def on_render(self, console: tcod.Console) -> None:
         """Render chrome panel into console; fill grid console for GPU 3× overlay."""
         super().on_render(console)
+
+        scale = self.get_popup_scale()
+        total_width = _C_W
+        total_height = _C_H
+        x = _INV_BLIT_X
+        y = _INV_BLIT_Y
+        draw_w = max(4, int(total_width * scale))
+        draw_h = max(4, int(total_height * scale))
+        draw_x = x + (total_width - draw_w) // 2
+        draw_y = y + (total_height - draw_h) // 2
+
+        self._set_popup_bounds(draw_x, draw_y, draw_w, draw_h)
+        super().render_faded(console, draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_parchment_background(console, draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_ornate_border(console, draw_x, draw_y, draw_w, draw_h, "Inventory")
+
+        if scale < 1.0:
+            return
 
         self._grid_console.clear()
         self._fill_grid_console()
@@ -2028,6 +2047,24 @@ class ContainerGridUI(PopupEventHandler):
     def on_render(self, console: tcod.Console) -> None:
         super().on_render(console)
 
+        scale = self.get_popup_scale()
+        total_width = _CC_W
+        total_height = _CC_H
+        x = _CC_BLIT_X
+        y = _CC_BLIT_Y
+        draw_w = max(4, int(total_width * scale))
+        draw_h = max(4, int(total_height * scale))
+        draw_x = x + (total_width - draw_w) // 2
+        draw_y = y + (total_height - draw_h) // 2
+
+        self._set_popup_bounds(draw_x, draw_y, draw_w, draw_h)
+        super().render_faded(console, draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_parchment_background(console, draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_ornate_border(console, draw_x, draw_y, draw_w, draw_h, "Container")
+
+        if scale < 1.0:
+            return
+
         self._grid_console.clear()
         self._fill_player_grid()
 
@@ -3255,6 +3292,25 @@ class CookingUI(PopupEventHandler):
 
     def on_render(self, console: tcod.Console) -> None:
         super().on_render(console)
+
+        scale = self.get_popup_scale()
+        total_width = _CK_W
+        total_height = _CK_H
+        x = _CK_BLIT_X
+        y = _CK_BLIT_Y
+        draw_w = max(4, int(total_width * scale))
+        draw_h = max(4, int(total_height * scale))
+        draw_x = x + (total_width - draw_w) // 2
+        draw_y = y + (total_height - draw_h) // 2
+
+        self._set_popup_bounds(draw_x, draw_y, draw_w, draw_h)
+        super().render_faded(console, draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_parchment_background(console, draw_x, draw_y, draw_w, draw_h)
+        MenuRenderer.draw_ornate_border(console, draw_x, draw_y, draw_w, draw_h, "Campfire")
+
+        if scale < 1.0:
+            return
+
         self._update_output()
 
         # Player grid

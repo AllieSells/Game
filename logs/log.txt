@@ -1,12 +1,12 @@
 Log file cleared at startup.
-Thu May 28 21:47:57 2026: Game started.
-[2026-05-28 21:47:58] [frame 0] Unified ModernGL lightmap bridge: enabled (composer attached).
+Mon Jun  1 22:18:27 2026: Game started.
+[2026-06-01 22:18:29] [frame 0] Unified ModernGL lightmap bridge: enabled (composer attached).
 Loaded exceptions module in 0.01 seconds
-Loaded input_handlers module in 0.53 seconds
+Loaded input_handlers module in 0.08 seconds
 Loaded 250 frames for animated background.
-Loaded setup_game module in 8.26 seconds
-Loaded tcod.sdl.video and traceback modules in 0.00 seconds
-Finished loading in 21.54 seconds
-Settings loaded: {'fullscreen': False, 'audio': 30, 'lighting_mode': 'gpu', 'crt_scanlines': True, 'crt_vignette': True, 'crt_bloom': True, 'crt_ca': False, 'crt_curvature': True, 'light_flicker': True, 'shadow_softness': 0.2, 'modern_gl_lightmap_unified': True}
+Loaded setup_game module in 6.34 seconds
+Loaded tcod.sdl.video and traceback modules in 0.01 seconds
+Finished loading in 22.26 seconds
+Settings loaded: {'fullscreen': False, 'audio': 70, 'lighting_mode': 'gpu', 'crt_scanlines': False, 'crt_vignette': True, 'crt_bloom': True, 'crt_ca': False, 'crt_curvature': True, 'light_flicker': True, 'shadow_softness': 0.2, 'modern_gl_lightmap_unified': True}
 =========================================================================================================================================================================================================================
-[frame 45] CRT: starting generation thread (loading screen visible)
+[frame 0] TRANSITION: entering game view (handler=MainGameEventHandler)

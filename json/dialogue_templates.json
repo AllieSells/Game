@@ -1,0 +1,257 @@
+{
+    "languages":  {
+                      "common":  {
+                                     "neutral":  {
+                                                     "responses":  {
+                                                                       "RefuseTrade":  [
+                                                                                           "I have nothing to trade with you.",
+                                                                                           "I don\u0027t have anything to trade.",
+                                                                                           "Sorry, I have nothing to trade."
+                                                                                       ],
+                                                                       "Greeting":  [
+                                                                                        "Hello there.",
+                                                                                        "Greetings.",
+                                                                                        "Well met.",
+                                                                                        "Welcome.",
+                                                                                        "Ah, greetings.",
+                                                                                        "Ah, a friendly face."
+                                                                                    ],
+                                                                       "Identity":  [
+                                                                                        "I am called {name}.",
+                                                                                        "My name is {name}.",
+                                                                                        "They call me {name}.",
+                                                                                        "You can call me {name}.",
+                                                                                        "That would be {name}.",
+                                                                                        "I go by {name}."
+                                                                                    ],
+                                                                       "Goodbye":  [
+                                                                                       "Hello again.",
+                                                                                       "Yes?",
+                                                                                       "Hello there.",
+                                                                                       "What do you need?",
+                                                                                       "Oh, it\u0027s you again.",
+                                                                                       "Yes, what is it?",
+                                                                                       "What now?",
+                                                                                       "We were just talking."
+                                                                                   ],
+                                                                       "Response":  [
+                                                                                        "I\u0027ve told you everything I know.",
+                                                                                        "What more do you want to know?",
+                                                                                        "Yes?",
+                                                                                        "I know nothing more to share."
+                                                                                    ],
+                                                                       "Location":  [
+                                                                                        "This is {location}.",
+                                                                                        "You are in {location}.",
+                                                                                        "We are in {location}.",
+                                                                                        "This place is called {location}.",
+                                                                                        "This area is known as {location}."
+                                                                                    ],
+                                                                       "Opening":  [
+                                                                                       "Hello ",
+                                                                                       "Greetings ",
+                                                                                       "Well met, ",
+                                                                                       "Welcome ",
+                                                                                       "Ah, greetings, ",
+                                                                                       "Ah, a friendly face, "
+                                                                                   ],
+                                                                       "Address":  [
+                                                                                       "traveler.",
+                                                                                       "adventurer.",
+                                                                                       "stranger.",
+                                                                                       "friend.",
+                                                                                       "wanderer.",
+                                                                                       "wayfarer."
+                                                                                   ],
+                                                                       "Closer":  [
+                                                                                      "",
+                                                                                      "",
+                                                                                      "",
+                                                                                      "",
+                                                                                      "",
+                                                                                      " What can I do for you?",
+                                                                                      " Welcome.",
+                                                                                      " Welcome to {location_empty}."
+                                                                                  ],
+                                                                       "Fallback":  [
+                                                                                        "I have nothing to say right now."
+                                                                                    ]
+                                                                   },
+                                                     "next_context":  {
+                                                                          "RefuseTrade":  [
+                                                                                              "Response"
+                                                                                          ],
+                                                                          "Greeting":  [
+                                                                                           "Response"
+                                                                                       ],
+                                                                          "Identity":  [
+                                                                                           "Response",
+                                                                                           "Identity"
+                                                                                       ],
+                                                                          "Goodbye":  [
+                                                                                          "Response"
+                                                                                      ],
+                                                                          "Response":  [
+                                                                                           "Response"
+                                                                                       ],
+                                                                          "Location":  [
+                                                                                           "Location"
+                                                                                       ],
+                                                                          "Opening":  [
+                                                                                          "Response"
+                                                                                      ],
+                                                                          "Fallback":  [
+                                                                                           "Default"
+                                                                                       ]
+                                                                      }
+                                                 }
+                                 },
+                      "yipyak":  {
+                                     "neutral":  {
+                                                     "responses":  {
+                                                                       "RefuseTrade":  [
+                                                                                           "TEST"
+                                                                                       ],
+                                                                       "Greeting":  [
+                                                                                        "TEST"
+                                                                                    ],
+                                                                       "Identity":  [
+                                                                                        "TEST"
+                                                                                    ],
+                                                                       "Goodbye":  [
+                                                                                       "TEST"
+                                                                                   ],
+                                                                       "Response":  [
+                                                                                        "TEST"
+                                                                                    ],
+                                                                       "Location":  [
+                                                                                        "TEST"
+                                                                                    ],
+                                                                       "Opening":  [
+                                                                                       "TEST"
+                                                                                   ],
+                                                                       "Address":  [
+                                                                                       "TEST"
+                                                                                   ],
+                                                                       "Closer":  [
+                                                                                      "TEST"
+                                                                                  ],
+                                                                       "Fallback":  [
+                                                                                        "FALLBACK TEST"
+                                                                                    ]
+                                                                   },
+                                                     "next_context":  {
+                                                                          "RefuseTrade":  [
+                                                                                              "Response"
+                                                                                          ],
+                                                                          "Greeting":  [
+                                                                                           "Response"
+                                                                                       ],
+                                                                          "Identity":  [
+                                                                                           "Response",
+                                                                                           "Identity"
+                                                                                       ],
+                                                                          "Goodbye":  [
+                                                                                          "Response"
+                                                                                      ],
+                                                                          "Response":  [
+                                                                                           "Response"
+                                                                                       ],
+                                                                          "Location":  [
+                                                                                           "Location"
+                                                                                       ],
+                                                                          "Opening":  [
+                                                                                          "Response"
+                                                                                      ],
+                                                                          "Fallback":  [
+                                                                                           "Default"
+                                                                                       ]
+                                                                      }
+                                                 },
+                                     "hostile":  {
+                                                     "responses":  {
+                                                                       "RefuseTrade":  [
+                                                                                           "I won\u0027t trade with you.",
+                                                                                           "I have nothing to trade with you.",
+                                                                                           "I have no interest in trading with you."
+                                                                                       ],
+                                                                       "Greeting":  [
+                                                                                        "What do you want?",
+                                                                                        "Leave me alone.",
+                                                                                        "Tawa ike."
+                                                                                    ],
+                                                                       "Identity":  [
+                                                                                        "Why would I tell you my name?",
+                                                                                        "My name is none of your business."
+                                                                                    ],
+                                                                       "Goodbye":  [
+                                                                                       "O tawa.",
+                                                                                       "Leave me alone."
+                                                                                   ],
+                                                                       "Response":  [
+                                                                                        "I have nothing to say to you.",
+                                                                                        "Leave me alone.",
+                                                                                        "Tawa ike."
+                                                                                    ],
+                                                                       "Fallback":  [
+                                                                                        "I have nothing to say to you.",
+                                                                                        "Leave me alone.",
+                                                                                        "O tawa."
+                                                                                    ]
+                                                                   }
+                                                 }
+                                 }
+                  },
+    "menus":  {
+                  "dialogue":  {
+                                   "main":  {
+                                                "title":  "Talking to {name}",
+                                                "options":  [
+                                                                {
+                                                                    "text":  "Hello",
+                                                                    "action":  "dialogue",
+                                                                    "context_key":  "Greeting"
+                                                                },
+                                                                {
+                                                                    "text":  "Questions",
+                                                                    "action":  "submenu",
+                                                                    "target":  "questions"
+                                                                },
+                                                                {
+                                                                    "text":  "Trade",
+                                                                    "action":  "trade"
+                                                                },
+                                                                {
+                                                                    "text":  "Farewell",
+                                                                    "action":  "exit"
+                                                                }
+                                                            ]
+                                            },
+                                   "questions":  {
+                                                     "title":  "Questions",
+                                                     "options":  [
+                                                                     {
+                                                                         "text":  "Where are we?",
+                                                                         "action":  "dialogue",
+                                                                         "context_key":  "Location"
+                                                                     },
+                                                                     {
+                                                                         "text":  "What are you called?",
+                                                                         "action":  "dialogue",
+                                                                         "context_key":  "Identity"
+                                                                     },
+                                                                     {
+                                                                         "text":  "What do you know?",
+                                                                         "action":  "dialogue",
+                                                                         "context_key":  "Response"
+                                                                     },
+                                                                     {
+                                                                         "text":  "[Back]",
+                                                                         "action":  "submenu",
+                                                                         "target":  "main"
+                                                                     }
+                                                                 ]
+                                                 }
+                               }
+              }
+}

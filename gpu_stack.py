@@ -33,6 +33,28 @@ import math
 from PIL import Image
 
 
+class _BurnSpark:
+    __slots__ = ("origin_y", "vx", "vy", "frames", "total_frames", "fx", "fy")
+
+    def __init__(
+        self,
+        origin_y: float,
+        vx: float,
+        vy: float,
+        frames: int,
+        total_frames: int,
+        fx: float,
+        fy: float,
+    ) -> None:
+        self.origin_y = origin_y
+        self.vx = vx
+        self.vy = vy
+        self.frames = frames
+        self.total_frames = total_frames
+        self.fx = fx
+        self.fy = fy
+
+
 def get_data_path(filename: str) -> str:
     """Re-exported so callers can import it from here if convenient."""
     import os
@@ -194,6 +216,32 @@ class JaggedLineSpellParticle:
         self.frames = 12
         self.total_frames = self.frames
         self.render_priority = 2
+
+    def get_light(self):
+        if self.frames <= 0 or not self.path:
+            return None
+        
+        max_nodes = 4
+        stride = max(1, len(self.path) // max_nodes)
+        pts = self.path[::stride]
+        if pts[-1] != self.path[-1]:
+            pts.append(self.path[-1])
+        pts = pts[:max_nodes]
+
+        age = 1.0 - self.frames / self.total_frames
+        pulse = 0.85 + 0.15 * math.sin(age * 20)
+        base_i = 1.0 * pulse
+
+        return [
+            {
+                "source_x": int(x),
+                "source_y": int(y),
+                "radius": 1,
+                "max_intensity": base_i,
+                "color": self.color,
+            }
+            for (x, y) in pts
+        ]
 
     def tick(self, console=None, game_map=None) -> None:
         self.frames -= 1
@@ -381,8 +429,8 @@ class BurningParticle:
         self.fx = self.anchor_x
         self.fy = self.anchor_y
 
-        # Internal spark states (each dict has fx/fy/vx/vy/frames/total/origin_y).
-        self.sparks: list[dict] = []
+        # Internal spark states are slot-based objects to keep per-spark overhead low.
+        self.sparks: list[_BurnSpark] = []
 
     def set_anchor(self, x: float, y: float) -> None:
         self.anchor_x = float(x)
@@ -404,16 +452,16 @@ class BurningParticle:
 
     def _spawn_spark(self) -> None:
         spark_origin_y = self.anchor_y
-        spark = {
-            "origin_y": spark_origin_y,
-            "vx": random.uniform(-0.018, 0.018),
-            "vy": random.uniform(-0.07, -0.035),
-            "frames": random.randint(8, 14),
-            "total_frames": 0,
-            "fx": self.anchor_x + (random.uniform(-0.42, 0.42) if not self.contained else 0.0),
-            "fy": self.anchor_y + (random.uniform(0.0, 0.35) if not self.contained else 0.2),
-        }
-        spark["total_frames"] = spark["frames"]
+        spark_frames = random.randint(8, 14)
+        spark = _BurnSpark(
+            origin_y=spark_origin_y,
+            vx=random.uniform(-0.018, 0.018),
+            vy=random.uniform(-0.07, -0.035),
+            frames=spark_frames,
+            total_frames=spark_frames,
+            fx=self.anchor_x + (random.uniform(-0.42, 0.42) if not self.contained else 0.0),
+            fy=self.anchor_y + (random.uniform(0.0, 0.35) if not self.contained else 0.2),
+        )
         self.sparks.append(spark)
 
     def tick(self, console, game_map) -> None:
@@ -427,23 +475,23 @@ class BurningParticle:
             for _ in range(emit_count):
                 self._spawn_spark()
 
-        updated_sparks: list[dict] = []
+        updated_sparks: list[_BurnSpark] = []
         for spark in self.sparks:
             if self.contained:
-                spark["fx"] += spark["vx"] * 2
-                spark["fy"] += spark["vy"] / 2
+                spark.fx += spark.vx * 2
+                spark.fy += spark.vy / 2
             else:
-                spark["fx"] += spark["vx"]
-                spark["fy"] += spark["vy"]
+                spark.fx += spark.vx
+                spark.fy += spark.vy
 
             # Cap rise at 1 tile above spawn.
-            min_y = spark["origin_y"] - 1.0
-            if spark["fy"] < min_y:
-                spark["fy"] = min_y
-                spark["vy"] = 0.0
+            min_y = spark.origin_y - 1.0
+            if spark.fy < min_y:
+                spark.fy = min_y
+                spark.vy = 0.0
 
-            spark["frames"] -= 1
-            if spark["frames"] > 0:
+            spark.frames -= 1
+            if spark.frames > 0:
                 updated_sparks.append(spark)
         self.sparks = updated_sparks
 
@@ -648,7 +696,7 @@ class PoisonSprayParticle:
 # SECTION 3 — CRT SETUP HELPERS
 # =============================================================================
 
-def generate_scanlines_texture(line_density: float = 3.0, intensity: float = 0.35) -> np.ndarray:
+def generate_scanlines_texture(line_density: float = 0.5, intensity: float = 0.35) -> np.ndarray:
     """Return a seamlessly tileable scanline overlay as an RGBA numpy array.
 
     line_density  — higher → more scanlines (thinner gaps).
@@ -1857,6 +1905,7 @@ class GPUStack:
 
         self._smoke_tex    = None
         self._smoke_frames = None
+        self._smoke_tex_frames = None
         self._dodge_tile_cache: dict = {}  # codepoint -> uploaded texture
 
         # Ember/smoke bloom tuning
@@ -1913,6 +1962,15 @@ class GPUStack:
         self.base_tile_w = base_tile_w
         self.base_tile_h = base_tile_h
         self.game_zoom   = game_zoom
+
+    def _active_anim_bucket(self, active_engine, anim_type):
+        getter = getattr(active_engine, "get_active_animation_bucket", None)
+        if callable(getter):
+            return getter(anim_type)
+        return [
+            anim for anim in active_engine.animation_queue
+            if isinstance(anim, anim_type) and getattr(anim, "frames", 0) > 0
+        ]
 
     # ------------------------------------------------------------------
     # 5a — Bloom render target management
@@ -2164,8 +2222,7 @@ class GPUStack:
 
     def _gpu_ember_render(self, active_engine) -> bool:
         """Draw EmberParticle emission rects into _gal_src (bloom pass)."""
-        embers = [a for a in active_engine.animation_queue
-                  if isinstance(a, EmberParticle) and a.frames > 0]
+        embers = self._active_anim_bucket(active_engine, EmberParticle)
         if not embers:
             return False
         tile_px_w = self.base_tile_w * self.game_zoom
@@ -2211,8 +2268,7 @@ class GPUStack:
 
     def _reveal_render(self, active_engine) -> bool:
         """Draw sparkles along a path or at a point (bloom pass)."""
-        particles = [a for a in active_engine.animation_queue
-                    if isinstance(a, RevealParticle) and a.frames > 0]
+        particles = self._active_anim_bucket(active_engine, RevealParticle)
         if not particles:
             return False
 
@@ -2323,8 +2379,7 @@ class GPUStack:
              perpendicular wobble that grows with distance (crack-in-space look).
           4. Chromatic fringe dots inside/outside the ring.
         """
-        particles = [a for a in active_engine.animation_queue
-                     if isinstance(a, SpaceDistortSpellParticle) and a.frames > 0]
+        particles = self._active_anim_bucket(active_engine, SpaceDistortSpellParticle)
         if not particles:
             return False
 
@@ -2471,8 +2526,7 @@ class GPUStack:
 
     def _jagged_line_spell_render(self, active_engine) -> bool:
         """Draws a jagged lightning bolt along the full spell path (bloom pass)."""
-        jagged_lines = [a for a in active_engine.animation_queue
-                        if isinstance(a, JaggedLineSpellParticle) and a.frames > 0]
+        jagged_lines = self._active_anim_bucket(active_engine, JaggedLineSpellParticle)
         if not jagged_lines:
             return False
 
@@ -2491,7 +2545,7 @@ class GPUStack:
 
                 age = 1.0 - (spell.frames / float(spell.total_frames))
                 # Stay bright for 70% of lifetime, fade over the last 30%
-                alpha = int(220 * max(0.0, 1.0 - max(0.0, age - 0.7) / 0.1))
+                alpha = int(255 * max(0.0, 1.0 - max(0.0, age - 0.7) / 0.1))
                 if alpha < 8:
                     continue
 
@@ -2536,7 +2590,7 @@ class GPUStack:
                         renderer.fill_rect((float(px - 2), float(py - 2), 4.0, 4.0))
 
                         # Glow halo: slightly larger, semi-transparent
-                        halo_a = alpha // 3
+                        halo_a = alpha // 2
                         if halo_a > 8:
                             renderer.draw_color = (r, g, b, halo_a)
                             renderer.fill_rect((float(px - 4), float(py - 4), 8.0, 8.0))
@@ -2547,10 +2601,7 @@ class GPUStack:
 
     def _projectile_trail_render(self, active_engine) -> bool:
         """Draw a smooth arced projectile stroke (slash-like, no orb trail)."""
-        projectiles = [
-            a for a in active_engine.animation_queue
-            if isinstance(a, ProjectileTrailParticle) and a.frames > 0 and a.path
-        ]
+        projectiles = [a for a in self._active_anim_bucket(active_engine, ProjectileTrailParticle) if a.path]
         if not projectiles:
             return False
 
@@ -2649,8 +2700,7 @@ class GPUStack:
         of particle age or spawn timing.
         """
         import time as _time
-        rays = [a for a in active_engine.animation_queue
-                if isinstance(a, IlluminatedParticle) and a.frames > 0]
+        rays = self._active_anim_bucket(active_engine, IlluminatedParticle)
         if not rays:
             return False
 
@@ -2740,8 +2790,7 @@ class GPUStack:
 
     def _sleep_render(self, active_engine) -> bool:
         """Draw a soft drifting blue Z-aura for each SleepingParticle (bloom pass)."""
-        sleeps = [a for a in active_engine.animation_queue
-                  if isinstance(a, SleepingParticle) and a.frames > 0]
+        sleeps = self._active_anim_bucket(active_engine, SleepingParticle)
         if not sleeps:
             return False
 
@@ -2807,8 +2856,7 @@ class GPUStack:
 
     def _heal_render(self, active_engine) -> bool:
         """Draw rising green crosses for each HealthParticle (bloom pass)."""
-        heals = [a for a in active_engine.animation_queue
-                 if isinstance(a, HealthParticle) and a.frames > 0]
+        heals = self._active_anim_bucket(active_engine, HealthParticle)
         if not heals:
             return False
 
@@ -2868,8 +2916,7 @@ class GPUStack:
 
         Renders orange-red pixel-art digits that rise from a hit entity and fade out.
         """
-        nums = [a for a in active_engine.animation_queue
-                if isinstance(a, DamageNumberParticle) and a.frames > 0]
+        nums = self._active_anim_bucket(active_engine, DamageNumberParticle)
         if not nums:
             return False
 
@@ -2955,22 +3002,23 @@ class GPUStack:
         game_map  = active_engine.game_map
         renderer  = self.renderer
         drew      = False
+        spark_w   = max(2, int(tile_px_w * 0.09))
+        spark_h   = max(3, int(tile_px_h * 0.18))
 
         with renderer.set_render_target(self._gal_src):
-            for burn in active_engine.animation_queue:
-                if not isinstance(burn, BurningParticle) or burn.frames <= 0:
-                    continue
+            for burn in self._active_anim_bucket(active_engine, BurningParticle):
                 # Visibility — check origin tile (entity tile), not spark tile
-                ex = int(round(burn.entity.x if hasattr(burn.entity, 'x') else burn.anchor_x))
-                ey = int(round(burn.entity.y if hasattr(burn.entity, 'y') else burn.anchor_y))
+                entity = getattr(burn, "entity", None)
+                ex = int(round(entity.x if entity is not None and hasattr(entity, 'x') else burn.anchor_x))
+                ey = int(round(entity.y if entity is not None and hasattr(entity, 'y') else burn.anchor_y))
                 if not game_map.in_bounds(ex, ey):
                     continue
                 if not game_map.visible[ex, ey]:
                     continue
 
                 for spark in getattr(burn, "sparks", []):
-                    scr_x = spark["fx"] - origin_x
-                    scr_y = spark["fy"] - origin_y
+                    scr_x = spark.fx - origin_x
+                    scr_y = spark.fy - origin_y
                     if not (-1.0 <= scr_x < self.game_view_width + 1.0 and
                             -1.0 <= scr_y < self.game_view_height + 1.0):
                         continue
@@ -2981,7 +3029,7 @@ class GPUStack:
                         continue
 
                     # age 0=birth 1=death
-                    age = 1.0 - (spark["frames"] / float(spark["total_frames"]))
+                    age = 1.0 - (spark.frames / float(spark.total_frames))
 
                     # Colour: young=yellow-white, middle=orange, old=dim red
                     if age < 0.4:
@@ -3001,11 +3049,9 @@ class GPUStack:
                         continue
 
                     # Small vertically-elongated flame tongue
-                    w = max(2, int(tile_px_w * 0.09))
-                    h = max(3, int(tile_px_h * 0.18))
                     renderer.draw_color = (r, g, b, alpha)
-                    renderer.fill_rect((float(px - w // 2), float(py - h // 2),
-                                        float(w), float(h)))
+                    renderer.fill_rect((float(px - spark_w // 2), float(py - spark_h // 2),
+                                        float(spark_w), float(spark_h)))
                     drew = True
 
         return drew
@@ -3017,8 +3063,7 @@ class GPUStack:
         Two ghost copies are drawn behind it at decreasing alpha to sell the
         speed-step feel.  The codepoint must sit in the 0xE000 PUA range.
         """
-        dodges = [a for a in active_engine.animation_queue
-                  if isinstance(a, DodgeParticle) and a.frames > 0]
+        dodges = self._active_anim_bucket(active_engine, DodgeParticle)
         if not dodges:
             return False
 
@@ -3111,8 +3156,7 @@ class GPUStack:
 
     def _slash_render(self, active_engine) -> bool:
         """Draw a slicing slash effect for each SlashParticle into _gal_src (bloom pass)."""
-        slashes = [a for a in active_engine.animation_queue
-                   if isinstance(a, SlashParticle) and a.frames > 0]
+        slashes = self._active_anim_bucket(active_engine, SlashParticle)
         if not slashes:
             return False
         
@@ -3237,8 +3281,7 @@ class GPUStack:
         RGB intensity fades linearly to zero at the far end.  The whole thing
         also fades in/out at birth/death via an age envelope.
         """
-        shafts = [a for a in active_engine.animation_queue
-                  if isinstance(a, LightShaftParticles) and a.frames > 0]
+        shafts = self._active_anim_bucket(active_engine, LightShaftParticles)
         if not shafts:
             return False
 
@@ -3311,8 +3354,7 @@ class GPUStack:
         Dust is intentionally subtle: tiny warm-gray specks with a soft fade
         envelope so they read as atmospheric particulate rather than magic.
         """
-        motes = [a for a in active_engine.animation_queue
-                 if isinstance(a, DustParticle) and a.frames > 0]
+        motes = self._active_anim_bucket(active_engine, DustParticle)
         if not motes:
             return False
 
@@ -3323,6 +3365,13 @@ class GPUStack:
         game_map = active_engine.game_map
         renderer = self.renderer
         drew = False
+        _dust_min_light = 0.0
+        try:
+            getter = getattr(active_engine, "get_ambient_particle_min_light", None)
+            if callable(getter):
+                _dust_min_light = float(getter("dust", 0.0))
+        except Exception:
+            _dust_min_light = 0.0
 
         with renderer.set_render_target(self._gal_src):
             for mote in motes:
@@ -3332,6 +3381,20 @@ class GPUStack:
                     continue
                 if not game_map.visible[sx_tile, sy_tile]:
                     continue
+
+                world_xi = int(round(mote.fx))
+                world_yi = int(round(mote.fy))
+                if not game_map.in_bounds(world_xi, world_yi):
+                    continue
+                if not game_map.visible[world_xi, world_yi]:
+                    continue
+
+                if _dust_min_light > 0.0:
+                    try:
+                        if float(game_map.tiles["light_level"][world_xi, world_yi]) < _dust_min_light:
+                            continue
+                    except Exception:
+                        continue
 
                 scr_x = mote.fx - origin_x
                 scr_y = mote.fy - origin_y
@@ -3355,17 +3418,45 @@ class GPUStack:
                 if fade <= 0.0:
                     continue
 
+                # Cheap local lighting response: dust catches bright shafts and
+                # light gradients (forward-scatter look) while staying faint in dark.
+                try:
+                    ll = game_map.tiles["light_level"]
+                    l_center = float(ll[world_xi, world_yi])
+                    l_max_n = l_center
+                    if game_map.in_bounds(world_xi + 1, world_yi):
+                        l_max_n = max(l_max_n, float(ll[world_xi + 1, world_yi]))
+                    if game_map.in_bounds(world_xi - 1, world_yi):
+                        l_max_n = max(l_max_n, float(ll[world_xi - 1, world_yi]))
+                    if game_map.in_bounds(world_xi, world_yi + 1):
+                        l_max_n = max(l_max_n, float(ll[world_xi, world_yi + 1]))
+                    if game_map.in_bounds(world_xi, world_yi - 1):
+                        l_max_n = max(l_max_n, float(ll[world_xi, world_yi - 1]))
+                except Exception:
+                    l_center = 0.25
+                    l_max_n = l_center
+
+                l_center = max(0.0, min(1.0, l_center))
+                l_edge = max(0.0, min(1.0, l_max_n - l_center))
+                light_response = max(0.0, min(1.0, (0.20 + l_center * 0.80 + l_edge * 0.55) ** 0.72))
+
                 twinkle = 0.60 + 0.40 * math.sin(age * 8.5 + mote.twinkle_phase)
-                alpha = int(62 * fade * twinkle)
+                alpha = int((22 + 90 * light_response) * fade * twinkle)
                 if alpha < 5:
                     continue
 
                 r, g, b = mote.color
-                renderer.draw_color = (r, g, b, alpha)
+                warm_lift = int(16 * light_response)
+                renderer.draw_color = (
+                    min(255, int(r * (0.86 + 0.34 * light_response)) + warm_lift),
+                    min(255, int(g * (0.86 + 0.32 * light_response)) + warm_lift),
+                    min(255, int(b * (0.84 + 0.26 * light_response))),
+                    alpha,
+                )
                 renderer.fill_rect((float(px - sz * 0.5), float(py - sz * 0.5),
                                     float(sz), float(sz)))
 
-                halo_alpha = alpha // 2
+                halo_alpha = int(alpha * (0.25 + 0.45 * light_response))
                 if halo_alpha > 4:
                     renderer.draw_color = (min(255, r + 10), min(255, g + 10), min(255, b + 10), halo_alpha)
                     renderer.fill_rect((float(px - sz), float(py - sz),
@@ -3377,8 +3468,7 @@ class GPUStack:
 
     def _gpu_smoke_render(self, active_engine) -> bool:
         """Draw SmokeCloudParticle sprite frames into _gal_src (bloom pass)."""
-        smokes = [a for a in active_engine.animation_queue
-                  if isinstance(a, SmokeCloudParticle) and a.frames > 0]
+        smokes = self._active_anim_bucket(active_engine, SmokeCloudParticle)
         if not smokes:
             return False
         tile_px_w = self.base_tile_w * self.game_zoom
@@ -3388,14 +3478,19 @@ class GPUStack:
         # Lazy-load animated smoke sprite sheet
         if self._smoke_tex is None:
             smoke_frames = []
+            smoke_tex_frames = []
             for i in range(7):
                 img = Image.open(
                     self._get_data_path(f"RP/particles/smoke/smoke{i+1}.png")
                 ).convert("RGBA")
-                smoke_frames.append(np.array(img, dtype=np.uint8))
-            self._smoke_tex = renderer.upload_texture(smoke_frames[0])
-            self._smoke_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                frame_np = np.array(img, dtype=np.uint8)
+                smoke_frames.append(frame_np)
+                frame_tex = renderer.upload_texture(frame_np)
+                frame_tex.blend_mode = tcod.sdl.render.BlendMode.BLEND
+                smoke_tex_frames.append(frame_tex)
+            self._smoke_tex = smoke_tex_frames[0]
             self._smoke_frames = smoke_frames
+            self._smoke_tex_frames = smoke_tex_frames
 
         origin_x, origin_y = active_engine.get_camera_origin(
             self.game_view_width, self.game_view_height)
@@ -3423,16 +3518,15 @@ class GPUStack:
                     len(self._smoke_frames) - 1,
                     int(age * len(self._smoke_frames))
                 )
-                self._smoke_tex.update(
-                    self._smoke_frames[frame_index])
+                smoke_tex = self._smoke_tex_frames[frame_index]
                 if age < 0.15:
                     smoke_alpha = int(age / 0.15 * 180)
                 elif age < 0.70:
                     smoke_alpha = 180
                 else:
                     smoke_alpha = int((1.0 - age) / 0.30 * 180)
-                self._smoke_tex.alpha_mod = max(0, smoke_alpha)
-                renderer.copy(self._smoke_tex,
+                smoke_tex.alpha_mod = max(0, smoke_alpha)
+                renderer.copy(smoke_tex,
                               dest=(float(px - 16), float(py - 16), 32.0, 32.0))
                 drew = True
         return drew
@@ -3443,8 +3537,7 @@ class GPUStack:
         Uses exact drip.color with a late-fade curve so drips stay fully
         opaque for 85% of their lifetime then fade out over the last 15%.
         """
-        drips = [a for a in active_engine.animation_queue
-                 if isinstance(a, DripParticle) and a.frames > 0]
+        drips = self._active_anim_bucket(active_engine, DripParticle)
         if not drips:
             return False
         tile_px_w = self.base_tile_w * self.game_zoom
@@ -3491,8 +3584,7 @@ class GPUStack:
           3. Scattered inner ember dots inside the blast area.
           4. 8 radial heat-ray streaks from the centre.
         """
-        particles = [a for a in active_engine.animation_queue
-                     if isinstance(a, FireballExplosionParticle) and a.frames > 0]
+        particles = self._active_anim_bucket(active_engine, FireballExplosionParticle)
         if not particles:
             return False
 
@@ -3624,8 +3716,7 @@ class GPUStack:
           2. Radiating acid droplets flying outward with ease-out cubic slowdown.
           3. A halfway trail dot per droplet for a flung-liquid look.
         """
-        particles = [a for a in active_engine.animation_queue
-                     if isinstance(a, PoisonSprayParticle) and a.frames > 0]
+        particles = self._active_anim_bucket(active_engine, PoisonSprayParticle)
         if not particles:
             return False
 
@@ -3735,10 +3826,34 @@ class GPUStack:
         """
         if self._gal_src is None:
             return
+        import time as _time
         gw, gh = int(gw), int(gh)
         renderer = self.renderer
         bw = max(1, self._gal_w // self._gal_ds)
         bh = max(1, self._gal_h // self._gal_ds)
+        _draw_bloom_ms = 0.0
+        _draw_nobloom_ms = 0.0
+
+        rebuild_cache = getattr(active_engine, "rebuild_active_animation_cache", None)
+        if callable(rebuild_cache):
+            rebuild_cache()
+
+        def _apply_lightmap_to_anim_layer() -> None:
+            # Reuse the frame's cached lightmap so GPU anims dim with local lighting.
+            if self._lightmap_tex is None:
+                return
+            prev_blend = self._lightmap_tex.blend_mode
+            prev_alpha = self._lightmap_tex.alpha_mod
+            prev_color = self._lightmap_tex.color_mod
+            try:
+                self._lightmap_tex.blend_mode = tcod.sdl.render.BlendMode.MOD
+                self._lightmap_tex.alpha_mod = 255
+                self._lightmap_tex.color_mod = (255, 255, 255)
+                renderer.copy(self._lightmap_tex, dest=(0, 0, gw, gh))
+            finally:
+                self._lightmap_tex.blend_mode = prev_blend
+                self._lightmap_tex.alpha_mod = prev_alpha
+                self._lightmap_tex.color_mod = prev_color
 
         # --- Bloom pass ---
         if self.gpu_anim_registry:
@@ -3746,8 +3861,15 @@ class GPUStack:
                 renderer.draw_color = (0, 0, 0, 255)
                 renderer.clear()
 
+            _draw_bloom_start = _time.perf_counter()
             results = [fn(active_engine) for fn in self.gpu_anim_registry]
+            _draw_bloom_ms = max(0.0, (_time.perf_counter() - _draw_bloom_start) * 1000.0)
+            if active_engine is not None and hasattr(active_engine, "profile_external_ms"):
+                active_engine.profile_external_ms("gpu_anim_draw_bloom", _draw_bloom_ms)
+
             if any(results):
+                with renderer.set_render_target(self._gal_src):
+                    _apply_lightmap_to_anim_layer()
                 with renderer.set_render_target(self._gal_blur_a):
                     renderer.draw_color = (0, 0, 0, 255)
                     renderer.clear()
@@ -3796,8 +3918,15 @@ class GPUStack:
                 renderer.draw_color = (0, 0, 0, 0)   # transparent clear
                 renderer.clear()
 
+            _draw_nobloom_start = _time.perf_counter()
             results = [fn(active_engine) for fn in self.gpu_anim_nobloom_registry]
+            _draw_nobloom_ms = max(0.0, (_time.perf_counter() - _draw_nobloom_start) * 1000.0)
+            if active_engine is not None and hasattr(active_engine, "profile_external_ms"):
+                active_engine.profile_external_ms("gpu_anim_draw_nobloom", _draw_nobloom_ms)
+
             if any(results):
+                with renderer.set_render_target(self._gal_src):
+                    _apply_lightmap_to_anim_layer()
                 try:
                     renderer.clip_rect = (0, 0, gw, gh)
                     self._gal_src.blend_mode = tcod.sdl.render.BlendMode.BLEND
@@ -3806,6 +3935,10 @@ class GPUStack:
                     renderer.copy(self._gal_src, dest=(int(dest_offset_x), int(dest_offset_y), gw, gh))
                 finally:
                     renderer.clip_rect = None
+
+        if active_engine is not None and hasattr(active_engine, "profile_external_ms"):
+            _draw_total_ms = float(_draw_bloom_ms) + float(_draw_nobloom_ms)
+            active_engine.profile_external_ms("gpu_anim_draw_total", _draw_total_ms)
 
     # ------------------------------------------------------------------
     # 5f — Full-scene Kawase bloom

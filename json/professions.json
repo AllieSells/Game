@@ -6,7 +6,8 @@
     "skills": {
       "strength": 2,
       "swords": 2,
-      "vigor": 2
+      "vigor": 2,
+      "medium armor": 2
     },
     "starting_items": [
       "shortsword",

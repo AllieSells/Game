@@ -384,7 +384,7 @@ class LightningConsumable(Consumable):
             
             # Use centralized damage calculation for consumable items
             from components.damage_types import DamageType
-            final_damage, _, was_fully_resisted = actions.calculate_damage(
+            final_damage, _, was_fully_resisted, deflected = actions.calculate_damage(
                 attacker=consumer,
                 target=target,
                 base_damage=self.damage,
@@ -439,7 +439,7 @@ class FireballConsumable(Consumable):
             if actor.distance(*target_xy) <= self.radius:
                 # Use centralized damage calculation for consumable items
                 from components.damage_types import DamageType
-                final_damage, _, was_fully_resisted = actions.calculate_damage(
+                final_damage, _, was_fully_resisted, deflected = actions.calculate_damage(
                     attacker=action.entity,
                     target=actor,
                     base_damage=self.damage,

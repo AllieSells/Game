@@ -452,7 +452,7 @@ def calculate_damage(
     hit_part=None,
     proficiency_profile: profsys.ProficiencyResult = None,
     armor_tags: list[str] = None,
-) -> tuple[int, int, bool]:
+) -> tuple[int, int, bool, bool]:
     """
     Centralized damage calculation for melee, ranged, and spell attacks.
     
@@ -467,7 +467,7 @@ def calculate_damage(
         armor_tags: Armor tags for the hit part (optional, calculated if not provided)
     
     Returns:
-        tuple[int, int, bool]: (final_damage, armor_defense, was_fully_resisted)
+        tuple[int, int, bool, bool]: (final_damage, armor_defense, was_fully_resisted, deflected)
     """
     # Calculate stat-based multipliers
     stat_multiplier = 1.0
@@ -521,7 +521,19 @@ def calculate_damage(
         final_damage = max(0, int(base_damage * total_damage_multiplier))
         armor_defense = 0
     
-    return final_damage, armor_defense, was_fully_resisted
+    # Shield check (global): does not depend on targeted body part.
+    deflected = False
+    shield_tags = set()
+    if hasattr(target, 'equipment') and target.equipment:
+        shield_tags = target.equipment.get_shield_tags()
+    deflected = profsys.shield_check(target, shield_tags)
+
+    if deflected:
+        final_damage = 0
+        armor_defense = 0
+        print("DEFLECTED")
+    
+    return final_damage, armor_defense, was_fully_resisted, deflected
 
 
 class Action:
@@ -620,7 +632,7 @@ class InteractAction(Action):
         elif self.engine.game_map.get_actor_at_location(target_x, target_y):
             self.engine.debug_log(f"Interacting with actor at {target_x}, {target_y}", handler=type(self).__name__, event="perform")
             npc = self.engine.game_map.get_actor_at_location(target_x, target_y)
-            if npc and hasattr(npc, "ai") and getattr(npc.ai, "type", None) == "Friendly":
+            if npc and hasattr(npc, "ai") and npc.can_speak: # and getattr(npc.ai, "type", None) == "Friendly":
                 # Import here to avoid circular imports
                 from input_handlers import DialogueEventHandler
                 return DialogueEventHandler(self.engine, npc)
@@ -628,6 +640,9 @@ class InteractAction(Action):
                 self.engine.message_log.add_message("They don't seem interested in talking.")
         else:
             self.engine.message_log.add_message("There is nothing to interact with.")
+
+
+
 
 
 class PickupAction(Action):
@@ -1611,7 +1626,7 @@ class RangedAction(ActionWithDirection):
         projectile_damage_type = getattr(projectile_item, 'damage_type', DamageType.PIERCING) if projectile_item else DamageType.PIERCING
         
         # Use centralized damage calculation for ranged attacks
-        final_damage, armor_defense, was_fully_resisted = calculate_damage(
+        final_damage, armor_defense, was_fully_resisted, deflected = calculate_damage(
             attacker=self.entity,
             target=target,
             base_damage=projectile_power,
@@ -1640,6 +1655,8 @@ class RangedAction(ActionWithDirection):
         hit_chance *= bow_profile.accuracy_multiplier
         hit_chance = max(MIN_HIT_CHANCE, min(MAX_HIT_CHANCE, hit_chance))
         hit_success = random.random() < hit_chance
+
+
 
         # Dodge calculation
         dodge_success = False
@@ -1708,6 +1725,12 @@ class RangedAction(ActionWithDirection):
         if not hit_success:
             # Get a nearby tile for the missed attack
             miss_x, miss_y = get_adjacent_miss_position(target.x, target.y, self.engine.game_map)
+            collateral_target = self.engine.game_map.get_actor_at_location(miss_x, miss_y)
+            has_collateral_hit = (
+                collateral_target
+                and collateral_target != self.entity
+                and collateral_target != target
+            )
             
             if dodge_success:
                 self.engine.message_log.add_message(
@@ -1715,7 +1738,7 @@ class RangedAction(ActionWithDirection):
                 )
             else:
                 self.engine.message_log.add_message(
-                    f"{attack_desc}, but misses!", color.dark_gray
+                    f"{attack_desc}, but misses!", color.dark_gray, stack=not has_collateral_hit
                 )
             
             # Arrow drops at the miss position unless this is innate ammo.
@@ -1723,8 +1746,7 @@ class RangedAction(ActionWithDirection):
                 self._drop_projectile_at((miss_x, miss_y), projectile_item)
             
             # Check for collateral targets at the miss position
-            collateral_target = self.engine.game_map.get_actor_at_location(miss_x, miss_y)
-            if collateral_target and collateral_target != self.entity and collateral_target != target:
+            if has_collateral_hit:
                 # Calculate reduced damage for collateral hit (50% of original)
                 collateral_damage = max(1, final_damage // 2)
                 collateral_target.fighter.take_damage(collateral_damage)
@@ -1768,7 +1790,11 @@ class RangedAction(ActionWithDirection):
                     self.engine.animation_queue.append(gpu_stack.CRTBleedAnim())
                 
         else:
-            if was_fully_resisted:
+            if deflected:
+                self.engine.message_log.add_message(
+                    f"{attack_desc}, but it was blocked by the shield!", color.light_blue
+                )
+            elif was_fully_resisted:
                 self.engine.message_log.add_message(
                     f"{attack_desc}, but the attack is completely resisted!", color.light_blue
                 )
@@ -1874,7 +1900,7 @@ class MeleeAction(ActionWithDirection):
 
         return weapon, (weapon_verb or "attacks")
 
-    def _compute_damage_profile(self, target: Actor, hit_part, damage_modifier: float, equipped_weapons: list) -> tuple[int, int, bool, list, profsys.ProficiencyResult]:
+    def _compute_damage_profile(self, target: Actor, hit_part, damage_modifier: float, equipped_weapons: list) -> tuple[int, int, bool, list, profsys.ProficiencyResult, bool]:
         armor_tags = target.equipment.get_armor_tags_for_part(hit_part.name) if hit_part and target.equipment else []
         weapon_profile = _weapon_proficiency_profile(self.entity, equipped_weapons)
         
@@ -1896,7 +1922,7 @@ class MeleeAction(ActionWithDirection):
             if self.engine.debug:
                 print(f"[WEAPON DEBUG] Final damage_type: {weapon_damage_type}")
         
-        final_damage, armor_defense, was_fully_resisted = calculate_damage(
+        final_damage, armor_defense, was_fully_resisted, deflected = calculate_damage(
             attacker=self.entity,
             target=target,
             base_damage=self.entity.fighter.power,
@@ -1908,7 +1934,7 @@ class MeleeAction(ActionWithDirection):
             armor_tags=armor_tags,
         )
         
-        return final_damage, armor_defense, was_fully_resisted, armor_tags, weapon_profile
+        return final_damage, armor_defense, was_fully_resisted, armor_tags, weapon_profile, deflected
 
     def _compute_hit_success(self, target: Actor, weapon_profile: profsys.ProficiencyResult) -> bool:
         if self.tile_rel_pos:
@@ -2060,7 +2086,7 @@ class MeleeAction(ActionWithDirection):
 
         hit_part, self.target_part, damage_modifier = _resolve_hit_part(target, self.target_part)
         equipped_weapons: list = _collect_equipped_weapons(self.entity)
-        final_damage, armor_defense, was_fully_resisted, armor_tags, weapon_profile = self._compute_damage_profile(
+        final_damage, armor_defense, was_fully_resisted, armor_tags, weapon_profile, deflected = self._compute_damage_profile(
             target,
             hit_part,
             damage_modifier,
@@ -2110,6 +2136,12 @@ class MeleeAction(ActionWithDirection):
         if not hit_success:
             # Get a nearby tile for the missed attack
             miss_x, miss_y = get_adjacent_miss_position(target.x, target.y, self.engine.game_map)
+            collateral_target = self.engine.game_map.get_actor_at_location(miss_x, miss_y)
+            has_collateral_hit = (
+                collateral_target
+                and collateral_target != self.entity
+                and collateral_target != target
+            )
             
             msg = (f"{attack_desc}, but {target.name} dodges!" if dodge_success
                    else f"{attack_desc}, but misses!")
@@ -2121,11 +2153,14 @@ class MeleeAction(ActionWithDirection):
             
             # Show the attack hitting the miss position instead
             self.engine.animation_queue.append(gpu_stack.SlashParticle((miss_x, miss_y), enchanted=False, angle=slash_angle, type="miss"))
-            self.engine.message_log.add_message(msg, color.teal if dodge_success else color.dark_gray)
+            self.engine.message_log.add_message(
+                msg,
+                color.teal if dodge_success else color.dark_gray,
+                stack=not has_collateral_hit,
+            )
             
             # Check for collateral targets at the miss position
-            collateral_target = self.engine.game_map.get_actor_at_location(miss_x, miss_y)
-            if collateral_target and collateral_target != self.entity and collateral_target != target:
+            if has_collateral_hit:
                 # Calculate reduced damage for collateral hit (50% of original)
                 collateral_damage = max(1, final_damage // 2)
                 collateral_target.fighter.take_damage(collateral_damage)
@@ -2146,7 +2181,11 @@ class MeleeAction(ActionWithDirection):
                 slash_angle=slash_angle,
             )
         else:
-            if was_fully_resisted:
+            if deflected:
+                self.engine.message_log.add_message(
+                    f"{attack_desc}, but it was blocked by the shield!", color.light_blue
+                )
+            elif was_fully_resisted:
                 self.engine.message_log.add_message(
                     f"{attack_desc}, but the attack is completely resisted!", color.light_blue
                 )

@@ -1234,7 +1234,7 @@ AMBIENT_TYPES = {
         sound_file='RP/sfx/loops/fire/fire_loop.wav',
         entity_names=['Campfire', 'Bonfire'],
         proximity_threshold=5,
-        base_volume=0.3
+        base_volume=1.0
     ),
     'dungeon': AmbientSoundType(
         name='dungeon',
@@ -1258,15 +1258,15 @@ AMBIENT_TYPES = {
         entity_names=[None],
         map_type=None,
         proximity_threshold=999,  # Always play when active
-        base_volume=0.1
+        base_volume=1.0
     ),
     'dungeon_music': AmbientSoundType(
         name='dungeon_music', 
-        sound_file='RP/music/dungeon1.mp3',  # Change this to your music file
+        sound_file='RP/music/dungeon1.wav',  # Change this to your music file
         entity_names=[None],
         map_type=None,
         proximity_threshold=999,
-        base_volume=0.3
+        base_volume=1.0
     ),
     'menu_music': AmbientSoundType(
         name='menu_music',
@@ -1282,7 +1282,7 @@ AMBIENT_TYPES = {
         entity_names=[None],
         map_type=None,
         proximity_threshold=999,
-        base_volume=0.3
+        base_volume=1.0
     ),
 }
 
@@ -2020,3 +2020,18 @@ def set_music_files(dungeon_file: str, menu_file: str):
     AMBIENT_TYPES['menu_music'].sound_file = menu_file
 
 
+def load_voice_sounds(gender: str, count: int = 30):
+    folder = f"RP/voice/{gender.lower()}/"
+    prefix = gender.lower()
+
+    paths = [f"{folder}{prefix}{i}.wav" for i in range(1, count + 1)]
+
+    #print(*paths, sep="\n")  # debug
+
+    return [Sound(path) for path in paths]
+
+
+def play_voice(gender: str, pitch: float):
+    voice_sounds = load_voice_sounds(gender)
+    sound = random.choice(voice_sounds)
+    play_sound_with_pitch_variation(sound, (pitch, pitch), volume=0.5)
