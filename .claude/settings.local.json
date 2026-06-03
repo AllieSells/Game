@@ -37,7 +37,8 @@
       "Bash(python -m py_compile input_handlers.py sounds.py)",
       "Bash(python -m py_compile main.py input_handlers.py sounds.py shader.py)",
       "Bash(python -m py_compile sprite_manager.py setup_game.py)",
-      "PowerShell(New-Item -ItemType Directory -Force -Path \"c:\\\\Users\\\\User\\\\New folder\\\\Game\\\\Game\\\\.github\\\\workflows\")"
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"c:\\\\Users\\\\User\\\\New folder\\\\Game\\\\Game\\\\.github\\\\workflows\")",
+      "Bash(git rm *)"
     ]
   }
 }
