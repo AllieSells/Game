@@ -2,8 +2,8 @@ from enum import Enum, auto
 from random import random
 
 from components.body_parts import BodyPart
-from liquid_system import LiquidSystem, LiquidType
-from typing import Dict, List, Optional, Set, TYPE_CHECKING
+from liquid_system import LiquidType
+from typing import Optional
 
 
 

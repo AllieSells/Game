@@ -19,7 +19,6 @@ import hashlib
 
 from PIL import Image
 import numpy as np
-import random
 import tcod.sdl.mouse
 
 import sounds
@@ -70,15 +69,52 @@ if not os.environ.get("GAME_SHOW_WARNINGS"):
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+def set_console_visible(visible: bool) -> None:
+    """Show or hide the Windows console window. No-op on non-Windows / dev runs."""
+    try:
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 1 if visible else 0)
+    except Exception:
+        pass
+
+
 def get_data_path(filename):
-    """Get the correct path for data files in both development and PyInstaller."""
+    """Bundled read-only assets (inside _MEIPASS in exe, project folder in dev)."""
     if getattr(sys, 'frozen', False):
-        # Running as PyInstaller executable
         base_path = sys._MEIPASS
     else:
-        # Running in development
         base_path = os.path.dirname(__file__)
     return os.path.join(base_path, filename)
+
+
+def get_user_data_path(filename):
+    """Writable user data path — next to the exe in production, project folder in dev.
+
+    This is where mutable files (settings.json, save games, logs) must live so
+    that writes succeed in a frozen one-file exe where _MEIPASS is read-only.
+    """
+    if getattr(sys, 'frozen', False):
+        base_path = os.path.dirname(sys.executable)
+    else:
+        base_path = os.path.dirname(__file__)
+    return os.path.join(base_path, filename)
+
+
+def _ensure_user_settings() -> None:
+    """Copy bundled settings.json to the user-writable location on first run."""
+    user_path = get_user_data_path("json/settings.json")
+    if not os.path.exists(user_path):
+        os.makedirs(os.path.dirname(user_path), exist_ok=True)
+        import shutil
+        try:
+            shutil.copy2(get_data_path("json/settings.json"), user_path)
+        except Exception:
+            pass
+
+
+_ensure_user_settings()
 
 # Import tcod and create window as fast as possible
 
@@ -112,6 +148,15 @@ except Exception as e:
     # Create a basic empty tileset as fallback
     tileset = tcod.tileset.Tileset(16, 16)
 
+# Apply console visibility from settings (hide by default in exe builds).
+try:
+    import json as _json
+    with open(get_user_data_path("json/settings.json"), 'r') as _sf:
+        _st = '\n'.join(line for line in _sf if not line.strip().startswith('//'))
+        set_console_visible(bool(_json.loads(_st).get("show_console", False)))
+except Exception:
+    set_console_visible(False)
+
 # Load extra overlay sprites from RP/extras.png into PUA codepoints (U+E000+).
 import sprite_manager
 sprite_manager.load_extras(
@@ -139,7 +184,6 @@ from gpu_stack import (
     create_vignette_texture,
     create_glare_texture,
     DegaussAnimation,
-    CRTSwitchAnimation,
     VHSGlitchAnimation,
     VideoModeSwitchAnimation,
 )
@@ -199,7 +243,7 @@ def load_settings():
     """Load settings from JSON file."""
     import json  # Import here if not already imported
     try:
-        with open(get_data_path("json/settings.json"), 'r') as f:
+        with open(get_user_data_path("json/settings.json"), 'r') as f:
             content = f.read()
             # Remove JSON comments
             lines = [line for line in content.split('\n') if not line.strip().startswith('//')]
@@ -425,7 +469,6 @@ show_loading_screen(context, ui_console, "Initializing hardware...")
 
 
 # Now load remaining modules
-import json
 
 start_time = time.time() # Track total loading
 

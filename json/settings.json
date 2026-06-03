@@ -1,7 +1,7 @@
 {
     // Display settings
     "fullscreen": false,
-    "audio": 70,
+    "audio": 50,
     // Lighting settings
     "lighting_mode": "gpu",
     // CRT filter settings
@@ -13,5 +13,9 @@
     "light_flicker": true,
     // Lighting settings
     "shadow_softness": 0.2,
-    "modern_gl_lightmap_unified": true
+    "modern_gl_lightmap_unified": true,
+    // Audio settings
+    "voice_blips": true,
+    // Debug settings
+    "show_console": false
 }

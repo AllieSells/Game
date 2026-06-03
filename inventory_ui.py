@@ -945,7 +945,7 @@ class InventoryGridUI(PopupEventHandler):
                         fg=_HINT_FG, bg=_BG)
             else:
                 c.print(2, _INFO_Y + 1,
-                        "RClick: context  |  Esc: close",
+                        "RClick: context  |  Esc: close  |  Alt: Health",
                         fg=_HINT_FG, bg=_BG)
             return
 
@@ -3480,7 +3480,6 @@ class CookingUI(PopupEventHandler):
     def _fill_cooking_qty(self) -> None:
         """ADD-blend overlay for cooking slots — no extra decoration needed;
         the heat sprite is drawn directly in the grid console."""
-        pass
 
     def _render_to_console(self, c: tcod.Console) -> None:
         W, H = _CK_W, _CK_H

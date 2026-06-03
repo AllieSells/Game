@@ -1,4 +1,3 @@
-from components.dialogue_generator import generate_sentence
 
 
 def build_reverse_lookup(from_lang: str, to_lang: str) -> list[tuple[str, str]]:

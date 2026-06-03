@@ -250,7 +250,7 @@ def random_floor_tile():
 floor = random_floor_tile()
 
 wooden_floor = new_tile(
-    name="Fungal Floor",
+    name="Wooden Floor",
     walkable=True,
     transparent=True,
     # Yellowish brown

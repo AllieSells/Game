@@ -4351,14 +4351,11 @@ class GPUStack:
                     active_engine.profile_external_ms("lightmap_unified_disabled", 1.0)
                     msg = "UnifiedGL runtime auto-disabled after fallback; using SDL lightmap path."
                     print("[INFO]: " + msg)
-                    if hasattr(active_engine, "message_log") and active_engine.message_log is not None:
-                        active_engine.message_log.add_message(msg)
                 except Exception:
                     pass
             except Exception:
                 # Fall through to legacy path on any bridge/composer failure.
                 self._unified_runtime_disabled = True
-                pass
 
         if should_rebuild:
             lm_np = lighting_engine.build_lightmap(game_map, game_console)

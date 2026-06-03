@@ -29,6 +29,36 @@
   },
 
   "contexts": {
+    "guide_opening": {
+      "neutral": {
+        "common" : ["Hm..?"]
+      }
+    },
+    "guide_greet": {
+      "neutral": {
+        "common": ["Greetings, {address}. I am your Guide for this place."]
+      }
+    },
+    "guide_combat": {
+      "neutral": {
+        "common": ["You can attack enemies with Left Click. Hold SHIFT and move in a direction to dodge. Try it out on that Dummy."]
+      }
+    },
+    "guide_magic" : {
+      "neutral": {
+        "common": ["You can access spells you have learned by pressing C. Assign quickcast with 1-9. You may find tomes around, but learning a school of magic takes experience."]
+      }
+    },
+    "guide_items" : {
+      "neutral": {
+        "common": ["You will likely find many useful items inside chests. Right Click to interact with chests and other tiles in the world."]
+      }
+    },
+    "guide_world" : {
+      "neutral": {
+        "common": ["You have arrived at the Mouth of Aerrok, a treacherous place. The Dungeon of Aerrok awaits you down the stairs. Many have died attempting to find our salvation in the depths."]
+      }
+    },
 
     "Opening": {
       "neutral": {

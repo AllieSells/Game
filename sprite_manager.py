@@ -382,8 +382,14 @@ def _register_avg_normal_from_normal_pixels(cp: int, normal_pixels: np.ndarray) 
         w = np.clip(alpha, 0.0, 1.0)
         wsum = float(np.sum(w))
         if wsum <= 1e-6:
+            # Normal map has no authored data for this tile (blank/transparent area).
+            # Decoded values from zero pixels are garbage (-1,-1,-1 per pixel) so
+            # register flat (0,0,1) normals instead to avoid intense fake lighting.
+            h, w_px = normal_pixels.shape[:2]
+            flat = np.zeros((h, w_px, 3), dtype=np.float32)
+            flat[..., 2] = 1.0
             _avg_normal_by_cp[cp] = (0.0, 0.0, 1.0)
-            _register_normal_field(cp, normals, alpha)
+            _register_normal_field(cp, flat, alpha)
         else:
             ax = float(np.sum(nx * w) / wsum)
             ay = float(np.sum(ny * w) / wsum)
@@ -2087,7 +2093,11 @@ def apply_neighbor_overlay(
 # Portrait compositor
 # ---------------------------------------------------------------------------
 
-_PORTRAIT_CACHE_DIR = os.path.join(os.path.dirname(__file__), "portrait_cache")
+import sys as _sys
+_PORTRAIT_CACHE_DIR = os.path.join(
+    os.path.dirname(_sys.executable) if getattr(_sys, "frozen", False) else os.path.dirname(__file__),
+    "portrait_cache"
+)
 _PORTRAIT_PARTS_DIR = os.path.join(os.path.dirname(__file__), "components", "portrait_parts")
 # Bump this string to invalidate all cached portraits (e.g. after changing tints or layers)
 _PORTRAIT_CACHE_VERSION = "v2"

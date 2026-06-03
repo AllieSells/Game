@@ -14,12 +14,22 @@ import sys
 def get_data_path(filename):
     """Get the correct path for data files in both development and PyInstaller."""
     if getattr(sys, 'frozen', False):
-        # Running as PyInstaller executable
         base_path = sys._MEIPASS
     else:
-        # Running in development
         base_path = os.path.dirname(__file__)
     return os.path.join(base_path, filename)
+
+
+def _log(message: str) -> None:
+    """Write to logs/log.txt, creating the directory if it doesn't exist."""
+    try:
+        log_path = get_data_path('logs/log.txt')
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, 'a') as f:
+            f.write(message if message.endswith('\n') else message + '\n')
+    except Exception:
+        pass  # Never let logging crash the game
+
 
 # Global audio cache to avoid reloading files repeatedly
 _audio_cache = {}
@@ -236,8 +246,7 @@ class AudioMixer:
             self.stream.start()
             self.running = True
         except Exception as e:
-            with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                log_file.write(f"Error starting audio stream: {e}\n")
+            _log(f"Error starting audio stream: {e}\n")
     
     def _audio_callback(self, outdata, frames, time, status):
         """Audio callback that mixes all active sounds."""
@@ -319,14 +328,12 @@ class AudioMixer:
             try:
                 outdata[:] = self._apply_lowpass_filter(outdata, self.muffling_cutoff)
             except Exception as e:
-                with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                    log_file.write(f"Error applying muffling filter: {e}\n")
+                _log(f"Error applying muffling filter: {e}\n")
 
         try:
             outdata[:] = self._apply_vhs_effect(outdata)
         except Exception as e:
-            with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                log_file.write(f"Error applying VHS effect: {e}\n")
+            _log(f"Error applying VHS effect: {e}\n")
 
         # Prevent clipping
         np.clip(outdata, -1.0, 1.0, out=outdata)
@@ -368,8 +375,7 @@ class AudioMixer:
             final_volume = volume * global_volume_multiplier
         except Exception as e:
             # Fallback if settings can't be loaded
-            with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                log_file.write(f"Error loading settings for audio volume: {e}\n")
+            _log(f"Error loading settings for audio volume: {e}\n")
             final_volume = volume
             
         with self.lock:
@@ -427,8 +433,7 @@ class AudioMixer:
             else:
                 # Handle new 0-100 format
                 global_volume_multiplier = max(0.0, min(1.0, global_volume / 100.0))
-                with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                    log_file.write(f"Updating loop volumes with global volume: {global_volume} (multiplier: {global_volume_multiplier})\n")
+                _log(f"Updating loop volumes with global volume: {global_volume} (multiplier: {global_volume_multiplier})\n")
                 
             with self.lock:
                 for sound_info in self.loop_sounds:
@@ -436,12 +441,10 @@ class AudioMixer:
                         # Get base volume (assume it was stored at 1.0 originally)
                         base_volume = 0.3
                         sound_info['volume'] = base_volume * global_volume_multiplier
-                        with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                            log_file.write(f"Updated loop '{sound_info.get('id')}' volume to {sound_info['volume']}\n")
+                        _log(f"Updated loop '{sound_info.get('id')}' volume to {sound_info['volume']}\n")
                         
         except Exception as e:
-            with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                log_file.write(f"Failed to update loop volumes: {e}\n")
+            _log(f"Failed to update loop volumes: {e}\n")
     
     def _apply_lowpass_filter(self, audio_data: np.ndarray, cutoff: float) -> np.ndarray:
         """Apply low-pass filter for sound muffling effect with proper state management."""
@@ -511,8 +514,7 @@ class AudioMixer:
             return filtered.astype(np.float32)
             
         except Exception as e:
-            with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                log_file.write(f"Filter error: {e}\n")
+            _log(f"Filter error: {e}\n")
             # Reset filter state on error
             self.filter_zi_l = None
             self.filter_zi_r = None
@@ -588,11 +590,22 @@ _settings_cache_time: float = 0.0
 _SETTINGS_CACHE_TTL: float = 2.0  # Refresh settings at most every 2 seconds
 _settings_cache_mtime: float = -1.0
 
+def _get_settings_path() -> str:
+    """Return the user-writable settings path (next to exe in prod, project folder in dev)."""
+    try:
+        import sys as _sys
+        if getattr(_sys, "frozen", False):
+            return os.path.join(os.path.dirname(_sys.executable), "json", "settings.json")
+    except Exception:
+        pass
+    return get_data_path("json/settings.json")
+
+
 def load_settings():
     """Load settings from JSON file (cached for up to 2 seconds)."""
     global _settings_cache, _settings_cache_time, _settings_cache_mtime
     now = time.monotonic()
-    settings_path = get_data_path("json/settings.json")
+    settings_path = _get_settings_path()
 
     try:
         current_mtime = os.path.getmtime(settings_path)
@@ -646,8 +659,7 @@ class Sound:
             resampled = signal.resample(audio_data, new_length, axis=0)
             return resampled.astype(np.float32, copy=False)
         except Exception as e:
-            with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                log_file.write(f"Error resampling audio: {e}\n")
+            _log(f"Error resampling audio: {e}\n")
             return audio_data
     
     def _load_audio(self, filename: str) -> Tuple[np.ndarray, int]:
@@ -661,8 +673,7 @@ class Sound:
             _audio_cache[filename] = (data, samplerate)
             return data, samplerate
         except Exception as e:
-            with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                log_file.write(f"Error loading sound {filename}: {e}\n")
+            _log(f"Error loading sound {filename}: {e}\n")
             # Return silent audio as fallback
             silent_audio = np.zeros((int(0.1 * 22050),), dtype=np.float32)  # 0.1 second of silence
             _audio_cache[filename] = (silent_audio, 22050)
@@ -740,8 +751,7 @@ def play_sound_with_pitch_variation(sound: Sound, pitch_range=(0.85, 1.15), volu
         modified_sound.play(fade_ms=fade_ms)
         
     except Exception as e:
-        with open(get_data_path('logs/log.txt'), 'a') as log_file:
-            log_file.write(f"Error in pitch variation: {e}\n")
+        _log(f"Error in pitch variation: {e}\n")
         # Fallback to normal playback
         try:
             sound.set_volume(volume)
@@ -1379,8 +1389,7 @@ class AmbientSoundManager:
             ambient_state['active'] = True
             
         except Exception as e:
-            with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                log_file.write(f"Could not start {ambient_type} loop: {e}\n")
+            _log(f"Could not start {ambient_type} loop: {e}\n")
     
     def stop_ambient_loop(self, ambient_type: str):
         """Stop ambient loop with fade out."""
@@ -1490,8 +1499,7 @@ def _ray_cast_sound(start_x, start_y, end_x, end_y, game_map):
                     return 0.0
                     
             except Exception as e:
-                with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                    log_file.write(f"Exception getting tile info: {e}\n")
+                _log(f"Exception getting tile info: {e}\n")
                 sound_strength *= 0.1  # Default heavy attenuation for unknown walls
         
         # Distance-based attenuation (moderate falloff)
@@ -1698,8 +1706,7 @@ def apply_muffling_to_audio(audio_data: np.ndarray, cutoff: float = 800, sampler
         return filtered.astype(np.float32, copy=False)
         
     except Exception as e:
-        with open(get_data_path('logs/log.txt'), 'a') as log_file:
-            log_file.write(f"Muffling filter error: {e}\n")
+        _log(f"Muffling filter error: {e}\n")
         return audio_data  # Return original on error
 
 def play_positional_sound(sound_func, source_x, source_y, player, game_map, muffled_cutoff=800):
@@ -1793,8 +1800,7 @@ def play_muffled_sound(sound_func, cutoff=800):
         
     else:
         # Fallback - just play the original function (no muffling)
-        with open(get_data_path('logs/log.txt'), 'a') as log_file:
-            log_file.write(f"Warning: No muffling support for sound function: {sound_func.__name__}\n")
+        _log(f"Warning: No muffling support for sound function: {sound_func.__name__}\n")
         sound_func()
         return
     
@@ -1808,8 +1814,7 @@ def play_muffled_sound(sound_func, cutoff=800):
             new_length = int(len(muffled_data) / pitch)
             muffled_data = signal.resample(muffled_data, new_length, axis=0).astype(np.float32, copy=False)
         except Exception as e:
-            with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                log_file.write(f"Pitch variation error: {e}\n")
+            _log(f"Pitch variation error: {e}\n")
     
     # Play the muffled sound directly through the mixer
     global _mixer
@@ -1954,8 +1959,7 @@ def play_muffled_sound_with_coords(sound_func, cutoff=800, entity_x=0, entity_y=
         sound.set_volume(0.5)  # Match original volume
     else:
         # Fallback - just play the original function (no muffling)
-        with open(get_data_path('logs/log.txt'), 'a') as log_file:
-            log_file.write(f"Warning: No muffling support for sound function: {sound_func.__name__}\n")
+        _log(f"Warning: No muffling support for sound function: {sound_func.__name__}\n")
         sound_func(entity_x, entity_y) if 'walk_sound' in sound_func.__name__ else sound_func()
         return
     
@@ -1969,8 +1973,7 @@ def play_muffled_sound_with_coords(sound_func, cutoff=800, entity_x=0, entity_y=
             new_length = int(len(muffled_data) / pitch)
             muffled_data = signal.resample(muffled_data, new_length, axis=0).astype(np.float32, copy=False)
         except Exception as e:
-            with open(get_data_path('logs/log.txt'), 'a') as log_file:
-                log_file.write(f"Pitch variation error: {e}\n")
+            _log(f"Pitch variation error: {e}\n")
     
     # Add unique stagger delay per entity using position as seed
     entity_seed = (entity_x * 31 + entity_y * 17) % 1000
@@ -2032,6 +2035,11 @@ def load_voice_sounds(gender: str, count: int = 30):
 
 
 def play_voice(gender: str, pitch: float):
+    try:
+        if not load_settings().get("voice_blips", True):
+            return
+    except Exception:
+        pass
     voice_sounds = load_voice_sounds(gender)
     sound = random.choice(voice_sounds)
     play_sound_with_pitch_variation(sound, (pitch, pitch), volume=0.5)

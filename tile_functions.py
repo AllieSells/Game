@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     from entity import Actor
 
 import tile_types
-import color
 
 def open_door(engine: "Engine", actor: "Actor", x: int, y: int) -> Optional[str]:
     """

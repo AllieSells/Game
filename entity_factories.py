@@ -1198,7 +1198,7 @@ kobold = Actor(
     verb_past="scratched",
     verb_participial="scratching",
     dodge_chance=0.10,
-    can_speak = True,
+    can_speak = False,
     knowledge = {
         "language": "yipyak",
         "gender": random.choice(["male", "female"]),
@@ -1318,7 +1318,7 @@ goblin = Actor(
             None: 50
         }
     },
-    can_speak = True,
+    can_speak = False,
     knowledge = {
         "language": "goblin",
         "gender": random.choice(["male", "female"]),
@@ -1683,10 +1683,12 @@ tutorial_guide = Actor(
     inventory=Inventory(capacity=26),
     level=Level(xp_given=0),
     sentient=True,
-    is_known=True,
-    type = "Guide",
+    is_known=False,
+    type = "guide",
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=999999999999),
     can_speak = True,
+    dialogue_context="guide_opening",
+    unknown_name="Old Man"
 )
 
 villager = Actor(
@@ -1700,7 +1702,7 @@ villager = Actor(
     level=Level(xp_given=10),
     sentient=True,
     is_known=False,
-    type = "NPC",
+    type = "villager",
     body_parts=BodyParts(AnatomyType.HUMANOID, max_hp=10),
     can_speak = True,
 )

@@ -169,7 +169,9 @@ def generate_sentence(
 
 _PRIMARY_CONTEXT_KEYS = (
     "RefuseTrade", "Greeting", "Identity", "Location",
-    "Knowledge", "Goodbye", "Response",
+    "Knowledge", "Goodbye", "Response", "guide_greet",
+    "guide_combat", "guide_magic", "guide_items", "guide_world",
+    "guide_opening"
 )
 
 

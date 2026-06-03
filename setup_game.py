@@ -220,9 +220,10 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
     engine.game_world.generate_world()
     
     from pathlib import Path
-    cache = Path("portrait_cache")
+    import sprite_manager as _sm
+    cache = Path(_sm._PORTRAIT_CACHE_DIR)
     if not cache.exists():
-        cache.mkdir()
+        cache.mkdir(parents=True)
     for item in cache.iterdir():
         if item.is_file():
             try:
@@ -249,10 +250,11 @@ def new_game(game_seed: Optional[int] = None, seed_string: Optional[str] = None)
     # Clear world generation flag after generation is complete
     engine.is_generating_world = False
 
-    engine.message_log.add_message("Press ? For Controls")
+    
     engine.message_log.add_message(
         f"Seed: {get_current_seed()}", color.welcome_text
     )
+    engine.message_log.add_message("Speak to the old man.")
     engine.show_minimap = 1  # Show controls by default — player spawns inside dungeon
     return engine
 
@@ -305,10 +307,11 @@ def tutorial_game(game_seed = None, seed_string = None) -> Engine:
     # Clear world generation flag after generation is complete
     engine.is_generating_world = False
 
-    engine.message_log.add_message("Press ? For Controls")
+    
     engine.message_log.add_message(
         f"Seed: {get_current_seed()}", color.welcome_text
     )
+    engine.message_log.add_message("Speak to the old man.")
     engine.message_log.add_message(
         "You enter the dungeon. Haunted figures move in the dark...", color.welcome_text
     )
@@ -1860,7 +1863,6 @@ def initialize_music():
     # sounds.add_dungeon_track("RP/sfx/loops/dungeon/ambience.wav")
     # sounds.add_menu_track("RP/sfx/loops/menu/theme.wav")
     
-    pass
 
 # Initialize music tracks when module loads
 initialize_music()

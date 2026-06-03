@@ -2,7 +2,7 @@
 Example of how to add new enemies to the simple spawning system.
 Much easier and cleaner than the previous complex approach.
 """
-from enemy_spawning import add_enemy, add_enemy_to_floor, enemy_spawner
+from enemy_spawning import add_enemy
 from components.ai import HostileEnemy
 from components.equipment import Equipment
 from components.fighter import Fighter

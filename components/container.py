@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, TYPE_CHECKING, Optional
+from typing import List, TYPE_CHECKING
 
 from components.base_component import BaseComponent
 

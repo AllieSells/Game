@@ -140,7 +140,6 @@ class Fighter(BaseComponent):
                             gm.entities.discard(self.parent)
                         except Exception as e:
                             self.engine.debug_log(f"ERROR: Failed to discard {self.parent.name} from gamemap entities on death: {e}", handler=self.__class__.__name__, event="DeathCleanup")
-                            pass
             except Exception:
                 pass
 
@@ -572,7 +571,6 @@ class Receiver(Fighter):
                     gm.entities.discard(self.parent)
                 except Exception as e:
                     self.engine.debug_log(f"ERROR: Failed to discard {self.parent.name} from gamemap entities on death: {e}", handler=self.__class__.__name__, event="DeathCleanup")
-                    pass
 
         if getattr(self.parent, "is_boss", False):
             from input_handlers import GameWonEventHandler

@@ -1,14 +1,24 @@
 Log file cleared at startup.
-Tue Jun  2 17:27:36 2026: Game started.
-[2026-06-02 17:27:38] [frame 0] Unified ModernGL lightmap bridge: enabled (composer attached).
-Loaded exceptions module in 0.01 seconds
+Wed Jun  3 00:07:05 2026: Game started.
+[2026-06-03 00:07:06] [frame 0] Unified ModernGL lightmap bridge: enabled (composer attached).
+Loaded exceptions module in 0.00 seconds
 Loaded input_handlers module in 0.05 seconds
 Loaded 250 frames for animated background.
-Loaded setup_game module in 5.42 seconds
-Loaded tcod.sdl.video and traceback modules in 0.00 seconds
-Updating loop volumes with global volume: 70 (multiplier: 0.7)
-Updated loop 'ambient_menu' volume to 0.21
-Updated loop 'ambient_menu_music' volume to 0.21
-Finished loading in 13.85 seconds
-Settings loaded: {'fullscreen': False, 'audio': 70, 'lighting_mode': 'gpu', 'crt_scanlines': False, 'crt_vignette': True, 'crt_bloom': True, 'crt_ca': False, 'crt_curvature': True, 'light_flicker': True, 'shadow_softness': 0.2, 'modern_gl_lightmap_unified': True}
+Loaded setup_game module in 5.04 seconds
+Loaded tcod.sdl.video and traceback modules in 0.01 seconds
+Finished loading in 15.44 seconds
+Settings loaded: {'fullscreen': False, 'audio': 50, 'lighting_mode': 'gpu', 'crt_scanlines': True, 'crt_vignette': True, 'crt_bloom': True, 'crt_ca': True, 'crt_curvature': True, 'light_flicker': True, 'shadow_softness': 0.2, 'modern_gl_lightmap_unified': True, 'voice_blips': True, 'show_console': False}
 =========================================================================================================================================================================================================================
+[frame 0] TRANSITION: entering game view (handler=MainGameEventHandler)
+Error loading sound RP/sfx/walk/moss/moss1.mp3: Error opening 'C:\\Users\\User\\New folder\\Game\\Game\\RP/sfx/walk/moss/moss1.mp3': System error.
+Error loading sound RP/sfx/walk/moss/moss2.mp3: Error opening 'C:\\Users\\User\\New folder\\Game\\Game\\RP/sfx/walk/moss/moss2.mp3': System error.
+Error loading sound RP/sfx/walk/moss/moss3.mp3: Error opening 'C:\\Users\\User\\New folder\\Game\\Game\\RP/sfx/walk/moss/moss3.mp3': System error.
+Error loading sound RP/sfx/walk/moss/moss4.mp3: Error opening 'C:\\Users\\User\\New folder\\Game\\Game\\RP/sfx/walk/moss/moss4.mp3': System error.
+[frame 1174] CRT: starting generation thread (loading screen visible)
+[frame 1175] CRT: playing video mode switch (INT 10h) from completed loading screen
+[frame 1175] CRT: video mode switch blank phase done, transitioning handler
+[frame 1175] CRT: handler after transition = MainMenu
+[frame 1175] CRT: capturing game frame for play_on
+[frame 1175] CRT: playing video mode resync + snap with real game frame
+[frame 1175] CRT: video mode resync done
+[frame 1181] CRT: starting generation thread (loading screen visible)

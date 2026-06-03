@@ -7,7 +7,6 @@ from tcod.console import Console
 import tile_types
 from entity import Actor, Item
 from render_order import RenderOrder
-import color
 from liquid_system import LiquidSystem
 import sprite_manager
 from components.effect import is_invisible
@@ -570,7 +569,7 @@ class GameMap:
                                                        gpu_only=_gpu_mode)
                             
                             has_torch = False
-                            if hasattr(entity, 'equipment'):
+                            if hasattr(entity, 'equipment') and entity.equipment:
                                 has_torch = entity.equipment.has_item_equipped("Torch")
                                 if has_torch:
                                     px, py = entity.x, entity.y

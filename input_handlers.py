@@ -153,15 +153,7 @@ class BaseEventHandler(tcod.event.EventDispatch[ActionOrHandler]):
                 self.engine.mouse_y = int(active_tile[1])
             except Exception:
                 pass
-        try:
-            if self.engine.mouse_ui_y == 40 and 36 <= self.engine.mouse_ui_x <= 50:
-                self.engine.hovered_inventory_button = "inventory"
-            elif self.engine.mouse_ui_y == 40 and 52 <= self.engine.mouse_ui_x <= 64:
-                self.engine.hovered_inventory_button = "equipment"
-            else:
-                self.engine.hovered_inventory_button = None
-        except Exception:
-            pass
+
         return None
 
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
@@ -809,27 +801,8 @@ class DialogueEventHandler(PopupEventHandler):
         else:
             knows_name = npc.unknown_name
         self.selected_index = 0
-        self.menu_structure = {
-            "main": {
-                "title": f"Talking to {knows_name}",
-                "options": [
-                    {"text": "Hello", "action": "dialogue", "context": ["Greeting"]},
-                    {"text": "Questions", "action": "submenu", "target": "questions"},
-                    {"text": "Trade", "action": "trade", "target": "trade"},
-                    {"text": "Farewell", "action": "exit"}
-                ]
-            },
-            "questions": {
-                "title": "Questions",
-                "options": [
-                    {"text": "Where are we?", "action": "dialogue", "context": ["Location"]},
-                    {"text": "What are you called?", "action": "dialogue", "context": ["Identity"]},
-                    {"text": "What do you know?", "action": "dialogue", "context": ["Knowledge"]},
-                    {"text": "[Back]", "action": "submenu", "target": "main"}
-                ]
-            }
-        }
-
+        self.talked_to_guide = False
+        self.menu_structure = self._build_menu(npc, knows_name)
         
         # Generate initial dialogue text
         self.current_dialogue = self.dialogue.generate_dialogue(character=self.npc, context=self.npc.dialogue_context)
@@ -849,6 +822,8 @@ class DialogueEventHandler(PopupEventHandler):
             self.current_dialogue = ("Hello there.", ["Greeting"])
             
         display_name = self.npc.name if self.npc.is_known else self.npc.unknown_name
+        if display_name is None:
+            display_name = "???"
         self.engine.message_log.add_message(f"{display_name}: {self.current_dialogue[0]}", color.blue)
         if isinstance(self.current_dialogue[1], str):
             self.npc.dialogue_context = [self.current_dialogue[1]]
@@ -867,6 +842,65 @@ class DialogueEventHandler(PopupEventHandler):
         self._dlg_opt_y = None  # first option row — set in on_render, read by mouse handlers
         self._dlg_box_y = None
         self._dlg_box_h = None
+
+    # ------------------------------------------------------------------
+    # Standard reusable menu pages (mix and match in _build_menu below)
+    # ------------------------------------------------------------------
+
+    def _page_questions(self) -> dict:
+        return {
+            "title": "Questions",
+            "options": [
+                {"text": "Where are we?",        "action": "dialogue", "context": ["Location"]},
+                {"text": "What are you called?", "action": "dialogue", "context": ["Identity"]},
+                {"text": "What do you know?",    "action": "dialogue", "context": ["Knowledge"]},
+                {"text": "[Back]",               "action": "submenu",  "target": "main"},
+            ],
+        }
+
+    # ------------------------------------------------------------------
+    # Menu builder — add a new elif branch for each entity type.
+    # npc.type is set on the entity (e.g. "Merchant", "Quest Giver", etc.)
+    # Each branch returns a complete menu_structure dict.
+    # ------------------------------------------------------------------
+
+    def _build_menu(self, npc, display_name: str) -> dict:
+        if npc.type == "villager":
+            return {
+                "main": {
+                    "title": f"Talking to {display_name}",
+                    "options": [
+                        {"text": "Hello",     "action": "dialogue", "context": ["Greeting"]},
+                        {"text": "Questions", "action": "submenu",  "target": "questions"},
+                        {"text": "Trade",     "action": "trade",    "target": "trade"},
+                        {"text": "Farewell",  "action": "exit"},
+                    ],
+                },
+                "questions": self._page_questions(),
+            }
+
+        elif npc.type == "guide":
+            if not npc.is_known:
+                return {
+                    "main": {
+                        "title": f"Talking to the old man",
+                        "options": [
+                            {"text": "Where am I? Who are you?", "action": "dialogue", "context": ["guide_greeting"]}
+                        ]
+                    }
+                }
+            else:
+                return {
+                    "main": {
+                        "title": f"Talking to {display_name}",
+                        "options": [
+                            {"text": "Tell me about combat", "action": "dialogue", "context": ["guide_combat"]},
+                            {"text": "Tell me about magic", "action": "dialogue", "context": ["guide_magic"]},
+                            {"text": "Tell me about items", "action": "dialogue", "context": ["guide_items"]},
+                            {"text": "Tell me about this place", "action": "dialogue", "context": ["guide_world"]}
+                        ]
+                    }
+                }
 
     def update_menu_title(self):
         """Update the main menu title when NPC becomes known."""
@@ -1104,6 +1138,8 @@ class DialogueEventHandler(PopupEventHandler):
                 self._last_visible_chars = 0
                 
                 display_name = self.npc.name if self.npc.is_known else self.npc.unknown_name
+                if display_name is None:
+                    display_name = "???"
                 self.engine.message_log.add_message(f"{display_name}: {self.current_dialogue[0]}", color.blue)
                 
         
@@ -1120,6 +1156,7 @@ class DialogueEventHandler(PopupEventHandler):
             return None
             
         elif action == "dialogue":
+
             # Execute dialogue with given context
             context = selected_option.get("context", [])
             self.npc.dialogue_context = context
@@ -1136,6 +1173,8 @@ class DialogueEventHandler(PopupEventHandler):
                 self.current_dialogue = ("I have nothing to say about that.", ["Default"])
                 
             display_name = self.npc.name if self.npc.is_known else self.npc.unknown_name
+            if display_name is None:
+                display_name = "???"
             self.engine.message_log.add_message(f"{display_name}: {self.current_dialogue[0]}", color.blue)
             
             # Update dialogue context
@@ -1148,6 +1187,12 @@ class DialogueEventHandler(PopupEventHandler):
             if "Identity" in context:
                 self.npc.is_known = True
                 self.update_menu_title()
+            if "guide_greeting" in context:
+                self.talked_to_guide = True
+                self.npc.is_known = True
+                self.update_menu_title()
+                knows_name = self.npc.name if self.npc.is_known else self.npc.unknown_name
+                self.menu_structure = self._build_menu(self.npc, knows_name)
             
             return None
         
@@ -4011,7 +4056,7 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.K_SLASH and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT
         ):            
             # TODO HELP MENU
-            return HelpMenuHandler(parent_handler=self)
+            return None #HelpMenuHandler(parent_handler=self)
         elif key == tcod.event.KeySym.T:
             active_ability = getattr(player, "active_ability", None)
             if active_ability is None:
@@ -6032,16 +6077,22 @@ class Settings(BaseEventHandler):
     
     def __init__(self, parent_handler=None):
         self.engine = getattr(parent_handler, "engine", None)
-        # Load settings from JSON file
-        self.settings_file = "json/settings.json"
+        # Always read/write the user-writable copy (next to exe in prod, project folder in dev)
+        try:
+            import sys as _sys
+            import os as _os
+            _base = _os.path.dirname(_sys.executable) if getattr(_sys, "frozen", False) else _os.path.dirname(_os.path.abspath(__file__))
+            self.settings_file = _os.path.join(_base, "json", "settings.json")
+        except Exception:
+            self.settings_file = "json/settings.json"
         self.settings_data = self._load_settings()
         
         self.categories = {
-            "Controls": {
-                "Options": [''],
-                "SelectedIndex": 0,
-                "json_key": None  # No JSON key since this opens a sub-menu
-            },
+            #"Controls": {
+            #    "Options": [''],
+            #    "SelectedIndex": 0,
+            #    "json_key": None  # No JSON key since this opens a sub-menu
+            #},
             "Window:": {
                 "Options": ["Windowed", "Fullscreen"],
                 "SelectedIndex": 1 if self.settings_data.get("fullscreen", False) else 0,
@@ -6081,6 +6132,16 @@ class Settings(BaseEventHandler):
                 "Options": ["On", "Off"],
                 "SelectedIndex": 0 if self.settings_data.get("crt_curvature", True) else 1,
                 "json_key": "crt_curvature"
+            },
+            "Voice Blips:": {
+                "Options": ["On", "Off"],
+                "SelectedIndex": 0 if self.settings_data.get("voice_blips", True) else 1,
+                "json_key": "voice_blips"
+            },
+            "Log Console:": {
+                "Options": ["Off", "On"],
+                "SelectedIndex": 1 if self.settings_data.get("show_console", False) else 0,
+                "json_key": "show_console"
             }
         }
         # Convert to list for easier navigation
@@ -6187,7 +6248,17 @@ class Settings(BaseEventHandler):
                         reload_crt_settings()
                     except Exception:
                         pass
-            
+
+                # Toggle console visibility live
+                if category_data.get("json_key") == "show_console":
+                    try:
+                        import ctypes
+                        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+                        if hwnd:
+                            ctypes.windll.user32.ShowWindow(hwnd, 1 if category_data["SelectedIndex"] == 1 else 0)
+                    except Exception:
+                        pass
+
         # Handle selection (Enter/Space)
         elif key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.SPACE:
             selected_category_key = self.category_keys[self.selected_option]
@@ -6289,8 +6360,14 @@ class Settings(BaseEventHandler):
                         self.settings_data[json_key] = (selected_index == 0)  # True for On
                     elif json_key and json_key.startswith("crt_"):
                         self.settings_data[json_key] = (selected_index == 0)  # True for On
+                    elif json_key == "voice_blips":
+                        self.settings_data[json_key] = (selected_index == 0)  # True for On
+                    elif json_key == "show_console":
+                        self.settings_data[json_key] = (selected_index == 1)  # True for On
             
             # Write to file with proper JSON format, preserving lighting_mode and other non-UI settings
+            import os as _os
+            _os.makedirs(_os.path.dirname(_os.path.abspath(self.settings_file)), exist_ok=True)
             with open(self.settings_file, 'w') as f:
                 f.write("{\n")
                 f.write("    // Display settings\n")
@@ -6308,7 +6385,11 @@ class Settings(BaseEventHandler):
                 f.write(f'    "light_flicker": {json.dumps(self.settings_data.get("light_flicker", True))},\n')
                 f.write("    // Lighting settings\n")
                 f.write(f'    "shadow_softness": {json.dumps(self.settings_data.get("shadow_softness", 0.2))},\n')
-                f.write(f'    "modern_gl_lightmap_unified": {json.dumps(self.settings_data.get("modern_gl_lightmap_unified", False))}\n')
+                f.write(f'    "modern_gl_lightmap_unified": {json.dumps(self.settings_data.get("modern_gl_lightmap_unified", False))},\n')
+                f.write("    // Audio settings\n")
+                f.write(f'    "voice_blips": {json.dumps(self.settings_data.get("voice_blips", True))},\n')
+                f.write("    // Debug settings\n")
+                f.write(f'    "show_console": {json.dumps(self.settings_data.get("show_console", False))}\n')
                 f.write("}\n")
         except Exception:
             # If saving fails, just continue - don't crash the game
@@ -6371,7 +6452,17 @@ class Settings(BaseEventHandler):
                         reload_crt_settings()
                     except Exception:
                         pass
-            
+
+                # Toggle console visibility live
+                if category_data.get("json_key") == "show_console":
+                    try:
+                        import ctypes
+                        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+                        if hwnd:
+                            ctypes.windll.user32.ShowWindow(hwnd, 1 if category_data["SelectedIndex"] == 1 else 0)
+                    except Exception:
+                        pass
+
         # Handle selection (Enter/Space)
         elif key == tcod.event.KeySym.RETURN or key == tcod.event.KeySym.SPACE:
             selected_category_key = self.category_keys[self.selected_option]

@@ -2,7 +2,7 @@
 import re
 import tcod
 import color
-from typing import Optional, Tuple, TYPE_CHECKING
+from typing import Optional
 import os
 
 def parse_colored_text(text: str, default_color=color.white) -> list:

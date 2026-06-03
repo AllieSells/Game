@@ -12,7 +12,7 @@ def main():
     
     # Install PyInstaller if needed
     try:
-        import PyInstaller
+        pass
     except ImportError:
         print("Installing PyInstaller...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])

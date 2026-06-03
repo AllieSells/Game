@@ -30,6 +30,22 @@ except ImportError:
     pass
 
 
+def _shader_log(msg: str) -> None:
+    """Write shader debug info to logs/shader.log — visible in both dev and packaged exe."""
+    import os, sys
+    try:
+        if getattr(sys, "frozen", False):
+            base = os.path.dirname(sys.executable)
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+        log_path = os.path.join(base, "logs", "shader.log")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as _f:
+            _f.write(msg if msg.endswith("\n") else msg + "\n")
+    except Exception:
+        pass
+
+
 LIGHT_SCALE = 2  # Higher = faster (fewer pixels computed), relies on GPU bilinear upscaling
 _ENGINE_SINGLETON: LightingShaderEngine | None = None
 
@@ -102,7 +118,7 @@ class LightingShaderConfig:
     shadow_max_samples: int = 40  # Maximum ray samples per light
     shadow_threshold: float = 0.015  # Early exit when shadow gets this dark
     shadow_min_distance: float = 0.5  # Don't trace shadows for lights closer than this (tiles)
-    shadow_softness: float = 0.0  # Shadow edge diffusion (0.0=no shadow, 1.0=hard, 0.5=soft)
+    shadow_softness: float = 1.0  # Shadow edge diffusion (0.0=no shadow, 1.0=hard, 0.5=soft)
 
 
 # =============================================================================
@@ -456,7 +472,7 @@ class LightingShaderEngine:
         if mode != "gpu":
             print(f"[WARNING]: LightingShaderEngine is GPU-only; forcing mode='gpu' (requested '{mode}')")
         
-        print(f"[DEBUG]: LightingShaderEngine initialized with mode='{mode}', moderngl_available={_MODERNGL_AVAILABLE}")
+        _shader_log(f"[DEBUG]: LightingShaderEngine initialized with mode='{mode}', moderngl_available={_MODERNGL_AVAILABLE}")
         
         # Material atlases used by the GPU pipeline.
         self._tile_id_atlas: np.ndarray | None = None
@@ -574,7 +590,7 @@ class LightingShaderEngine:
         if self._gpu_failed:
             return False
         if not _MODERNGL_AVAILABLE:
-            print("[ERROR]: ModernGL not available - install with: pip install moderngl")
+            _shader_log("[ERROR]: ModernGL not available")
             self._gpu_failed = True
             return False
             
@@ -604,13 +620,12 @@ class LightingShaderEngine:
             )
             
             self._gpu_initialized = True
-            print("[INFO]: GPU lighting initialized successfully")
+            _shader_log("[INFO]: GPU lighting initialized successfully")
             return True
             
         except Exception as e:
-            print(f"[ERROR]: GPU initialization failed: {e}")
-            import traceback
-            traceback.print_exc()
+            _shader_log(f"[ERROR]: GPU init failed: {e}")
+            import traceback as _tb; _shader_log(_tb.format_exc())
             self._gpu_failed = True
             self._gpu_ctx = None
             self._gpu_program = None
@@ -1360,8 +1375,7 @@ class LightingShaderEngine:
             lm = self._build_lightmap_gpu(game_map, console)
         except Exception as e:
             print(f"[ERROR]: GPU lightmap build failed: {e}")
-            import traceback
-            traceback.print_exc()
+            import traceback as _tb; _shader_log(_tb.format_exc())
             raise
 
         if lm is None:
@@ -1391,9 +1405,9 @@ def get_lighting_engine(mode: str | None = None) -> LightingShaderEngine:
     # Auto-detect mode from settings if not specified
     if mode is None:
         try:
-            import json
-            with open("json/settings.json", 'r') as f:
-                # Strip comments for JSON parsing
+            import json, sys as _sys, os as _os
+            _base = _sys._MEIPASS if getattr(_sys, "frozen", False) else _os.path.dirname(_os.path.abspath(__file__))
+            with open(_os.path.join(_base, "json", "settings.json"), 'r') as f:
                 text = '\n'.join(line for line in f if not line.strip().startswith('//'))
                 settings = json.loads(text)
                 mode = settings.get("lighting_mode", "gpu")
@@ -1411,7 +1425,9 @@ def get_lighting_engine(mode: str | None = None) -> LightingShaderEngine:
         _cfg_kwargs: dict = {}
         try:
             import json as _json
-            with open("json/settings.json", 'r') as _f:
+            import sys as _sys2, os as _os2
+            _base2 = _sys2._MEIPASS if getattr(_sys2, "frozen", False) else _os2.path.dirname(_os2.path.abspath(__file__))
+            with open(_os2.path.join(_base2, "json", "settings.json"), 'r') as _f:
                 _txt = '\n'.join(line for line in _f if not line.strip().startswith('//'))
                 _s = _json.loads(_txt)
             if "shadow_softness" in _s:

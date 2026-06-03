@@ -6,7 +6,6 @@ Actions for interacting with the liquid coating system.
 
 from __future__ import annotations
 from typing import TYPE_CHECKING
-import random
 import color
 from actions import Action
 from liquid_system import LiquidType

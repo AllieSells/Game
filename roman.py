@@ -1,1 +1,1 @@
-from dependencies.roman import *
+from dependencies.roman import toRoman, fromRoman

@@ -1834,7 +1834,9 @@ class DodgeAction(ActionWithDirection):
     def perform(self) -> None:
         
         if self.entity.dodge_cooldown > 0:
+            self.engine.message_log.add_message("Too tired to dodge!", color.impossible)
             raise exceptions.Impossible("Too tired to dodge!")
+        
         else:
             target_x, target_y = self.dest_xy
             gm = self.engine.game_map

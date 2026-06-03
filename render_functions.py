@@ -6,7 +6,6 @@ import tcod
 import numpy as np
 
 import color
-import text_utils
 import time
 import sprite_manager
 import identify as identify_system
@@ -627,17 +626,6 @@ def render_gold(
     
     console.print(x=GOLD_X, y=GOLD_Y, string=f"Gold: {gold_amount}", fg=color.gold_accent)
 
-def render_ui_buttons(
-        console: 'Console', hovered_button: str = None) -> None:
-    # === ADJUSTABLE COORDINATES ===
-    INVENTORY_BUTTON_X = 36
-    EQUIPMENT_BUTTON_X = 52
-    BUTTON_Y = 40
-    # ==============================
-    inv_color = color.gold_accent if hovered_button == "inventory" else color.bronze_text
-    equip_color = color.gold_accent if hovered_button == "equipment" else color.bronze_text
-    console.print(x=INVENTORY_BUTTON_X, y=BUTTON_Y, string="Inventory [TAB]", fg=inv_color)
-    console.print(x=EQUIPMENT_BUTTON_X, y=BUTTON_Y, string="Equipment [E]", fg=equip_color)
 
 
 def _collect_coating_effects(player) -> list:
@@ -1174,7 +1162,6 @@ def render_gpu_minimap_body(
         else:
             if gm.visible[ex, ey] or gm.explored[ex, ey]:
                 # Distinguish chests (container component) from loose items
-                from components.container import Container
                 if hasattr(ent, 'container') and ent.container is not None:
                     pixels[ey, ex] = _MM_COL_CHEST
                 else:

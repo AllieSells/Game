@@ -1,11 +1,9 @@
 from __future__ import annotations
-from enum import unique
 from typing import Dict, Iterator, Tuple, List, TYPE_CHECKING
 import copy
 import tcod
 import random
 
-import engine
 import sprite_manager
 import entity_factories
 from game_map import GameMap
@@ -14,7 +12,6 @@ import numpy as np
 import tile_types
 from enemy_spawning import get_enemies_for_floor
 
-from setup_game import _current_seed
 
 # Spawn configuration data
 max_items_by_floor = {1: 2, 4: 2}

@@ -5,7 +5,6 @@ import pickle
 import traceback
 from typing import TYPE_CHECKING, Optional
 import os
-import math
 import numpy as np
 import tcod.event
 from tcod.console import Console
@@ -13,15 +12,12 @@ from tcod.map import compute_fov
 from collections import deque
 import random
 
-from components import equipment
 import components
 import exceptions
-import game_map
 from liquid_system import LiquidType
 from message_log import MessageLog
 import render_functions
 import sounds
-from animations import TextPopupAnimation, WaterMoveAnimation, GlobalWaterAnimation, GlobalOceanAnimation, GlobalBeachWaterAnimation, GlobalRiverAnimation, GlobalDungeonWaterAnimation
 import color
 
 if TYPE_CHECKING:
@@ -30,9 +26,8 @@ if TYPE_CHECKING:
     from actions import Action
 
 import time
-from animations import FireFlicker, BonefireFlicker, FlameAnimation
+from animations import BonefireFlicker
 from gpu_stack import SmokeCloudParticle, EmberParticle, DripParticle, BurningParticle, SleepingParticle, DustParticle
-import sprite_manager
 import tcod.noise
 
 
@@ -776,7 +771,6 @@ class Engine:
                                 self.animation_queue.append(GivingQuestAnimation(entity))
                             except Exception:
                                 traceback.print_exc()
-                                pass
                 
                 # Spawn drip particles for blood/water body-part coatings
                 if hasattr(entity, 'body_parts') and entity.body_parts:
@@ -940,7 +934,6 @@ class Engine:
             _mark("ambient_sounds", _ss)
         except Exception:
             traceback.print_exc()
-            pass
         _mark("entity_updates", _section_start)
 
         _frame_samples_ms["total"] = (time.perf_counter() - _frame_start) * 1000.0
@@ -1426,18 +1419,9 @@ class Engine:
 
 
 
-        # Torch increases FOV radius; campfires only affect Darkness (lighting), not FOV
-        radius = 16 #if has_torch else 3
-        if self.has_effect(self.player, DarkvisionEffect):
-            radius = 10
 
-        if self.game_map.sunlit:
-            radius = max(radius, 1000)  # Sunlit areas have large FOV regardless of torch
-        if self.game_map.biome == "tutorial":
-            radius = 10
-        # If player in village, greatly increase FOV radius
-        if self.game_map.type == "village":
-            radius = 1000
+        radius = 16 #if has_torch else 3
+
 
         self.game_map.visible[:] = compute_fov(
             self.game_map.tiles["transparent"],
@@ -1532,10 +1516,7 @@ class Engine:
         )
 
 
-        render_functions.render_ui_buttons(
-            console=console,
-            hovered_button=self.hovered_inventory_button
-        )
+
 
         render_functions.render_combat_stats(
             console=console,

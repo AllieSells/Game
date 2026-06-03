@@ -1,0 +1,33 @@
+name: Publish to Itch.io
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build exe
+        run: python build_game.py
+
+      - name: Publish to Itch.io
+        uses: Oval-Tutu/publish-to-itch-with-butler@v1
+        with:
+          api-key: ${{ secrets.BUTLER_API_KEY }}
+          itch_user: allieelf
+          itch_game: doa
+          channel: windows-prealpha
+          package: dist/
+          version: ${{ github.ref_name }}
